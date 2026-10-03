@@ -1,3 +1,5 @@
+import { failureInputLimit } from "./failure-redaction.mjs";
+
 const safeOccErrorCodes = new Set([
   "INVALID_REQUEST",
   "UNAUTHENTICATED",
@@ -323,6 +325,84 @@ function failureDiagnostic(error) {
   if (!isRecord(diagnostic)) {
     return undefined;
   }
+  if (diagnostic.kind === "runtime-model-probe") {
+    if (
+      !["outer-timeout", "wrapper-exited", "classification"].includes(diagnostic.reason) ||
+      ![
+        "not-observed",
+        "READY",
+        "AUTHENTICATION_FAILED",
+        "MODEL_PROBE_CPU_STARVED",
+        "MODEL_PROBE_FAILED",
+        "MODEL_PROBE_TIMEOUT",
+        "UNAVAILABLE",
+        "other",
+      ].includes(diagnostic.probe) ||
+      !["not-observed", "ok", "failed", "other"].includes(diagnostic.modelPhase)
+    ) {
+      return undefined;
+    }
+    const result = {
+      kind: "runtime-model-probe",
+      reason: diagnostic.reason,
+      probe: diagnostic.probe,
+      modelPhase: diagnostic.modelPhase,
+    };
+    for (const key of [
+      "running",
+      "readyObserved",
+      "pluginReadyObserved",
+      "nativeSpawnPhaseObserved",
+      "failureObserved",
+    ]) {
+      if (typeof diagnostic[key] !== "boolean") {
+        return undefined;
+      }
+      result[key] = diagnostic[key];
+    }
+    for (const key of [
+      "loadClientsSubmitted",
+      "loadClientsStarted",
+      "loadClientsSettled",
+      "loadClientsRejected",
+    ]) {
+      if (!Number.isInteger(diagnostic[key]) || diagnostic[key] < 0 || diagnostic[key] > 8) {
+        return undefined;
+      }
+      result[key] = diagnostic[key];
+    }
+    if (
+      result.loadClientsSettled > result.loadClientsSubmitted ||
+      result.loadClientsStarted > result.loadClientsSubmitted ||
+      result.loadClientsRejected > result.loadClientsSettled
+    ) {
+      return undefined;
+    }
+    for (const key of ["capMs", "elapsedMs", "cpuWaitMs"]) {
+      if (diagnostic[key] === undefined || (key === "cpuWaitMs" && diagnostic[key] === null)) {
+        result[key] = diagnostic[key];
+      } else if (
+        Number.isSafeInteger(diagnostic[key]) &&
+        diagnostic[key] >= 0 &&
+        diagnostic[key] <= 3_600_000
+      ) {
+        result[key] = diagnostic[key];
+      } else {
+        return undefined;
+      }
+    }
+    result.probeStage = [
+      "prepare",
+      "preflight",
+      "spawn",
+      "returned",
+      "cleanup",
+      "complete",
+    ].includes(diagnostic.probeStage)
+      ? diagnostic.probeStage
+      : "not-observed";
+    return result;
+  }
   if (diagnostic.kind === "network-policy") {
     return [
       "Agent outbound platform traffic",
@@ -432,6 +512,28 @@ function upstreamDiagnostic(value) {
   return { kind: "chatgpt-admin-http", operation, status };
 }
 
+// Failure messages and the top stack frame make flakes attributable. They are
+// raw here and travel only over the pipe to run-tests, which redacts and
+// truncates them (failure-redaction.mjs) before anything reaches an artifact
+// or the job log.
+function failureText(cause) {
+  const message =
+    typeof cause === "string" ? cause : typeof cause?.message === "string" ? cause.message : "";
+  const stack = typeof cause?.stack === "string" ? cause.stack : "";
+  // The stack starts with the message, which can quote another process's stack.
+  const messageEnd =
+    message && stack.includes(message) ? stack.indexOf(message) + message.length : 0;
+  const frame = stack
+    .slice(messageEnd)
+    .split("\n")
+    .find((line) => /^\s+at\s/u.test(line))
+    ?.trim();
+  return {
+    message: message ? message.slice(0, failureInputLimit) : undefined,
+    frame: frame ? frame.slice(0, failureInputLimit) : undefined,
+  };
+}
+
 function location(data = {}) {
   const error = data.details?.error;
   const cause = error?.cause ?? error;
@@ -481,6 +583,7 @@ function location(data = {}) {
               : undefined,
           location: failureLocation,
           diagnostic: failureDiagnostic(cause),
+          ...failureText(cause),
         }
       : undefined,
     durationMs:
@@ -489,6 +592,8 @@ function location(data = {}) {
   };
 }
 
+// Only for scripts/ci/run-tests.mjs: failure text here is unredacted, so never
+// point a step whose stdout reaches a log or artifact at this reporter directly.
 export default async function* jsonLinesReporter(source) {
   for await (const event of source) {
     if (event.type === "test:diagnostic") {

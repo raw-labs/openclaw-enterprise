@@ -2,11 +2,13 @@ import http from "node:http";
 import https from "node:https";
 import type { Socket } from "node:net";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { hasControlCharacter } from "@openclaw-enterprise/utils";
 
 export interface NativeAdminProxyContext {
   readonly gatewayBase: string;
   readonly agentOrigin: string;
   readonly apiKey: string;
+  readonly runtimeHeaders: Readonly<Record<string, string>>;
 }
 
 export type NativeAdminWebSocketCloseReason =
@@ -15,6 +17,7 @@ export type NativeAdminWebSocketCloseReason =
   | "authorization_denied"
   | "agent_unavailable"
   | "revision_changed"
+  | "role_changed"
   | "disabled"
   | "dependency_timeout"
   | "dependency_failure"
@@ -35,6 +38,10 @@ const WS_LEASE_INTERVAL_MS = 25_000;
 const WS_LEASE_TIMEOUT_MS = 5_000;
 const NATIVE_ADMIN_RESERVED_PREFIX = "/__occ/native-admin/";
 const SERVICE_WORKER_CSP = "worker-src 'none'";
+// The native UI renders `/api/users/<id>/avatar` as a plain <img>. Without an
+// uploaded photo OpenClaw falls back to Gravatar and answers 502 when it cannot
+// reach it, which a dedicated Gateway never can (it has no internet egress).
+const USER_AVATAR_PATH = /^\/api\/users\/[^/]+\/avatar$/;
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -56,21 +63,13 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   "x-forwarded-for",
   "x-real-ip",
   "x-occ-identity",
+  "x-occ-role",
+  "x-occ-role-policy",
   "x-occ-session-key",
   "x-openclaw-scopes",
 ]);
 
 const STRIPPED_RESPONSE_HEADERS = new Set(["set-cookie"]);
-
-function hasControlCharacter(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 0x1f || code === 0x7f) {
-      return true;
-    }
-  }
-  return false;
-}
 
 function percentDecode(value: string): string | undefined {
   try {
@@ -190,7 +189,8 @@ function requestHeaders(
       HOP_BY_HOP_HEADERS.has(lower) ||
       STRIPPED_REQUEST_HEADERS.has(lower) ||
       connectionHeaders.has(lower) ||
-      lower.startsWith("x-forwarded-")
+      lower.startsWith("x-forwarded-") ||
+      Object.keys(context.runtimeHeaders).some((header) => header.toLowerCase() === lower)
     ) {
       continue;
     }
@@ -202,6 +202,7 @@ function requestHeaders(
   if (typeof request.headers.origin === "string") {
     headers.origin = request.headers.origin;
   }
+  Object.assign(headers, context.runtimeHeaders);
   headers["x-api-key"] = context.apiKey;
   return headers;
 }
@@ -347,6 +348,7 @@ export async function proxyNativeAdminHttp(options: {
     return;
   }
 
+  const avatarRequest = USER_AVATAR_PATH.test(options.request.url.split("?", 1)[0] ?? "");
   options.reply.hijack();
   const upstreamRequest = https.request(
     upstream,
@@ -356,6 +358,13 @@ export async function proxyNativeAdminHttp(options: {
       if (headers === undefined) {
         endHttp(options.reply, 502);
         upstreamResponse.destroy();
+        return;
+      }
+      if (avatarRequest && upstreamResponse.statusCode === 502) {
+        // A missing photo, not an unavailable Gateway: the UI shows initials either way.
+        upstreamResponse.resume();
+        options.reply.raw.writeHead(404, { "cache-control": "no-store" });
+        options.reply.raw.end();
         return;
       }
       options.reply.raw.writeHead(upstreamResponse.statusCode ?? 502, headers);

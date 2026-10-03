@@ -6,30 +6,31 @@ namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md
 ## Networking
 
 Configure the cluster DNS namespace and Pod labels and the gateway port.
-Set `network.gatewayTrustedProxyCidrs` to a
-nonempty list of valid CIDRs for the actual proxy socket sources. This is trusted
-Installation configuration; the Driver has no production CIDR default and rejects
-all-source ranges, including IPv4-mapped equivalents. Without
-private routing, also configure the namespace and Pod selectors in
+Set `network.gatewayTrustedProxyCidrs` to nonempty, valid CIDRs for the proxy
+socket sources. This trusted Installation setting has no production default and
+rejects all-source ranges, including IPv4-mapped equivalents. Without private
+routing, also configure the namespace and Pod selectors in
 `network.gatewayClients` for your authenticated proxy.
 
 Each tenant starts with default-deny ingress and egress. Explicit policies allow
-DNS, approved gateway clients, and required communication between an Agent's
-gateway and dedicated Harness. Cross-tenant traffic, traffic between different
-Agents, Kubernetes API access, and cloud metadata access remain denied.
+DNS (UDP/TCP ports `53` and `5353` through `allow-dns`), approved gateway clients,
+and required communication between an Agent's gateway and dedicated Harness.
+Cross-tenant traffic, traffic between different Agents, Kubernetes API access,
+and cloud metadata access remain denied where those addresses fall inside the
+model egress exclusions below.
 
 For Compute-owned startup failure evidence, plugin reporting, and on-demand
-deployment diagnostics, set
-`network.pluginStatusProxySourceCidrs` to the precise source addresses used by the
-Kubernetes API server when proxying requests to workload Pods. The policy allows
-those sources only to the private status port, TCP/18791. Both worker and API
-ServiceAccounts need namespace-local `get` on `pods/proxy` for their respective
-reads. The ingress rule also applies when an Agent has no enabled plugins.
-Prefer individual `/32` or `/128` addresses. On an
-overlay network, the observed source may be the control-plane node's overlay
-address rather than its node IP. Verify it across nodes with enforced policies.
+deployment diagnostics, set `network.pluginStatusProxySourceCidrs` to the
+Kubernetes API server's source addresses when proxying requests to workload Pods.
+The policy allows those sources only to the private status port, TCP/18791.
+Worker and API ServiceAccounts each need namespace-local `get` on `pods/proxy`.
+The ingress rule also applies when an Agent has no enabled plugins.
+Prefer individual `/32` or `/128` addresses. On overlay networks, the source may
+be the control-plane node's overlay address rather than its node IP. Verify it
+across nodes with enforced policies.
 An omitted list adds no API-proxy ingress rule and leaves status unavailable
-where the cluster blocks that traffic. This setting does not expose the native
+where the cluster blocks that traffic. It also restarts the Gateway once on each
+dedicated Codex first deploy. This setting does not expose the native
 gateway or grant workloads Kubernetes API access.
 
 When private Agent routing is enabled, Compute derives the only allowed peer
@@ -64,8 +65,7 @@ authentication and also support explicit trusted proxy.
 Operators must verify that the configured CIDRs contain the proxy's actual
 source addresses and exclude untrusted sources. CIDRs do not authenticate a
 proxy: retain the exact Envoy NetworkPolicy peer, TLS verification, service-key
-authentication, and identity/header sanitization. Direct embedded access still
-requires a trusted proxy or the optional operator loopback password.
+authentication, and identity/header sanitization.
 
 For repository-bearing revisions, Compute grants credential-service egress to
 the embedded gateway/Harness or dedicated Codex Pod. The separate dedicated
@@ -74,8 +74,7 @@ Helm admits TCP/8443 ingress to the worker's credential sidecar from managed
 gateway Pods carrying an Agent label, and managed dedicated Agent Pods carrying
 both Agent and revision labels. Each peer also requires the tenant namespace
 label. These selectors permit transport; the credential service still validates
-the session and repository grant. Verify the effective policies in the installed
-cluster; rendered rules alone do not prove traffic enforcement.
+the session and repository grant.
 
 Compute projects repository broker policy to the actual Codex consumer: the
 Agent Pod for dedicated Codex, or the gateway for embedded OpenClaw with
@@ -115,12 +114,15 @@ Codex separately requires HTTPS interception, it retains platform and startup
 roots upstream and supplies child tools with its managed CA bundle. Preserve
 inherited `GIT_SSL_CAINFO`; TLS verification remains enabled in both paths.
 
-Production currently permits public TCP/443 egress for model access; a
-restricted model proxy is not yet available. Before readiness, each dedicated
-revision receives its own authentication-only egress policy. Concurrent pending
-candidates cannot replace each other's grant; stop and retirement remove the
-exact revision's policy after its Harness terminates. Channels require an
-approved HTTP(S) proxy in `runtime.channels`: a literal IP endpoint, or the exact
+Model access uses TCP/443 egress to any address outside `10.0.0.0/8`,
+`100.64.0.0/10`, `172.16.0.0/12`, `192.168.0.0/16` and `169.254.0.0/16`; a
+restricted model proxy is not yet available. Confirm that your API server
+endpoint, Pod and Service CIDRs, and metadata endpoint fall inside them. A
+dedicated Agent has one authentication-only egress policy, pinned to its latest
+prepared revision. Stop leaves it and the Agent's runtime and plugin-status
+policies, selecting no Pod, until the next preparation or Agent deletion.
+Channels require an approved HTTP(S) proxy in `runtime.channels`: a literal IP
+endpoint, or the exact
 Helm-managed proxy Service URL paired with `runtime.channels.managedProxy`.
 Direct public channel-provider access is denied.
 
@@ -143,12 +145,11 @@ them only Gateway transport and plugin-status ingress (`allow-agent-runtime` is
 ingress-only for them): no DNS, workspace-node, model or authentication egress.
 Provider Harness readiness and activation reject a Pod with any other profile.
 
-Existing policy names remain stable, and the upgrade restarts no Pod. New
-namespaces receive the narrowed `allow-dns`, `allow-gateway-ingress` and
-`allow-node-gateway`. Earlier namespaces keep their previous versions, which
-ignore the profile, until recreated: Compute never narrows them in place.
-Running Pods keep their templates until Compute next prepares a revision of
-their Agent:
+Existing policy names remain stable; upgrading the controller restarts no Pod.
+Compute preserves existing namespace policy selectors until recreation. During
+Agent preparation, it adds missing DNS ports to the tenant and Gateway policies
+with UID/resource-version guards, preserving peers and other rules. Running Pods
+retain their templates until Compute prepares their Agent's revision:
 
 - Preparing a revision re-renders that Agent's grants and templates with the
   profile; other Agents are untouched. Re-preparing an active revision (as
@@ -211,7 +212,6 @@ SHA-256 of `<gatewayNamespace>/<gatewayName>`. The hostname is
 `<serviceName>.<envoyNamespace>.svc`. It uses standard Linux Pod DNS search and
 does not assume a `cluster.local` suffix. Set the same explicit `hostname` in
 Compute and Helm for custom DNS or clients outside that cluster DNS context.
-The default needs no existing Agent or Kubernetes lookup.
 The operator installs Envoy Gateway and cert-manager and configures the
 [private gateway infrastructure](../../../guides/deploy/workspace-routing.md#agent-workspace-files).
 Do not put an Agent endpoint, service key, certificate, or file contents into
@@ -219,18 +219,23 @@ native Configuration or an AgentRevision.
 
 `getGatewayEndpoint` derives
 `wss://<hostname>/namespaces/<namespaceId>/agents/<agentId>` without Kubernetes
-API access. During preparation and activation, Compute reconciles an owned
-`HTTPRoute` in the Gateway's physical namespace (control plane for dedicated,
-data plane for embedded), attached to the configured Gateway's
-`https` listener. Both rules match the configured private hostname and target
-the existing same-namespace gateway Service:
+API access. Preparation and activation reconcile an owned `HTTPRoute` in the
+Gateway's namespace (control plane for dedicated, data plane for embedded).
+Both rules use the private hostname, configured Gateway's `https` listener and
+same-namespace gateway Service:
 
 - The exact Agent path rewrites to `/`, preserving workspace-file WSS access.
 - A prefix rule below that Agent path rewrites the prefix to `/` and retains
-  the suffix for native UI assets, deep links, and WebSocket paths.
+  the suffix for service HTTP and WebSocket requests.
 
-OCC bounds proxy requests to the selected Agent base. Public native UI browser
-traffic enters through OCC; Envoy and gateway Services remain private. See
+Human access uses `wss://<hostname>/people/namespaces/<namespaceId>/agents/<agentId>`
+and a separate `-people` HTTPRoute preserving OCC's verified identity, role,
+policy digest and scopes. This path cannot match the service prefix if the
+human route is absent or unaccepted. Entry requires enabled native device
+auto-approval with an explicit cap containing every selected-role scope.
+
+OCC bounds browser proxy requests to the selected human base; Envoy and gateway
+Services remain private. See
 [Agent native admin UI](../../agent-native-admin.md#agent-host-identity).
 Namespaces receive the Gateway membership label used by `allowedRoutes`.
 Runtime-enabled dedicated revisions also receive a `/node` route and a
@@ -238,14 +243,13 @@ route-specific SecurityPolicy for native device authentication. The
 [routing reference](../../gateway-routing.md#native-node-endpoint) owns its
 credential boundary and the remaining Harness lifecycle requirements.
 
-The Service and route remain stable across revision cutover. Retiring an old
-revision preserves a newer gateway's route; final gateway cleanup removes the
-owned route. Reconciliation runs through the existing revision lifecycle; this
-Driver does not add periodic route drift repair. Missing CRDs or denied worker
-permissions fail reconciliation rather than disabling routing silently.
+The Service and routes remain stable across revision cutover. Retirement
+preserves newer routes; final cleanup removes owned routes. The revision
+lifecycle reconciles them without periodic drift repair. Missing CRDs or denied
+worker permissions fail reconciliation.
 
 Envoy's Gateway-level SecurityPolicy authenticates the OCC service key before
-forwarding. The route overwrites the native identity and real-IP headers and
+forwarding. The service route overwrites the native identity and real-IP headers and
 removes caller forwarding and scope headers. Native `allowRealIpFallback`
 accepts Envoy's direct downstream connection address when OCC and Envoy share a
 Pod CIDR. That source address must be nonloopback; a loopback port-forward alone

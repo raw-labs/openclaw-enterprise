@@ -589,6 +589,14 @@ test("console keeps loaded route families visible while return reads refresh", a
   await releaseHeldRoute(page, sessionPattern, sessionHold);
   await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
 
+  const nativeStatusUrl = `${fixture.origin}/namespaces/${namespace.id}/agents/${agent.id}/native-admin`;
+  let nativeStatusReads = 0;
+  page.on("request", (request) => {
+    if (request.url() === nativeStatusUrl) {
+      nativeStatusReads += 1;
+    }
+  });
+  const deniedNativeStatus = page.waitForResponse((response) => response.url() === nativeStatusUrl);
   await page.getByRole("link", { name: "Agents", exact: true }).click();
   await page.getByRole("link", { name: "Retained route Agent", exact: true }).click();
   await page.getByRole("heading", { name: "Retained route Agent", exact: true }).waitFor();
@@ -596,8 +604,8 @@ test("console keeps loaded route families visible while return reads refresh", a
   const workspaceNotice =
     "Workspace files require a deployed Agent with an active revision and a reachable gateway.";
   await page.getByText(workspaceNotice, { exact: true }).waitFor();
-  await page.locator(".native-admin-access").waitFor({ state: "attached" });
-  const originalNativePanel = await page.locator(".native-admin-access").elementHandle();
+  assert.equal((await deniedNativeStatus).status(), 403);
+  await page.locator(".native-admin-access").waitFor({ state: "hidden" });
   await page.getByRole("link", { name: "← Agents", exact: true }).click();
   await page.getByText("Retained route Agent", { exact: true }).waitFor();
   const detailPattern = "**/namespaces/" + namespace.id + "/agents/" + agent.id;
@@ -611,11 +619,13 @@ test("console keeps loaded route families visible while return reads refresh", a
   assert.equal(new URL(page.url()).searchParams.get("tab"), "workspace");
   await releaseHeldRoute(page, detailPattern, detailHold);
   await page.locator('.content [aria-live="polite"]:not([inert])').waitFor();
+  await page.locator(".native-admin-access").waitFor({ state: "attached" });
   assert.equal(
-    await originalNativePanel.evaluate((node) => node.isConnected),
+    await page.locator(".native-admin-access").isHidden(),
     true,
-    "Native admin access is not reconstructed after admission succeeds",
+    "Denied OpenClaw access remains hidden after route admission",
   );
+  assert.equal(nativeStatusReads, 1, "return navigation does not repeat the audited denial");
   await page.getByRole("heading", { name: "Retained route Agent", exact: true }).waitFor();
 
   await page.getByRole("link", { name: "← Agents", exact: true }).click();
@@ -720,6 +730,12 @@ test("console retained views clear after session expiry and exact Agent denial",
   await expectRetainedPreview(page, "Denied retained Agent");
   await releaseHeldRoute(page, detailPattern, deniedAgent);
   await page.getByRole("heading", { name: "Access denied", exact: true }).waitFor();
+  // Someone else's Agent link says what the reader can do, not that a collection is unreadable.
+  await page
+    .getByText(
+      "You do not have access to this Agent or its settings, or it was deleted. Ask its owner to share it with you.",
+    )
+    .waitFor();
   await expectNoText(page, /Configuration draft|Selected revision/);
 });
 
@@ -865,6 +881,69 @@ test("Google sign-in accepts only a Google authorization URL and confirms throug
   await page.getByText("Could not sign in with Google. Try again or use your password.").waitFor();
 });
 
+test("OIDC sign-in uses the discovered label and accepts only the discovered endpoint", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
+  const { page } = await newPage(t, fixture);
+  const requests = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  const envelope = (data) => ({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ data, meta: { requestId: "browser-oidc" } }),
+  });
+  const endpoint = "https://sso.example.test/realms/acme/protocol/openid-connect/auth";
+  let discovery = {
+    github: false,
+    google: false,
+    oidc: true,
+    oidcSignIn: { label: "Acme SSO", authorizationUrl: endpoint },
+    sessionBinding: true,
+  };
+  // This controller has no OIDC configuration; discovery and start are modelled here.
+  await page.route("**/api/auth/providers", (route) => route.fulfill(envelope(discovery)));
+  const attemptId = "c".repeat(43);
+  const starts = [
+    "https://sso.example.test/realms/other/protocol/openid-connect/auth",
+    `${endpoint}?client_id=fixture&state=s`,
+  ];
+  await page.route("**/api/auth/providers/oidc/start", (route) =>
+    route.fulfill(envelope({ url: starts.shift(), attemptId })),
+  );
+  // Models the IdP redirecting back to Console after the callback set its cookies.
+  await page.route("https://sso.example.test/**", (route) =>
+    route.fulfill({ status: 302, headers: { location: `${fixture.origin}/console/` } }),
+  );
+  await page.goto(`${fixture.origin}/console/login`);
+  const oidc = page.getByRole("button", { name: "Continue with Acme SSO" });
+  await oidc.click();
+  await page
+    .getByText("Acme SSO sign-in is unavailable. Try again or use your password.")
+    .waitFor();
+  assert.equal(await page.getByRole("button", { name: "Continue with Google" }).count(), 0);
+
+  const result = page.waitForResponse(
+    (candidate) => new URL(candidate.url()).pathname === "/api/auth/providers/oidc/result",
+  );
+  await oidc.click();
+  const refused = await result;
+  assert.equal(refused.request().postDataJSON().attemptId, attemptId);
+  assert.equal(refused.status(), 403);
+  await page
+    .getByText("Could not sign in with Acme SSO. Try again or use your password.")
+    .waitFor();
+  assert.equal(requests.includes("/api/auth/providers/google/result"), false);
+
+  // A non-HTTPS discovered endpoint offers no OIDC button at all.
+  discovery = {
+    ...discovery,
+    oidcSignIn: { label: "Acme SSO", authorizationUrl: "http://sso.example.test/auth" },
+  };
+  await page.goto(`${fixture.origin}/console/login`);
+  await page.getByLabel("Username").waitFor();
+  await expectNoText(page, /Continue with Acme SSO/);
+});
+
 test("recovery-only password sign-in keeps the form behind Recovery sign-in", async (t) => {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
@@ -894,7 +973,7 @@ test("recovery-only password sign-in keeps the form behind Recovery sign-in", as
     .waitFor();
   assert.equal(await page.getByLabel("Password").isVisible(), false);
   await page.getByRole("button", { name: "Continue with GitHub" }).click();
-  await page.getByText("GitHub sign-in is unavailable. Please try again later.").waitFor();
+  await page.getByText("GitHub sign-in is unavailable. Try again later.").waitFor();
 
   await recovery.click();
   assert.equal(await recovery.isVisible(), false);
@@ -1084,7 +1163,7 @@ for (const trigger of ["Refresh", "Back with a replacement session"]) {
     const missingId = "ns_00000000-0000-4000-8000-000000000099";
     const { page } = await newMobilePage(t, fixture);
     await login(page, fixture, `/console/namespaces?namespace=${missingId}`);
-    const selector = page.getByRole("combobox", { name: "Choose a valid namespace", exact: true });
+    const selector = page.getByRole("combobox", { name: "Choose a valid Namespace", exact: true });
     await page.locator("#namespace-selector:not(:disabled)").waitFor();
     assert.equal(await selector.locator(`option[value="${alpha.id}"]`).count(), 1);
 
@@ -1265,7 +1344,7 @@ test("Namespaces recovers stale selection inline and handles losing all readable
   await page.getByRole("list", { name: "Namespaces", exact: true }).waitFor();
 
   // A stale bookmark must offer recovery on this page without opening the drawer.
-  const selector = page.getByRole("combobox", { name: "Choose a valid namespace", exact: true });
+  const selector = page.getByRole("combobox", { name: "Choose a valid Namespace", exact: true });
   assert.equal(await selector.isVisible(), true);
   assert.equal(await page.locator(".page-header select").count(), 0);
   await selector.selectOption({ label: "Alpha" });

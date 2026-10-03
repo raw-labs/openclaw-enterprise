@@ -213,7 +213,7 @@ if (command === "inputs") {
   const store = join(root, "node_modules/.pnpm");
   const retained = new Set();
   const visited = new Set();
-  async function visit(importer) {
+  async function visit(importer, manifestBytes) {
     const canonical = await realpath(importer);
     if (visited.has(canonical)) {
       return;
@@ -223,21 +223,20 @@ if (command === "inputs") {
     if (!packagePath.startsWith("..")) {
       retained.add(packagePath.split("/")[0]);
     }
-    const manifest = JSON.parse(await readFile(join(canonical, "package.json"), "utf8"));
-    const names = new Set(
-      Object.keys({
-        ...manifest.dependencies,
-        ...manifest.optionalDependencies,
-        ...manifest.peerDependencies,
-      }),
+    const manifest = JSON.parse(
+      manifestBytes ?? (await readFile(join(canonical, "package.json"), "utf8")),
     );
-    for (const name of names) {
+    for (const name of Object.keys({
+      ...manifest.dependencies,
+      ...manifest.optionalDependencies,
+      ...manifest.peerDependencies,
+    })) {
       let directory = canonical;
       while (true) {
         const candidate = join(directory, "node_modules", name);
         try {
-          await readFile(join(candidate, "package.json"));
-          await visit(candidate);
+          const manifestBytes = await readFile(join(candidate, "package.json"));
+          await visit(candidate, manifestBytes);
           break;
         } catch (error) {
           if (error.code !== "ENOENT" && error.code !== "ENOTDIR") {
@@ -262,8 +261,8 @@ if (command === "inputs") {
     })) {
       const candidate = join(root, directory, name);
       try {
-        await readFile(join(candidate, "package.json"));
-        await visit(candidate);
+        const manifestBytes = await readFile(join(candidate, "package.json"));
+        await visit(candidate, manifestBytes);
       } catch (error) {
         if (error.code !== "ENOENT" && error.code !== "ENOTDIR") {
           throw error;
@@ -296,6 +295,8 @@ if (command === "inputs") {
           "705b21a67f344de66a5468a07b35f6fec01635331d99cb85d9254c56bccc0c7d",
         openclawConnectPatchSha256:
           "c57722da9a88ec4295577ab9a9ba6e2ca37fceda11ce8b51b08ee1425e00851f",
+        openclawTrustedProxyRolePatchSha256:
+          "a8d5e59d74fdbdab4df4974663c7a40cabe6086572d84c8baec998f208d17ab5",
         artifactKind: "assembled-runtime-root",
         runtimeContentsSha256: hash(contents),
         lockfileSha256: hash(await readFile(join(root, "pnpm-lock.yaml"))),

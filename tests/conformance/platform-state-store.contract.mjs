@@ -1218,6 +1218,7 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
   });
 
   await verifyDeletedResourceAccessBindingContract(store, revision);
+  await verifyDuplicateNameContract(store);
 
   return {
     installation,
@@ -1234,6 +1235,111 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     lifecycleNamespace,
     deletedAt,
   };
+}
+
+// A duplicate caller-chosen name is a ResourceStateConflictError whose message names the
+// taken kind, alike in both adapters; a server-generated identity collision stays generic.
+async function verifyDuplicateNameContract(store) {
+  const createdAt = new Date().toISOString();
+  const namespace = {
+    id: identifier("ns"),
+    name: "Duplicate names " + randomUUID(),
+    status: "ready",
+    createdAt,
+  };
+  const secret = {
+    id: identifier("sec"),
+    namespaceId: namespace.id,
+    name: "Taken secret " + randomUUID(),
+    driverId: "secret-contract",
+    backendRef: {
+      namespaceName: "contract",
+      name: "duplicate-names",
+      key: "value",
+      uid: randomUUID(),
+    },
+    createdAt,
+  };
+  const presetFor = (name) => ({
+    id: identifier("pre"),
+    namespaceId: namespace.id,
+    name: name + " " + randomUUID(),
+    createdAt,
+    template: {
+      variables: {},
+      agent: { name: "Assistant", executionMode: "embedded" },
+      configuration: { values: {} },
+    },
+  });
+  const preset = presetFor("Taken preset");
+  const otherPreset = presetFor("Other preset");
+  const account = {
+    id: identifier("sa"),
+    namespaceId: namespace.id,
+    name: "Taken account " + randomUUID(),
+  };
+  const source = {
+    id: identifier("cs"),
+    namespaceId: namespace.id,
+    name: "Taken source " + randomUUID(),
+    type: "openai",
+    config: { base_url: "https://api.openai.com/v1" },
+    secrets: {},
+    driverId: "credential-gateway-contract",
+    state: "ready",
+    createdAt,
+  };
+
+  await store.transact(async (transaction) => {
+    await transaction.namespaces.createNamespace(namespace);
+    await transaction.secrets.createSecret(secret);
+    await transaction.presets.createPreset(preset);
+    await transaction.presets.createPreset(otherPreset);
+    await transaction.serviceAccounts.createServiceAccount(account);
+    await transaction.credentialSources.createCredentialSource(source);
+  });
+
+  const nameConflict = (message) => ({ name: "ResourceStateConflictError", message });
+  for (const [write, message] of [
+    [
+      (transaction) =>
+        transaction.namespaces.createNamespace({ ...namespace, id: identifier("ns") }),
+      "A Namespace with this name already exists or was deleted. Choose a different name.",
+    ],
+    [
+      (transaction) => transaction.secrets.createSecret({ ...secret, id: identifier("sec") }),
+      "A Secret with this name already exists in this Namespace. Choose a different name.",
+    ],
+    [
+      (transaction) => transaction.presets.createPreset({ ...preset, id: identifier("pre") }),
+      "A Preset with this name already exists in this Namespace. Choose a different name.",
+    ],
+    [
+      (transaction) =>
+        transaction.presets.updatePreset(namespace.id, otherPreset.id, { name: preset.name }),
+      "A Preset with this name already exists in this Namespace. Choose a different name.",
+    ],
+    [
+      (transaction) =>
+        transaction.serviceAccounts.createServiceAccount({ ...account, id: identifier("sa") }),
+      "A ServiceAccount with this name already exists in this Namespace. Choose a different name.",
+    ],
+    [
+      (transaction) =>
+        transaction.credentialSources.createCredentialSource({ ...source, id: identifier("cs") }),
+      "A credential source with this name already exists in this Namespace. Choose a different name.",
+    ],
+  ]) {
+    await assert.rejects(store.transact(write), nameConflict(message));
+  }
+
+  // The server chose the identity, so its collision keeps the generic conflict.
+  await assert.rejects(
+    store.transact((transaction) =>
+      transaction.secrets.createSecret({ ...secret, name: "Fresh secret " + randomUUID() }),
+    ),
+    (error) => error.name === "ResourceConflictError",
+  );
 }
 
 // Deleting a Configuration, Preset, Secret, credential source or ServiceAccount
@@ -1386,7 +1492,7 @@ async function verifyDeletedResourceAccessBindingContract(store, revision) {
   // Only the binding on a live resource still holds the Role.
   await assert.rejects(
     store.transact((transaction) => transaction.iamPolicy.deleteRole(namespace.id, role.id)),
-    /referenced by an AccessBinding/,
+    /referenced by AccessBindings/,
   );
   await store.transact(async (transaction) => {
     assert.equal(await transaction.iamPolicy.deleteAccessBinding(namespace.id, surviving.id), true);
@@ -1650,6 +1756,151 @@ async function verifyCredentialSourceContract(
       false,
     );
   });
+
+  // A withdrawal is keyed by revision and source: replays return the recorded request, and
+  // revocation is recorded once.
+  const withdrawal = {
+    namespaceId: sourceNamespace.id,
+    agentId: sourceAgent.id,
+    revisionId: sourceRevision.id,
+    credentialSourceId: source.id,
+    state: "pending",
+    requestedBy: "principal-platform-state-contract",
+    requestedAt: new Date().toISOString(),
+  };
+  await store.transact(async (transaction) => {
+    assert.deepEqual(
+      await transaction.credentialSources.requestCredentialWithdrawal(withdrawal),
+      withdrawal,
+    );
+    assert.deepEqual(
+      await transaction.credentialSources.requestCredentialWithdrawal({
+        ...withdrawal,
+        requestedBy: "principal-platform-state-replay",
+        requestedAt: new Date(Date.now() + 1000).toISOString(),
+      }),
+      withdrawal,
+    );
+    // Withdrawal work targets the revision without replacing its deployment work.
+    await transaction.operations.append({
+      kind: "agent_revision",
+      action: "reconcile",
+      target: "credentials_withdrawn",
+      operationId: "withdrawal-contract",
+      namespaceId: sourceNamespace.id,
+      resourceId: sourceRevision.id,
+      actorId: "principal-platform-state-contract",
+    });
+  });
+  await store.read(async (state) => {
+    assert.deepEqual(
+      await state.credentialSources.listCredentialWithdrawals(
+        sourceNamespace.id,
+        sourceRevision.id,
+      ),
+      [withdrawal],
+    );
+    const revisionWork = (await state.operations.list()).filter(
+      (operation) =>
+        operation.kind === "agent_revision" && operation.resourceId === sourceRevision.id,
+    );
+    assert.deepEqual(revisionWork.map(({ target }) => target ?? "deploy").sort(), [
+      "credentials_withdrawn",
+      "deploy",
+    ]);
+    const work = await state.operations.findWork(
+      `agent_revision:${sourceRevision.id}:reconcile:credentials_withdrawn:withdrawal-contract`,
+    );
+    assert.equal(work.agentTarget, "credentials_withdrawn");
+    assert.equal(work.revisionId, sourceRevision.id);
+    const deployment = await state.operations.findWork(
+      `agent_revision:${sourceRevision.id}:reconcile`,
+    );
+    assert.equal(deployment.agentTarget, undefined);
+  });
+  const completedAt = new Date().toISOString();
+  const attempted = {
+    ...withdrawal,
+    lastReason: "CREDENTIAL_WITHDRAWAL_PENDING",
+    lastAttemptAt: completedAt,
+  };
+  await store.transact(async (transaction) => {
+    // The worker's latest outcome is recorded on the pending withdrawal it explains.
+    assert.deepEqual(
+      await transaction.credentialSources.recordCredentialWithdrawalAttempt(
+        sourceNamespace.id,
+        sourceRevision.id,
+        source.id,
+        { reason: "CREDENTIAL_WITHDRAWAL_PENDING", at: completedAt },
+      ),
+      attempted,
+    );
+    assert.deepEqual(
+      await transaction.credentialSources.markCredentialWithdrawalRevoked(
+        sourceNamespace.id,
+        sourceRevision.id,
+        source.id,
+        completedAt,
+      ),
+      { ...attempted, state: "revoked", completedAt },
+    );
+    assert.equal(
+      await transaction.credentialSources.recordCredentialWithdrawalAttempt(
+        sourceNamespace.id,
+        sourceRevision.id,
+        source.id,
+        { reason: "CREDENTIALS_WITHDRAWN", at: completedAt },
+      ),
+      undefined,
+    );
+    assert.equal(
+      await transaction.credentialSources.markCredentialWithdrawalRevoked(
+        sourceNamespace.id,
+        sourceRevision.id,
+        source.id,
+        completedAt,
+      ),
+      undefined,
+    );
+  });
+
+  // An update may point the existing field at a replacement Secret, but never change fields.
+  const replacementSecret = {
+    ...sourceSecret,
+    id: identifier("sec"),
+    name: "Replacement model key " + randomUUID(),
+    backendRef: { ...sourceSecret.backendRef, name: "replacement-model-key", uid: randomUUID() },
+  };
+  const replacementRef = {
+    kind: "secret",
+    namespaceId: sourceNamespace.id,
+    id: replacementSecret.id,
+  };
+  await store.transact(async (transaction) => {
+    await transaction.secrets.createSecret(replacementSecret);
+    assert.deepEqual(
+      await transaction.credentialSources.replaceCredentialSourceSecrets(
+        sourceNamespace.id,
+        source.id,
+        { api_key: replacementRef },
+      ),
+      { ...source, secrets: { api_key: replacementRef } },
+    );
+  });
+  await assert.rejects(
+    store.transact((transaction) =>
+      transaction.credentialSources.replaceCredentialSourceSecrets(sourceNamespace.id, source.id, {
+        other_key: replacementRef,
+      }),
+    ),
+    "A credential source update cannot change its Secret fields.",
+  );
+  // Restore the original reference so later cases keep their Secret dependency.
+  await store.transact((transaction) =>
+    transaction.credentialSources.replaceCredentialSourceSecrets(sourceNamespace.id, source.id, {
+      api_key: { kind: "secret", namespaceId: sourceNamespace.id, id: sourceSecret.id },
+    }),
+  );
 
   // Deletion is two-phase: a deleting source stays recorded and blocks Namespace
   // teardown, but new bindings refuse it.

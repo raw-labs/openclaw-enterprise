@@ -26,7 +26,7 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: openclaw-enterprise
-      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/instance: {{ $.Release.Name | quote }}
       app.kubernetes.io/component: {{ $component }}
   template:
     metadata:
@@ -125,9 +125,9 @@ spec:
         {{- end }}
         - name: installation-startup
           secret:
-            secretName: {{ $.Values.installation.secretName }}
+            secretName: {{ $.Values.installation.secretName | quote }}
             items:
-              - key: {{ $.Values.installation.key }}
+              - key: {{ $.Values.installation.key | quote }}
                 path: installation.yaml
         {{- if $.Values.database.caSecretName }}
         - name: database-ca
@@ -164,9 +164,9 @@ spec:
         {{- end }}
         - name: chatgpt-admin
           secret:
-            secretName: {{ $chatgpt.secretName }}
+            secretName: {{ $chatgpt.secretName | quote }}
             items:
-              - key: {{ $chatgpt.key }}
+              - key: {{ $chatgpt.key | quote }}
                 path: admin-key
         {{- end }}
         {{- else }}
@@ -235,6 +235,26 @@ spec:
             {{- if $.Values.auth.google.allowedDomains }}
             - name: OCC_AUTH_GOOGLE_ALLOWED_DOMAINS
               value: {{ join "," $.Values.auth.google.allowedDomains | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if and $.Values.auth.oidc $.Values.auth.oidc.enabled }}
+            - name: OCC_AUTH_OIDC_ISSUER
+              value: {{ $.Values.auth.oidc.issuer | quote }}
+            - name: OCC_AUTH_OIDC_AUTHORIZATION_URL
+              value: {{ $.Values.auth.oidc.authorizationUrl | quote }}
+            - name: OCC_AUTH_OIDC_TOKEN_URL
+              value: {{ $.Values.auth.oidc.tokenUrl | quote }}
+            - name: OCC_AUTH_OIDC_JWKS_URL
+              value: {{ $.Values.auth.oidc.jwksUrl | quote }}
+            {{- include "openclaw.secretEnv" (dict "name" "OCC_AUTH_OIDC_CLIENT_ID" "secretName" $.Values.auth.oidc.secretName "key" $.Values.auth.oidc.clientIdKey) | nindent 12 }}
+            {{- include "openclaw.secretEnv" (dict "name" "OCC_AUTH_OIDC_CLIENT_SECRET" "secretName" $.Values.auth.oidc.secretName "key" $.Values.auth.oidc.clientSecretKey) | nindent 12 }}
+            {{- if and $.Values.auth.oidc.tokenAuth (ne $.Values.auth.oidc.tokenAuth "client_secret_post") }}
+            - name: OCC_AUTH_OIDC_TOKEN_AUTH
+              value: {{ $.Values.auth.oidc.tokenAuth | quote }}
+            {{- end }}
+            {{- if $.Values.auth.oidc.displayName }}
+            - name: OCC_AUTH_OIDC_DISPLAY_NAME
+              value: {{ $.Values.auth.oidc.displayName | quote }}
             {{- end }}
             {{- end }}
             {{- if $.Values.auth.recoveryUserId }}

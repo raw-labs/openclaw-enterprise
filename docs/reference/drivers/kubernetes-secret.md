@@ -11,7 +11,13 @@ lifecycle. This page owns Kubernetes setup and operator procedures.
 
 The Driver stores values for environment delivery, transient server-side
 hosted plugin discovery, and [credential source](../credential-sources.md)
-registration. Hosted existing-Agent discovery uses its bound `codex_pat` Secret;
+registration. **Experimental** Codex OAuth device login keeps private provider
+state in the same backend and uses atomic compare-and-swap to fence concurrent
+completion and cancellation. Once an
+OAuth source is claimed for runtime handoff, ordinary value updates and
+compare-and-swap are rejected, so it can no longer be cancelled, only deleted;
+reconnect creates a new Secret. Hosted existing-Agent discovery uses its bound `codex_pat` Secret
+or a separate Agent-scoped OAuth login;
 Create Agent discovery can use a selected Secret. Curated discovery needs no
 Secret. Values never enter Console responses. The Driver does not issue
 credentials, share Secrets across Namespaces, keep value history, restart
@@ -220,8 +226,8 @@ for verification and safe upstream revocation.
 There is no value history, automatic rotation, automatic workload restart, or
 value rollback. Updating or deleting an OCC Secret does not remove credentials
 already delivered to a running process environment, and deletion is blocked while
-current Configurations, Agent drafts, active revisions, or pending deployments still depend on
-the Secret. For a compromised credential, stop the affected workloads and revoke
+current Configurations, credential sources, Agent drafts, active revisions, or pending
+deployments still depend on the Secret. For a compromised credential, stop the affected workloads and revoke
 the credential at the upstream provider; then update the OCC Secret with a
 replacement value and redeploy the intended consumers. Delete the Secret only
 after its reference dependencies are cleared; see [Delete](#delete).

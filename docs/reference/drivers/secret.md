@@ -21,13 +21,14 @@ Compose without Installation YAML selects no Secret Driver. See
 The [shared interface](../../../packages/contracts/src/index.ts) requires four
 storage and projection methods and optionally supports transient server-side use.
 
-| Method                    | Contract                                                                                                                                                                                      |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create(identity, value)` | Store the value for OCC's `{ id, namespaceId, name }` and return a safe backend reference.                                                                                                    |
-| `update(secret, value)`   | Replace the value at the stored, owned backend identity. Returns no value and does not report delivery.                                                                                       |
-| `delete(secret)`          | Remove only the backend object belonging to this Secret. Returns no value.                                                                                                                    |
-| `resolve(secret)`         | Check live ownership and return only the reference safe to use for projection. Never return the value or substitute another object.                                                           |
-| `withValue(secret, use)`  | When supported, verify exact ownership and pass the current value to a transient server-side callback, such as registering an authorized credential source. Never expose it as a public read. |
+| Method                                    | Contract                                                                                                                                                                                      |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create(identity, value)`                 | Store the value for OCC's `{ id, namespaceId, name }` and return a safe backend reference.                                                                                                    |
+| `update(secret, value)`                   | Replace the value at the stored, owned backend identity. Returns no value and does not report delivery.                                                                                       |
+| `delete(secret)`                          | Remove only the backend object belonging to this Secret. Returns no value.                                                                                                                    |
+| `resolve(secret)`                         | Check live ownership and return only the reference safe to use for projection. Never return the value or substitute another object.                                                           |
+| `compareAndSwap(secret, expected, value)` | Optional atomic replacement of an exact current value. **Experimental** Codex OAuth device login uses it to serialize polling and fence cancellation; a mismatch returns false.               |
+| `withValue(secret, use)`                  | When supported, verify exact ownership and pass the current value to a transient server-side callback, such as registering an authorized credential source. Never expose it as a public read. |
 
 The current `SecretBackendRef` contains `namespaceName`, `name`, `key`, and
 `uid`; these are internal metadata, never caller-selected locations. The public
@@ -77,9 +78,10 @@ On creation, the Driver writes the value and OCC stores the returned identity.
 OCC registers backend deletion for a known failed transaction; it does not do
 so when the commit outcome is unknown. Updates overwrite the backend value: OCC
 keeps no prior value for rollback, and success means stored, not delivered.
-Deletion is refused while a Configuration, credential source, active revision,
-or pending deployment still references the Secret. Otherwise OCC calls the Driver before
-removing its own record.
+Deletion is refused with `409` while a Configuration, credential source, Agent
+draft, active revision, or pending deployment still references the Secret; the
+message lists these kinds, not the specific resources. Otherwise OCC calls the
+Driver before removing its own record.
 
 For plugin discovery, OCC checks permissions and reads current Secret metadata,
 then calls `withValue` without holding a platform transaction over backend or

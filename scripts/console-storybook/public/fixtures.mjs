@@ -1,9 +1,6 @@
 import standardCodexPreset from "/console/standard-codex-preset.mjs";
 import standardOpenclawPreset from "/console/standard-openclaw-preset.mjs";
-import devdayPreset from "/console/devday-preset.mjs";
-import devdayPartnersPreset from "/console/devday-partners-preset.mjs";
-import devdayQaPreset from "/console/devday-qa-preset.mjs";
-import devdayOncallPreset from "/console/devday-oncall-preset.mjs";
+import swePreset from "/console/swe-preset.mjs";
 
 const createdAt = "2026-09-01T12:00:00.000Z";
 const namespaceId = "ns_00000000-0000-4000-8000-000000000001";
@@ -85,11 +82,12 @@ export function installFixture(scenario, evidence) {
   const deployments = new Map();
   const provisioning = new Map();
   const credentials = new Map();
+  const deviceLogins = new Map();
   const files = new Map();
   const secrets = new Map();
   const stagedWorkspaceFiles = new Map();
-  const roles = [];
-  const bindings = [];
+  const roles = structuredClone(scenario.sharingRoles ?? []);
+  const bindings = structuredClone(scenario.sharingBindings ?? []);
   const deleted = new Set();
   const session = {
     authenticated: true,
@@ -170,7 +168,9 @@ export function installFixture(scenario, evidence) {
           ? { method: "chatgpt_service_account", serviceAccountId: "sa_demo" }
           : scenario.auth === "codex_pat"
             ? { method: "codex_pat", source: secretRef("sec_demo_service_account") }
-            : auth;
+            : scenario.auth === "oauth"
+              ? { method: "oauth", source: secretRef("sec_demo_oauth_deployed") }
+              : auth;
   let selectedRevisionId = null;
   if (scenario.candidateDeploymentStatus) {
     selectedRevisionId =
@@ -207,6 +207,11 @@ export function installFixture(scenario, evidence) {
   credentials.set(agent.id, { transportConfigured: scenario.transport !== false });
   function snapshot(owner, id, revision) {
     const configuration = configs.get(owner.configurationId);
+    const model = configuration.values.agents?.defaults?.model;
+    const primaryModel = typeof model === "string" ? model : model?.primary;
+    const harnessId =
+      configuration.values.agents?.defaults?.models?.[primaryModel]?.agentRuntime?.id ??
+      (primaryModel?.startsWith("codex/") ? "codex" : "openclaw");
     return {
       id,
       namespaceId,
@@ -231,7 +236,7 @@ export function installFixture(scenario, evidence) {
             },
           }
         : {}),
-      harness: { id: "codex", version: "demo", mode: owner.executionMode },
+      harness: { id: harnessId, version: "demo", mode: owner.executionMode },
       compute: { id: "kubernetes-demo", implementation: "kubernetes" },
       servicePrincipalId: owner.servicePrincipalId,
       ...(owner.repositoryBindings?.length
@@ -349,7 +354,7 @@ export function installFixture(scenario, evidence) {
     });
   }
   const preset = {
-    id: scenario.devdayPreset ? "pre_devday_codex" : "pre_00000000-0000-4000-8000-000000000001",
+    id: scenario.swePreset ? "pre_swe_codex" : "pre_00000000-0000-4000-8000-000000000001",
     namespaceId,
     name: "Research assistant",
     template: {
@@ -371,12 +376,12 @@ export function installFixture(scenario, evidence) {
       },
     },
   };
-  if (scenario.standardCodexPreset || scenario.standardOpenclawPreset || scenario.devdayPreset) {
+  if (scenario.standardCodexPreset || scenario.standardOpenclawPreset || scenario.swePreset) {
     Object.assign(
       preset,
       structuredClone(
-        scenario.devdayPreset
-          ? devdayPreset
+        scenario.swePreset
+          ? swePreset
           : scenario.standardOpenclawPreset
             ? standardOpenclawPreset
             : standardCodexPreset,
@@ -387,13 +392,10 @@ export function installFixture(scenario, evidence) {
     preset.template.agent.initialWorkspaceFiles = structuredClone(scenario.presetWorkspaceFiles);
   }
   const presets = [preset];
-  if (scenario.devdayPreset) {
+  if (scenario.swePreset) {
     for (const [name, definition] of [
       ["standard-codex", standardCodexPreset],
       ["standard-openclaw", standardOpenclawPreset],
-      ["devday-partners", devdayPartnersPreset],
-      ["devday-qa", devdayQaPreset],
-      ["devday-oncall", devdayOncallPreset],
     ]) {
       presets.push({
         ...structuredClone(definition),
@@ -511,6 +513,9 @@ export function installFixture(scenario, evidence) {
           ...(scenario.unsupportedProvisioning === true
             ? {}
             : { agentProvisioning: { executionModes: ["dedicated"] } }),
+          ...(scenario.nativeWorkerSupport
+            ? { nativeWorkers: { support: scenario.nativeWorkerSupport } }
+            : {}),
           ...(scenario.pluginCapabilities ? { pluginPolicies: scenario.pluginCapabilities } : {}),
           ...(scenario.pluginDiscoveryCredential
             ? { pluginDiscovery: { credential: scenario.pluginDiscoveryCredential } }
@@ -534,6 +539,44 @@ export function installFixture(scenario, evidence) {
       const [, ns, resource] = match;
       if (ns !== namespaceId) {
         return response([]);
+      }
+      const deviceLogin = resource.match(
+        /^agents(?:\/[^/]+)?\/device-authorizations(?:\/([^/]+)(\/poll)?)?$/,
+      );
+      if (deviceLogin) {
+        const [, id, poll] = deviceLogin;
+        if (!id && method === "POST") {
+          const source = secretRef(nextId("sec"));
+          const login = {
+            source,
+            status: "pending",
+            verificationUrl: "https://auth.openai.com/codex/device",
+            userCode: "DEMO-1234",
+            expiresAt: new Date(Date.now() + (scenario.oauthExpired ? -1 : 600_000)).toISOString(),
+            intervalSeconds: 1,
+          };
+          deviceLogins.set(source.id, login);
+          secrets.set(
+            source.id,
+            secretMetadata(source.id, "Codex OAuth login (Experimental, simulated)"),
+          );
+          return response(login);
+        }
+        const login = deviceLogins.get(id);
+        if (!login) {
+          return error(404);
+        }
+        if (poll && method === "POST") {
+          if (!scenario.oauthPending) {
+            login.status = "ready";
+          }
+          return response(login);
+        }
+        if (!poll && method === "DELETE") {
+          deviceLogins.delete(id);
+          secrets.delete(id);
+          return new Response(null, { status: 204 });
+        }
       }
       if (resource === "service-accounts" && method === "GET") {
         return response(accounts);
@@ -943,6 +986,7 @@ export function installFixture(scenario, evidence) {
           if (!revisions.has(revisionId)) {
             return error(404);
           }
+          const startup = scenario.runtimePod === "startupWarnings";
           const pod = {
             role: "gateway",
             cluster: "control",
@@ -957,24 +1001,38 @@ export function installFixture(scenario, evidence) {
                 state: "running",
                 reason: null,
                 ready: true,
-                restartCount: 1,
+                restartCount: startup ? 0 : 1,
                 startedAt: "2026-09-27T11:40:00.000Z",
-                lastTermination: {
-                  reason: "OOMKilled",
-                  exitCode: 137,
-                  finishedAt: "2026-09-27T11:39:58.000Z",
-                },
+                lastTermination: startup
+                  ? null
+                  : {
+                      reason: "OOMKilled",
+                      exitCode: 137,
+                      finishedAt: "2026-09-27T11:39:58.000Z",
+                    },
               },
             ],
-            events: [
-              {
-                type: "Warning",
-                reason: "BackOff",
-                message: "Back-off restarting failed container gateway",
-                count: 2,
-                lastObservedAt: "2026-09-27T11:39:59.000Z",
-              },
-            ],
+            // A healthy first deploy: readiness probes failed while the Gateway started.
+            events: startup
+              ? [
+                  {
+                    type: "Warning",
+                    container: "gateway",
+                    reason: "Unhealthy",
+                    message: "Readiness probe failed: Gateway /readyz unavailable: ECONNREFUSED",
+                    count: 8,
+                    lastObservedAt: "2026-09-27T11:40:20.000Z",
+                  },
+                ]
+              : [
+                  {
+                    type: "Warning",
+                    reason: "BackOff",
+                    message: "Back-off restarting failed container gateway",
+                    count: 2,
+                    lastObservedAt: "2026-09-27T11:39:59.000Z",
+                  },
+                ],
           };
           return response({
             revisionId,
@@ -1137,6 +1195,36 @@ export function installFixture(scenario, evidence) {
           const { reads: _reads, ...status } = deployment;
           return response(status);
         }
+        if (suffix === "/runtime-roles") {
+          return scenario.runtimeRolesUnavailable
+            ? error(503)
+            : response([
+                {
+                  id: "researcher",
+                  permissions: {
+                    sessions: { others: "none" },
+                    agents: ["main"],
+                    scopes: ["operator.read", "operator.write"],
+                  },
+                },
+                {
+                  id: "reviewer",
+                  permissions: {
+                    sessions: { others: "view" },
+                    agents: ["main"],
+                    scopes: ["operator.read"],
+                  },
+                },
+                {
+                  id: "administrator",
+                  permissions: {
+                    sessions: { others: "write" },
+                    agents: "*",
+                    scopes: ["operator.admin"],
+                  },
+                },
+              ]);
+        }
         if (suffix.startsWith("/workspace/files/")) {
           const filename = decodeURIComponent(suffix.split("/").at(-1));
           const key = `${id}/${filename}`;
@@ -1172,6 +1260,15 @@ export function installFixture(scenario, evidence) {
           bindings.push(binding);
           return response(binding, 201);
         }
+      }
+      const runtimeRoleMatch = resource.match(/^iam\/access-bindings\/([^/]+)\/runtime-role$/);
+      if (runtimeRoleMatch && method === "PATCH") {
+        const binding = bindings.find((item) => item.id === runtimeRoleMatch[1]);
+        if (!binding) {
+          return error(404);
+        }
+        binding.runtimeRole = body.runtimeRole;
+        return response(binding);
       }
       const bindingMatch = resource.match(/^iam\/access-bindings\/([^/]+)$/);
       if (bindingMatch && method === "DELETE") {

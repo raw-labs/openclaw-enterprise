@@ -1,5 +1,7 @@
 import { story } from "./story.mjs";
 
+export const PluginsOAuthRevision = story("pluginsOAuthRevision");
+
 export default { title: "Pages/Agent detail" };
 
 export const Draft = story("draft");
@@ -44,6 +46,7 @@ export const DiagnosticsSuccess = story("diagnosticsSuccess");
 export const DiagnosticsUnknown = story("diagnosticsUnknown");
 export const DiagnosticsUnavailable = story("diagnosticsUnavailable");
 export const RuntimeLogs = story("runtimeLogs");
+export const RuntimeLogsStartupWarnings = story("runtimeLogsStartupWarnings");
 export const RuntimeLogsFilteredDownload = story("runtimeLogsFilteredDownload");
 export const RuntimeLogsDenied = story("runtimeLogsDenied");
 export const RuntimeLogsClusterRbac = story("runtimeLogsClusterRbac");
@@ -72,5 +75,7 @@ export const RevisionCredentialsMissing = {
 export const Sharing = { ...story("agentSharing") };
 export const SharingGranted = { ...story("agentSharingGranted") };
 export const SharingRemoved = { ...story("agentSharingRemoved") };
+export const SharingRoleChanged = story("agentSharingRoleChanged");
+export const SharingRolesUnavailable = story("agentSharingRolesUnavailable");
 export const SharingDenied = { ...story("agentSharingDenied") };
 export const SharingUnknown = { ...story("agentSharingUnknown") };

@@ -12,6 +12,7 @@ export function createPlatformReadView(
       "list",
       "findWork",
       "findWorkAttempt",
+      "hasOutstandingCredentialWithdrawalWork",
     ]),
     installations: bindRepository(repositories.installations, lifetime, [
       "findInstallation",
@@ -27,6 +28,8 @@ export function createPlatformReadView(
     credentialSources: bindRepository(repositories.credentialSources, lifetime, [
       "findCredentialSource",
       "listCredentialSources",
+      "findCredentialWithdrawal",
+      "listCredentialWithdrawals",
     ]),
     serviceAccounts: bindRepository(repositories.serviceAccounts, lifetime, [
       "findServiceAccount",
@@ -61,6 +64,7 @@ export function createPlatformReadView(
     ]),
     provisioning: bindRepository(repositories.provisioning, lifetime, [
       "findByWorkId",
+      "findWithWork",
       "hasPendingNamespaceProvisioning",
       "findByAgent",
       "findByConfiguration",

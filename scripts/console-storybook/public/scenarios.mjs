@@ -9,6 +9,8 @@ const candidateVersion =
 const create = "/console/agents/new?namespace=ns_00000000-0000-4000-8000-000000000001";
 const click = (text) => ({ click: text });
 const form = [click("Start without Preset")];
+const oauthForm = [...form, { selector: "#agent-auth-method", value: "oauth" }];
+const startOAuthLogin = [...oauthForm, click("Sign in with OAuth")];
 const createModelSecret = (value) => [
   { selector: "#provider-credential-secret", value: "__openclaw_create_secret__" },
   { selector: "#create-provider-credential-secret-value", value },
@@ -58,7 +60,7 @@ const pluginCapabilities = {
 };
 const pluginSetup = {
   message:
-    "App connection status is not verified. Catalog availability does not confirm linked credentials. In ChatGPT admin, select the same workspace as this PAT and enable plugin and app access for its user or service account. For service-account plugin credentials, open Service accounts, choose the account, and configure its app connections. Workspace administrator access is required. OCE policies do not grant access or configure credentials. Reload plugins after changes.",
+    "App connection status is not verified. Catalog availability does not confirm linked credentials. In ChatGPT admin, select the same workspace as this credential and enable plugin and app access for its user or service account. For service-account plugin credentials, open Service accounts, choose the account, and configure its app connections. Workspace administrator access is required. OCE policies do not grant access or configure credentials. Reload plugins after changes.",
   links: [
     { label: "Manage workspace plugins", url: "https://chatgpt.com/admin/plugins?catalog=GLOBAL" },
     { label: "Service account credentials", url: "https://admin.openai.com/" },
@@ -325,7 +327,7 @@ const createProvisioningSecrets = [
 ];
 const devdayCreateCheckpoint = [
   click("Create Agent"),
-  { selector: "#agent-preset", value: "pre_devday_codex" },
+  { selector: "#agent-preset", value: "pre_swe_codex" },
   { selector: "#preset-variable-name", value: "devday claw" },
   click("Use Preset"),
   { selector: "#provider-credential-secret", value: "sec_devday_model_token" },
@@ -341,8 +343,11 @@ const devdayCreateCheckpoint = [
   { selector: 'select[aria-label="Create issue require approval for"]', value: "all_actions" },
   click("Done"),
   { selector: devdayRepositorySelector, click: true },
-  { selector: "#repository-profile-git-write", click: true },
+  { selector: "#repository-default-git-full", click: true },
+  { selector: ".repository-customize summary", click: true },
+  { selector: "#repository-default-issues", click: true },
   click("Edit Slack"),
+  { selector: "#slack-channel-ids-search", value: "CDEMO123", key: "Enter" },
   { selector: "#slack-channel-access", value: "selected" },
   { selector: "#slack-allowed-user-ids-search", value: "UDEMO123", key: "Enter" },
   { selector: "#slack-secret-slack-app-token", value: "sec_devday_slack_app_token" },
@@ -357,7 +362,7 @@ const devdayAdminCheckpoint = [
 ];
 
 const shareExistingPerson = [
-  { selector: "#share-principal-id", value: "person-demo" },
+  { selector: "#share-principal-id", value: "prn_00000000-0000-4000-8000-000000000003" },
   { selector: ".agent-access-consent input", click: true },
   click("Share Agent"),
 ];
@@ -428,6 +433,9 @@ export const scenarios = {
     githubEnabled: true,
     description:
       "Provider discovery adds Continue with GitHub beside the password form. Clicking it demonstrates an unavailable provider; this fixture never navigates to GitHub.",
+    steps: [
+      "Check the GitHub icon and label, then select the button to see the unavailable message.",
+    ],
     gap: "An administrator must attach the numeric GitHub identity to an existing account through the API. Enrollment, account creation, and recovery administration have no console controls. OAuth navigation and session issuance require backend verification.",
   },
   githubUnavailable: {
@@ -515,6 +523,9 @@ export const scenarios = {
     googleEnabled: true,
     description:
       "Provider discovery adds Continue with Google beside the password form and any other configured provider. Clicking it demonstrates an unavailable provider; this fixture never navigates to Google.",
+    steps: [
+      "Check the Google and GitHub icons and labels, then select either button to see the unavailable message.",
+    ],
     gap: "An administrator must attach the Google subject identifier to an existing account through the API. Email addresses never match an account. OAuth navigation and session issuance require backend verification.",
   },
   googleUnavailable: {
@@ -638,7 +649,7 @@ export const scenarios = {
     description:
       "Agent panels retain loaded controls on tab and page returns. This preview uses simulated API data.",
     steps: [
-      "Wait for Native admin UI, then open Credentials and return to Configuration. The native access result remains visible.",
+      "Wait for OpenClaw, then open Credentials and return to Configuration. The access result remains visible.",
       "Expand View admitted native configuration, visit Workspace files, then return. The disclosure stays expanded.",
       "Return to Agents and use browser Back. Native admin access and expanded panels remain loaded after admission succeeds.",
       "Click Refresh access to explicitly check the native endpoint again. Page Refresh reloads all panels.",
@@ -792,7 +803,7 @@ export const scenarios = {
     path: "/console/namespaces?namespace=ns_00000000-0000-4000-8000-000000000099",
     description: "Recover from a stale Namespace URL using the selector inside the message.",
     steps: [
-      "Choose Engineering under Choose a valid namespace; the URL changes and the warning disappears without leaving Namespaces.",
+      "Choose Engineering under Choose a valid Namespace; the URL changes and the warning disappears without leaving Namespaces.",
       "Use browser Back to return to the unavailable selection and recover again.",
     ],
   },
@@ -848,7 +859,7 @@ export const scenarios = {
     path: create,
     actions: form,
     description:
-      "OpenAI defaults to Codex. Choose the harness before entering its supported credential; execution mode follows the harness. No model is selected by default.",
+      "OpenAI defaults to Codex with Dedicated execution. Selecting OpenClaw starts in Embedded mode; supported Installations also offer Dedicated under Runtime details. No model is selected by default.",
     steps: [
       "Keep OpenAI and the Codex harness, enter a dummy API key, and select a listed model.",
       'In Configuration JSON, edit plugins.entries.codex.config.appServer: set sandbox to "workspace-write", approvalPolicy to "never", and remoteWorkspaceRoot to "/workspace/custom".',
@@ -1577,18 +1588,43 @@ export const scenarios = {
     description:
       "The creation form seeds AGENTS.md, SOUL.md, IDENTITY.md, and USER.md before the Agent's first deployment. Clearing a field creates an empty file.",
   },
+  createDedicatedOpenclaw: {
+    group: "Pages/Create Agent",
+    name: "OpenAI with dedicated OpenClaw",
+    path: create,
+    nativeWorkerSupport: "custom-image",
+    actions: [
+      ...readyForm,
+      { selector: "#agent-harness", value: "openclaw" },
+      { selector: ".launch-runtime summary", click: true },
+      { selector: "#execution-mode", value: "dedicated" },
+    ],
+    description:
+      "Experimental Dedicated OpenClaw uses the same Agent creation form as Codex. The simulated Installation declares custom-image native worker support. A model and dummy API-key Secret are selected; channel controls remain available.",
+    steps: [
+      "Confirm the Harness is OpenClaw and Execution mode is Dedicated.",
+      "Open the Slack editor, then cancel it. Channel controls remain available for dedicated OpenClaw.",
+      "Select Embedded, then return to Dedicated. Confirm the Harness remains OpenClaw.",
+      "Create the Agent and follow simulated provisioning to Agent details. Open Configuration and confirm the snapshot shows Dedicated execution and the OpenClaw Harness.",
+    ],
+  },
   createEmbedded: {
     group: "Pages/Create Agent",
-    name: "OpenAI with OpenClaw harness",
+    name: "Embedded OpenClaw",
     path: create,
-    actions: [...form, { selector: "#agent-harness", value: "openclaw" }],
+    actions: [
+      ...form,
+      { selector: "#agent-harness", value: "openclaw" },
+      { selector: ".launch-runtime summary", click: true },
+    ],
     description:
-      "OpenClaw remains available for OpenAI with an API key. It uses Embedded execution and disables unsupported channel editing.",
+      "Selecting OpenClaw defaults to Embedded, keeping OpenClaw and its model credential together in the Gateway. Unsupported channel editing remains disabled.",
   },
   createDedicatedOpenclawExperimental: {
     group: "Pages/Create Agent",
     name: "Experimental Dedicated OpenClaw",
     path: create,
+    nativeWorkerSupport: "custom-image",
     actions: [
       ...form,
       { selector: "#agent-harness", value: "openclaw" },
@@ -1596,7 +1632,7 @@ export const scenarios = {
       { selector: "#execution-mode", value: "dedicated" },
     ],
     description:
-      "Dedicated OpenClaw displays its experimental status and runtime-build compatibility requirement before deployment.",
+      "The simulated Installation declares custom-image native worker support. Dedicated OpenClaw displays its experimental status and runtime-build compatibility requirement before deployment.",
     gap: "This simulated form does not verify that a selected OpenClaw runtime image includes native worker-inference support.",
   },
   createRepositoriesSelected: {
@@ -1947,6 +1983,16 @@ export const scenarios = {
     ],
     gap: "All credentials and API responses in this preview are simulated.",
   },
+  createPasswordPresetMissingModel: {
+    group: "Pages/Create Agent",
+    name: "Standard Codex missing model",
+    path: create,
+    standardCodexPreset: true,
+    actions: passwordPresetForm.filter((action) => action.selector !== "#preset-variable-model"),
+    description:
+      "Use Preset with an empty Model stops at the required Model field. Variables with defaults stay optional.",
+    gap: "All credentials and API responses in this preview are simulated.",
+  },
   createPasswordPresetDraft: {
     group: "Pages/Create Agent",
     name: "Standard Codex password draft",
@@ -2040,6 +2086,98 @@ export const scenarios = {
     description:
       "Service Accounts authentication is available with the Codex harness and uses the same fixed OpenAI model list. Switching to OpenClaw selects API-key authentication and clears the credential and model selection.",
   },
+  createOAuth: {
+    group: "Pages/Create Agent",
+    name: "ChatGPT OAuth before sign-in (Experimental)",
+    path: create,
+    pluginDiscovery,
+    pluginCapabilities,
+    actions: oauthForm,
+    description:
+      "Experimental first-deploy login for a dedicated Codex Agent. The limitations notice stays visible throughout login and recovery. The model picker remains available; credentials never enter the browser.",
+  },
+  createOAuthPending: {
+    group: "Pages/Create Agent",
+    name: "ChatGPT device login pending (Experimental)",
+    path: create,
+    oauthPending: true,
+    actions: startOAuthLogin,
+    description:
+      "The user code and provider link are visible while authorization is pending. Cancel login removes this staged login locally.",
+  },
+  createOAuthReady: {
+    group: "Pages/Create Agent",
+    name: "ChatGPT login ready for plugin discovery (Experimental)",
+    path: create,
+    pluginDiscovery,
+    pluginCapabilities,
+    actions: startOAuthLogin,
+    description:
+      "The fixture completes login after one poll. Configure plugins uses the server-owned login reference. No access or refresh token appears in this preview.",
+    steps: [
+      "Wait for ChatGPT login ready, then open Configure plugins and add Calendar.",
+      "Choose a model and create the Agent. Deployment is simulated; the runtime token handoff is not proved here.",
+    ],
+  },
+  createOAuthDenied: {
+    group: "Pages/Create Agent",
+    name: "ChatGPT login permission denied (Experimental)",
+    path: create,
+    rules: [{ suffix: "/device-authorizations", method: "POST", status: 403 }],
+    actions: startOAuthLogin,
+    description:
+      "A denied authorization request leaves the form usable and does not create a browser credential.",
+  },
+  createOAuthUnavailable: {
+    group: "Pages/Create Agent",
+    name: "ChatGPT login unavailable (Experimental)",
+    path: create,
+    rules: [{ suffix: "/device-authorizations", method: "POST", status: 501 }],
+    actions: startOAuthLogin,
+    description:
+      "An Installation whose selected Drivers do not support device login reports it as unavailable. Choose another authentication method; no device code or sign-in link appears.",
+  },
+  createOAuthError: {
+    group: "Pages/Create Agent",
+    name: "ChatGPT login exchange failed (Experimental)",
+    path: create,
+    rules: [{ suffix: "/poll", method: "POST", status: 503 }],
+    actions: startOAuthLogin,
+    description:
+      "A failed poll stops polling. Cancel the staged login and connect again; the console does not retry an uncertain exchange.",
+  },
+  createOAuthExpired: {
+    group: "Pages/Create Agent",
+    name: "ChatGPT device login expired (Experimental)",
+    path: create,
+    oauthExpired: true,
+    actions: startOAuthLogin,
+    description:
+      "An expired device code cannot be used to create the Agent. Cancel it and sign in again.",
+  },
+  pluginsOAuthRevision: {
+    group: "Pages/Agent detail",
+    name: "Separate ChatGPT login for plugin editing (Experimental)",
+    path: `${draft}&tab=plugins`,
+    deployed: true,
+    auth: "oauth",
+    agentPlugins: JSON.parse(pluginSelections),
+    pluginCapabilities,
+    pluginDiscovery,
+    actions: [click("Sign in with OAuth")],
+    description:
+      "A separate configuration login enables plugin browsing while the deployed Agent retains its own credential. Saving plugin selections never replaces authentication.",
+  },
+  authOAuthReconnect: {
+    group: "Components/Credentials",
+    name: "Explicit ChatGPT credential replacement (Experimental)",
+    path: `${draft}&tab=credentials`,
+    deployed: true,
+    auth: "oauth",
+    actions: [click("Sign in with OAuth")],
+    description:
+      "The current Agent login is preserved by default. A completed new login only replaces the saved source when Save authentication source is chosen; deployment remains separate.",
+  },
   createPatToOpenClaw: {
     group: "Pages/Create Agent",
     name: "Switch from Service Accounts to OpenClaw",
@@ -2052,7 +2190,7 @@ export const scenarios = {
       { selector: "#agent-harness", value: "openclaw" },
     ],
     description:
-      "Switching an unsaved service account form to OpenClaw clears the token and model, selects API-key authentication, and uses Embedded execution. Choose or create a simulated API key Secret to continue.",
+      "Switching an unsaved service account form to OpenClaw clears the token and model, selects API-key authentication, and defaults to Embedded execution. Review the selected authentication before continuing.",
   },
   createBoundPatPreset: {
     group: "Pages/Create Agent",
@@ -2221,10 +2359,10 @@ export const scenarios = {
     name: "Share an Agent",
     path: draft,
     description:
-      "Grant an existing person access to this Agent's full native Gateway. Other Agents and OCE administration remain separate.",
+      "Choose any configured OpenClaw role for an existing person. The selected role controls native permissions.",
     steps: [
-      "Enter person-demo as the existing Principal ID.",
-      "Review the native-access disclosure, acknowledge it, and share.",
+      "Enter prn_00000000-0000-4000-8000-000000000003 as the existing Principal ID.",
+      "Choose an OpenClaw role, review its permissions, acknowledge shared access, and share.",
       "Remove the direct binding; Namespace discovery remains available.",
     ],
   },
@@ -2234,7 +2372,7 @@ export const scenarios = {
     path: draft,
     actions: shareExistingPerson,
     description:
-      "Namespace discovery and the selected Agent grant are present. Removing the direct grant does not remove other effective access.",
+      "Namespace discovery and the selected Agent grant are present. Removing the runtime assignment revokes OpenClaw entry; other grants may still provide OCE management access.",
   },
   agentSharingRemoved: {
     group: "Pages/Agent detail",
@@ -2243,6 +2381,47 @@ export const scenarios = {
     actions: [...shareExistingPerson, click("Remove binding")],
     description:
       "The selected direct Agent binding was removed. Namespace discovery and unrelated grants are preserved.",
+  },
+  agentSharingRoleChanged: {
+    group: "Pages/Agent detail",
+    name: "Change OpenClaw role",
+    path: draft,
+    actions: [
+      ...shareExistingPerson,
+      { selector: ".agent-access-grant select", value: "reviewer" },
+    ],
+    description:
+      "Change the selected role and inspect the success feedback. This simulated preview does not verify backend atomicity or native connection closure.",
+  },
+  agentSharingRolesUnavailable: {
+    group: "Pages/Agent detail",
+    name: "OpenClaw roles unavailable",
+    path: draft,
+    runtimeRolesUnavailable: true,
+    sharingRoles: [
+      {
+        id: "role-demo-entry",
+        namespaceId: "ns_00000000-0000-4000-8000-000000000001",
+        permissions: [
+          { action: "read", resourceKind: "agent" },
+          { action: "use", resourceKind: "agent" },
+        ],
+      },
+    ],
+    sharingBindings: [
+      {
+        id: "binding-demo-entry",
+        namespaceId: "ns_00000000-0000-4000-8000-000000000001",
+        subjectKind: "identity",
+        subjectId: "prn_00000000-0000-4000-8000-000000000003",
+        roleId: "role-demo-entry",
+        resourceKind: "agent",
+        resourceId: "agt_00000000-0000-4000-8000-000000000001",
+        runtimeRole: "reviewer",
+      },
+    ],
+    description:
+      "Sharing remains disabled while the deployed role catalog is unavailable; existing assignments can be removed.",
   },
   agentSharingDenied: {
     group: "Pages/Agent detail",
@@ -2544,7 +2723,7 @@ export const scenarios = {
     description:
       "v7 has already been checked and is waiting for another reconciliation. Its last result and timestamp remain distinct from current runtime health.",
     steps: [
-      "Read the pending reason and Last checked time in Deployment activity.",
+      "Read the pending reason and Since time in Deployment activity.",
       "Click Refresh deployment; the simulated pending result remains visible.",
       "View v6 and confirm the latest deployment still describes v7.",
     ],
@@ -2665,6 +2844,16 @@ export const scenarios = {
     candidateDeploymentStatus: "succeeded",
     description:
       "The Logs tab shows the Gateway Pod, its OOMKilled restart and BackOff Event, then redacted operational output with a withheld-structured-output row. Previous instance is available after the restart.",
+  },
+  runtimeLogsStartupWarnings: {
+    group: "Pages/Agent detail",
+    name: "Runtime status after a healthy first deploy",
+    path: `${candidateVersion}&tab=logs`,
+    deployed: true,
+    candidateDeploymentStatus: "succeeded",
+    runtimePod: "startupWarnings",
+    description:
+      "The Gateway Pod is Ready with no restarts; its startup readiness-probe Event is listed in muted text as an earlier warning instead of in the warning color.",
   },
   runtimeLogsFilteredDownload: {
     group: "Pages/Agent detail",
@@ -3534,6 +3723,34 @@ export const scenarios = {
     description:
       "Authorized launch link and warning. The fixture opens an explanatory page instead of a real gateway.",
   },
+  nativeReadError: {
+    group: "Components/Native admin",
+    name: "Status read failure",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "available",
+    rules: [{ suffix: "/native-admin", method: "GET", status: 503, once: true }],
+    description: "A failed access read keeps its error and Refresh access visible.",
+    steps: [
+      "Confirm the OpenClaw card shows Service unavailable and no launch link.",
+      "Click Refresh access. The error clears and Open OpenClaw becomes available.",
+    ],
+    gap: "Simulated status recovery; deployment-triggered refresh is covered by the Console browser integration.",
+  },
+  nativeReadRecovery: {
+    group: "Components/Native admin",
+    name: "Recovery on Back",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "available",
+    rules: [{ suffix: "/native-admin", method: "GET", status: 503, once: true }],
+    description: "Back rechecks a failed access read and replaces the error after recovery.",
+    steps: [
+      "Confirm the OpenClaw card shows Service unavailable and no launch link.",
+      "Open Namespaces, then use Back. The error clears and Open OpenClaw becomes available.",
+    ],
+    gap: "Simulated status recovery; the browser integration uses the real role catalog after its outage ends.",
+  },
   nativeStopped: {
     group: "Components/Native admin",
     name: "Stopped",
@@ -3555,8 +3772,13 @@ export const scenarios = {
     name: "Denied and hidden",
     path: revision,
     deployed: true,
-    nativeAdmin: "denied",
-    description: "Denied native-admin access hides the whole panel.",
+    rules: [{ suffix: "/native-admin", method: "GET", status: 403 }],
+    description:
+      "A person without an OpenClaw assignment can retain their Agent page while access is denied.",
+    steps: [
+      "Confirm the OpenClaw card is hidden.",
+      "Open Namespaces, then use Back. The cached Agent page returns with OpenClaw still hidden.",
+    ],
   },
   workspaceNavigation: {
     group: "Components/Workspace",
@@ -3714,7 +3936,7 @@ export const scenarios = {
       "Choose the provider first, then a compatible harness. The production form updates native Configuration and execution mode; credentials and deployment remain simulated.",
     steps: [
       "Check the inset arrows on the Namespace, Provider, Harness, and Authentication method controls. Use the controls with a mouse and keyboard.",
-      "OpenAI starts with Codex and Dedicated execution. Select OpenClaw: execution becomes Embedded and the API key and selected model remain available.",
+      "OpenAI starts with Codex and Dedicated execution. Select OpenClaw: Embedded is selected and channel controls are disabled. Dedicated requires an Installation with native worker support; the separate Dedicated OpenClaw stories simulate that prerequisite.",
       "Select Anthropic: only OpenClaw is available, and the previous provider's credential and model are cleared. Enter a dummy API key and choose a listed model.",
       "Select OpenAI again: Codex is selected by default. Choose Service Accounts, enter a dummy token, and choose a listed model.",
       "Select OpenClaw: authentication changes to API key and the token and model are cleared. Enter a dummy API key and select a model to continue creation.",
@@ -3786,7 +4008,7 @@ export const scenarios = {
     slackChannels: { COPENCLAWFEEDBACK: { requireMention: true, users: ["UDEMO123"] } },
     nativeAdmin: "available",
     nativeAdminUrl: "/storybook-fixtures/devday-admin.html?agent=oceclaw&channel=openclaw-feedback",
-    devdayPreset: true,
+    swePreset: true,
     pluginDiscovery: devdayPluginDiscovery,
     pluginCapabilities,
     fixturePluginCatalog: true,
@@ -3823,11 +4045,11 @@ export const scenarios = {
       "DevDay create-flow rehearsal using real Console controls with fake service-account and Slack Secret data. Provisioning and deployment progress are simulated in the Storybook fixture.",
     steps: [
       "Start on the Agents list with the already deployed oceclaw seed, then click Create Agent.",
-      "The picker includes SWE Agent, Community Agent, Q&A Agent, and Oncall Agent. Select SWE Agent and enter devday claw for its name.",
+      "The picker includes SWE Agent, Standard Codex, and Standard OpenClaw. Select SWE Agent and enter devday claw for its name.",
       "Keep the default gpt-6-astra model and click Use Preset. Choose the existing DevDay Codex service account (simulated) Secret, or explicitly create a new simulated Secret. No credential is preselected. Review AGENTS.md: its opening sentence now says You are devday claw. Workspace defaults remain editable.",
       "Open Configure plugins. The simulated curated catalog is available for every Preset and Secret choice in this Storybook flow; add Linear, set Linear default reviewer to Automatic review, and set Create issue approval to Ask for approval.",
-      "Repository access offers openclaw/openclaw-enterprise and openclaw/openclaw. Select either or both with Contributor access.",
-      "Open Edit Slack. Confirm the six prefilled channels: oce-feedback (C0C49E7CS4A), oce-team (C0C43A2QA11), oce-feedback-test (C0C569NN9ME), oce-team-test (C0C4A0JH2BG), oce-community (C0C5KF0JLSC), and oce-community-test (C0C5KF0DWLQ); mentions are not required. Allow simulated user UDEMO123, then bind the existing simulated DevDay Slack Secrets and apply settings.",
+      "Repository access offers openclaw/openclaw-enterprise and openclaw/openclaw. Select either or both with Contributor access, then turn off issue management to match the approved profiles.",
+      "Open Edit Slack. Confirm no channels are prefilled. Add the simulated channel CDEMO123. Allow simulated user UDEMO123, then bind the existing simulated DevDay Slack Secrets and apply settings.",
       "Create Agent and wait for provisioning to open Agent details. Inspect Deployment activity; it finishes simulated activation after a few seconds, or use Refresh deployment.",
       "Use ← Agents and open oceclaw in the same fixture to continue segment 2. The next-segment link starts an independent resettable fixture.",
     ],
@@ -3843,7 +4065,7 @@ export const scenarios = {
     slackChannels: { COPENCLAWFEEDBACK: { requireMention: true, users: ["UDEMO123"] } },
     nativeAdmin: "available",
     nativeAdminUrl: "/storybook-fixtures/devday-admin.html?agent=oceclaw&channel=openclaw-feedback",
-    devdayPreset: true,
+    swePreset: true,
     pluginDiscovery: devdayPluginDiscovery,
     pluginCapabilities,
     fixturePluginCatalog: true,
@@ -3899,7 +4121,7 @@ export const scenarios = {
     steps: [
       "Start on the Agents list and open oceclaw.",
       "Confirm the Console shows a selected deployed revision, simulated deployment status, and available native admin access.",
-      "Click Open native admin UI. The target fixture opens with an existing #openclaw-feedback message.",
+      "Click Open OpenClaw. The target fixture opens with an existing #openclaw-feedback message.",
       "Enter a new message, click Send in the simulated Admin UI, and confirm the visible assistant reply.",
     ],
     gap: "The Admin UI target is a fixture page. It demonstrates the link target and chat-shaped result only; it does not connect to a gateway, Slack, credentials, or a model.",

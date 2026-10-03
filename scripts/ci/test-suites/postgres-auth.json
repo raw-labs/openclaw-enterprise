@@ -10,10 +10,12 @@
         "PostgreSQL native admin shared session and HTTP proxy work across two OCC API replicas",
         "PostgreSQL native admin WebSocket lease closes within thirty seconds after parent logout",
         "PostgreSQL native admin WebSocket lease closes within thirty seconds after parent session expiry",
-        "PostgreSQL native admin WebSocket lease closes within thirty seconds after IAM administer restriction",
+        "PostgreSQL native admin WebSocket lease closes within thirty seconds after IAM use restriction",
         "PostgreSQL native admin WebSocket lease closes within thirty seconds after Agent stop",
         "PostgreSQL native admin WebSocket lease closes within thirty seconds after active revision replacement",
-        "PostgreSQL native admin WebSocket closes on API shutdown and disabled redeploy denies reuse"
+        "PostgreSQL native admin WebSocket closes on API shutdown and disabled redeploy denies reuse",
+        "PostgreSQL role changes and revocation close existing proxy leases across replicas",
+        "PostgreSQL persists only one exact human assignment and limits updates to the runtime role"
       ]
     },
     {
@@ -44,6 +46,12 @@
       "path": "tests/integration/postgres-github-tab-binding.test.mjs",
       "expectedTests": [
         "a GitHub tab keeps its own session: another tab's password sign-in signs it out"
+      ]
+    },
+    {
+      "path": "tests/integration/postgres-oidc-tab-binding.test.mjs",
+      "expectedTests": [
+        "an OIDC tab keeps its own session: another tab's password sign-in signs it out"
       ]
     },
     {

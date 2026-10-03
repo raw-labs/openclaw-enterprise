@@ -16,7 +16,13 @@ async function createFixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), "occ-presets-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const audit = new InMemoryAuditSink();
-  const state = new InMemoryPlatformState({ auditSink: audit });
+  let policy;
+  const state = new InMemoryPlatformState({
+    auditSink: audit,
+    // Live lookup, so people enrolled by the fixture can be bound as in Postgres.
+    resolveIAMIdentity: (identityId) =>
+      policy?.identities.find((identity) => identity.id === identityId),
+  });
   // The real filesystem Driver enforces native credential rules, including bootstrap defaults.
   const configurationDriver = new FilesystemConfigurationDriver(root);
   const fixture = await createConsoleAppFixture(t, {
@@ -25,6 +31,7 @@ async function createFixture(t, options = {}) {
     configurationDriver,
     ...options,
   });
+  policy = fixture.policy;
   await fixture.bootstrap();
   const session = await fixture.signIn();
   return { ...fixture, audit, session, state };
@@ -61,10 +68,17 @@ test("Preset CRUD keeps Namespace names unique and filters reads by exact Native
     body: { name: "Shared name", template: {} },
   });
   assert.equal(duplicate.status, 409);
+  // The caller chose only the name, so the conflict says the name is taken here.
+  const presetNameConflict =
+    "A Preset with this name already exists in this Namespace. Choose a different name.";
+  assert.equal(duplicate.body.error.code, "RESOURCE_CONFLICT");
+  assert.equal(duplicate.body.error.message, presetNameConflict);
   const conflictingRename = await fixture.request("PATCH", `${collection(alpha.id)}/${hidden.id}`, {
     body: { name: "Shared name" },
   });
   assert.equal(conflictingRename.status, 409);
+  assert.equal(conflictingRename.body.error.code, "RESOURCE_CONFLICT");
+  assert.equal(conflictingRename.body.error.message, presetNameConflict);
 
   const limited = await fixture.createAccountWithPolicy("preset-reader", (principal) => {
     fixture.policy.roles.push({
@@ -361,6 +375,58 @@ test("Preset admission rejects malformed templates and credential leaks while pr
   assert.ok(presetMutations.length > 0);
   assert.ok(presetMutations.every((event) => !JSON.stringify(event).includes("secretId")));
   assert.ok(presetMutations.every((event) => !JSON.stringify(event).includes(secret.ref.id)));
+});
+
+test("Preset write errors name the template field and the shape it expects", async (t) => {
+  const fixture = await createFixture(t);
+  const namespace = await fixture.createNamespace("Preset errors", { ready: true });
+  const contract = "The request does not match the operation contract:";
+  // Each rejection names one field and what it accepts, so a CLI or API user can fix it directly.
+  const cases = [
+    [
+      { agent: { name: "{{ vars.missing }}" } },
+      "Preset agent.name: variable missing is undeclared; declare it under variables.",
+    ],
+    [
+      { variables: { model: { type: "string", default: 123 } } },
+      "Preset variables.model: default must match its declared type, string.",
+    ],
+    [
+      { variables: { key: { type: "password", default: "stored" } } },
+      "Preset variables.key: password variables cannot have stored defaults.",
+    ],
+    [
+      { variables: { model: { type: "strng" } } },
+      `${contract} body /template/variables/model/type has an unsupported value (expected one of "string", "number", "boolean", "password").`,
+      [{ path: "/template/variables/model/type", code: "INVALID_VALUE" }],
+    ],
+    // A number fails each string literal on both type and value; the accepted values are still named once.
+    [
+      { variables: { model: { type: 5 } } },
+      `${contract} body /template/variables/model/type has an unsupported value (expected one of "string", "number", "boolean", "password").`,
+      [{ path: "/template/variables/model/type", code: "INVALID_VALUE" }],
+    ],
+    [
+      { variables: { model: { type: "string", default: { nested: true } } } },
+      `${contract} body /template/variables/model/default has the wrong type (expected one of string, number, boolean).`,
+      [{ path: "/template/variables/model/default", code: "INVALID_TYPE" }],
+    ],
+    [
+      { variables: { model: { type: "number", extra: 1 } } },
+      `${contract} body /template/variables/model/extra is not an accepted field.`,
+      [{ path: "/template/variables/model/extra", code: "UNKNOWN_FIELD" }],
+    ],
+  ];
+  for (const [template, message, details] of cases) {
+    const rejected = await fixture.request("POST", collection(namespace.id), {
+      body: { name: "Rejected", template },
+    });
+    assert.equal(rejected.status, 400, JSON.stringify(rejected.body));
+    assert.equal(rejected.body.error.code, "INVALID_REQUEST");
+    assert.equal(rejected.body.error.message, message);
+    assert.deepEqual(rejected.body.error.details, details);
+  }
+  assert.deepEqual((await fixture.request("GET", collection(namespace.id))).data, []);
 });
 
 test("method-only Preset authentication is a default, not an Agent credential", async (t) => {
@@ -683,7 +749,7 @@ test("SWE Agent Preset defaults to Astra and reuses an existing service-account 
     "synthetic-existing-service-account-token",
   );
   const artifact = JSON.parse(
-    await readFile(new URL("../../deploy/presets/devday.json", import.meta.url), "utf8"),
+    await readFile(new URL("../../deploy/presets/swe-preset.json", import.meta.url), "utf8"),
   );
   const originalTemplate = structuredClone(artifact.template);
   validatePresetTemplate(originalTemplate);
@@ -745,6 +811,8 @@ test("SWE Agent Preset defaults to Astra and reuses an existing service-account 
   assert.deepEqual(configuration.data.values.channels.slack.replyToModeByChatType, {
     channel: "all",
   });
+  // The reusable preset must not admit any preconfigured deployment-specific channels.
+  assert.deepEqual(configuration.data.values.channels.slack.channels, {});
   const before = await fixture.request("GET", `/namespaces/${namespace.id}/secrets`);
   assert.deepEqual(
     before.data.map((secret) => secret.id),
@@ -780,83 +848,6 @@ test("SWE Agent Preset defaults to Astra and reuses an existing service-account 
   );
   assert.equal(
     JSON.stringify(first.body).includes("synthetic-existing-service-account-token"),
-    false,
-  );
-});
-
-test("Community Agent Preset installs and creates a dedicated Agent with community defaults", async (t) => {
-  const { renderPresetTemplate, validatePresetTemplate } =
-    await import("../../packages/contracts/src/index.ts");
-  const fixture = await createFixture(t);
-  const namespace = await fixture.createNamespace("Community Agent", { ready: true });
-  const serviceAccount = await fixture.createSecret(
-    namespace.id,
-    "Existing community service account token",
-    "synthetic-community-service-account-token",
-  );
-  const artifact = JSON.parse(
-    await readFile(new URL("../../deploy/presets/devday-partners.json", import.meta.url), "utf8"),
-  );
-  const originalTemplate = structuredClone(artifact.template);
-  validatePresetTemplate(originalTemplate);
-  assert.equal(artifact.name, "Community Agent");
-  assert.deepEqual(originalTemplate.agent.harnessAuth, { method: "codex_pat" });
-  assert.deepEqual(originalTemplate.agent.plugins, {});
-
-  const installed = await fixture.request("POST", collection(namespace.id), { body: artifact });
-  assert.equal(installed.status, 201, JSON.stringify(installed.body));
-  const selected = await fixture.request("GET", `${collection(namespace.id)}/${installed.data.id}`);
-  assert.equal(selected.status, 200, JSON.stringify(selected.body));
-  assert.deepEqual(selected.data.template, originalTemplate);
-
-  const selectedTemplate = structuredClone(selected.data.template);
-  selectedTemplate.agent.harnessAuth = { method: "codex_pat", source: serviceAccount.ref };
-  const rendered = renderPresetTemplate(selectedTemplate, { name: "Community lifecycle" });
-  assert.equal(
-    rendered.agent.initialWorkspaceFiles["AGENTS.md"].startsWith("# Community lifecycle"),
-    true,
-  );
-  assert.equal(rendered.agent.initialWorkspaceFiles["AGENTS.md"].includes("# Ocalot"), false);
-  assert.match(rendered.agent.initialWorkspaceFiles["AGENTS.md"], /look in Linear/i);
-
-  const configuration = await fixture.request(
-    "POST",
-    `/namespaces/${namespace.id}/configurations`,
-    {
-      body: { kind: "agent", ...rendered.configuration },
-    },
-  );
-  assert.equal(configuration.status, 201, JSON.stringify(configuration.body));
-  assert.equal(configuration.data.values.channels.slack.dmPolicy, "disabled");
-  assert.deepEqual(configuration.data.values.channels.slack.channels, {
-    C0C43A2QA11: { requireMention: false, users: ["*"] },
-    C0C4A0JH2BG: { requireMention: false, users: ["*"] },
-    C0C5KF0JLSC: { requireMention: false, users: ["*"] },
-    C0C5KF0DWLQ: { requireMention: false, users: ["*"] },
-  });
-  const created = await fixture.request("POST", `/namespaces/${namespace.id}/agents`, {
-    body: {
-      ...rendered.agent,
-      configurationId: configuration.data.id,
-    },
-  });
-  assert.equal(created.status, 201, JSON.stringify(created.body));
-  assert.equal(created.data.executionMode, "dedicated");
-  assert.deepEqual(created.data.plugins, {});
-  assert.deepEqual(created.data.harnessAuth, {
-    method: "codex_pat",
-    source: serviceAccount.ref,
-  });
-  const workspaceSetup = await fixture.state.read((state) =>
-    state.workspaceSetups.find(namespace.id, created.data.id),
-  );
-  assert.deepEqual(workspaceSetup?.files, rendered.agent.initialWorkspaceFiles);
-  assert.equal(
-    JSON.stringify(installed.body).includes("synthetic-community-service-account-token"),
-    false,
-  );
-  assert.equal(
-    JSON.stringify(created.body).includes("synthetic-community-service-account-token"),
     false,
   );
 });
@@ -906,11 +897,11 @@ test("Installation YAML seeds authorized default Presets for new and existing Na
   const path = join(directory, "installation.yaml");
   const configuration = createInstallationDriverConfiguration();
   const customPreset = JSON.parse(
-    await readFile(new URL("../../deploy/presets/devday.json", import.meta.url), "utf8"),
+    await readFile(new URL("../../deploy/presets/swe-preset.json", import.meta.url), "utf8"),
   );
   configuration.presets = {
     includeDefaults: true,
-    files: [fileURLToPath(new URL("../../deploy/presets/devday.json", import.meta.url))],
+    files: [fileURLToPath(new URL("../../deploy/presets/swe-preset.json", import.meta.url))],
   };
   await writeFile(path, JSON.stringify(configuration));
   const runtime = await loadInstallationConfiguration({
@@ -930,10 +921,7 @@ test("Installation YAML seeds authorized default Presets for new and existing Na
   assert.equal(Object.hasOwn(customDefault.template.variables, "modelSecret"), false);
   assert.equal(customDefault.template.variables.model.default, "gpt-6-astra");
   assert.equal(customDefault.template.agent.harnessAuth.method, "codex_pat");
-  assert.equal(
-    customDefault.template.configuration.values.channels.slack.channels.C0C43A2QA11.requireMention,
-    false,
-  );
+  assert.deepEqual(customDefault.template.configuration.values.channels.slack.channels, {});
   assert.equal(customDefault.template.configuration.values.plugins.entries.slack.enabled, true);
   const openclaw = list.data.find((preset) => preset.name === "Standard OpenClaw");
   assert.equal(openclaw.template.agent.executionMode, "embedded");
@@ -1064,6 +1052,22 @@ test("Namespace deletion removes unmodified default Presets and names what still
   const pristine = await fixture.createNamespace("Pristine defaults", { ready: true });
   const seeded = (await fixture.request("GET", collection(pristine.id))).data;
   assert.equal(seeded.length, runtime.defaultPresets.length);
+  // A grant on a seeded default is removed with it and named in its delete event.
+  const { principal: reader } = await fixture.createAccountWithPolicy("preset-grantee", () => {});
+  const role = await fixture.request("POST", `/namespaces/${pristine.id}/iam/roles`, {
+    body: { name: "Preset reader", permissions: [{ action: "read", resourceKind: "preset" }] },
+  });
+  assert.equal(role.status, 201, JSON.stringify(role.body));
+  const binding = await fixture.request("POST", `/namespaces/${pristine.id}/iam/access-bindings`, {
+    body: {
+      subjectKind: "identity",
+      subjectId: reader.id,
+      roleId: role.data.id,
+      resourceKind: "preset",
+      resourceId: seeded[0].id,
+    },
+  });
+  assert.equal(binding.status, 201, JSON.stringify(binding.body));
   const deleted = await fixture.request("DELETE", `/namespaces/${pristine.id}`);
   assert.equal(deleted.status, 202, JSON.stringify(deleted.body));
   assert.equal(deleted.data.status, "deleting");
@@ -1080,6 +1084,23 @@ test("Namespace deletion removes unmodified default Presets and names what still
   assert.deepEqual(
     cascaded.map((event) => event.resource.id).sort(),
     seeded.map((preset) => preset.id).sort(),
+  );
+  assert.deepEqual(
+    cascaded.find((event) => event.resource.id === seeded[0].id).details.removedAccessBindings,
+    [
+      {
+        id: binding.data.id,
+        subjectKind: "identity",
+        subjectId: reader.id,
+        roleId: role.data.id,
+        resourceKind: "preset",
+        resourceId: seeded[0].id,
+      },
+    ],
+  );
+  assert.equal(
+    cascaded.filter((event) => event.details.removedAccessBindings !== undefined).length,
+    1,
   );
 
   // An operator-edited default is real content: keep it and say what blocks deletion.

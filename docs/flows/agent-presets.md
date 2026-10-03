@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
-updated: 2026-09-27
-last_updated_session: authoring-run/c1812a3c-f760-4167-80ca-f4a66d8572e4
+updated: "2026-10-03"
+last_updated_session: authoring-run/59d7541c-66d2-414c-8139-174fca84fe33
 ---
 
 # Agent Presets flow
@@ -17,8 +17,8 @@ continues through [revision admission](configuration-driver/persistence-and-revi
 
 - [Installation loader](../../apps/controller/src/composition/installation-config.ts):
   `loadInstallationConfiguration` reads `presets.includeDefaults` and `presets.files`.
-  Bundled defaults are **Standard Codex** and **Standard OpenClaw**; custom DevDay
-  files are loaded only when explicitly listed. Production and PostgreSQL development composition pass generic
+  Bundled defaults are **Standard Codex** and **Standard OpenClaw**; the custom SWE Agent
+  file is loaded only when explicitly listed. Production and PostgreSQL development composition pass generic
   name/template definitions to OCC and call `initializeDefaultPresets`.
 
 - Source: `packages/contracts/src/api/routes.ts:occApiRoutes`.
@@ -124,8 +124,12 @@ path records mutations and denials without template or variable contents.
 `apps/controller/src/console/agents/presets.mjs:createPresetFields`
 
 [`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs)
-lists only readable Presets, then reads the selected resource once. The user
-reviews prefilled scalar defaults and fills typed inputs. The bound password
+lists only readable Presets, then reads the selected resource once with
+`revalidate: false`: the snapshot becomes a local draft, not an ongoing page
+dependency. The user reviews prefilled scalar defaults and fills typed inputs.
+Inputs for referenced variables without defaults are required, so the browser
+flags an empty one before rendering; defaulted or unreferenced variables stay
+optional. The bound password
 variable offers a new masked token or an existing same-Namespace Secret. The
 chooser fetches only Secret metadata, validates the original template, and replaces
 the password token with the selected reference in a temporary copy. Mode changes
@@ -249,6 +253,8 @@ or an immutable admitted revision.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-03 09:53: Exclude the selected Preset snapshot from replay after its values become an independent draft. (authoring-run/59d7541c-66d2-414c-8139-174fca84fe33 - f7af67dd9a7b6e5571e7d4d7c384966ba7fb31fd)
 
 - 2026-09-27 00:28: Discard no-Preset creation state when leaving the flow. (authoring-run/c1812a3c-f760-4167-80ca-f4a66d8572e4 - ea187c93468f399b00ebb504fcbbed5ab21ddd8e)
 

@@ -1,7 +1,7 @@
 ---
 created: 2026-09-01
-updated: 2026-09-29
-last_updated_session: authoring-run/1ca6a40a-a247-465f-9a83-182dbcb6ff4e
+updated: "2026-10-03"
+last_updated_session: authoring-run/59d7541c-66d2-414c-8139-174fca84fe33
 ---
 
 # Platform console request flow
@@ -125,16 +125,24 @@ run. Password fields and their derived discovery state clear before retention.
 Controls stay inert until admission succeeds; navigation remains available.
 
 Completed views retain their DOM, handlers, and draft capture callbacks. On return,
-`loadPage` rereads their GET dependencies and compares data and user identity.
-Unchanged views reactivate without rebuilding panels; changed data rebuilds them.
-Pending reads, read failures, password input, or mutations prevent reuse. Read-only
-catalog and diagnostic POSTs do not invalidate views. Refresh always rebuilds.
+`loadPage` rereads their GET dependencies and compares outcomes and user identity.
+`readSuccess` records response data; `readFailure` records HTTP error status and
+code, excluding per-attempt request IDs. Unchanged outcomes reactivate the view;
+recovery or a changed failure rebuilds it. A remembered tab-local `403` remains
+denied without another audited request; its owning panel's Retry clears that
+memory. Page/session admission still runs before reuse.
+Pending reads, transport or malformed-response failures, expired sessions,
+password input, and mutations prevent reuse. Live GETs with `revalidate: false`
+are excluded from dependency replay. Read-only catalog and diagnostic POSTs do
+not invalidate views on success. Refresh always rebuilds.
 Debug runtime disclosures follow the same validation and retain expanded state.
 
 A changed user or session key clears retained views and drafts before further
 private reads. Missing sessions open login; failed reads offer Retry.
 `showLogin` reads `GET /api/auth/providers`; true `github`/`google` flags add their **Continue
-with** buttons, and discovery failure keeps password login. `password: false`
+with** buttons, and discovery failure keeps password login. A true `oidc` flag adds a button
+labelled from `oidcSignIn.label` only when `oidcSignIn.authorizationUrl` is `https:`; its start
+URL must use that endpoint's origin and path, as GitHub's and Google's must use their fixed ones. `password: false`
 (recovery-only) hides the form behind **Recovery sign-in** and changes the
 provider-error advice from "use your password" to asking an administrator. Pending login disables
 all; generations reject late redirects. With `sessionBinding`, `loadPage`
@@ -327,6 +335,8 @@ refresh and inspection.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-03 09:42: Track completed GET failures centrally and revalidate their outcomes before restoring a view. (authoring-run/59d7541c-66d2-414c-8139-174fca84fe33 - f7af67dd9a7b6e5571e7d4d7c384966ba7fb31fd)
 
 - 2026-09-30 19:00: Remember denied Agent detail snapshot reads per tab so reloads do not add an audited denial per view.
 - 2026-09-29 20:00: Trace repository descriptions and inherited access. (public-pr/374)
