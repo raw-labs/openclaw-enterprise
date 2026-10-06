@@ -66,3 +66,12 @@ export const RevisionSecretsDenied = story("revisionSecretsDenied");
 export const RevisionSecretsMissing = story("revisionSecretsMissing");
 export const RevisionSecretsLoading = story("revisionSecretsLoading");
 export const RevisionSecretsAbsent = story("revisionSecretsAbsent");
+
+export const Teams = story("teams");
+export const TeamsEditor = story("teamsEditor");
+export const TeamsMissingSecret = story("teamsMissingSecret");
+export const TeamsUnsupported = story("teamsUnsupported");
+export const TeamsReadOnly = story("teamsReadOnly");
+export const TeamsSecretsLoading = story("teamsSecretsLoading");
+export const TeamsSaveDenied = story("teamsSaveDenied");
+export const TeamsSavePending = story("teamsSavePending");

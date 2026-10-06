@@ -219,6 +219,57 @@ test(
   },
 );
 
+test("Teams callbacks opt into a separate TLS listener and scoped ingress", tooling, async () => {
+  const callbacks = {
+    ...gatewayRoutingValues,
+    ...slackProxyValues,
+    "slackProxy.teamsEnabled": "true",
+    "gatewayRouting.channels.enabled": "true",
+    "gatewayRouting.channels.hostname": "callbacks.example.test",
+    "gatewayRouting.channels.tlsSecretName": "teams-public-tls",
+    "gatewayRouting.channels.ingressPeers[0].ipBlock.cidr": "198.51.100.0/24",
+  };
+  // Actual Helm output proves chart composition, not public TLS or CNI enforcement.
+  const objects = await resources((await render(callbacks)).stdout);
+  const gateway = objects.find(({ kind }) => kind === "Gateway");
+  const listener = gateway.spec.listeners.find(({ name }) => name === "channels");
+  assert.equal(listener.hostname, "callbacks.example.test");
+  assert.equal(listener.port, 8444);
+  assert.equal(listener.protocol, "HTTPS");
+  assert.equal(listener.tls.certificateRefs[0].name, "teams-public-tls");
+  assert.equal(listener.allowedRoutes.namespaces.from, "Selector");
+  const ingress = objects
+    .filter(({ kind }) => kind === "NetworkPolicy")
+    .flatMap(({ spec }) => spec.ingress ?? [])
+    .find(({ ports }) => ports?.some(({ port }) => port === 8444));
+  assert.deepEqual(ingress.from, [{ ipBlock: { cidr: "198.51.100.0/24" } }]);
+  const proxy = objects.find(
+    ({ kind, metadata }) => kind === "Deployment" && metadata.name.endsWith("slack-proxy"),
+  );
+  assert.equal(
+    proxy.spec.template.spec.containers[0].env.find(
+      ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS_ENABLED",
+    ).value,
+    "true",
+  );
+  for (const override of [
+    { "gatewayRouting.enabled": "false" },
+    { "gatewayRouting.hostname": "callbacks.example.test" },
+    { "gatewayRouting.channels.tlsSecretName": "" },
+    { "gatewayRouting.channels.listenerPort": "10443" },
+    { "gatewayRouting.channels.ingressPeers": "null" },
+  ]) {
+    await assert.rejects(render({ ...callbacks, ...override }), /channel/);
+  }
+  const disabled = await resources((await render(gatewayRoutingValues)).stdout);
+  assert.equal(
+    disabled
+      .find(({ kind }) => kind === "Gateway")
+      .spec.listeners.some(({ name }) => name === "channels"),
+    false,
+  );
+});
+
 test("sandbox ingress uses a separate listener outside OCE cookie scope", tooling, async () => {
   const sandboxValues = {
     ...agentNativeAdminValues,

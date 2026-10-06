@@ -109,6 +109,27 @@ spec:
         kinds:
           - group: gateway.networking.k8s.io
             kind: HTTPRoute
+    {{- if $routing.channels.enabled }}
+    - name: channels
+      hostname: {{ $routing.channels.hostname | quote }}
+      port: {{ $routing.channels.listenerPort }}
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: {{ $routing.channels.tlsSecretName | quote }}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              openclaw-enterprise.io/gateway: {{ $routeNamespaceLabel | quote }}
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+    {{- end }}
     {{- if $routing.sandbox.enabled }}
     - name: sandbox
       hostname: {{ printf "*.%s" $routing.sandbox.domain | quote }}
@@ -223,6 +244,13 @@ spec:
       gateway.envoyproxy.io/owning-gateway-name: {{ $gatewayName | quote }}
   policyTypes: [Ingress, Egress]
   ingress:
+    {{- if $routing.channels.enabled }}
+    - from:
+        {{- toYaml $routing.channels.ingressPeers | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $routing.channels.listenerPort }}
+    {{- end }}
     {{- if $routing.sandbox.enabled }}
     - from:
         {{- toYaml $routing.sandbox.ingressPeers | nindent 8 }}

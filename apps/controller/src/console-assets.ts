@@ -42,6 +42,7 @@ const CONSOLE_ASSETS = new Map([
       "agents/secret-picker.mjs",
       "agents/credentials.mjs",
       "channels/slack.mjs",
+      "channels/teams.mjs",
       "channels/shared-ui.mjs",
       "channels.mjs",
       "agents.mjs",

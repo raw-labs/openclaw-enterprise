@@ -7,6 +7,21 @@ const CONNECT_TIMEOUT_MS = 10_000;
 const SHUTDOWN_DRAIN_MS = 2_000;
 const ALLOWED_SUFFIXES = [".slack.com", ".slack-edge.com", ".slack-msgs.com"];
 const ALLOWED_HOSTS = new Set(["slack.com", "slack-edge.com", "slack-msgs.com"]);
+// Public-cloud text messaging only: no broad Microsoft or SharePoint wildcard.
+const TEAMS_HOSTS = new Set([
+  "login.microsoftonline.com",
+  "login.botframework.com",
+  "api.botframework.com",
+  "smba.trafficmanager.net",
+  "graph.microsoft.com",
+]);
+const teamsEnabled = process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED === "true";
+if (
+  process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED !== undefined &&
+  !["true", "false"].includes(process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED)
+) {
+  throw new Error("OCC_CHANNEL_PROXY_TEAMS_ENABLED must be true or false.");
+}
 
 function parsePort(value) {
   if (value === undefined || value === "") {
@@ -41,6 +56,7 @@ function isAllowedSlackConnectTarget(target) {
   }
   return (
     ALLOWED_HOSTS.has(parsed.host) ||
+    (teamsEnabled && TEAMS_HOSTS.has(parsed.host)) ||
     ALLOWED_SUFFIXES.some((suffix) => parsed.host.endsWith(suffix))
   );
 }

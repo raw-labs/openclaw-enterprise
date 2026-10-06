@@ -73,6 +73,25 @@ export async function temporaryGatewayConfiguration(t, harnessId) {
 
 export function createRuntimeImageConfiguration(harnessId, providerModel, options = {}) {
   const configuration = createHarnessConfiguration(harnessId, providerModel);
+  if (options.enableTeams === true) {
+    configuration.plugins = {
+      ...configuration.plugins,
+      allow: [...new Set([...(configuration.plugins?.allow ?? []), "msteams"])],
+      entries: { ...configuration.plugins?.entries, msteams: { enabled: true } },
+    };
+    configuration.channels = {
+      ...configuration.channels,
+      msteams: {
+        enabled: true,
+        appId: "11111111-1111-4111-8111-111111111111",
+        tenantId: "22222222-2222-4222-8222-222222222222",
+        appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+        legacyWebhook: false,
+        dmPolicy: "disabled",
+        groupPolicy: "disabled",
+      },
+    };
+  }
   if (options.enableSlack !== true) {
     return configuration;
   }

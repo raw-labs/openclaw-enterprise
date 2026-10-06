@@ -347,3 +347,13 @@ shows organization-wide policy restrictions. Missing-credential, read-only, and
 save-failure stories cover the surrounding states.
 Capture the final interactions and native values outside the repository;
 attach reviewable screenshots and video to the task and PR.
+
+### Teams editor checks
+
+Follow the [Teams workflow](../../scripts/console-storybook/teams-workflow.md) in
+**Components/Channels → Teams Editor**. Save personal access independently from
+channel senders, disable channel conversations, and reopen to inspect persisted
+controls. Teams stories cover missing password bindings, advanced native settings,
+immutable deployed versions, loading Secret metadata, denied saves, and pending
+saves. These fixtures demonstrate UI behavior; [Teams integration verification](../testing/teams.md)
+owns deployment, SDK authentication, and the pending live-provider proof.

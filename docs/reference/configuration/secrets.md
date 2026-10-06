@@ -83,8 +83,8 @@ unimplemented.
 Configure channels directly in the Agent's complete native OpenClaw
 Configuration. Slack is the channel with live Enterprise integration coverage.
 The Kubernetes Compute Driver recognizes enabled `slack` and `msteams`
-configuration shapes; unknown enabled providers fail closed. Teams requires
-operator-provided ingress and remains unverified end to end.
+configuration shapes; unknown enabled providers fail closed. Teams uses a Compute-owned callback route when the operator enables its
+separate public listener; live Teams delivery remains unverified end to end.
 `channels.defaults` and `channels.modelByChannel` are shared settings, not
 providers. The recognized native channel configurations consume these
 gateway-only credential values:
@@ -203,7 +203,8 @@ dedicated gateway receives these admitted bindings; generated runtime
 credentials contain no channel tokens. See
 [Kubernetes credential ownership](../drivers/kubernetes-compute/storage-and-credentials.md#runtime-credentials).
 
-Teams message ingress requires a separately deployed and reviewed public Bot
-Framework `/api/messages` webhook. Enterprise does not provide that webhook;
-end-to-end Teams behavior remains unverified. See [Slack testing](../../testing/slack.md)
-for channel integration coverage.
+Teams message ingress uses the separate **channels** listener and an exact
+Agent-specific POST route to the native `/api/messages` handler. Its SDK validates
+Microsoft bearer tokens. Configure the public origin, certificate, and provider
+proxy before deployment; see [Teams setup](../../guides/integrations/teams.md)
+and [verification limits](../../testing/teams.md).

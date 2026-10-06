@@ -1,7 +1,6 @@
 # Kubernetes Compute Driver
 
-The Kubernetes Compute Driver runs OpenClaw Agents on Kubernetes. It provisions
-or adopts one namespace per tenant in a single cluster and creates an OpenClaw
+Compute runs Agents in one created or adopted namespace per tenant, with a
 gateway for each deployed Agent. Dedicated Gateways and Harnesses use separate
 Pods, identities and volumes within that namespace; embedded OpenClaw combines
 them in one Pod.
@@ -252,9 +251,10 @@ the worker stops predecessors before starting the new Harness. This permits RWO
 workspace storage and introduces deployment downtime; restore a previous
 configuration through a new revision instead of restarting its old snapshot.
 
-Enabled external channels require dedicated execution. Unsupported Harness and
-execution-mode combinations fail deployment. Embedded OpenClaw is never
-delegated to OpenShell.
+External channels require dedicated execution; Teams also requires
+`gatewayRouting.channels.hostname` and the operator's **channels** listener
+([setup](../../guides/integrations/teams.md)). Unsupported Harness/mode combinations
+fail deployment. Embedded OpenClaw cannot use OpenShell.
 
 Stopping an Agent first deletes its exact gateway route and gateway runtime,
 then removes the dedicated Harness Deployment or delegates provider-owned

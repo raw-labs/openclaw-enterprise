@@ -52,9 +52,12 @@ See the [Console reference](../../reference/console.md#inspect-detail-revisions-
 for binding permissions and save behavior. Apply the saved draft with
 **Deploy new version** before expecting the running Agent to use it.
 
-Microsoft Teams has no console editor. Existing Teams settings remain visible
-in native Configuration JSON, but a Teams-enabled draft cannot deploy through
-the console. Use the operator workflow for those Agents.
+For Microsoft Teams, configure app and tenant IDs, select or create the app
+password Secret, and choose channel and personal-message access in the Teams
+editor. Follow [Teams setup](../integrations/teams.md) for the required public
+callback listener and Microsoft app registration. A missing password binding
+blocks console deployment. Advanced native shapes remain inspectable through
+Configuration JSON.
 
 ## Credentials tab
 

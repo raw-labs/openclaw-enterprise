@@ -57,6 +57,24 @@ function configurationValues(scenario) {
       channels: slackChannels(scenario),
     };
   }
+  if (scenario.teams) {
+    values.channels.msteams = {
+      enabled: true,
+      appId: "11111111-1111-4111-8111-111111111111",
+      tenantId: "22222222-2222-4222-8222-222222222222",
+      appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+      dmPolicy: "disabled",
+      groupPolicy: "allowlist",
+      groupAllowFrom: ["*"],
+      requireMention: true,
+      teams: {
+        "33333333-3333-4333-8333-333333333333": {
+          channels: { "19:demo@thread.tacv2": { requireMention: true } },
+        },
+      },
+      ...(scenario.teamsConfiguration ?? {}),
+    };
+  }
   return values;
 }
 
@@ -150,6 +168,7 @@ export function installFixture(scenario, evidence) {
   for (const secret of [
     secretMetadata("sec_demo_model", "Demo model API key (simulated)"),
     secretMetadata("sec_demo_service_account", "Demo Service Accounts token (simulated)"),
+    secretMetadata("sec_demo_teams_password", "Teams app password (simulated)"),
     secretMetadata("sec_demo_slack_app_token", "Slack app token (simulated)"),
     secretMetadata("sec_demo_slack_bot_token", "Slack bot token (simulated)"),
     secretMetadata("sec_demo_slack_backup_token", "Slack backup token (simulated)"),
@@ -178,6 +197,12 @@ export function installFixture(scenario, evidence) {
   if (scenario.candidateDeploymentStatus) {
     config.generation = 2;
     config.values.agents.defaults.model = "codex/gpt-5.1";
+  }
+  if (scenario.teams && scenario.teamsBindings !== false) {
+    config.secretBindings.MSTEAMS_APP_PASSWORD = {
+      source: secretRef("sec_demo_teams_password"),
+      delivery: { type: "env" },
+    };
   }
   if (scenario.slack && scenario.slackBindings !== false) {
     const keys =

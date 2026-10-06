@@ -3057,6 +3057,86 @@ export const scenarios = {
     description:
       "390px viewport with the simulated OCC revision beside OCE in the open drawer. Escape or the overlay closes it.",
   },
+  teams: {
+    group: "Components/Channels",
+    name: "Teams configured",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    description:
+      "Simulated Teams configuration with bound app password, selected channels, and disabled personal messages.",
+  },
+  teamsEditor: {
+    group: "Components/Channels",
+    name: "Teams editor",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    actions: [click("Edit Microsoft Teams")],
+    description:
+      "App and tenant IDs, app password Secret, channel access and personal-message policies.",
+  },
+  teamsSecretsLoading: {
+    group: "Components/Channels",
+    name: "Teams Secret metadata loading",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    rules: [{ prefix: `${presetSecretsPath}/`, hold: true }],
+    actions: [click("Edit Microsoft Teams")],
+    description: "Bound Secret IDs remain visible while metadata loads.",
+  },
+  teamsSaveDenied: {
+    group: "Components/Channels",
+    name: "Teams save denied",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    rules: [
+      {
+        suffix: "/configurations/cfg_00000000-0000-4000-8000-000000000001",
+        method: "PATCH",
+        status: 403,
+      },
+    ],
+    actions: [click("Edit Microsoft Teams"), click("Save configuration")],
+    description: "A denied save preserves Teams edits and reports the authorization error.",
+  },
+  teamsSavePending: {
+    group: "Components/Channels",
+    name: "Teams save pending",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    rules: [
+      {
+        suffix: "/configurations/cfg_00000000-0000-4000-8000-000000000001",
+        method: "PATCH",
+        hold: true,
+      },
+    ],
+    actions: [click("Edit Microsoft Teams"), click("Save configuration")],
+    description:
+      "A pending save disables mutable controls and deployment; the request times out after 15 seconds.",
+  },
+  teamsMissingSecret: {
+    group: "Components/Channels",
+    name: "Teams missing credential",
+    path: `${draft}&tab=credentials`,
+    teams: true,
+    teamsBindings: false,
+    description: "Missing Teams app password binding prevents deployment.",
+  },
+  teamsUnsupported: {
+    group: "Components/Channels",
+    name: "Teams advanced native settings",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    teamsConfiguration: { cloud: "USGov" },
+    description: "Unsupported native settings keep the editor disabled and remain inspectable.",
+  },
+  teamsReadOnly: {
+    group: "Components/Channels",
+    name: "Teams deployed version",
+    path: currentVersion + "&tab=channels",
+    teams: true,
+    description: "Deployed versions expose immutable Teams settings.",
+  },
   slack: {
     group: "Components/Channels",
     name: "Slack configured",
