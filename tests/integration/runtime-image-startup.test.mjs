@@ -692,7 +692,7 @@ function assertBundledPluginLoaded(pluginList, pluginId) {
   return plugin;
 }
 
-async function assertCodexAppServerHandshake(containerName) {
+async function assertCodexAppServerHandshake(containerName, installedMcp = false) {
   const { stdout } = await runDocker(
     [
       "exec",
@@ -702,7 +702,7 @@ async function assertCodexAppServerHandshake(containerName) {
       "-e",
       `
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -770,6 +770,32 @@ try {
     throw new Error(
       \`Codex app-server initialized as \${serverVersion}, but codex --version reported \${installedVersion}.\`
     );
+  }
+  if (${installedMcp}) {
+    // Load the image's real file-backed plugin projection, with no synthetic registry.
+    let load;
+    for (const name of readdirSync(pluginDist).filter((name) => /^codex-mcp-config-.*\\.mjs$/.test(name))) {
+      const exports = await import(pathToFileURL(join(pluginDist, name)));
+      load ??= Object.values(exports).find((value) =>
+        typeof value === "function" && value.name === "loadCodexBundleMcpThreadConfigCore"
+      );
+    }
+    if (!load) { throw new Error("Packaged native MCP projection is missing."); }
+    const cfg = JSON.parse(readFileSync(process.env.OPENCLAW_CONFIG_PATH, "utf8"));
+    const projected = await load({ workspaceDir: "/home/node/workspace", cfg });
+    const remote = projected.configPatch?.mcp_servers?.installedRemote;
+    if (!remote || remote.url !== "http://127.0.0.1:9/mcp" || Object.hasOwn(remote, "cwd")) {
+      throw new Error("Installed HTTP MCP server must reach Codex without a subprocess cwd.");
+    }
+    // A disconnected MCP endpoint can warn; it must not reject thread/start's config.
+    // This starts a real Codex thread but makes no model request or provider tool call.
+    const started = await client.request("thread/start", {
+      cwd: "/home/node/workspace",
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      config: projected.configPatch,
+    }, { timeoutMs: ${10_000 * imageSmokeTimeoutMultiplier} });
+    if (!started?.thread?.id) { throw new Error("Codex did not start the native MCP thread."); }
   }
   process.stdout.write(JSON.stringify({ installedVersion, serverVersion }));
 } finally {
@@ -1018,6 +1044,60 @@ test(
     assertBundledCodexPluginLoaded(pluginList);
     await assertCodexAppServerHandshake(containerName);
     assertNoPackagingFailure(logs);
+  },
+);
+
+test(
+  "runtime image inspects an installed OAuth MCP plugin and starts its native Codex thread",
+  imageTestOptions,
+  async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "oce-installed-mcp-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    await chmod(directory, 0o755);
+    await mkdir(join(directory, ".claude-plugin"));
+    await writeFile(
+      join(directory, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "installed-remote", version: "1.0.0" }),
+    );
+    await writeFile(
+      join(directory, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          installedRemote: {
+            type: "http",
+            url: "http://127.0.0.1:9/mcp",
+            auth: "oauth",
+            connectionTimeoutMs: 500,
+          },
+        },
+      }),
+    );
+    const configuration = createAdmittedRuntimeImageConfiguration("codex");
+    configuration.plugins.allow = [...(configuration.plugins.allow ?? []), "installed-remote"];
+    configuration.plugins.load = { paths: ["/opt/installed-remote"] };
+    configuration.plugins.entries["installed-remote"] = { enabled: true };
+    // Match a native installed bundle without a duplicate owner mcp.servers entry.
+    // The endpoint is deliberately disconnected: account discovery is local inventory proof.
+    const { containerName } = await runGatewaySmoke(t, "codex", {
+      configuration,
+      volumes: [`${directory}:/opt/installed-remote:ro`],
+    });
+    const { stdout } = await runDocker([
+      "exec",
+      containerName,
+      "node",
+      "-e",
+      ...nodeProgramArguments(
+        PLUGIN_RUNTIME_HELPERS +
+          '\ncallNativeGateway("plugins.inspect", { pluginId: "installed-remote" }, 15000).then((result) => process.stdout.write(JSON.stringify(result)));',
+      ),
+    ]);
+    const inspection = JSON.parse(stdout);
+    assert.equal(inspection.ok, true);
+    assert.deepEqual(inspection.value.mcpAuth, [
+      { serverName: "installedRemote", state: "unauthenticated" },
+    ]);
+    await assertCodexAppServerHandshake(containerName, true);
   },
 );
 
@@ -2109,8 +2189,8 @@ assert.equal(execFileSync("codex", ["--version"], {encoding: "utf8"}).trim(), "c
 assert.equal(execFileSync(process.execPath, [bundledCommand, "--version"], {encoding: "utf8"}).trim(), "codex-cli 0.160.0");
 const provenance = JSON.parse(readFileSync("/opt/oce/runtime/provenance.json", "utf8"));
 assert.equal(provenance.source, "https://github.com/openclaw/openclaw");
-assert.equal(provenance.commit, "11d3d04a1279781a770f6a6aa09e6322b064b80a");
-assert.equal(provenance.sourceArchiveSha256, "b48a59055b2eeb39db06a7b900ade5208fa8f23c3f4f481fd5b5c455ea9436ab");
+assert.equal(provenance.commit, "62d0c5f3b66c58b2864aa60e79214c796a904f51");
+assert.equal(provenance.sourceArchiveSha256, "49c0a32f2cd609395058953f06f73b8ce5206f3795fd4f37885a9003b10100df");
 assert.equal(provenance.openclawBridgePatchSha256, "1d8b670e7029872262375a21da7222768c2fe2390ff7a159ed1616ee9c9de1ca");
 assert.equal(provenance.openclawConnectPatchSha256, "c57722da9a88ec4295577ab9a9ba6e2ca37fceda11ce8b51b08ee1425e00851f");
 assert.equal(provenance.codex.version, "0.160.0");
