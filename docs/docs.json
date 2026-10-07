@@ -330,6 +330,10 @@
                       {
                         "page": "reference/drivers/slack-channel",
                         "label": "Slack Directory"
+                      },
+                      {
+                        "page": "reference/drivers/teams-channel",
+                        "label": "Teams Directory"
                       }
                     ]
                   },

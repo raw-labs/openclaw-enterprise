@@ -571,6 +571,8 @@ export interface UpdateAgentInput {
 
 export interface LookupChannelDirectoryInput {
   readonly secretId: string;
+  readonly provider: string;
+  readonly context?: ChannelDirectoryLookupInput["context"];
   readonly kind: ChannelDirectoryLookupInput["kind"];
   readonly query?: string;
   readonly cursor?: string;
@@ -4748,6 +4750,17 @@ export class OpenClawController {
       !value.includes("\u0000");
     if (
       !bounded(input.secretId, 200) ||
+      !bounded(input.provider, 64) ||
+      !/^[a-z][a-z0-9_-]*$/.test(input.provider) ||
+      (input.context !== undefined &&
+        (!asRecord(input.context) ||
+          Object.keys(input.context).length > 8 ||
+          Object.entries(input.context).some(
+            ([key, value]) =>
+              !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key) ||
+              !bounded(value, 200) ||
+              hasControlCharacter(value),
+          ))) ||
       (input.kind !== "users" && input.kind !== "channels") ||
       (input.query !== undefined && !bounded(input.query, 200, true)) ||
       (input.cursor !== undefined && !bounded(input.cursor, 2048)) ||
@@ -4808,6 +4821,8 @@ export class OpenClawController {
           const result = await driver.lookupDirectory(
             {
               token,
+              provider: input.provider,
+              ...(input.context === undefined ? {} : { context: input.context }),
               kind: input.kind,
               ...(input.query === undefined ? {} : { query: input.query }),
               ...(input.cursor === undefined ? {} : { cursor: input.cursor }),

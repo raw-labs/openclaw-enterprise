@@ -1,3 +1,4 @@
+import { createTeamsDirectoryField, teamsReference } from "../agents/teams-directory.mjs";
 import { element } from "../dom.mjs";
 import { TEAMS_SECRET_BINDINGS, secretIdForBinding } from "../agents/credentials.mjs";
 import { createSecretReferenceField, secretBinding } from "../agents/secret-picker.mjs";
@@ -15,6 +16,7 @@ import {
 
 const PASSWORD_REF = { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" };
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const teamReferences = new WeakMap();
 const DM_POLICIES = ["disabled", "allowlist", "open", "pairing"];
 
 function support(values) {
@@ -75,6 +77,101 @@ function select(id, options, value) {
 
 function appendFields(body, config, context) {
   const [teamId, team] = Object.entries(config.teams ?? {})[0] ?? ["", {}];
+  const appId = input("msteams-app-id", config.appId);
+  const tenantId = input("msteams-tenant-id", config.tenantId);
+  const teamInput = input("msteams-team-id", teamId);
+  const directoryFields = [];
+  const getLookup = () => {
+    const source = (context.draftSecretBindings ?? context.secretBindings)?.MSTEAMS_APP_PASSWORD
+      ?.source;
+    const reference = teamsReference(teamInput.value);
+    return source?.kind === "secret" &&
+      source.namespaceId === context.namespaceId &&
+      reference?.groupId &&
+      GUID.test(appId.value.trim()) &&
+      GUID.test(tenantId.value.trim())
+      ? {
+          secretId: source.id,
+          context: {
+            appId: appId.value.trim(),
+            tenantId: tenantId.value.trim(),
+            teamId: reference.groupId,
+          },
+        }
+      : null;
+  };
+  let resolved;
+  teamReferences.set(body, () => {
+    const reference = teamsReference(teamInput.value);
+    return (
+      reference?.nativeId ??
+      (resolved?.scope === JSON.stringify(getLookup()) ? resolved.nativeId : undefined)
+    );
+  });
+  const refresh = () => directoryFields.forEach((field) => field.refreshValue());
+  for (const control of [appId, tenantId, teamInput]) {
+    control.addEventListener("input", refresh);
+  }
+  const directory = (kind, control, label) => {
+    const field = createTeamsDirectoryField({
+      context,
+      kind,
+      control,
+      label,
+      getLookup,
+      onWorkspace(nativeId) {
+        const reference = teamsReference(teamInput.value);
+        if (reference?.nativeId && reference.nativeId !== nativeId) {
+          return false;
+        }
+        resolved = { scope: JSON.stringify(getLookup()), nativeId };
+        return true;
+      },
+    });
+    directoryFields.push(field);
+    return field;
+  };
+  const channelField = directory(
+    "channels",
+    input("msteams-channel-ids", Object.keys(team.channels ?? {}).join(", ")),
+    "Channels",
+  );
+  const groupField = directory(
+    "users",
+    input(
+      "msteams-group-users",
+      (config.groupAllowFrom ?? []).filter((id) => id !== "*").join(", "),
+    ),
+    "Allowed people in these channels",
+  );
+  const personalField = directory(
+    "users",
+    input("msteams-dm-users", (config.allowFrom ?? []).filter((id) => id !== "*").join(", ")),
+    "Allowed people in personal messages",
+  );
+  const channelAccess = select(
+    "msteams-channel-access",
+    [
+      ["selected", "Selected people"],
+      ["everyone", "Everyone in these channels"],
+    ],
+    config.groupAllowFrom?.includes("*") ? "everyone" : "selected",
+  );
+  const dmPolicy = select(
+    "msteams-dm-policy",
+    DM_POLICIES.map((policy) => [policy, policy[0].toUpperCase() + policy.slice(1)]),
+    config.dmPolicy ?? "pairing",
+  );
+  const updateAccess = () => {
+    groupField.hidden = channelAccess.value === "everyone";
+    groupField.querySelector("#msteams-group-users").disabled = groupField.hidden;
+    personalField.hidden = dmPolicy.value !== "allowlist" && dmPolicy.value !== "pairing";
+    personalField.querySelector("#msteams-dm-users").disabled = personalField.hidden;
+    refresh();
+  };
+  channelAccess.addEventListener("change", updateAccess);
+  dmPolicy.addEventListener("change", updateAccess);
+  updateAccess();
   const binding = TEAMS_SECRET_BINDINGS[0];
   const picker = createSecretReferenceField({
     context,
@@ -88,6 +185,7 @@ function appendFields(body, config, context) {
         [binding.key]: secretBinding(secret),
       };
       context.draftChangedSecrets = { ...context.draftChangedSecrets, [binding.key]: secret };
+      refresh();
     },
     createSecretName: () =>
       `${typeof context.agentName === "function" ? context.agentName() : (context.agentName ?? "Teams")} ${binding.secretName}`,
@@ -102,8 +200,8 @@ function appendFields(body, config, context) {
   });
   body.append(
     element("h2", {}, "Microsoft app"),
-    field("App ID", input("msteams-app-id", config.appId)),
-    field("Tenant ID", input("msteams-tenant-id", config.tenantId)),
+    field("App ID", appId),
+    field("Tenant ID", tenantId),
     picker.field,
     element(
       "p",
@@ -117,34 +215,13 @@ function appendFields(body, config, context) {
       config.groupPolicy !== "disabled",
     ),
     field(
-      "Team ID",
-      input("msteams-team-id", teamId),
-      "One exact team ID. Directory lookup is not available.",
+      "Team ID or link",
+      teamInput,
+      "Paste a Teams Team link or its Entra group UUID for name lookup. Native Team IDs also work for manual setup. Only native IDs are saved; paste the link again when reopening to browse names.",
     ),
-    field(
-      "Channel IDs",
-      input("msteams-channel-ids", Object.keys(team.channels ?? {}).join(", ")),
-      "Comma-separated exact channel IDs, such as 19:…@thread.tacv2.",
-    ),
-    field(
-      "Who can use the agent in these channels?",
-      select(
-        "msteams-channel-access",
-        [
-          ["selected", "Selected people"],
-          ["everyone", "Everyone in these channels"],
-        ],
-        config.groupAllowFrom?.includes("*") ? "everyone" : "selected",
-      ),
-    ),
-    field(
-      "Allowed channel user IDs",
-      input(
-        "msteams-group-users",
-        (config.groupAllowFrom ?? []).filter((id) => id !== "*").join(", "),
-      ),
-      "Comma-separated Microsoft Entra object IDs or exact Teams user IDs.",
-    ),
+    channelField,
+    field("Who can use the agent in these channels?", channelAccess),
+    groupField,
     checkbox(
       "msteams-require-mention",
       "Require a mention",
@@ -153,18 +230,12 @@ function appendFields(body, config, context) {
         config.requireMention) !== false,
     ),
     element("h2", {}, "Personal messages"),
-    field(
-      "Personal-message policy",
-      select(
-        "msteams-dm-policy",
-        DM_POLICIES.map((policy) => [policy, policy[0].toUpperCase() + policy.slice(1)]),
-        config.dmPolicy ?? "pairing",
-      ),
-    ),
-    field(
-      "Allowed personal-message user IDs",
-      input("msteams-dm-users", (config.allowFrom ?? []).filter((id) => id !== "*").join(", ")),
-      "Personal access is separate from channel access. Pairing requires native pairing approval for new senders.",
+    field("Personal-message policy", dmPolicy),
+    personalField,
+    element(
+      "p",
+      { className: "hint" },
+      "Directory search lists only members of the selected Team. For other people, enter exact Microsoft Entra object IDs or Teams user IDs. Personal access is separate from channel access; pairing requires native approval for new senders.",
     ),
   );
 }
@@ -195,7 +266,13 @@ export const teams = {
     if (ids.includes("*") || team === "*") {
       return "Use exact team and channel IDs; wildcard access requires native Configuration JSON.";
     }
-    if (Boolean(team) !== Boolean(ids.length)) {
+    if (team && !teamsReference(team)) {
+      return "Enter a native Team ID, a group UUID, or a Teams Team link.";
+    }
+    if (ids.length && !teamReferences.get(body)?.()) {
+      return "Search this Team to resolve its native ID, or paste its Team link or native ID before saving.";
+    }
+    if (Boolean(ids.length) && !team) {
       return "Provide both a team ID and at least one channel ID, or leave both empty for personal messages only.";
     }
     const users = uniqueList(body.querySelector("#msteams-group-users").value.split(","));
@@ -226,7 +303,7 @@ export const teams = {
     config.tenantId = body.querySelector("#msteams-tenant-id").value.trim();
     config.appPassword = PASSWORD_REF;
     config.legacyWebhook = false;
-    const teamId = body.querySelector("#msteams-team-id").value.trim();
+    const teamId = teamReferences.get(body)?.() ?? "";
     const ids = uniqueList(body.querySelector("#msteams-channel-ids").value.split(","));
     const oldTeam = config.teams?.[teamId] ?? {};
     const mention = body.querySelector("#msteams-require-mention").checked;

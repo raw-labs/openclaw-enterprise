@@ -54,7 +54,9 @@ for binding permissions and save behavior. Apply the saved draft with
 
 For Microsoft Teams, configure app and tenant IDs, select or create the app
 password Secret, and choose channel and personal-message access in the Teams
-editor. Follow [Teams setup](../integrations/teams.md) for the required public
+editor. Paste a Team link to search its standard channels and members by name
+when its app has Team-scoped directory consent. Exact-ID entry remains available.
+Follow [Teams setup](../integrations/teams.md) for the required public
 callback listener and Microsoft app registration. A missing password binding
 blocks console deployment. Advanced native shapes remain inspectable through
 Configuration JSON.

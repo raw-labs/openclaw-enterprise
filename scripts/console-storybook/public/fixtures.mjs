@@ -68,7 +68,7 @@ function configurationValues(scenario) {
       groupAllowFrom: ["*"],
       requireMention: true,
       teams: {
-        "33333333-3333-4333-8333-333333333333": {
+        "19:demo@thread.tacv2": {
           channels: { "19:demo@thread.tacv2": { requireMention: true } },
         },
       },
@@ -700,6 +700,28 @@ export function installFixture(scenario, evidence) {
       if (resource === "channel-directory/lookup" && method === "POST") {
         if (!secrets.has(body.secretId) || !["users", "channels"].includes(body.kind)) {
           return error(400);
+        }
+        if (body.provider === "msteams") {
+          const candidates =
+            body.kind === "users"
+              ? [
+                  { id: "44444444-4444-4444-8444-444444444444", name: "Alex Chen" },
+                  { id: "55555555-5555-4555-8555-555555555555", name: "Sam Rivers" },
+                ]
+              : [
+                  { id: "19:demo@thread.tacv2", name: "General" },
+                  { id: "19:engineering@thread.tacv2", name: "Engineering" },
+                ];
+          const query = (body.query ?? "").toLowerCase();
+          return response({
+            workspaceId: "19:demo@thread.tacv2",
+            candidates: candidates.filter((candidate) =>
+              body.ids
+                ? body.ids.includes(candidate.id)
+                : [candidate.id, candidate.name].some((part) => part.toLowerCase().includes(query)),
+            ),
+            complete: true,
+          });
         }
         const candidates =
           body.kind === "users"

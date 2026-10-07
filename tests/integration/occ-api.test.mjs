@@ -2658,7 +2658,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.equal(agent.status, 201);
 
   const path = `/namespaces/${namespace.id}/channel-directory/lookup`;
-  const body = { secretId: secret.data.id, kind: "users", query: "mem" };
+  const body = { provider: "slack", secretId: secret.data.id, kind: "users", query: "mem" };
   const unavailable = await controller.request("POST", path, { body });
   assert.equal(unavailable.status, 501);
   assert.equal(unavailable.body.error.code, "NOT_IMPLEMENTED");
@@ -2697,7 +2697,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.equal(JSON.stringify(created.body).includes(token), false);
   assert.equal(providerCalls, 1);
   const hydrated = await controller.request("POST", path, {
-    body: { secretId: secret.data.id, kind: "users", ids: ["U123", "U999"] },
+    body: { provider: "slack", secretId: secret.data.id, kind: "users", ids: ["U123", "U999"] },
   });
   assert.equal(hydrated.status, 200, JSON.stringify(hydrated.body));
   assert.deepEqual(hydrated.data, expected);
@@ -2789,7 +2789,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
 
   providerResult = { workspaceId: "T123", candidates: [], complete: false, nextCursor: "more" };
   const incompleteHydration = await controller.request("POST", path, {
-    body: { secretId: secret.data.id, kind: "users", ids: ["U123"] },
+    body: { provider: "slack", secretId: secret.data.id, kind: "users", ids: ["U123"] },
   });
   assert.equal(incompleteHydration.status, 503);
   assert.equal(incompleteHydration.body.error.code, "CHANNEL_DIRECTORY_INVALID_RESPONSE");

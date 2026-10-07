@@ -1,12 +1,12 @@
 # Connect an Agent to Microsoft Teams
 
 Use a Dedicated Agent with the Kubernetes Compute Driver and a runtime image
-that bundles `msteams`. The console supports one selected team, exact channel
+that bundles `msteams`. The console supports one selected Team, channel and member name lookup, exact
 IDs, channel sender restrictions, mentions, and separate personal-message
 policies. The native Teams plugin handles messages and replies.
 
 This integration currently targets Microsoft Public cloud with an app password.
-Live tenant delivery, attachments, Graph directory lookup, SSO, federated
+Live channel delivery, attachments, SSO, federated
 credentials, sovereign clouds, and Teams approval workflows are not qualified.
 See [Teams verification](../../testing/teams.md) before using it beyond testing.
 
@@ -57,8 +57,10 @@ The chart-managed proxy admits those exact Microsoft hosts only when
 1. Open the Dedicated Agent's **Channels** tab and select **Configure Microsoft
    Teams**. Enter the app and tenant UUIDs. Select or create an **app password**
    Secret; OCE binds it to `MSTEAMS_APP_PASSWORD` and grants the Agent access.
-2. Enter the exact team and channel IDs. Choose selected people or everyone in
-   those channels, and keep **Require a mention** enabled. Personal messages
+2. Paste a Team link in **Team ID or link** and search its standard channels
+   and members by name, or enter native Team/channel IDs manually. Name lookup
+   requires the optional [Team-scoped directory consent](#enable-team-scoped-name-lookup).
+   Choose selected people or everyone in those channels, and keep **Require a mention** enabled. Personal messages
    have a separate Disabled, Allowlist, Open, or Pairing policy. Leave both team
    and channel IDs empty for personal messages only. Pairing requires the native
    approval workflow for new senders; the console does not approve pairings.
@@ -83,6 +85,45 @@ Advanced native configurations remain inspectable and can be disabled in the
 console. Unsupported editor shapes require the Configuration API; the editor
 does not flatten multiple teams or wildcard access rules. Custom webhook paths
 and legacy webhook listeners fail deployment preparation.
+
+## Enable Team-scoped name lookup
+
+Update the Teams app package, using manifest v1.12 or later. Set
+`webApplicationInfo.id` to the same Entra application ID as the bot, retain the
+app's resource URI, and add these application permissions to
+`authorization.permissions.resourceSpecific`:
+
+```json
+[
+  { "name": "ChannelSettings.Read.Group", "type": "Application" },
+  { "name": "TeamMember.Read.Group", "type": "Application" }
+]
+```
+
+Keep the bot's `team` installation scope enabled. Upload the revised package,
+then have an authorized Team owner install it in the selected Team and consent
+to those permissions, subject to your tenant's app and RSC policies. A personal
+installation alone does not grant access to a Team. See Microsoft's
+[RSC installation instructions](https://learn.microsoft.com/en-us/microsoftteams/platform/graph-api/rsc/grant-resource-specific-consent).
+No tenant-wide user or Team read grant is required, and these permissions do
+not allow reading channel messages. OCE does not grant Microsoft permissions.
+
+In the editor, enter app and tenant IDs and select the existing app-password
+Secret. In Teams, use **Get link to team**, then paste that link in **Team ID or
+link**. Search **Channels** and the appropriate **Allowed people** field and
+select a result. For people outside that Team, enter exact Entra object IDs or
+Teams user IDs. A group UUID also enables lookup; resolve it through a successful
+search before saving channel access. OCE saves native IDs only, so paste the
+Team link again when reopening to browse names. See the
+[directory reference](../../reference/drivers/teams-channel.md) for bounds and
+visibility limits.
+
+The production API needs its channel directory proxy to permit
+`login.microsoftonline.com:443` and `graph.microsoft.com:443`. With the managed
+proxy, enable both `slackProxy.enabled` and `slackProxy.teamsEnabled`. This is
+separate from the Agent's runtime proxy. Missing directory consent or egress
+leaves exact-ID entry available and does not make Graph access a deployment
+prerequisite.
 
 ## Diagnose a missing reply
 

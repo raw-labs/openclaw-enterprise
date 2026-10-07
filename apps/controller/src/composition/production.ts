@@ -21,7 +21,7 @@ import {
   type PreparedAuthAccount,
 } from "../auth/index.ts";
 import { createFastifyApp } from "../index.ts";
-import { SlackChannelDriver } from "../drivers/channel/slack.ts";
+import { BundledChannelDriver } from "../drivers/channel/index.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -267,7 +267,7 @@ export async function composeProduction(config: ProductionConfig) {
     controller.registerDriver(secretDriver);
     controller.selectDriver("secret", secretDriver.id);
     {
-      const channelDriver = new SlackChannelDriver(
+      const channelDriver = new BundledChannelDriver(
         globalThis.fetch,
         config.channelDirectoryProxyUrl,
         {

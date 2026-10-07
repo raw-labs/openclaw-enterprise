@@ -2102,6 +2102,8 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     if (operation.operationId === "lookupChannelDirectory") {
       const directory = await controller.lookupChannelDirectory(context.actorId, namespaceId, {
         secretId: body?.secretId as string,
+        provider: body?.provider as string,
+        ...(body?.context === undefined ? {} : { context: body.context as Record<string, string> }),
         kind: body?.kind as "users" | "channels",
         ...(body?.query === undefined ? {} : { query: body.query as string }),
         ...(body?.cursor === undefined ? {} : { cursor: body.cursor as string }),

@@ -17,7 +17,15 @@ tenant access, proxy connectivity, model execution, or replies.
 `tests/browser/console-agent-channels.test.mjs` exercises the regular console
 workflow through the development HTTP API: save separate personal and channel
 access, bind a Namespace Secret, grant Agent access, and retain the native
-plugin selection. Storybook's `Components/Channels/Teams*` stories are simulated
+plugin selection. Its directory case uses the real API, OCC, IAM, Secret Driver,
+and bundled Channel Driver with a local HTTP Microsoft protocol fixture. It
+selects names, saves native IDs, and preserves manual entry after consent denial.
+`tests/integration/teams-directory.test.mjs` additionally checks Team-scoped
+requests, pagination, foreign continuation rejection and response sanitization.
+These fixtures do not prove live Graph authentication or RSC consent. Before
+qualifying lookup, install the revised app in a disposable Team and verify
+channels and members with the two RSC permissions, then confirm a second Team
+without consent is denied. Storybook's `Components/Channels/Teams*` stories are simulated
 UI evidence, not deployment proof.
 
 Run `node --test tests/integration/production-kubernetes-packaging.test.mjs`
