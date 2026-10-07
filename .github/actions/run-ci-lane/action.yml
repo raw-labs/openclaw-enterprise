@@ -114,7 +114,7 @@ runs:
         # Admit only the packaged runtime binary; retain the global restriction.
         profile="$RUNNER_TEMP/oce-ci-codex-userns"
         cat > "$profile" <<'PROFILE'
-        profile oce-ci-codex-userns /app/node_modules/openclaw/node_modules/**/vendor/x86_64-unknown-linux-musl/codex/codex flags=(unconfined) {
+        profile oce-ci-codex-userns /app/node_modules/openclaw/**/vendor/x86_64-unknown-linux-musl/codex/codex flags=(unconfined) {
           userns,
         }
         PROFILE
@@ -185,6 +185,10 @@ runs:
       continue-on-error: true
       shell: bash
       run: tail -n 120 "$RUNNER_TEMP/memory/${{ inputs.lane }}.log" || true
+    - name: Report sandbox host policy denials
+      if: failure() && inputs.lane == 'images-runtime-startup' && runner.environment == 'github-hosted'
+      shell: bash
+      run: sudo dmesg --ctime | grep -E 'apparmor="DENIED"|unprivileged_userns' | tail -n 40 || true
     - name: Cleanup lane
       if: always()
       shell: bash
