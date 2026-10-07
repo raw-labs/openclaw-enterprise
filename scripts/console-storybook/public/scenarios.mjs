@@ -3057,6 +3057,176 @@ export const scenarios = {
     description:
       "390px viewport with the simulated OCC revision beside OCE in the open drawer. Escape or the overlay closes it.",
   },
+  teams: {
+    group: "Components/Channels",
+    name: "Teams configured",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    description:
+      "Simulated Teams configuration with bound app password, selected channels, and disabled personal messages.",
+  },
+  teamsEditor: {
+    group: "Components/Channels",
+    name: "Teams editor",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    actions: [click("Edit Microsoft Teams")],
+    description:
+      "App and tenant IDs, app password Secret, channel access and personal-message policies.",
+  },
+  teamsDirectoryChannels: {
+    group: "Components/Channels",
+    name: "Teams channel directory",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    actions: [
+      click("Edit Microsoft Teams"),
+      {
+        selector: "#msteams-team-id",
+        value:
+          "https://teams.microsoft.com/l/team/19%3Ademo%40thread.tacv2/conversations?groupId=33333333-3333-4333-8333-333333333333",
+      },
+      { selector: "#msteams-channel-ids-search", value: "engineering", focus: true },
+    ],
+    description:
+      "Search standard channels within a selected Team. Names are transient; saving retains native IDs.",
+  },
+  teamsDirectoryMembers: {
+    group: "Components/Channels",
+    name: "Teams member directory",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    teamsConfiguration: {
+      groupAllowFrom: ["44444444-4444-4444-8444-444444444444"],
+      dmPolicy: "allowlist",
+      allowFrom: ["44444444-4444-4444-8444-444444444444"],
+    },
+    actions: [
+      click("Edit Microsoft Teams"),
+      { selector: "#msteams-team-id", value: "33333333-3333-4333-8333-333333333333" },
+      { selector: "#msteams-group-users-search", value: "sam", focus: true },
+    ],
+    description:
+      "Select Team members by name for independent channel and personal-message allowlists.",
+  },
+  teamsDirectoryDenied: {
+    group: "Components/Channels",
+    name: "Teams directory consent missing",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    rules: [
+      {
+        suffix: "/channel-directory/lookup",
+        method: "POST",
+        status: 403,
+        code: "CHANNEL_DIRECTORY_MISSING_SCOPE",
+      },
+    ],
+    actions: [
+      click("Edit Microsoft Teams"),
+      { selector: "#msteams-team-id", value: "33333333-3333-4333-8333-333333333333" },
+      { selector: "#msteams-channel-ids-search", focus: true },
+    ],
+    description: "Missing Team-scoped consent preserves exact-ID entry and existing access rules.",
+  },
+  teamsDirectoryLoading: {
+    group: "Components/Channels",
+    name: "Teams directory loading",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    rules: [{ suffix: "/channel-directory/lookup", method: "POST", hold: true }],
+    actions: [
+      click("Edit Microsoft Teams"),
+      { selector: "#msteams-team-id", value: "33333333-3333-4333-8333-333333333333" },
+      { selector: "#msteams-channel-ids-search", focus: true },
+    ],
+    description: "Pending Graph lookup announces loading; exact-ID entry remains available.",
+  },
+  teamsDirectoryEmpty: {
+    group: "Components/Channels",
+    name: "Teams directory no matches",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    actions: [
+      click("Edit Microsoft Teams"),
+      { selector: "#msteams-team-id", value: "33333333-3333-4333-8333-333333333333" },
+      { selector: "#msteams-channel-ids-search", value: "not-a-channel", focus: true },
+    ],
+    description: "No results in the Team does not change selected access IDs.",
+  },
+  teamsDirectoryMissingSecret: {
+    group: "Components/Channels",
+    name: "Teams directory missing Secret",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    teamsBindings: false,
+    actions: [click("Edit Microsoft Teams")],
+    description:
+      "Name search stays disabled until app, tenant, Team context and a password Secret are selected.",
+  },
+  teamsSecretsLoading: {
+    group: "Components/Channels",
+    name: "Teams Secret metadata loading",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    rules: [{ prefix: `${presetSecretsPath}/`, hold: true }],
+    actions: [click("Edit Microsoft Teams")],
+    description: "Bound Secret IDs remain visible while metadata loads.",
+  },
+  teamsSaveDenied: {
+    group: "Components/Channels",
+    name: "Teams save denied",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    rules: [
+      {
+        suffix: "/configurations/cfg_00000000-0000-4000-8000-000000000001",
+        method: "PATCH",
+        status: 403,
+      },
+    ],
+    actions: [click("Edit Microsoft Teams"), click("Save configuration")],
+    description: "A denied save preserves Teams edits and reports the authorization error.",
+  },
+  teamsSavePending: {
+    group: "Components/Channels",
+    name: "Teams save pending",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    rules: [
+      {
+        suffix: "/configurations/cfg_00000000-0000-4000-8000-000000000001",
+        method: "PATCH",
+        hold: true,
+      },
+    ],
+    actions: [click("Edit Microsoft Teams"), click("Save configuration")],
+    description:
+      "A pending save disables mutable controls and deployment; the request times out after 15 seconds.",
+  },
+  teamsMissingSecret: {
+    group: "Components/Channels",
+    name: "Teams missing credential",
+    path: `${draft}&tab=credentials`,
+    teams: true,
+    teamsBindings: false,
+    description: "Missing Teams app password binding prevents deployment.",
+  },
+  teamsUnsupported: {
+    group: "Components/Channels",
+    name: "Teams advanced native settings",
+    path: `${draft}&tab=channels`,
+    teams: true,
+    teamsConfiguration: { cloud: "USGov" },
+    description: "Unsupported native settings keep the editor disabled and remain inspectable.",
+  },
+  teamsReadOnly: {
+    group: "Components/Channels",
+    name: "Teams deployed version",
+    path: currentVersion + "&tab=channels",
+    teams: true,
+    description: "Deployed versions expose immutable Teams settings.",
+  },
   slack: {
     group: "Components/Channels",
     name: "Slack configured",

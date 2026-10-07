@@ -224,6 +224,7 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- $proxy := .Values.slackProxy -}}
 {{- if .Values.api.channelDirectoryProxyUrl -}}{{- fail "api.channelDirectoryProxyUrl must be empty when slackProxy.enabled uses the chart-managed Service" -}}{{- end -}}
 {{- if not (kindIs "bool" $proxy.enabled) -}}{{- fail "slackProxy.enabled must be a boolean" -}}{{- end -}}
+{{- if not (kindIs "bool" $proxy.teamsEnabled) -}}{{- fail "slackProxy.teamsEnabled must be a boolean" -}}{{- end -}}
 {{- if or (gt (len $proxy.serviceName) 63) (not (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" $proxy.serviceName)) -}}
 {{- fail "slackProxy.serviceName must be a DNS-1035 Service name" -}}
 {{- end -}}
@@ -299,8 +300,17 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- end -}}
 {{- end -}}
 {{- if and .Values.gatewayRouting.sandbox.enabled (not .Values.gatewayRouting.enabled) -}}{{- fail "gatewayRouting.sandbox requires gatewayRouting.enabled" -}}{{- end -}}
+{{- if and .Values.gatewayRouting.channels.enabled (not .Values.gatewayRouting.enabled) -}}{{- fail "gatewayRouting.channels requires gatewayRouting.enabled" -}}{{- end -}}
 {{- if .Values.gatewayRouting.enabled -}}
 {{- $routing := .Values.gatewayRouting -}}
+{{- if $routing.channels.enabled -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\\.[a-z0-9-]+$" $routing.channels.hostname) -}}{{- fail "gatewayRouting.channels.hostname must be a DNS hostname" -}}{{- end -}}
+{{- $privateHostname := default (printf "%s.%s.svc" (include "openclaw.gatewayRouting.serviceName" .) $routing.envoyNamespace) $routing.hostname -}}
+{{- if eq $routing.channels.hostname $privateHostname -}}{{- fail "channel callbacks must use a hostname separate from gateway administration" -}}{{- end -}}
+{{- if not $routing.channels.tlsSecretName -}}{{- fail "gatewayRouting.channels.tlsSecretName must reference a public HTTPS certificate Secret" -}}{{- end -}}
+{{- if or (lt (int $routing.channels.listenerPort) 1024) (gt (int $routing.channels.listenerPort) 65535) (eq (int $routing.channels.listenerPort) (int $routing.envoyHttpsTargetPort)) (eq (int $routing.channels.listenerPort) 443) (and $routing.sandbox.enabled (eq (int $routing.channels.listenerPort) (int $routing.sandbox.listenerPort))) -}}{{- fail "channel listener must use an unprivileged port separate from private HTTPS and sandbox listeners" -}}{{- end -}}
+{{- if not $routing.channels.ingressPeers -}}{{- fail "gatewayRouting.channels.ingressPeers must explicitly select public ingress sources" -}}{{- end -}}
+{{- end -}}
 {{- $tlsSecretName := include "openclaw.gatewayRouting.tlsSecretName" . -}}
 {{- $rootSecretName := include "openclaw.gatewayRouting.rootSecretName" . -}}
 {{- if and (hasKey $routing "hostname") (not (kindIs "string" $routing.hostname)) -}}{{- fail "gatewayRouting.hostname must be a string when supplied" -}}{{- end -}}

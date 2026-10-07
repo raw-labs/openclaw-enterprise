@@ -338,3 +338,13 @@ receive controller credentials.
 
 - [Driver configuration and troubleshooting](../kubernetes-compute.md)
 - [Kubernetes security controls](../../security.md)
+
+## Teams callbacks
+
+Enabled Teams requires `gatewayRouting.channels.hostname`, a separate **channels**
+listener, and the reviewed proxy. Compute exposes only the exact Agent POST
+callback, preserves Microsoft Authorization, strips OCE administrative headers,
+and delegates authentication to the native SDK. The serving revision owns the
+route; disable/stop/delete removes it with ownership preconditions.
+[Teams setup](../../../guides/integrations/teams.md) owns the endpoint, listener,
+certificate, proxy settings, and verification limits.

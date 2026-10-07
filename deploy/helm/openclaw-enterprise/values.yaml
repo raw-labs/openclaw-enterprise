@@ -186,6 +186,13 @@ gatewayRouting:
   remoteNodeCidrs: []
   tenantGatewayPort: 8080
   envoyHttpsTargetPort: 10443
+  channels:
+    enabled: false
+    # Public DNS and an existing publicly trusted certificate for Microsoft callbacks.
+    hostname: ""
+    tlsSecretName: ""
+    listenerPort: 8444
+    ingressPeers: []
   sandbox:
     enabled: false
     # A dedicated wildcard domain outside the OCE session cookie domain.
@@ -242,6 +249,8 @@ api:
     clientAddressHeader: ""
 
 slackProxy:
+  # Enable Microsoft Public cloud text-messaging endpoints in the same proxy.
+  teamsEnabled: false
   # Optional chart-managed HTTP CONNECT proxy for Slack channel traffic. It is
   # inert until enabled. HTTPS egress excludes private and reserved IPv4 ranges.
   enabled: false

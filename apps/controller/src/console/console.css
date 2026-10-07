@@ -1312,6 +1312,13 @@ summary:focus-visible {
   max-height: 16rem;
   overflow: auto;
 }
+.teams-directory-field > [hidden] {
+  display: none;
+}
+.teams-directory-field .slack-directory-result small {
+  display: block;
+  overflow-wrap: anywhere;
+}
 .slack-directory-result {
   width: 100%;
   text-align: left;

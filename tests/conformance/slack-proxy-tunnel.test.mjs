@@ -279,3 +279,33 @@ test("the CONNECT allowlist matches whole Slack host names on port 443", testOpt
     );
   }
 });
+
+test(
+  "Teams proxy egress is opt-in and limited to exact Public cloud hosts",
+  testOptions,
+  async (t) => {
+    const defaultProxy = await startSlackProxy(t);
+    assert.match(
+      await connectThroughProxy(defaultProxy.port, "login.microsoftonline.com:443"),
+      /^HTTP\/1\.1 403 Forbidden/,
+    );
+    const upstream = await listen(t, (socket) => socket.end("provider-tunnel-reply"));
+    // Redirect only the provider transport to loopback; authorization still runs
+    // in the actual proxy process. This does not prove Microsoft connectivity.
+    const teamsProxy = await startSlackProxy(t, {
+      teamsEnabled: true,
+      upstreamPort: upstream.address().port,
+      upstreamHosts: ["smba.trafficmanager.net"],
+    });
+    const tunnel = await openTunnel(t, teamsProxy.port, "smba.trafficmanager.net:443");
+    assert.match(tunnel.head, established);
+    for (const target of [
+      "smba.trafficmanager.net:80",
+      "login.microsoftonline.com.evil.test:443",
+      "arbitrary.microsoft.com:443",
+      "127.0.0.1:443",
+    ]) {
+      assert.match(await connectThroughProxy(teamsProxy.port, target), /^HTTP\/1\.1 403 Forbidden/);
+    }
+  },
+);

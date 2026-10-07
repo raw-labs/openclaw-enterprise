@@ -149,10 +149,13 @@ separate facts, and startup evidence does not establish live gateway health; see
 [deployment guide](../guides/deploy/production-agents.md#configure-the-agent-runtime)
 and [deployment reference](agents/deployment.md#revisions-and-deployment).
 
-Channels edits the saved Slack draft. Teams credentials and Bot Framework ingress
-require operator setup; Teams has no editor, its settings remain in Configuration
-JSON, and it blocks Console deployment. Saving Slack patches `values` and
-includes `secretBindings` only for changed tokens. Existing plugin allowlists are
+Channels edits saved Slack and Microsoft Teams drafts. Teams exposes app and
+tenant IDs, an app-password Secret, one team with selected channels, mentions,
+and separate personal-message access. Advanced shapes remain inspectable in
+Configuration JSON. Operator-configured public callback routing and proxy egress
+are required before Teams deployment; see [Teams setup](../guides/integrations/teams.md).
+Saving channel settings patches `values` and includes `secretBindings` for changed
+credentials. Existing plugin allowlists are
 extended; omitted ones stay omitted. Channel allowlists remain native
 Configuration changes, and shared Configurations can affect other Agents' future
 deployments.

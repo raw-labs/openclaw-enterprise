@@ -1311,6 +1311,9 @@ export interface PluginDriver extends Driver {
 
 export interface ChannelDirectoryLookupInput {
   readonly token: string;
+  readonly provider: string;
+  /** Provider-owned, nonsecret lookup context; never persisted by directory lookup. */
+  readonly context?: Readonly<Record<string, string>>;
   readonly kind: "users" | "channels";
   readonly query?: string;
   readonly cursor?: string;

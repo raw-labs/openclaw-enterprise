@@ -234,3 +234,13 @@ The `org.openclaw.image.revision` label records the same upstream commit for
 Docker inspection; the build checks that it matches packaged provenance. Local builds
 can pass `--build-arg OCC_BUILD_REVISION=<full-lowercase-git-sha>`; omitted metadata
 remains unknown. Rebuild the runtime image to include this metadata.
+
+
+## Microsoft Teams plugin
+
+The same pinned OpenClaw source assembly bundles `msteams` alongside `codex` and
+`slack`, retaining the Teams SDK and Azure dependencies. Upstream treats plugins
+built with their host as bundled; no compatibility override or plugin download
+is used. The Teams startup case exercises actual SDK authentication in the
+assembled image; see [Teams verification](../../docs/testing/teams.md). Live
+Microsoft delivery and public Kubernetes ingress remain separate acceptance checks.

@@ -1007,6 +1007,44 @@ test(
 );
 
 test(
+  "runtime image serves the bundled Teams callback with SDK authentication and no legacy listener",
+  imageTestOptions,
+  async (t) => {
+    // Synthetic credentials never leave the network-disabled container. This proves
+    // packaging and JWT rejection, not Microsoft tenant access or a model reply.
+    const { logs, containerName, pluginList } = await runGatewaySmoke(t, "openclaw", {
+      collectPlugins: true,
+      configuration: createAdmittedRuntimeImageConfiguration("openclaw", { enableTeams: true }),
+      extraEnvironment: ["MSTEAMS_APP_PASSWORD=synthetic-teams-password"],
+    });
+    const plugin = assertBundledPluginLoaded(pluginList, "msteams");
+    assert.equal(plugin.dependencyStatus?.requiredInstalled, true);
+    assert.deepEqual(plugin.dependencyStatus?.missing, []);
+    // Wait for the asynchronous channel to register its route after gateway readiness.
+    const probe = String.raw`
+const deadline = Date.now() + 20000;
+let response;
+while (Date.now() < deadline) {
+  response = await fetch("http://127.0.0.1:8080/api/messages", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  if (response.status === 401) break;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+if (response.status !== 401) throw new Error("Teams callback is not protected: " + response.status);
+const forged = await fetch("http://127.0.0.1:8080/api/messages", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer not-a-jwt", "x-occ-identity": "occ-workspace-files" }, body: "{}" });
+if (![401, 403].includes(forged.status)) throw new Error("Teams SDK accepted an invalid token: " + forged.status);
+const socket = await import("node:net");
+await new Promise((resolve, reject) => {
+  const client = socket.connect(3978, "127.0.0.1");
+  client.once("connect", () => { client.destroy(); reject(new Error("Legacy Teams listener is exposed")); });
+  client.once("error", (error) => error.code === "ECONNREFUSED" ? resolve() : reject(error));
+});
+`;
+    await runDocker(["exec", containerName, "node", "--input-type=module", "-e", probe]);
+    assertNoPackagingFailure(logs);
+  },
+);
+
+test(
   "runtime image discovers the bundled Codex plugin from a fresh gateway home",
   imageTestOptions,
   async (t) => {

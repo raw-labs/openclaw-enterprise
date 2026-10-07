@@ -72,6 +72,7 @@ recorded status is not proof of current implementation or release availability.
 | Initial Agent workspace files                               | —                                                                 | [Plan / record](plans/34-agent-workspace-files-setup.md)                  |
 | Initial OCC Prometheus metrics                              | [Decision](rfcs/28-occ-prometheus-metrics.md)                     | [Plan](plans/28-occ-prometheus-metrics-plan.md)                           |
 | Installation profiles: openclaw and codex                   | [Decision](rfcs/2026-09-28-installation-profiles-design/index.md) | —                                                                         |
+| Microsoft Teams channel support | — | [Plan](plans/0045-teams-channel-support.md) |
 | Native OpenClaw plugin tool policies                        | [Decision](rfcs/35-native-plugin-tool-policy.md)                  | —                                                                         |
 | OCC Gateway Administration and Command Proxy                | —                                                                 | [Plan / record](plans/15-occ-gateway-access/index.md)                     |
 | OpenShell first-Agent dedicated Codex                       | —                                                                 | [Plan](plans/0044-openshell-first-agent-codex.md)                         |

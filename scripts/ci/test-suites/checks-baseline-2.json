@@ -29,6 +29,7 @@
     "tests/integration/password-sign-in-admission.test.mjs",
     "tests/integration/google-login-transport.test.mjs",
     "tests/conformance/slack-channel-directory.test.mjs",
+    "tests/integration/teams-directory.test.mjs",
     "tests/conformance/repository-credentials-github.test.mjs",
     "tests/integration/repository-credentials-driver.test.mjs",
     "tests/integration/known-device-cookie.test.mjs",
@@ -94,6 +95,9 @@
     "tests/conformance/schema-auth-boundary-v1.test.mjs": "tsc --build of a fixture project that references packages/occ; if that output is stale, it rebuilds workspace output that other files read"
   },
   "files": [
+    {
+      "path": "tests/integration/teams-directory.test.mjs"
+    },
     {
       "path": "tests/integration/dev-codex-seccomp-failure.test.mjs"
     },
