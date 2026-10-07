@@ -212,9 +212,10 @@ Configure runner labels through repository Actions variables:
 | `CONTAINER_ARM64_RUNNER` | `blacksmith-8vcpu-ubuntu-2404-arm` | `depot-ubuntu-24.04-arm-16` |
 
 The runner app and runner group must admit the repository, including public
-repositories when applicable. Kubernetes fixture and observability jobs retain
-GitHub-hosted runners for bridge netfilter support. Changing a label does not
-establish that its runner can enforce NetworkPolicies.
+repositories when applicable. Kubernetes fixture and observability jobs use
+GitHub-hosted Ubuntu 22.04 for bridge netfilter support; PostgreSQL authentication
+uses it for sandboxed Chromium. Changing a label does not establish that its
+runner supports these isolation requirements.
 
 Require `CI Required` on the integration branch after a successful baseline run;
 block force pushes and deletion. Run update candidates through CI before
