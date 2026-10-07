@@ -22,6 +22,43 @@ the restricted workspace-node commands and saved-token-first pairing required by
 split storage; published `2026.9.5` packages do not contain that complete contract.
 
 The source pin is an OpenClaw main commit, not a published OpenClaw release.
+
+The selected revision is the merge of
+[HTTPS installed-MCP sign-in (#163875)](https://github.com/openclaw/openclaw/pull/163875),
+two commits after the previous `11d3d04` pin. It includes
+[remote MCP transport configuration (#162376)](https://github.com/openclaw/openclaw/pull/162376):
+HTTP/SSE servers no longer inherit a subprocess `cwd`. The HTTPS fix admits the
+Gateway dashboard's authenticated HTTPS origin, discovers enabled installed MCP
+plugins without duplicate `mcp.servers` entries, and replaces tokenless client
+registrations whose saved callback conflicts with the chosen callback. Existing
+authenticated registrations keep their tokens. Upstream recorded real Notion
+consent, persisted credentials, and authenticated read-only tools; that evidence
+is not qualification of this image or an OCE deployment.
+
+The two-commit update leaves the upstream dependency lockfile, Dockerfile,
+Codex/Slack manifests, workspace templates, and workspace implementation unchanged.
+The intervening commit only changes tests and test inventories. The build keeps
+both OCE patches below: neither is implemented by the selected source. Archive
+and patch checksum verification and `git apply` remain mandatory; unsupported
+source or already-applied patches fail the build.
+
+Gateway identity, exact-origin access, workspace routing, plugin/tool controls,
+and Dedicated Harness integration are implemented by the Compute entrypoints,
+not additional source patches. Their configuration validation, plugin version
+guards, disabled Gateway-local tools, and fail-closed model transport remain in
+place. Run the [image qualification](../../docs/testing/images.md#build-images-from-the-checkout)
+and [credentialed runtime checks](../../docs/testing/kubernetes.md#kubernetes-model-turns-and-secrets)
+before selecting a rebuilt image for installation.
+
+These MCP fixes cover native OpenClaw installed plugins. OCE's hosted Codex
+plugin picker uses a separate catalog and requires supported ChatGPT login;
+see [Plugin Drivers](../../docs/reference/drivers/plugin-bundled.md).
+Successful native MCP sign-in does not establish hosted Codex plugin installation
+or Dedicated Harness model/tool execution. Installed-only MCP account editing
+and CLI logout remain upstream limitations documented in #163875. Dedicated
+native OpenClaw, additional channel providers, and OCE sign-in capabilities are
+unaffected by this source update.
+
 Until [OpenClaw #158724](https://github.com/openclaw/openclaw/pull/158724) or
 an equivalent implementation is available upstream, the build applies its
 `readOnlyPaths` compatibility change as
@@ -49,8 +86,8 @@ runs both entrypoints against this image and fails when the image disagrees with
 | Input                                        | Selection                                                                                                    |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Build base                                   | `docker.io/library/node:24-bookworm@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584` |
-| OpenClaw source commit                       | `11d3d04a1279781a770f6a6aa09e6322b064b80a`                                                                   |
-| Source archive SHA-256                       | `b48a59055b2eeb39db06a7b900ade5208fa8f23c3f4f481fd5b5c455ea9436ab`                                           |
+| OpenClaw source commit                       | `62d0c5f3b66c58b2864aa60e79214c796a904f51`                                                                   |
+| Source archive SHA-256                       | `49c0a32f2cd609395058953f06f73b8ce5206f3795fd4f37885a9003b10100df`                                           |
 | Dedicated Codex CLI (`OPENAI_CODEX_VERSION`) | `0.160.0`                                                                                                    |
 | Matrix crypto native library                 | `@matrix-org/matrix-sdk-crypto-nodejs` `v0.6.6`, SHA-256 per architecture                                    |
 
@@ -102,7 +139,7 @@ checksum-verifying download helper, and both installs read it from a loopback se
 instead of GitHub. When an OpenClaw update changes the locked
 `@matrix-org/matrix-sdk-crypto-nodejs` version, update that stage's version, URL and
 both SHA-256 values. Until then the install fails with a "no pinned file" message.
-Follow the [pinned upstream Docker assembly](https://github.com/openclaw/openclaw/blob/11d3d04a1279781a770f6a6aa09e6322b064b80a/Dockerfile)
+Follow the [pinned upstream Docker assembly](https://github.com/openclaw/openclaw/blob/62d0c5f3b66c58b2864aa60e79214c796a904f51/Dockerfile)
 to keep plugin dependencies and runtime assets consistent. Its plugin-local
 dependency layout preserves dependencies that differ from core versions.
 Plugin chunks emitted directly under `dist` also need package-root resolution.

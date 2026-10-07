@@ -114,7 +114,18 @@ OCC_TEST_RUNTIME_IMAGE=openclaw-enterprise-runtime:test \
 
 This checks gateway readiness and bundled Codex/Slack plugin loading from a
 fresh runtime home, then initializes the image's real Codex app-server through
-the installed plugin's version guard. The smoke runs offline without provider
+the installed plugin's version guard.
+The installed-MCP case loads a file-backed native bundle through the gateway,
+checks that plugin inspection advertises its OAuth account without an explicit
+`mcp.servers` duplicate, and sends the bundle's actual HTTP projection to a real
+Codex `thread/start`. Its disconnected loopback endpoint proves transport
+configuration acceptance, not OAuth consent, token persistence, or tool execution.
+The previous `11d3d04` image fails account discovery in this case. Upstream's
+[HTTPS MCP regressions](https://github.com/openclaw/openclaw/pull/163875) separately
+exercise callback ownership, stale registrations, and persistence with local
+protocol fixtures; provider credentials and a disposable Agent are still
+required for live Notion and ChatGPT/Dedicated Harness proof.
+The smoke runs offline without provider
 credentials. It does not make a model call or establish a Slack connection;
 run the [live Slack test](slack.md#slack) for channel delivery proof.
 

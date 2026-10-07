@@ -1,7 +1,7 @@
 ---
 created: "2026-09-19"
-updated: "2026-10-01"
-last_updated_session: "authoring-run/bef09bf6-deaa-4189-9568-5f13beb451e7"
+updated: "2026-10-07"
+last_updated_session: 01a116b4-e592-7bb0-a4a6-f19f69d57025
 ---
 
 # Agent Native Admin UI Flow
@@ -167,21 +167,29 @@ volume. The gateway mounts that same home subdirectory at `/home/node`, so nativ
 edits remain Pod-local and the next Pod starts from the admitted configuration.
 The init container cannot write through the gateway's later mount path.
 
+### 9. Native installed-MCP browser sign-in
+
+`deploy/runtime/Dockerfile:1` selects OpenClaw
+[`62d0c5f3`](https://github.com/openclaw/openclaw/tree/62d0c5f3b66c58b2864aa60e79214c796a904f51).
+Its `src/gateway/server-methods/mcp-auth-login.ts` resolves enabled installed
+plugin connections from the active Gateway inventory plus explicit overrides.
+`src/gateway/provider-browser-auth.ts` selects the already-admitted dashboard
+HTTPS origin for `/oauth/provider/callback`; OCE's proxy continues to enforce
+its shared-session and exact-Agent admission. Changed or revoked administrator connections, inventory, configuration, or
+callbacks cannot finish authorization. Saved MCP credentials do not project into
+the Dedicated Codex hosted-plugin path. See [Plugin Driver limits](../reference/drivers/plugin-bundled.md#native-mappings-and-limits).
+
 ## Debugging and Verification
 
 - `AGENT_NATIVE_ADMIN_INVALID` at startup points to invalid native admin enablement, missing public origin, invalid Agent domain, invalid shared cookie parent domain, invalid Better Auth cookie scope, or insufficient auth secret material.
-- `disabled` means the Installation has not enabled the feature.
-- `stopped` means the exact Agent is not desired running. Its response has no origin or revision after stop reconciliation clears the active revision, or before the first deployment.
-- `unavailable` means active revision selection raised `NoActiveAgentRevisionError` (a desired-running Agent without an active revision) before OCC could derive the Agent target, or a newer revision exists whose Compute Driver `requiresStoppedPredecessors` (Kubernetes dedicated). That worker stops the active revision's workload before the newer one starts, so nothing serves until the newer revision activates; if it fails, the old revision stays recorded as active with no workload.
-- `unsupported` means the selected Compute Driver, gateway endpoint, or native trusted-proxy/control UI configuration cannot support the active revision.
+- Diagnose `disabled`, `stopped`, `unavailable`, and `unsupported` with the [availability reference](../reference/agent-native-admin.md#authorization-and-availability). The trace above identifies their source decisions and revision-cutover consequences.
 - Wrong or unknown Agent hosts fail before gateway proxying. Check the derived host calculation, Agent lifecycle state, and `agentNativeAdmin.domain`.
 - Browser requests should not contain native-admin exchange, bootstrap, callback, launch-code, state, verifier, or Agent-specific session-cookie traffic.
 - The native gateway should never observe the OCE session cookie; inspect sanitized proxy inputs when testing this boundary.
 - IAM denial audits should appear for attributable denied status checks, proxy admission, and WebSocket lease renewal, with the human principal and exact Agent target preserved.
 - `openclaw.agents.native_admin.websocket.connect` audits should include `connectionId`; matching `openclaw.agents.native_admin.websocket.close` audits should reuse `connectionId` and include `closeReason` with one of the expected categories: lifecycle, revocation, dependency, client, upstream, or shutdown.
 - Service-worker registration failure is expected: the HTTP proxy rejects `Service-Worker: script` requests and adds `worker-src 'none'` to proxied responses.
-- Browser tests cover panel visibility, warning copy, available status, and opening the returned URL. Integration proof should cover shared-cookie admission, denied service API keys, unknown host denial, proxied asset loads, WebSocket reconnect, authorization lease renewal (the PostgreSQL suite shortens the 25-second interval), revision-change closure and reconnect, and a reversible native admin edit on a disposable Agent.
-- The flow is source-backed only here. Live runtime proof remains separate.
+- Browser tests cover the availability panel and opening its URL. Runtime proof requires disposable-Agent checks of cookie admission, denied keys/hosts, proxied assets, WebSocket renewal/revocation, revision cutover, and native edits. Source and browser checks do not establish live runtime behavior.
 
 ## Related docs
 
@@ -196,6 +204,8 @@ The init container cannot write through the gateway's later mount path.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-07 16:17: Trace installed-MCP HTTPS callback ownership for the updated runtime pin. (01a116b4-e592-7bb0-a4a6-f19f69d57025 - 447c387b63c1b781fec03655f06c318caeb91e36)
 
 - 2026-10-04 07:30: Only a missing active revision reports `unavailable`; IAM and other dependency outages return `503`, and close or refuse proxied requests as `dependency_failure`. (bh11-native-status)
 
