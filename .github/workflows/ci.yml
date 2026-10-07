@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - codex/raw-integration
   merge_group:
   workflow_dispatch:
 
@@ -219,7 +220,7 @@ jobs:
 
   audit:
     name: Suite Audit
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -242,7 +243,7 @@ jobs:
     # test fixture, so they run beside the test lanes in every mode instead of
     # before Checks and Conformance 1's tests (about 40 s of its critical path).
     if: ${{ needs.impact.outputs.mode == 'docs' || needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -305,7 +306,7 @@ jobs:
     needs: impact
     if: ${{ needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests' }}
     # NetworkPolicy proofs need a runner kernel with bridge netfilter support.
-    runs-on: ${{ (startsWith(matrix.lane, 'k3d-fixture-') || matrix.lane == 'k3d-observability') && 'ubuntu-22.04' || matrix.lane == 'repository-credentials-platform' && 'blacksmith-16vcpu-ubuntu-2404' || 'blacksmith-8vcpu-ubuntu-2404' }}
+    runs-on: ${{ (startsWith(matrix.lane, 'k3d-fixture-') || matrix.lane == 'k3d-observability') && 'ubuntu-22.04' || matrix.lane == 'repository-credentials-platform' && (vars.CI_LARGE_RUNNER || 'blacksmith-16vcpu-ubuntu-2404') || (vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404') }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false

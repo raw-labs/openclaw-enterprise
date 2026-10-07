@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - codex/raw-integration
   schedule:
     - cron: "43 3 * * 1"
   workflow_dispatch:

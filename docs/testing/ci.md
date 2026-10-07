@@ -21,13 +21,13 @@ The non-required [First Agent smoke](first-agent-smoke.md) installs Local Setup 
 
 Full CI has twenty required lanes. `checks-baseline-1` and `checks-baseline-2` split the baseline conformance and local integration files by measured file durations. Only part 1 runs the type and Go CLI checks and installs the docs site its docs tests need; part 2 builds the workspace output its tests read. Register new baseline files in either part, keeping job times close. Lanes with `fileConcurrency` run `parallelFiles` up to that many at once, longest first; other files, including `serialFiles`, run alone first. `checks-browser` and `checks-browser-2` split browser tests likewise, plus some baseline files (only part 1 installs the docs site); `postgres-auth` owns sign-in, session and account authentication tests and its own PostgreSQL server; `images-model-probes` builds only the runtime image and runs the CPU-contention model probe without a cluster; `images-runtime-startup` and `images-runtime-startup-2` each build the runtime image and run startup smoke files apart from packaging (part 2 also the other model probes); `runtime-image-startup.test.mjs`, `runtime-image-startup-probe.test.mjs`, `runtime-image-gateway-peer.test.mjs` and `runtime-image-native-worker.test.mjs` are split by measured case durations and share `tests/helpers/runtime-image-startup.mjs`.
 
-Hosted image builds use separate controller/runtime caches. Packaging exports on main pushes; model probes, runtime startup and the repository credential platform restore. A never-cancelled main [cache workflow](../../.github/workflows/ci-image-cache.yml) also exports; pull requests only read main's cache. The platform lane loads its cached runtime image into the Docker engine and derives its fixture from it with the default builder. Transfers time out after one minute, export failures are ignored, and builds load locally. Cache credentials stay in preparation. Local builds remain unchanged.
+Hosted image builds use separate controller/runtime caches. Packaging exports on CI pushes; model probes, runtime startup and the repository credential platform restore. A never-cancelled main [cache workflow](../../.github/workflows/ci-image-cache.yml) also exports; pull requests restore caches available to their base and default branches. The platform lane loads its cached runtime image into the Docker engine and derives its fixture from it with the default builder. Transfers time out after one minute, export failures are ignored, and builds load locally. Cache credentials stay in preparation. Local builds remain unchanged.
 
 Compare per-file `wallDurationMs`, preparation `[ci-timing]` phases and Actions timestamps for slow setup or tests. [k3d image preparation](ci-k3d-images.md) covers how images reach the cluster nodes.
 
 `static-checks` runs `pnpm docs:check` and the [dependency policy](repository-boundaries.md). Pages above 1,500 visible words require review; above 2,500 fail except the approved [API reference](../reference/api.md) and `AGENTS.md` files. The generated API, site build, navigation, and links must pass. The [specification check](../contributing/specifications.md#status-and-review) also validates non-archived RFC metadata and spec link targets. Run `pnpm docs:check-length` for word counts alone.
 
-CI Impact and Suite Audit start independently. Full mode runs the nineteen-lane matrix and `runtime-image-fixture`; `CI Required` requires their outcomes and same-source artifacts. Kubernetes fixture and observability lanes use `ubuntu-22.04` for bridge netfilter support; `runtime-image-fixture` and `CI Required` also use it. The repository credential platform lane uses `blacksmith-16vcpu-ubuntu-2404` to build the delivered runtime image and platform fixture in one job; other lanes and the audit use `blacksmith-8vcpu-ubuntu-2404`.
+CI Impact and Suite Audit start independently. Full mode runs the nineteen-lane matrix and `runtime-image-fixture`; `CI Required` requires their outcomes and same-source artifacts. Kubernetes fixture and observability lanes use `ubuntu-22.04` for bridge netfilter support; `runtime-image-fixture` and `CI Required` also use it. The repository credential platform lane uses `CI_LARGE_RUNNER` (default `blacksmith-16vcpu-ubuntu-2404`) to build the delivered runtime image and platform fixture in one job; other configurable lanes and the audit use `CI_RUNNER` (default `blacksmith-8vcpu-ubuntu-2404`).
 
 In every mode, `static-checks` verifies checkout identity and runs the workspace, lint, format, OpenAPI and docs checks beside the lanes. The docs check covers word limits, site links and navigation, but not outgoing links in root or `specs/` Markdown. Docs mode (a verified documentation-only PR merge tree) runs no product tests. `CI Required` verifies the mode and requires successful impact, audit and static checks, with docs mode's test jobs skipped. Missing, failed, cancelled or unexpectedly skipped selected jobs fail. Docs mode does not run the test-result aggregator or require test artifacts.
 
@@ -195,6 +195,34 @@ See [manual Full Integration lanes](ci-manual-integration.md#manual-full-integra
 #### No GitHub workflow entrypoint
 
 See [no GitHub workflow entrypoint](ci-manual-integration.md#no-github-workflow-entrypoint).
+
+## Downstream runners and integration
+
+The `codex/raw-integration` branch runs CI and CodeQL on pushes. Keep `main`
+aligned with upstream; merge selected topic branches into the integration branch
+and qualify its exact commit before building a downstream release.
+
+Configure runner labels through repository Actions variables:
+
+| Variable                 | Default                            | Downstream setting          |
+| ------------------------ | ---------------------------------- | --------------------------- |
+| `CI_RUNNER`              | `blacksmith-8vcpu-ubuntu-2404`     | `depot-ubuntu-24.04-8`      |
+| `CI_LARGE_RUNNER`        | `blacksmith-16vcpu-ubuntu-2404`    | `depot-ubuntu-24.04-16`     |
+| `CONTAINER_AMD64_RUNNER` | `blacksmith-16vcpu-ubuntu-2404`    | `depot-ubuntu-24.04-16`     |
+| `CONTAINER_ARM64_RUNNER` | `blacksmith-8vcpu-ubuntu-2404-arm` | `depot-ubuntu-24.04-arm-16` |
+
+The runner app and runner group must admit the repository, including public
+repositories when applicable. Kubernetes fixture and observability jobs retain
+GitHub-hosted runners for bridge netfilter support. Changing a label does not
+establish that its runner can enforce NetworkPolicies.
+
+Require `CI Required` on the integration branch after a successful baseline run;
+block force pushes and deletion. Run update candidates through CI before
+advancing the branch. Existing upstream PRs remain on their topic branches.
+Downstream release packaging belongs to the release bundle: the upstream
+publication workflows enforce upstream repository and branch identity and do
+not publish downstream images. Credentialed qualification remains separate
+from ordinary CI.
 
 ## Related
 
