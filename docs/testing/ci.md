@@ -218,7 +218,7 @@ uses it for sandboxed Chromium. The first image runtime startup lane uses
 GitHub-hosted Ubuntu 24.04 for the Codex sandbox and network proxy. Changing a
 label does not establish that its runner supports these isolation requirements.
 The startup lane loads a job-owned AppArmor profile permitting user namespaces
-for the packaged runtime Codex binary, then unloads it during cleanup. The host's
+for Codex's packaged `bwrap` helper, then unloads it during cleanup. The host's
 global namespace restriction stays enabled; runtime seccomp and sandbox checks
 remain required.
 

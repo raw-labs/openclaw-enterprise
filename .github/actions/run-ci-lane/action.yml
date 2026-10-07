@@ -105,16 +105,16 @@ runs:
       if: inputs.lane == 'checks-browser' || (inputs.lane == 'checks-baseline-1' && inputs.static-checks == 'false')
       shell: bash
       run: pnpm docs:install
-    - name: Allow the runtime Codex binary to create sandbox namespaces
+    - name: Allow the runtime Codex sandbox helper to create namespaces
       id: codex-userns
       if: inputs.lane == 'images-runtime-startup' && runner.environment == 'github-hosted'
       shell: bash
       run: |
         # Ubuntu 24.04 restricts capabilities in unprivileged user namespaces.
-        # Admit only the packaged runtime binary; retain the global restriction.
+        # Admit only the packaged bwrap helper; retain the global restriction.
         profile="$RUNNER_TEMP/oce-ci-codex-userns"
         cat > "$profile" <<'PROFILE'
-        profile oce-ci-codex-userns /app/node_modules/openclaw/**/vendor/x86_64-unknown-linux-musl/codex/codex flags=(unconfined) {
+        profile oce-ci-codex-userns /app/node_modules/openclaw/**/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap flags=(unconfined) {
           userns,
         }
         PROFILE
