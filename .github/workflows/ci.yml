@@ -305,8 +305,8 @@ jobs:
     name: ${{ matrix.title }}
     needs: impact
     if: ${{ needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests' }}
-    # These lanes need bridge netfilter or sandboxed Chromium support.
-    runs-on: ${{ (startsWith(matrix.lane, 'k3d-fixture-') || matrix.lane == 'k3d-observability' || matrix.lane == 'postgres-auth') && 'ubuntu-22.04' || matrix.lane == 'repository-credentials-platform' && (vars.CI_LARGE_RUNNER || 'blacksmith-16vcpu-ubuntu-2404') || (vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404') }}
+    # These lanes need bridge netfilter, Chromium or Codex sandbox support.
+    runs-on: ${{ (startsWith(matrix.lane, 'k3d-fixture-') || matrix.lane == 'k3d-observability' || matrix.lane == 'postgres-auth' || matrix.lane == 'images-runtime-startup') && 'ubuntu-22.04' || matrix.lane == 'repository-credentials-platform' && (vars.CI_LARGE_RUNNER || 'blacksmith-16vcpu-ubuntu-2404') || (vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404') }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
