@@ -335,6 +335,10 @@ function annotateRuntimeImageStockBrokerFailure(error) {
   const stage = matches.at(-1)?.[1];
   if (runtimeImageStockBrokerDiagnosticStages.has(stage)) {
     error.openclawCiDiagnostic = { kind: "runtime-image-stock-broker", stage };
+    // Keep the child's failure ahead of the Docker command in bounded CI output.
+    if (typeof error.stderr === "string" && error.stderr.trim()) {
+      error.message = `Runtime image stock broker (${stage}): ${error.stderr.trim()}`;
+    }
   }
   return error;
 }

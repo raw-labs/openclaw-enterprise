@@ -214,9 +214,9 @@ Configure runner labels through repository Actions variables:
 The runner app and runner group must admit the repository, including public
 repositories when applicable. Kubernetes fixture and observability jobs use
 GitHub-hosted Ubuntu 22.04 for bridge netfilter support; PostgreSQL authentication
-uses it for sandboxed Chromium, and the first image runtime startup lane for the
-Codex sandbox. Changing a label does not establish that its runner supports these
-isolation requirements.
+uses it for sandboxed Chromium. The first image runtime startup lane uses
+GitHub-hosted Ubuntu 24.04 for the Codex sandbox and network proxy. Changing a
+label does not establish that its runner supports these isolation requirements.
 
 Require `CI Required` on the integration branch after a successful baseline run;
 block force pushes and deletion. Run update candidates through CI before
