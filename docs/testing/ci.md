@@ -217,6 +217,10 @@ GitHub-hosted Ubuntu 22.04 for bridge netfilter support; PostgreSQL authenticati
 uses it for sandboxed Chromium. The first image runtime startup lane uses
 GitHub-hosted Ubuntu 24.04 for the Codex sandbox and network proxy. Changing a
 label does not establish that its runner supports these isolation requirements.
+The startup lane loads a job-owned AppArmor profile permitting user namespaces
+for the packaged runtime Codex binary, then unloads it during cleanup. The host's
+global namespace restriction stays enabled; runtime seccomp and sandbox checks
+remain required.
 
 Require `CI Required` on the integration branch after a successful baseline run;
 block force pushes and deletion. Run update candidates through CI before
