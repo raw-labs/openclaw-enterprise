@@ -27,6 +27,9 @@ separately prepares and verifies a profile inside its own k3d node.
 
 ## Identify the restriction
 
+If preparation reports `Codex version mismatch`, first
+[match the image pair to its source checkout](published-images.md#resolve-a-codex-version-mismatch).
+
 The message `bwrap: No permissions to create a new namespace` does not identify
 which layer denied the request. Record the node OS, kernel, container runtime,
 architecture, runtime image digest, Codex version, effective OCI seccomp policy,
