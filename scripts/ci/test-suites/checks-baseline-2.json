@@ -96,6 +96,9 @@
   },
   "files": [
     {
+      "path": "tests/integration/teams-directory.test.mjs"
+    },
+    {
       "path": "tests/integration/dev-codex-seccomp-failure.test.mjs"
     },
     {
