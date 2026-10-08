@@ -32,7 +32,7 @@ static int child(void *unused) {
   printf("child uid=%d\n", getuid()); label();
   int result = mount(NULL, "/", NULL, MS_SILENT | MS_SLAVE | MS_REC, NULL);
   printf("mount result=%d errno=%d %s\n", result, errno, strerror(errno));
-  return result != 0;
+  fflush(stdout); return result != 0;
 }
 static void map(pid_t pid, const char *name, const char *value) {
   char path[128]; snprintf(path, sizeof(path), "/proc/%d/%s", pid, name);
@@ -52,6 +52,8 @@ int main(void) {
 SOURCE
 node_base='docker.io/library/node:24-bookworm@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584'
 docker run --rm --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --mount "type=bind,src=$diagnostics,dst=/diagnostics" --entrypoint gcc "$node_base" -O0 -o /diagnostics/mount /diagnostics/mount.c
+docker run --rm --mount "type=bind,src=$diagnostics,dst=/diagnostics" --entrypoint sh "$node_base" -c 'apt-get update -qq; cd /diagnostics; apt-get download strace; dpkg-deb -x strace*.deb /diagnostics'
+echo "OCE_SANDBOX_TRACE_DIR=$diagnostics" >> "$GITHUB_ENV"
 sudo aa-status || true
 sudo sysctl kernel.apparmor_restrict_unprivileged_userns kernel.apparmor_restrict_unprivileged_userns_force || true
 sudo cat /etc/apparmor.d/unprivileged_userns || true

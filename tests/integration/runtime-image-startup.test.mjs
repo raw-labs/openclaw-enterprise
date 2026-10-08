@@ -772,7 +772,7 @@ vm.runInNewContext(fs.readFileSync(0, "utf8"), {
         const appServerEnvironment = options.env ?? environment;
         assert.equal(Object.hasOwn(appServerEnvironment, "APP_SERVER_TOKEN"), false);
         assert.equal(Object.hasOwn(appServerEnvironment, "APP_TOKEN_SHA"), false);
-        native = cp.spawn(command, [...args.slice(0, appServer + 1), "--listen", "stdio://"], {
+        native = cp.spawn("/diagnostics/usr/bin/strace", ["-f", "-s", "160", "-e", "trace=execve,clone,unshare,mount,capset,prctl", command, ...args.slice(0, appServer + 1), "--listen", "stdio://"], {
           ...options, env: appServerEnvironment, stdio: ["pipe", "pipe", "pipe"],
         });
         return native;
@@ -1947,6 +1947,8 @@ const timeout = setTimeout(() => {
           `${materialVolumeName}:/source-repository-credentials:ro`,
           "-v",
           `${tls.certFile}:/certs/broker-ca.pem:ro`,
+          "-v",
+          `${process.env.OCE_SANDBOX_TRACE_DIR}:/diagnostics:ro`,
           "--entrypoint",
           "node",
           image,
