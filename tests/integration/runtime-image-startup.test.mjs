@@ -1672,6 +1672,14 @@ assert.equal(request("fixture/unadmitted.git/info/refs?service=git-upload-pack",
 console.log("broker-denial-codes-confirmed");
 NODE`;
     const probeSecurityOptions = await reviewedCodexSeccompSecurityOptions();
+    // Docker's default AppArmor policy denies nested mounts. CI loads a separate
+    // container policy; the existing seccomp allowlist and denial proofs still apply.
+    const apparmorProfile = process.env.OCC_TEST_CODEX_APPARMOR_PROFILE;
+    if (apparmorProfile) {
+      assert.equal(apparmorProfile, "oce-ci-codex-sandbox");
+      assert.ok(process.env.CI && process.env.OPENCLAW_ENTERPRISE_CI_STATE);
+      probeSecurityOptions.push("--security-opt", `apparmor=${apparmorProfile}`);
+    }
     const probe = `
 const assert = require("node:assert/strict");
 const cp = require("node:child_process");
@@ -1681,6 +1689,7 @@ const { createInterface } = require("node:readline");
 function markStockBrokerStage(stage) {
   console.error("openclaw-ci-stock-broker-stage=" + stage);
 }
+${apparmorProfile ? `assert.equal(fs.readFileSync("/proc/self/attr/current", "utf8").trim(), "${apparmorProfile} (enforce)", "CI sandbox AppArmor policy must be enforced");` : ""}
 markStockBrokerStage("material-init");
 const material = cp.spawnSync(process.execPath, ["-e", ${JSON.stringify(REPOSITORY_MATERIAL_INIT_ENTRYPOINT)}, ${JSON.stringify(JSON.stringify(descriptor))}], {
   stdio: "inherit",

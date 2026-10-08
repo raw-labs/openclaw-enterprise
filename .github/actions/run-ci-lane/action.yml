@@ -105,7 +105,7 @@ runs:
       if: inputs.lane == 'checks-browser' || (inputs.lane == 'checks-baseline-1' && inputs.static-checks == 'false')
       shell: bash
       run: pnpm docs:install
-    - name: Allow the runtime Codex sandbox helper to create namespaces
+    - name: Load the runtime Codex AppArmor policies
       id: codex-userns
       if: inputs.lane == 'images-runtime-startup'
       shell: bash
@@ -123,6 +123,8 @@ runs:
         }
         PROFILE
         sudo apparmor_parser -r "$profile"
+        sudo apparmor_parser -r .github/actions/run-ci-lane/codex-sandbox.apparmor
+        echo "OCC_TEST_CODEX_APPARMOR_PROFILE=oce-ci-codex-sandbox" >> "$GITHUB_ENV"
         docker info --format 'Docker security options: {{json .SecurityOptions}}'
     - name: Run typecheck
       if: inputs.lane == 'checks-baseline-1'
@@ -198,10 +200,12 @@ runs:
       if: always()
       shell: bash
       run: node scripts/ci/cleanup.mjs --state "$RUNNER_TEMP/state/${{ inputs.lane }}.json"
-    - name: Unload the job-owned Codex namespace profile
+    - name: Unload the job-owned Codex AppArmor policies
       if: always() && steps.codex-userns.outcome == 'success'
       shell: bash
-      run: sudo apparmor_parser -R "$RUNNER_TEMP/oce-ci-codex-userns"
+      run: |
+        sudo apparmor_parser -R .github/actions/run-ci-lane/codex-sandbox.apparmor
+        sudo apparmor_parser -R "$RUNNER_TEMP/oce-ci-codex-userns"
     - name: Export image cleanup reconciliation
       id: image_reconciliation
       if: always() && inputs.lane == 'images-packaging'

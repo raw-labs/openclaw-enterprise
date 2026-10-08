@@ -338,9 +338,9 @@ jobs:
     name: Runtime Image Fixture
     needs: impact
     if: ${{ needs.impact.outputs.mode == 'full' || (needs.impact.outputs.mode == 'tests' && needs.impact.outputs.fixture == 'true') }}
-    # Ephemeral jobs receive a fresh VM and the job's existing Docker engine.
+    # This fixture admits only GitHub-hosted jobs with a fresh VM and the job's existing Docker engine.
     # Only this lane writes fixture tags; its process awaits each Docker command.
-    runs-on: ${{ vars.CI_COMPAT_RUNNER || 'ubuntu-22.04' }}
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

@@ -214,15 +214,20 @@ Configure runner labels through repository Actions variables:
 
 The runner app and runner group must admit the repository, including public
 repositories when applicable. `CI_COMPAT_RUNNER` selects the Ubuntu 22.04 host
-for Kubernetes fixtures, observability, sandboxed Chromium, runtime fixtures and
+for Kubernetes fixtures, observability, sandboxed Chromium and
 first-Agent smoke. Remaining automatic lanes use `CI_RUNNER`, except the repository
-platform lane, which uses `CI_LARGE_RUNNER`. Use ephemeral VMs with sudo, Docker and enforcing NetworkPolicies.
+platform lane, which uses `CI_LARGE_RUNNER`. The small runtime-image fixture stays
+on GitHub-hosted Ubuntu 22.04: its existing host-admission contract requires it.
+Use ephemeral VMs with sudo, Docker and enforcing NetworkPolicies.
 
-The first runtime startup lane loads a job-owned AppArmor profile permitting
-user namespaces for Codex's packaged `bwrap` helper and unloads it during cleanup.
-Global namespace restrictions stay enabled. The lane logs Docker's active security
-options; a host's default container policy can still prevent nested Codex mounts.
-The existing seccomp, filesystem and network denial assertions remain required.
+The startup lane loads the packaged `bwrap` namespace profile and the
+[job-owned container policy](../../.github/actions/run-ci-lane/codex-sandbox.apparmor).
+`OCC_TEST_CODEX_APPARMOR_PROFILE=oce-ci-codex-sandbox` selects and verifies the enforced
+policy only for the stock Codex broker probe. It admits nested mounts, retaining
+Docker's proc/sys denials. Digest-verified seccomp limits mount flags; non-root,
+read-only, dropped-capability and no-new-privileges settings remain. Existing
+filesystem and network denials must pass. Cleanup unloads both profiles; global
+AppArmor and namespace restrictions stay enabled.
 
 Require `CI Required` on the integration branch after a successful baseline run;
 block force pushes and deletion. Run update candidates through CI before
