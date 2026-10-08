@@ -1,0 +1,24 @@
+name: Sandbox Host Compatibility
+on:
+  push:
+    branches: [codex/depot-sandbox-compatibility]
+    paths: [.github/workflows/sandbox-compatibility.yml]
+permissions:
+  contents: read
+env:
+  CI: "1"
+jobs:
+  sandbox:
+    name: Untraced sandbox on standard Ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/run-ci-lane
+        with:
+          lane: images-runtime-startup
+          profile: full
+          node-version: "24.16.0"
+          artifact-prefix: compatibility

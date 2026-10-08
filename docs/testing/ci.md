@@ -27,7 +27,7 @@ Compare per-file `wallDurationMs`, preparation `[ci-timing]` phases and Actions 
 
 `static-checks` runs `pnpm docs:check` and the [dependency policy](repository-boundaries.md). Pages above 1,500 visible words require review; above 2,500 fail except the approved [API reference](../reference/api.md) and `AGENTS.md` files. The generated API, site build, navigation, and links must pass. The [specification check](../contributing/specifications.md#status-and-review) also validates non-archived RFC metadata and spec link targets. Run `pnpm docs:check-length` for word counts alone.
 
-CI Impact and Suite Audit start independently. Full mode runs the nineteen-lane matrix and `runtime-image-fixture`; `CI Required` requires their outcomes and same-source artifacts. Kubernetes fixture and observability lanes use `ubuntu-22.04` for bridge netfilter support; `runtime-image-fixture` and `CI Required` also use it. The repository credential platform lane uses `CI_LARGE_RUNNER` (default `blacksmith-16vcpu-ubuntu-2404`) to build the delivered runtime image and platform fixture in one job; other configurable lanes and the audit use `CI_RUNNER` (default `blacksmith-8vcpu-ubuntu-2404`).
+CI Impact and Suite Audit start independently. Full mode runs the nineteen-lane matrix and `runtime-image-fixture`; `CI Required` requires their outcomes and same-source artifacts. [Runner settings](#downstream-runners-and-integration) select compatible hosts for Kubernetes fixtures, browser authentication and first-Agent smoke, with a larger host for the repository credential platform lane.
 
 In every mode, `static-checks` verifies checkout identity and runs the workspace, lint, format, OpenAPI and docs checks beside the lanes. The docs check covers word limits, site links and navigation, but not outgoing links in root or `specs/` Markdown. Docs mode (a verified documentation-only PR merge tree) runs no product tests. `CI Required` verifies the mode and requires successful impact, audit and static checks, with docs mode's test jobs skipped. Missing, failed, cancelled or unexpectedly skipped selected jobs fail. Docs mode does not run the test-result aggregator or require test artifacts.
 
@@ -204,13 +204,14 @@ and qualify its exact commit before building a downstream release.
 
 Configure runner labels through repository Actions variables:
 
-| Variable                 | Default                            | Downstream setting          |
-| ------------------------ | ---------------------------------- | --------------------------- |
-| `CI_COMPAT_RUNNER`       | `ubuntu-22.04`                     | `depot-ubuntu-22.04-8`      |
-| `CI_RUNNER`              | `blacksmith-8vcpu-ubuntu-2404`     | `depot-ubuntu-24.04-8`      |
-| `CI_LARGE_RUNNER`        | `blacksmith-16vcpu-ubuntu-2404`    | `depot-ubuntu-24.04-16`     |
-| `CONTAINER_AMD64_RUNNER` | `blacksmith-16vcpu-ubuntu-2404`    | `depot-ubuntu-24.04-16`     |
-| `CONTAINER_ARM64_RUNNER` | `blacksmith-8vcpu-ubuntu-2404-arm` | `depot-ubuntu-24.04-arm-16` |
+| Variable                     | Default                            | Downstream setting           |
+| ---------------------------- | ---------------------------------- | ---------------------------- |
+| `CI_COMPAT_RUNNER`           | `ubuntu-22.04`                     | `depot-ubuntu-22.04-8`       |
+| `CI_RUNNER`                  | `blacksmith-8vcpu-ubuntu-2404`     | `depot-ubuntu-24.04-8`       |
+| `CI_LARGE_RUNNER`            | `blacksmith-16vcpu-ubuntu-2404`    | `depot-ubuntu-24.04-16`      |
+| `CI_RUNNER_FILE_CONCURRENCY` | lane default                       | `1` (configuration fixtures) |
+| `CONTAINER_AMD64_RUNNER`     | `blacksmith-16vcpu-ubuntu-2404`    | `depot-ubuntu-24.04-16`      |
+| `CONTAINER_ARM64_RUNNER`     | `blacksmith-8vcpu-ubuntu-2404-arm` | `depot-ubuntu-24.04-arm-16`  |
 
 The runner app and runner group must admit the repository, including public
 repositories when applicable. `CI_COMPAT_RUNNER` selects the Ubuntu 22.04 host
@@ -220,7 +221,12 @@ platform lane, which uses `CI_LARGE_RUNNER`. The small runtime-image fixture sta
 on GitHub-hosted Ubuntu 22.04: its existing host-admission contract requires it.
 Use ephemeral VMs with sudo, Docker and enforcing NetworkPolicies.
 
-The startup lane loads the packaged `bwrap` namespace profile and the
+The concurrency override applies only to Kubernetes configuration fixture files.
+Native image checks also need `CONTAINER_NODE_BASE_IMAGE`; follow the
+[container operator setup](../../.github/containers.md#operator-setup).
+
+The startup lane loads the packaged `bwrap` namespace profile on kernels with
+Ubuntu's namespace restriction, plus the
 [job-owned container policy](../../.github/actions/run-ci-lane/codex-sandbox.apparmor).
 `OCC_TEST_CODEX_APPARMOR_PROFILE=oce-ci-codex-sandbox` selects and verifies the enforced
 policy only for the stock Codex broker probe. It admits nested mounts, retaining
