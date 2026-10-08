@@ -772,7 +772,7 @@ vm.runInNewContext(fs.readFileSync(0, "utf8"), {
         const appServerEnvironment = options.env ?? environment;
         assert.equal(Object.hasOwn(appServerEnvironment, "APP_SERVER_TOKEN"), false);
         assert.equal(Object.hasOwn(appServerEnvironment, "APP_TOKEN_SHA"), false);
-        native = cp.spawn("/diagnostics/usr/bin/strace", ["-f", "-s", "160", "-e", "trace=execve,clone,unshare,mount,capset,prctl", command, ...args.slice(0, appServer + 1), "--listen", "stdio://"], {
+        native = cp.spawn(command, [...args.slice(0, appServer + 1), "--listen", "stdio://"], {
           ...options, env: appServerEnvironment, stdio: ["pipe", "pipe", "pipe"],
         });
         return native;
@@ -1809,7 +1809,7 @@ vm.runInNewContext(${JSON.stringify(AGENT_RUNTIME_ENTRYPOINT)}, {
       spawn(command, args, options) {
         const appServer = args.indexOf("app-server");
         assert.ok(appServer > 0);
-        native = cp.spawn(command, [...args.slice(0, appServer + 1), "--listen", "stdio://"], {
+        native = cp.spawn("/diagnostics/usr/bin/strace", ["-f", "-s", "160", "-e", "trace=execve,clone,unshare,mount,capset,prctl", command, ...args.slice(0, appServer + 1), "--listen", "stdio://"], {
           ...options, env: environment, stdio: ["pipe", "pipe", "pipe"],
         });
         return native;
