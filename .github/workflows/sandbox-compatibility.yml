@@ -2,7 +2,9 @@ name: Sandbox Host Compatibility
 on:
   push:
     branches: [codex/depot-sandbox-compatibility]
-    paths: [.github/workflows/sandbox-compatibility.yml]
+    paths:
+      - .github/workflows/sandbox-compatibility.yml
+      - .github/actions/run-ci-lane/**
 permissions:
   contents: read
 env:

@@ -20,6 +20,10 @@ inputs:
       separate job).
     required: false
     default: "true"
+  file-concurrency:
+    description: Optional test-file concurrency override for the selected lane.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -176,7 +180,7 @@ runs:
       shell: bash
       env:
         # Keep configuration fixture files serial on hosts with observed API drops.
-        CI_RUNNER_FILE_CONCURRENCY: ${{ inputs.lane == 'k3d-fixture-configuration' && vars.CI_RUNNER_FILE_CONCURRENCY || '' }}
+        CI_RUNNER_FILE_CONCURRENCY: ${{ inputs.file-concurrency }}
         CI_RUNNER_TEST_TIMEOUT_MS: ${{ (startsWith(inputs.lane, 'checks-baseline-') || startsWith(inputs.lane, 'checks-browser')) && '300000' || (inputs.lane == 'k3d-model' || inputs.lane == 'openshell') && '5400000' || '' }}
         # Browser tests write screenshots and failure.json (console, network
         # and navigation log) here only when a test fails. Limited to the
