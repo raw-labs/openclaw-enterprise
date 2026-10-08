@@ -206,21 +206,23 @@ Configure runner labels through repository Actions variables:
 
 | Variable                 | Default                            | Downstream setting          |
 | ------------------------ | ---------------------------------- | --------------------------- |
+| `CI_COMPAT_RUNNER`       | `ubuntu-22.04`                     | `depot-ubuntu-22.04-8`      |
 | `CI_RUNNER`              | `blacksmith-8vcpu-ubuntu-2404`     | `depot-ubuntu-24.04-8`      |
 | `CI_LARGE_RUNNER`        | `blacksmith-16vcpu-ubuntu-2404`    | `depot-ubuntu-24.04-16`     |
 | `CONTAINER_AMD64_RUNNER` | `blacksmith-16vcpu-ubuntu-2404`    | `depot-ubuntu-24.04-16`     |
 | `CONTAINER_ARM64_RUNNER` | `blacksmith-8vcpu-ubuntu-2404-arm` | `depot-ubuntu-24.04-arm-16` |
 
 The runner app and runner group must admit the repository, including public
-repositories when applicable. Kubernetes fixture and observability jobs use
-GitHub-hosted Ubuntu 22.04 for bridge netfilter support; PostgreSQL authentication
-uses it for sandboxed Chromium. The first image runtime startup lane uses
-GitHub-hosted Ubuntu 24.04 for the Codex sandbox and network proxy. Changing a
-label does not establish that its runner supports these isolation requirements.
-The startup lane loads a job-owned AppArmor profile permitting user namespaces
-for Codex's packaged `bwrap` helper, then unloads it during cleanup. The host's
-global namespace restriction stays enabled; runtime seccomp and sandbox checks
-remain required.
+repositories when applicable. `CI_COMPAT_RUNNER` selects the Ubuntu 22.04 host
+for Kubernetes fixtures, observability, sandboxed Chromium, runtime fixtures and
+first-Agent smoke. Remaining automatic lanes use `CI_RUNNER`, except the repository
+platform lane, which uses `CI_LARGE_RUNNER`. Use ephemeral VMs with sudo, Docker and enforcing NetworkPolicies.
+
+The first runtime startup lane loads a job-owned AppArmor profile permitting
+user namespaces for Codex's packaged `bwrap` helper and unloads it during cleanup.
+Global namespace restrictions stay enabled. The lane logs Docker's active security
+options; a host's default container policy can still prevent nested Codex mounts.
+The existing seccomp, filesystem and network denial assertions remain required.
 
 Require `CI Required` on the integration branch after a successful baseline run;
 block force pushes and deletion. Run update candidates through CI before
