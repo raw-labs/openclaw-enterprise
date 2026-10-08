@@ -170,6 +170,10 @@ runs:
         ACTIONS_RUNTIME_TOKEN: ${{ steps.image-cache.outputs.token }}
         ACTIONS_RESULTS_URL: ${{ steps.image-cache.outputs.url }}
       run: node scripts/ci/prepare.mjs --lane "${{ inputs.lane }}" --state "$RUNNER_TEMP/state/${{ inputs.lane }}.json" --github-env "$GITHUB_ENV"
+    - name: Diagnose the sandbox host
+      if: inputs.lane == 'images-runtime-startup'
+      shell: bash
+      run: bash scripts/ci/depot-sandbox-diagnostics.sh
     - name: Run lane
       shell: bash
       env:
