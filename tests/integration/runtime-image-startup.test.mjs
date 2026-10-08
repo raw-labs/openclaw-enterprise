@@ -1593,9 +1593,16 @@ server.listen(443, "0.0.0.0", () => console.log("broker-forwarder-ready"));
       manifest: { kind: "codex", selections: {} },
       brokerCodexConfiguration,
     };
+    const apparmorProfile = process.env.OCC_TEST_CODEX_APPARMOR_PROFILE;
     const proxyEnvironmentProbe = [
       "node <<'NODE'",
       'const assert = require("node:assert/strict");',
+      // The actual sandboxed child must retain the container's enforcing policy.
+      ...(apparmorProfile
+        ? [
+            'assert.equal(require("node:fs").readFileSync("/proc/self/attr/current", "utf8").trim(), "oce-ci-codex-sandbox (enforce)");',
+          ]
+        : []),
       "const env = process.env;",
       'assert.equal(env.CODEX_NETWORK_PROXY_ACTIVE, "1");',
       'assert.equal(env.CODEX_NETWORK_ALLOW_LOCAL_BINDING, "1");',
@@ -1674,7 +1681,6 @@ NODE`;
     const probeSecurityOptions = await reviewedCodexSeccompSecurityOptions();
     // Docker's default AppArmor policy denies nested mounts. CI loads a separate
     // container policy; the existing seccomp allowlist and denial proofs still apply.
-    const apparmorProfile = process.env.OCC_TEST_CODEX_APPARMOR_PROFILE;
     if (apparmorProfile) {
       assert.equal(apparmorProfile, "oce-ci-codex-sandbox");
       assert.ok(process.env.CI && process.env.OPENCLAW_ENTERPRISE_CI_STATE);

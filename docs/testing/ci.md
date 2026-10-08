@@ -199,8 +199,7 @@ See [no GitHub workflow entrypoint](ci-manual-integration.md#no-github-workflow-
 ## Downstream runners and integration
 
 The `codex/raw-integration` branch runs CI and CodeQL on pushes. Keep `main`
-aligned with upstream; merge selected topic branches into the integration branch
-and qualify its exact commit before building a downstream release.
+aligned with upstream; qualify combined topic changes before downstream release.
 
 Configure runner labels through repository Actions variables:
 
@@ -225,19 +224,20 @@ The concurrency override applies only to Kubernetes configuration fixture files.
 Native image checks also need `CONTAINER_NODE_BASE_IMAGE`; follow the
 [container operator setup](../../.github/containers.md#operator-setup).
 
-The startup lane loads the packaged `bwrap` namespace profile on kernels with
-Ubuntu's namespace restriction, plus the
-[job-owned container policy](../../.github/actions/run-ci-lane/codex-sandbox.apparmor).
+The startup lane and native runtime-image smoke load the
+[job-owned container policy](../../.github/actions/run-ci-lane/codex-sandbox.apparmor)
+when Docker advertises AppArmor support. Both use the same
+[setup and cleanup helper](../../.github/actions/run-ci-lane/codex-sandbox.sh).
 `OCC_TEST_CODEX_APPARMOR_PROFILE=oce-ci-codex-sandbox` is forwarded through prepared state and verifies the enforced
 policy only for the stock Codex broker probe. It admits nested mounts, retaining
 Docker's proc/sys denials. Digest-verified seccomp limits mount flags; non-root,
 read-only, dropped-capability and no-new-privileges settings remain. Existing
-filesystem and network denials must pass. Cleanup unloads loaded profiles; global
+filesystem and network denials must pass. The sandboxed child must retain the
+enforced policy. Cleanup unloads the job-owned profile; global
 AppArmor and namespace restrictions stay enabled.
 
 Require `CI Required` on the integration branch after a successful baseline run;
-block force pushes and deletion. Run update candidates through CI before
-advancing the branch. Existing upstream PRs remain on their topic branches.
+block force pushes and deletion. Existing upstream PRs retain their topic branches.
 Downstream release packaging belongs to the release bundle: the upstream
 publication workflows enforce upstream repository and branch identity and do
 not publish downstream images. Credentialed qualification remains separate

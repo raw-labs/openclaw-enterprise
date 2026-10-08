@@ -57,7 +57,7 @@ coverage groups. `loadTestSuites` assembles their `scripts/ci/test-suites/<lane>
 files into a map consumed by the runner and preparation tools. Each lane owns its
 test inventory, environment, required inputs, and preparation settings.
 
-CI uses the event checkout without external service credentials. Impact and Suite Audit start independently. In every mode, `static-checks` verifies checkout identity and runs the workspace, lint, format, OpenAPI and docs checks, but no product tests; docs mode runs only it. Full mode runs all lanes; tests mode runs selected lanes. Kubernetes fixture, observability, authentication and first-Agent smoke use `CI_COMPAT_RUNNER` (default `ubuntu-22.04`). Runtime fixture requires GitHub hosting. Runtime startup forwards the scoped AppArmor selection through prepared state. Configuration fixtures honor the repository file-concurrency override. The repository credential platform lane uses `CI_LARGE_RUNNER`; configurable remaining lanes and audit use `CI_RUNNER`. See [runner settings](../testing/ci.md#downstream-runners-and-integration).
+CI uses the event checkout without external service credentials. Impact and Suite Audit start independently. `static-checks` verifies checkout identity and runs workspace, lint, format, OpenAPI and docs checks without product tests. Full mode runs all lanes; tests mode runs selected lanes. Runner variables select host compatibility and capacity; the runtime fixture requires GitHub hosting. Configuration fixtures honor the file-concurrency override. See [runner settings](../testing/ci.md#downstream-runners-and-integration).
 
 For a PR, the selector verifies the tested checkout and that the event head is the merge's second parent, then compares the first parent (the current base) and tested trees. Git path decoding preserves a leading UTF-8 BOM as filename data; paths outside the allowlist select full. API reference outputs and Markdown under `docs/reference/api/` select full for `openapi:check`. Only nonempty changes to allowlisted regular Markdown files select docs mode. Registered test files (with documentation and their own lane manifest entries) select tests mode: their `ci` lanes in either tree plus `checks-baseline-1`. Other test-tree, code, configuration, workflow or unknown changes and non-PR events select full. Missing or unverifiable policy or source evidence selects full or fails closed. Policy comes from that first parent; a base without it selects full. `CI Required` re-verifies the mode (and tests mode's lane set) and requires impact, audit and every selected job to succeed and the rest skipped. Missing, failed, cancelled, or unexpectedly skipped selected jobs fail the gate. Full and tests modes aggregate same-source results of their lanes; docs mode does not aggregate or invent test artifacts.
 
@@ -123,6 +123,12 @@ Native runtime-image tests trust a dynamic Codex Docker seccomp profile only whe
 that state is not CI proof; the standalone fallback remains the pinned reviewed
 manual profile. Production node provisioning remains outside CI ownership; see
 [Codex sandbox setup](../guides/deploy/codex-sandbox.md).
+
+On AppArmor hosts, `.github/actions/run-ci-lane/codex-sandbox.sh` loads the
+job-owned container policy for startup and native-image smoke.
+`prepareRuntimeSmokeCodexSeccompProfile` forwards its selection through prepared
+state. The stock broker probe verifies parent and child enforcement; always-run
+cleanup removes only this job's profile.
 
 ### 3. Execute and account for actual cases
 

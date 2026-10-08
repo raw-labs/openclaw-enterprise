@@ -1875,6 +1875,11 @@ async function prepareRuntimeSmokeCodexSeccompProfile(statePath, state, env, cre
   }
   env.OCC_TEST_CODEX_SECCOMP_PROFILE = seccomp.dockerProfilePath;
   env.OCC_TEST_KUBERNETES_CODEX_SECCOMP_PROFILE = seccomp.profileName;
+  // Lane execution filters inherited OCC_TEST_* settings. Preserve the
+  // job-owned container policy explicitly for both runtime smoke entry points.
+  if (process.env.OCC_TEST_CODEX_APPARMOR_PROFILE) {
+    env.OCC_TEST_CODEX_APPARMOR_PROFILE = process.env.OCC_TEST_CODEX_APPARMOR_PROFILE;
+  }
   cluster.codexSeccompProfile = seccomp.profileName;
   cluster.codexSeccompProfiles = seccomp.nodes;
   cluster.codexDockerSeccompProfile = {
@@ -2066,11 +2071,6 @@ async function prepareLane({ lane, statePath }) {
       Object.assign(env, built.env);
       if (codexSeccomp) {
         await prepareRuntimeSmokeCodexSeccompProfile(resolvedStatePath, state, env, cluster);
-        // The runner strips inherited OCC_TEST_* settings; forward this job-owned
-        // policy through prepared state so the stock broker probe actually selects it.
-        if (process.env.OCC_TEST_CODEX_APPARMOR_PROFILE) {
-          env.OCC_TEST_CODEX_APPARMOR_PROFILE = process.env.OCC_TEST_CODEX_APPARMOR_PROFILE;
-        }
       }
       break;
     }
