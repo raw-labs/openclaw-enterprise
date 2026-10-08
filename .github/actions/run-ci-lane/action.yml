@@ -125,7 +125,7 @@ runs:
         sudo apparmor_parser -r "$profile"
         sudo apparmor_parser -r .github/actions/run-ci-lane/codex-sandbox.apparmor
         echo "OCC_TEST_CODEX_APPARMOR_PROFILE=oce-ci-codex-sandbox" >> "$GITHUB_ENV"
-        docker info --format 'Docker security options: {{json .SecurityOptions}}'
+        docker info --format 'Docker {{.ServerVersion}}, kernel {{.KernelVersion}}, security {{json .SecurityOptions}}'
     - name: Run typecheck
       if: inputs.lane == 'checks-baseline-1'
       shell: bash
