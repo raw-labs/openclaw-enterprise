@@ -52,7 +52,7 @@ int main(void) {
 SOURCE
 node_base='docker.io/library/node:24-bookworm@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584'
 docker run --rm --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --mount "type=bind,src=$diagnostics,dst=/diagnostics" --entrypoint gcc "$node_base" -O0 -o /diagnostics/mount /diagnostics/mount.c
-docker run --rm --mount "type=bind,src=$diagnostics,dst=/diagnostics" --entrypoint sh "$node_base" -c 'apt-get update -qq; cd /diagnostics; apt-get download strace; dpkg-deb -x strace*.deb /diagnostics'
+docker run --rm --mount "type=bind,src=$diagnostics,dst=/diagnostics" --entrypoint sh "$node_base" -c 'apt-get update -qq; cd /diagnostics; apt-get download strace libunwind8; for deb in *.deb; do dpkg-deb -x "$deb" /diagnostics; done'
 echo "OCE_SANDBOX_TRACE_DIR=$diagnostics" >> "$GITHUB_ENV"
 sudo aa-status || true
 sudo sysctl kernel.apparmor_restrict_unprivileged_userns kernel.apparmor_restrict_unprivileged_userns_force || true
@@ -61,3 +61,5 @@ sudo cat /sys/kernel/security/lsm || true
 sudo cat /sys/kernel/security/apparmor/features/mount/mask || true
 sudo cat /sys/kernel/security/apparmor/profiles | grep -E 'oce|docker|userns|runc' || true
 docker run --rm --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges --security-opt "seccomp=$OCC_TEST_CODEX_SECCOMP_PROFILE" --security-opt apparmor=oce-ci-codex-sandbox --mount "type=bind,src=$diagnostics,dst=/diagnostics,readonly" --entrypoint /diagnostics/mount "$OCC_TEST_RUNTIME_IMAGE"
+
+docker run --rm --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges --security-opt "seccomp=$OCC_TEST_CODEX_SECCOMP_PROFILE" --security-opt apparmor=oce-ci-codex-sandbox --mount "type=bind,src=$diagnostics,dst=/diagnostics,readonly" -e LD_LIBRARY_PATH=/diagnostics/usr/lib/x86_64-linux-gnu --entrypoint /diagnostics/usr/bin/strace "$OCC_TEST_RUNTIME_IMAGE" -V

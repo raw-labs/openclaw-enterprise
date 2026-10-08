@@ -1810,7 +1810,7 @@ vm.runInNewContext(${JSON.stringify(AGENT_RUNTIME_ENTRYPOINT)}, {
         const appServer = args.indexOf("app-server");
         assert.ok(appServer > 0);
         native = cp.spawn("/diagnostics/usr/bin/strace", ["-f", "-s", "160", "-e", "trace=execve,clone,unshare,mount,capset,prctl", command, ...args.slice(0, appServer + 1), "--listen", "stdio://"], {
-          ...options, env: environment, stdio: ["pipe", "pipe", "pipe"],
+          ...options, env: { ...environment, LD_LIBRARY_PATH: "/diagnostics/usr/lib/x86_64-linux-gnu" }, stdio: ["pipe", "pipe", "pipe"],
         });
         return native;
       },
