@@ -201,7 +201,22 @@ runs:
     - name: Report sandbox host policy denials
       if: failure() && inputs.lane == 'images-runtime-startup'
       shell: bash
-      run: sudo dmesg --ctime | grep -E 'apparmor="(DENIED|AUDIT|ALLOWED)"|unprivileged_userns' | tail -n 40 || true
+      run: |
+        sudo journalctl -k --no-pager --since '-10 minutes' > "$RUNNER_TEMP/aa-journal"
+        sudo cat /var/log/audit/audit.log > "$RUNNER_TEMP/aa-audit" 2>/dev/null || true
+        node --input-type=module <<'NODE'
+        import { readFileSync } from 'node:fs';
+        for (const name of ['aa-journal', 'aa-audit']) {
+          const rows = readFileSync(`${process.env.RUNNER_TEMP}/${name}`, 'utf8').split('\n');
+          for (const row of rows) {
+            const result = row.match(/apparmor="(DENIED|AUDIT|ALLOWED)"/)?.[1];
+            const operation = row.match(/operation="(mount|capable|userns_create|exec|ptrace)"/)?.[1];
+            if (!result || !operation) continue;
+            const profile = ['oce-ci-codex-sandbox', 'docker-default', 'oce-ci-codex-userns', 'unprivileged_userns'].filter((value) => row.includes(`profile="${value}`)).join('+') || 'other';
+            console.log({result, operation, profile});
+          }
+        }
+        NODE
     - name: Cleanup lane
       if: always()
       shell: bash

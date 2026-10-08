@@ -1809,7 +1809,7 @@ vm.runInNewContext(${JSON.stringify(AGENT_RUNTIME_ENTRYPOINT)}, {
       spawn(command, args, options) {
         const appServer = args.indexOf("app-server");
         assert.ok(appServer > 0);
-        native = cp.spawn("/diagnostics/usr/bin/strace", ["-f", "-s", "160", "-e", "trace=execve,clone,unshare,mount,capset,prctl", command, ...args.slice(0, appServer + 1), "--listen", "stdio://"], {
+        native = cp.spawn("/diagnostics/usr/bin/strace", ["-f", "-s", "160", "-e", "trace=execve,clone,unshare,mount,capset,prctl", "-e", "inject=mount:delay_enter=1s:when=1", command, ...args.slice(0, appServer + 1), "--listen", "stdio://"], {
           ...options, env: { ...environment, LD_LIBRARY_PATH: "/diagnostics/usr/lib/x86_64-linux-gnu" }, stdio: ["pipe", "pipe", "pipe"],
         });
         return native;
@@ -1830,7 +1830,22 @@ lines.on("line", (line) => {
   }
 });
 let stderr = "";
-native.stderr.on("data", (chunk) => { stderr += chunk; });
+native.stderr.on("data", (chunk) => {
+  stderr += chunk;
+  const pid = chunk.toString().match(/\[pid\s+(\d+)\]\s+mount\(/)?.[1];
+  if (!pid) return;
+  let profile = "unreadable";
+  try {
+    const label = fs.readFileSync("/proc/" + pid + "/attr/current", "utf8");
+    profile = ["oce-ci-codex-sandbox", "docker-default", "oce-ci-codex-userns", "unprivileged_userns"].filter((name) => label.includes(name)).join("+") || "other";
+  } catch {}
+  try {
+    const status = fs.readFileSync("/proc/" + pid + "/status", "utf8");
+    const caps = status.match(/^CapEff:\s*([0-9a-f]+)$/m)?.[1] || "unknown";
+    const filters = status.match(/^Seccomp_filters:\s*(\d+)$/m)?.[1] || "unknown";
+    console.error("sandbox-policy profile=" + profile + " caps=" + caps + " filters=" + filters);
+  } catch {}
+});
 const rpc = (method, params) => new Promise((resolve, reject) => {
   const id = nextId++;
   pending.set(id, { resolve, reject });
@@ -1961,7 +1976,13 @@ const timeout = setTimeout(() => {
       const mount = error.stderr?.match(
         /mount\(NULL, "\/", NULL, (MS_[A-Z_|]+), NULL\)\s*=\s*(-?\d+)\s+(E[A-Z0-9]+)/,
       );
+      const policy = error.stderr?.match(
+        /sandbox-policy profile=([a-z+-]+) caps=([0-9a-f]+|unknown) filters=(\d+|unknown)/,
+      );
       const annotated = annotateRuntimeImageStockBrokerFailure(error);
+      if (policy) {
+        annotated.message = `Policy profile=${policy[1]} caps=${policy[2]} filters=${policy[3]}: ${annotated.message}`;
+      }
       if (mount) {
         annotated.message = `Sandbox mount flags=${mount[1]} result=${mount[2]} errno=${mount[3]}: ${annotated.message}`;
       }

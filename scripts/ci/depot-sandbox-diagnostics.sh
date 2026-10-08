@@ -63,3 +63,6 @@ sudo cat /sys/kernel/security/apparmor/profiles | grep -E 'oce|docker|userns|run
 docker run --rm --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges --security-opt "seccomp=$OCC_TEST_CODEX_SECCOMP_PROFILE" --security-opt apparmor=oce-ci-codex-sandbox --mount "type=bind,src=$diagnostics,dst=/diagnostics,readonly" --entrypoint /diagnostics/mount "$OCC_TEST_RUNTIME_IMAGE"
 
 docker run --rm --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges --security-opt "seccomp=$OCC_TEST_CODEX_SECCOMP_PROFILE" --security-opt apparmor=oce-ci-codex-sandbox --mount "type=bind,src=$diagnostics,dst=/diagnostics,readonly" -e LD_LIBRARY_PATH=/diagnostics/usr/lib/x86_64-linux-gnu --entrypoint /diagnostics/usr/bin/strace "$OCC_TEST_RUNTIME_IMAGE" -V
+
+# Audit records may go to journald or auditd instead of the kernel ring buffer.
+# Output only operation names and known profile categories, never raw records.
