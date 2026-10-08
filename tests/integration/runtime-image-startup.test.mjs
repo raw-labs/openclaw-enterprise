@@ -1958,7 +1958,14 @@ const timeout = setTimeout(() => {
         probe,
       ));
     } catch (error) {
-      throw annotateRuntimeImageStockBrokerFailure(error);
+      const mount = error.stderr?.match(
+        /mount\(NULL, "\/", NULL, (MS_[A-Z_|]+), NULL\)\s*=\s*(-?\d+)\s+(E[A-Z0-9]+)/,
+      );
+      const annotated = annotateRuntimeImageStockBrokerFailure(error);
+      if (mount) {
+        annotated.message = `Sandbox mount flags=${mount[1]} result=${mount[2]} errno=${mount[3]}: ${annotated.message}`;
+      }
+      throw annotated;
     }
     const match = stdout.match(/stock-codex-repository-broker-ready (\{[^\n]+\})/);
     assert.ok(match, stdout);
