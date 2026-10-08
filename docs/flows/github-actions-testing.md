@@ -127,7 +127,7 @@ manual profile. Production node provisioning remains outside CI ownership; see
 On AppArmor hosts, `.github/actions/run-ci-lane/codex-sandbox.sh` loads the
 job-owned container policy for startup and native-image smoke.
 `prepareRuntimeSmokeCodexSeccompProfile` forwards its selection through prepared
-state. The stock broker probe verifies parent and child enforcement; always-run
+state. The stock broker container verifies enforcement; always-run
 cleanup removes only this job's profile.
 
 ### 3. Execute and account for actual cases

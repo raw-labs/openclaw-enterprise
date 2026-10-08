@@ -232,8 +232,7 @@ when Docker advertises AppArmor support. Both use the same
 policy only for the stock Codex broker probe. It admits nested mounts, retaining
 Docker's proc/sys denials. Digest-verified seccomp limits mount flags; non-root,
 read-only, dropped-capability and no-new-privileges settings remain. Existing
-filesystem and network denials must pass. The sandboxed child must retain the
-enforced policy. Cleanup unloads the job-owned profile; global
+filesystem and network denials must pass. Cleanup unloads the job-owned profile; global
 AppArmor and namespace restrictions stay enabled.
 
 Require `CI Required` on the integration branch after a successful baseline run;
