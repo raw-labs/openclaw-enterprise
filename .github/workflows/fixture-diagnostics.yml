@@ -1,20 +1,17 @@
-name: Depot Sandbox Diagnostics
+name: Depot Fixture Diagnostics
 on:
   push:
     branches: [codex/depot-sandbox-diagnostics]
-    paths:
-      - scripts/ci/depot-sandbox-diagnostics.sh
-      - tests/integration/runtime-image-startup.test.mjs
-      - .github/actions/run-ci-lane/**
-  workflow_dispatch:
+    paths: [.github/workflows/fixture-diagnostics.yml]
 permissions:
   contents: read
 env:
   CI: "1"
+  CI_RUNNER_FILE_CONCURRENCY: "1"
 jobs:
-  sandbox:
-    name: Depot sandbox diagnostics
-    runs-on: ${{ vars.CI_RUNNER }}
+  fixture:
+    name: Serialized Depot Kubernetes fixtures
+    runs-on: ${{ vars.CI_COMPAT_RUNNER }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -22,7 +19,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/run-ci-lane
         with:
-          lane: images-runtime-startup
-          profile: full
+          lane: k3d-fixture-configuration
+          profile: k3d
           node-version: "24.16.0"
           artifact-prefix: diagnostics
