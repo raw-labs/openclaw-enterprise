@@ -195,7 +195,7 @@ runs:
     - name: Report sandbox host policy denials
       if: failure() && inputs.lane == 'images-runtime-startup'
       shell: bash
-      run: sudo dmesg --ctime | grep -E 'apparmor="DENIED"|unprivileged_userns' | tail -n 40 || true
+      run: sudo dmesg --ctime | grep -E 'apparmor="(DENIED|AUDIT|ALLOWED)"|unprivileged_userns' | tail -n 40 || true
     - name: Cleanup lane
       if: always()
       shell: bash
