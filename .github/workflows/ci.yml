@@ -323,6 +323,7 @@ jobs:
           profile: ${{ matrix.profile }}
           node-version: ${{ env.NODE_VERSION }}
           artifact-prefix: ci-results
+          file-concurrency: ${{ matrix.lane == 'k3d-fixture-configuration' && vars.CI_RUNNER_FILE_CONCURRENCY || '' }}
           # Static Checks runs them in this workflow.
           static-checks: "false"
       - name: Upload repository credential image identities

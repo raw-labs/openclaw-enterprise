@@ -2066,6 +2066,11 @@ async function prepareLane({ lane, statePath }) {
       Object.assign(env, built.env);
       if (codexSeccomp) {
         await prepareRuntimeSmokeCodexSeccompProfile(resolvedStatePath, state, env, cluster);
+        // The runner strips inherited OCC_TEST_* settings; forward this job-owned
+        // policy through prepared state so the stock broker probe actually selects it.
+        if (process.env.OCC_TEST_CODEX_APPARMOR_PROFILE) {
+          env.OCC_TEST_CODEX_APPARMOR_PROFILE = process.env.OCC_TEST_CODEX_APPARMOR_PROFILE;
+        }
       }
       break;
     }
