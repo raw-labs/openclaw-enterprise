@@ -220,6 +220,11 @@ export interface SecretReference extends ResourceRef {
   readonly namespaceId: string;
 }
 
+export interface ServiceAccountReference extends ResourceRef {
+  readonly kind: "service_account";
+  readonly namespaceId: string;
+}
+
 export interface SecretIdentity {
   readonly id: string;
   readonly namespaceId: string;
@@ -242,6 +247,24 @@ export interface Secret extends SecretIdentity {
 
 export interface SecretMetadata extends SecretIdentity {
   readonly ref: SecretReference;
+}
+
+/**
+ * Current references that keep a Secret from deletion, limited to resources the caller may
+ * read. `unreadable` counts the examined references the caller may not read, without naming
+ * them; `truncated` means more references exist than OCC examined.
+ */
+export interface SecretConsumers {
+  readonly agents: readonly string[];
+  readonly configurations: readonly string[];
+  readonly credentialSources: readonly string[];
+  readonly provisioningRequests: readonly string[];
+  readonly unreadable: number;
+  readonly truncated: boolean;
+}
+
+export interface SecretDetail extends SecretMetadata {
+  readonly consumers: SecretConsumers;
 }
 
 export interface SecretBinding {
@@ -337,16 +360,31 @@ export interface CredentialWithdrawal {
  * or running. A `pending` withdrawal without one has no attempt queued (attempts ran out or a
  * permanent failure ended them): nothing retries it until the withdraw request is sent again,
  * or revision maintenance, where Compute or repository credentials schedule it, queues one.
+ * Maintenance never re-queues one whose last attempt was denied to its requester.
+ * The API reports the active revision's withdrawal unless another revision that may still run
+ * with the source has a `pending` one, preferring one with no attempt queued.
  */
 export interface CredentialWithdrawalStatus extends CredentialWithdrawal {
   readonly withdrawalInProgress: boolean;
+}
+
+/** A non-model credential source the Agent's Harness may use at its source's endpoints. */
+export interface AgentCredentialSourceBinding {
+  readonly sourceId: string;
+}
+
+/** Private admission metadata for one non-model source frozen into a revision. */
+export interface CredentialSourceSnapshot {
+  readonly sourceId: string;
+  readonly credentialGatewayId: string;
+  readonly sourceType: string;
 }
 
 export type HarnessAuthBinding =
   | { readonly method: "api_key"; readonly source: SecretReference }
   | { readonly method: "codex_pat"; readonly source: SecretReference }
   | { readonly method: "oauth"; readonly source: SecretReference }
-  | { readonly method: "chatgpt_service_account"; readonly serviceAccountId: string }
+  | { readonly method: "codex_pat"; readonly source: ServiceAccountReference }
   | { readonly method: "credential_source"; readonly sourceId: string }
   | { readonly method: "runtime" };
 
@@ -369,8 +407,8 @@ export type HarnessAuthSnapshot =
       readonly secretDriverId: string;
     }
   | {
-      readonly method: "chatgpt_service_account";
-      readonly serviceAccountId: string;
+      readonly method: "codex_pat";
+      readonly source: ServiceAccountReference;
       readonly credential: ServiceAccountCredential & { readonly kind: "access_token" };
       readonly backendBinding: {
         readonly backendId: string;
@@ -389,17 +427,19 @@ export type HarnessAuthSnapshot =
 
 /** Authoritative delivery references, resolved again at dispatch; never secret values. */
 export type ResolvedHarnessAuth =
-  | (Extract<HarnessAuthSnapshot, { method: "api_key" | "codex_pat" | "oauth" }> & {
+  | (Extract<HarnessAuthSnapshot, { source: SecretReference }> & {
       readonly backendRef: SecretBackendRef;
     })
   | (Extract<HarnessAuthSnapshot, { method: "credential_source" }> & {
       readonly source: Readonly<CredentialSource>;
     })
-  | Extract<HarnessAuthSnapshot, { method: "chatgpt_service_account" | "runtime" }>;
+  | Extract<HarnessAuthSnapshot, { source: ServiceAccountReference } | { method: "runtime" }>;
 
 export interface ComputeRevisionContext {
   readonly workspaceSetup?: Readonly<WorkspaceSetup>;
   readonly harnessAuth: ResolvedHarnessAuth;
+  /** Non-model sources resolved again at dispatch, in admission order. */
+  readonly credentialSources?: readonly Readonly<CredentialSource>[];
   readonly secretEnvironment: readonly SecretEnvironmentProjection[];
   readonly repositoryCredentials?: readonly RepositoryCredentialRuntimeBinding[];
 }
@@ -623,6 +663,7 @@ export interface Agent extends Scope {
   readonly configurationId: string;
   readonly backendId: BackendRef;
   readonly harnessAuth: HarnessAuthBinding | null;
+  readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode: HarnessExecutionMode;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
@@ -642,6 +683,7 @@ export interface ConfigurationReadError {
     | "repositoryBindings"
     | "repositoryAccess"
     | "harnessAuth"
+    | "credentialSources"
     | "secretBindings"
     | "repositoryCredentials"
     | "configuration";
@@ -649,7 +691,12 @@ export interface ConfigurationReadError {
 
 export type AgentMetadata = Omit<
   Agent,
-  "plugins" | "pluginApprovers" | "repositoryBindings" | "repositoryAccess" | "harnessAuth"
+  | "plugins"
+  | "pluginApprovers"
+  | "repositoryBindings"
+  | "repositoryAccess"
+  | "harnessAuth"
+  | "credentialSources"
 >;
 
 export type AgentRead =
@@ -706,6 +753,7 @@ export interface AgentRevision extends Scope {
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryCredentials?: RepositoryRevisionState;
   readonly harnessAuth: HarnessAuthSnapshot;
+  readonly credentialSources?: readonly CredentialSourceSnapshot[];
   readonly servicePrincipalId: string;
   readonly createdAt: string;
 }
@@ -736,6 +784,9 @@ export function freezeAgentRevision(revision: AgentRevision): Readonly<AgentRevi
     harness: Object.freeze({ ...revision.harness }),
     compute: Object.freeze({ ...revision.compute }),
     harnessAuth: immutableCopy(revision.harnessAuth),
+    ...(revision.credentialSources === undefined
+      ? {}
+      : { credentialSources: immutableCopy(revision.credentialSources) }),
   });
 }
 
@@ -771,6 +822,7 @@ export const PERMISSION_ACTIONS = Object.freeze([
   "operate",
   "administer",
   "read_logs",
+  "use",
 ] as const);
 
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
@@ -799,6 +851,7 @@ export const SUPPORTED_PERMISSION_ACTIONS: Readonly<
     "operate",
     "administer",
     "read_logs",
+    "use",
   ] as const),
   agent_revision: Object.freeze(["read"] as const),
 });
@@ -833,12 +886,49 @@ export interface GroupMembership extends Scope {
 
 export type AccessBindingSubjectKind = "identity" | "group";
 
+/** Runtime role names are opaque to IAM; the selected Compute Driver owns their meaning. */
+export interface RuntimeAccessDecision extends AuthorizationDecision {
+  readonly runtimeRole?: string;
+}
+
+/** Explicit full runtime access, including upgrades from Agent administer grants. Compute owns its policy. */
+export const ADMINISTRATOR_RUNTIME_ROLE = "platform-administrator";
+
+export interface AgentRuntimeRole {
+  readonly id: string;
+  readonly permissions: Readonly<Record<string, unknown>>;
+}
+
+export interface AgentRuntimeRoleCatalog {
+  readonly configuration: Pick<Configuration, "id" | "generation">;
+  readonly roles: readonly AgentRuntimeRole[];
+  readonly desiredRuntimeState: AgentDesiredRuntimeState;
+  readonly activeRevision?: {
+    readonly id: string;
+    readonly roles: readonly AgentRuntimeRole[];
+  };
+}
+
+export type AgentRuntimeAccessUnavailableReason =
+  "role_unavailable" | "device_approval_required" | "transport_unsupported";
+
+export interface AgentRuntimeAccessUnavailable {
+  readonly reason: AgentRuntimeAccessUnavailableReason;
+}
+
+export interface AgentRuntimeAccess {
+  readonly endpoint: string;
+  readonly headers: Readonly<Record<string, string>>;
+}
+
 export interface AccessBinding extends Scope {
   readonly id: string;
   readonly namespaceId?: string;
   readonly subjectKind: AccessBindingSubjectKind;
   readonly subjectId: string;
   readonly roleId: string;
+  /** Exact human/Agent runtime assignment, separate from the OCE Role. */
+  readonly runtimeRole?: string;
   readonly resourceKind?: ResourceKind;
   readonly resourceId?: string;
 }
@@ -1008,6 +1098,20 @@ export interface SandboxHarnessContext extends SandboxNamespaceContext {
   readonly requirements: HarnessWorkloadRequirements;
 }
 
+export interface SandboxHarnessStatusContext extends SandboxHarnessContext {
+  /** The Agent transport token the Agent Gateway presents to the Harness. */
+  readonly transportToken: string;
+}
+
+/**
+ * What the provider-owned Harness answers at its endpoint. `failed` carries the Harness's own
+ * held startup failure, unvalidated; Compute validates it like a Compute-owned status port.
+ */
+export type SandboxHarnessStatus =
+  | { readonly state: "starting" }
+  | { readonly state: "serving" }
+  | { readonly state: "failed"; readonly runtimeFailure: unknown };
+
 export interface ComputeLifecycleHooks {
   afterNamespacePrepared?(namespace: Readonly<Namespace>, signal: AbortSignal): Promise<void>;
   beforeWorkloadStart?(
@@ -1031,6 +1135,8 @@ export interface IAMDriver extends Driver {
   readonly namespacePolicyTransaction?: "platform-unit-of-work";
   lookupIdentity(input: IdentityLookup): Promise<Identity | undefined>;
   authorize(request: AuthorizationRequest): Promise<AuthorizationDecision>;
+  /** Resolve entry permission and its exact human runtime assignment from one policy snapshot. */
+  authorizeRuntimeAccess?(request: AuthorizationRequest): Promise<RuntimeAccessDecision>;
   /**
    * True only when `principalId` holds every grant of `targetIdentityId` at the
    * same or a broader scope. Credential issuance for another identity requires it;
@@ -1068,11 +1174,30 @@ export interface IAMDriver extends Driver {
     context: IAMPolicyManagementContext,
     input: IAMManagedAccessBindingInput,
   ): Promise<Readonly<AccessBinding>>;
+  updateNamespaceRuntimeRole?(
+    context: IAMPolicyManagementContext,
+    namespaceId: string,
+    bindingId: string,
+    runtimeRole: string,
+  ): Promise<Readonly<AccessBinding> | undefined>;
   deleteNamespaceAccessBinding?(
     context: IAMPolicyManagementContext,
     namespaceId: string,
     bindingId: string,
   ): Promise<boolean>;
+  listNamespaceServicePrincipals?(
+    context: IAMPolicyReadContext,
+    namespaceId: string,
+  ): Promise<readonly Readonly<ServicePrincipal>[]>;
+  getNamespaceServicePrincipal?(
+    context: IAMPolicyReadContext,
+    namespaceId: string,
+    servicePrincipalId: string,
+  ): Promise<Readonly<ServicePrincipal> | undefined>;
+  createNamespaceServicePrincipal?(
+    context: IAMPolicyManagementContext,
+    input: IAMManagedServicePrincipalInput,
+  ): Promise<Readonly<ServicePrincipal>>;
 }
 
 export interface IAMPolicyReadRepository {
@@ -1093,13 +1218,25 @@ export interface IAMPolicyReadRepository {
     resourceKind: ResourceKind,
     resourceIds: readonly string[],
   ): Promise<readonly Readonly<Restriction>[]>;
+  /** Non-Agent ServicePrincipals of the exact Namespace; Agent identities are excluded. */
+  listServicePrincipals(namespaceId: string): Promise<readonly Readonly<ServicePrincipal>[]>;
+  getServicePrincipal(
+    namespaceId: string,
+    servicePrincipalId: string,
+  ): Promise<Readonly<ServicePrincipal> | undefined>;
 }
 
 export interface IAMPolicyRepository extends IAMPolicyReadRepository {
   createRole(role: Role): Promise<Readonly<Role>>;
   deleteRole(namespaceId: string, roleId: string): Promise<boolean>;
   createAccessBinding(binding: AccessBinding): Promise<Readonly<AccessBinding>>;
+  updateRuntimeRole(
+    namespaceId: string,
+    bindingId: string,
+    runtimeRole: string,
+  ): Promise<Readonly<AccessBinding> | undefined>;
   deleteAccessBinding(namespaceId: string, bindingId: string): Promise<boolean>;
+  createServicePrincipal(servicePrincipal: ServicePrincipal): Promise<Readonly<ServicePrincipal>>;
 }
 
 export interface IAMPolicyReadContext {
@@ -1133,8 +1270,15 @@ export interface IAMManagedAccessBindingInput {
   readonly subjectKind: "identity";
   readonly subjectId: string;
   readonly roleId: string;
+  readonly runtimeRole?: string;
   readonly resourceKind: ManagedIAMResourceKind;
   readonly resourceId: string;
+}
+
+/** A non-Agent automation identity fixed to one Namespace; it carries no grant. */
+export interface IAMManagedServicePrincipalInput {
+  readonly id: string;
+  readonly namespaceId: string;
 }
 
 export interface ServiceAccountDriver extends Driver {
@@ -1195,6 +1339,11 @@ export interface CredentialWithdrawalContext extends CredentialGatewayContext {
   /** The Sandbox provisioning created for `revision`. */
   readonly sandbox: SandboxResourceRef;
   readonly sourceId: string;
+  /**
+   * Re-checks a withdrawal already recorded `revoked`: the gateway detaches again only when
+   * the Sandbox still lists the source, and otherwise reports `revoked` without a mutation.
+   */
+  readonly recheck?: boolean;
 }
 
 /** Opaque grant that only the paired SandboxDriver can consume. */
@@ -1255,6 +1404,12 @@ export interface SandboxDriver extends Driver {
    * Service. Implementations must fail closed until the endpoint is observable and exact.
    */
   harnessEndpoint?(context: SandboxHarnessContext): Promise<SandboxHarnessEndpoint>;
+  /**
+   * Observes the provider-owned Harness through the endpoint `harnessEndpoint` returns, with the
+   * Agent transport token. Compute treats only `serving` as ready and fails the revision with a
+   * valid held `runtimeFailure`. `serving` requires an authenticated transport handshake.
+   */
+  harnessStatus?(context: SandboxHarnessStatusContext): Promise<SandboxHarnessStatus>;
   /**
    * The exact Sandbox `provisionHarness` creates for this revision, derived without effects.
    * Required to revoke credentials from a running revision.
@@ -1354,6 +1509,13 @@ export interface NamespaceEnsureResult extends Scope {
   readonly namespaceId: string;
   readonly namespaceReady: boolean;
   readonly failure?: NamespaceLifecycleFailure;
+  /**
+   * Optional bounded, non-secret operator explanation of `failure`, at most 256 printable
+   * characters. It names only this Namespace's own placement, never another tenant's
+   * identifiers or marker values. The worker logs it; status and audit keep only `failure`.
+   * The log keeps only letters, digits, spaces and `. _ : / @ -`; other text is dropped.
+   */
+  readonly reason?: string;
 }
 
 export interface NamespaceDeleteResult extends Scope {
@@ -1753,6 +1915,14 @@ export interface ComputeDriver extends Driver {
   ): Promise<AgentRuntimeLogChunk>;
   deleteAgentRuntimeCredentials?(binding: ComputeAgentBinding): Promise<void>;
   getGatewayEndpoint?(revision: AgentRevision): string | undefined;
+  /** Safe configured role catalog for the exact deployed revision. */
+  listAgentRuntimeRoles?(configuration: OpenClawConfigurationDocument): readonly AgentRuntimeRole[];
+  /** Human transport admission; must fail closed for unknown or unsupported assignments. */
+  getAgentRuntimeAccess?(
+    revision: AgentRevision,
+    principalId: string,
+    runtimeRole: string,
+  ): AgentRuntimeAccess | AgentRuntimeAccessUnavailable | undefined;
   ensureNamespace(namespace: Namespace): Promise<NamespaceEnsureResult>;
   deleteNamespace(namespace: Namespace): Promise<NamespaceDeleteResult>;
   /**
@@ -1764,11 +1934,15 @@ export interface ComputeDriver extends Driver {
    * Revokes `source` from the revision's paired Sandbox through the selected Credential
    * Gateway. Returns `revoked` only after the gateway confirms revocation, and `absent` when
    * the revision has no Sandbox or attachment left to revoke. Required for withdrawal.
+   * `options.recheck` is passed through to the gateway's withdrawal context. Throws OCC's
+   * CredentialWithdrawalRefusedError when retrying cannot help: a configuration that cannot
+   * reach the revision's Sandbox, or an object the Driver does not own.
    */
   withdrawCredentialSource?(
     revision: Readonly<AgentRevision>,
     source: Readonly<CredentialSource>,
     signal: AbortSignal,
+    options?: { readonly recheck?: boolean },
   ): Promise<CredentialAttachmentStatus>;
   prepareRevision(
     revision: AgentRevision,
@@ -1803,7 +1977,12 @@ export * from "./api/common.ts";
 export * from "./api/resources.ts";
 export * from "./api/routes.ts";
 
-export { normalizeHarnessAuthBinding, harnessAuthBindingFromSnapshot } from "./harness-auth.ts";
+export {
+  normalizeHarnessAuthBinding,
+  harnessAuthBindingFromSnapshot,
+  isSecretHarnessAuth,
+  isServiceAccountHarnessAuth,
+} from "./harness-auth.ts";
 
 export type { Preset, PresetTemplate, PresetLaunchSettings, PresetVariable } from "./presets.ts";
 export { normalizePresetTemplate } from "./presets.ts";

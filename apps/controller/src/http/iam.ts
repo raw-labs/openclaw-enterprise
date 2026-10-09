@@ -1,8 +1,10 @@
 import type {
   AccessBinding,
+  AgentRuntimeRoleCatalog,
   ResourceKind,
   ResourceRef,
   Role,
+  ServicePrincipal,
 } from "@openclaw-enterprise/contracts";
 import type { ResourceHandlers } from "./types.ts";
 
@@ -17,6 +19,7 @@ function bindingAuditDetails(binding: Readonly<AccessBinding>): Record<string, u
     subjectKind: binding.subjectKind,
     subjectId: binding.subjectId,
     roleId: binding.roleId,
+    ...(binding.runtimeRole === undefined ? {} : { runtimeRole: binding.runtimeRole }),
   };
 }
 
@@ -43,9 +46,16 @@ function clientIAMAccessBinding(binding: Readonly<AccessBinding>): Record<string
     subjectKind: binding.subjectKind,
     subjectId: binding.subjectId,
     roleId: binding.roleId,
+    ...(binding.runtimeRole === undefined ? {} : { runtimeRole: binding.runtimeRole }),
     ...(binding.resourceKind === undefined ? {} : { resourceKind: binding.resourceKind }),
     ...(binding.resourceId === undefined ? {} : { resourceId: binding.resourceId }),
   };
+}
+
+function clientIAMServicePrincipal(
+  servicePrincipal: Readonly<ServicePrincipal>,
+): Record<string, unknown> {
+  return { id: servicePrincipal.id, namespaceId: servicePrincipal.namespaceId };
 }
 
 export const iamHandlers = {
@@ -112,6 +122,13 @@ export const iamHandlers = {
         subjectKind: body?.subjectKind as "identity",
         subjectId: body?.subjectId as string,
         roleId: body?.roleId as string,
+        ...(body?.runtimeRole === undefined ? {} : { runtimeRole: body.runtimeRole as string }),
+        ...(body?.runtimeRoleConfiguration === undefined
+          ? {}
+          : {
+              runtimeRoleConfiguration:
+                body.runtimeRoleConfiguration as AgentRuntimeRoleCatalog["configuration"],
+            }),
         resourceKind: body?.resourceKind as ResourceKind,
         resourceId: body?.resourceId as string,
       });
@@ -121,6 +138,39 @@ export const iamHandlers = {
       return clientIAMAccessBinding(created);
     });
     reply.status(201).send({ data: binding, meta: { requestId: request.id } });
+  },
+  async listAgentRuntimeRoles({ controller, context, request, reply, params, namespaceId }) {
+    const roles = await controller.listAgentRuntimeRoles(
+      context.actorId,
+      namespaceId,
+      params.agentId as string,
+    );
+    reply.send({ data: roles, meta: { requestId: request.id } });
+  },
+  async updateIAMRuntimeRole({
+    controller,
+    context,
+    request,
+    reply,
+    params,
+    body,
+    namespaceId,
+    mutationEvent,
+  }) {
+    const binding = await controller.transact(async (unit) => {
+      const updated = await controller.updateIAMRuntimeRole(
+        context.actorId,
+        namespaceId,
+        params.bindingId as string,
+        body?.runtimeRole as string,
+        body?.runtimeRoleConfiguration as AgentRuntimeRoleCatalog["configuration"],
+      );
+      await unit.audit.append(
+        mutationEvent(bindingAuditResource(updated, namespaceId), bindingAuditDetails(updated)),
+      );
+      return clientIAMAccessBinding(updated);
+    });
+    reply.send({ data: binding, meta: { requestId: request.id } });
   },
   async getIAMAccessBinding({ controller, context, request, reply, params, namespaceId }) {
     const binding = await controller.getIAMAccessBinding(
@@ -145,5 +195,46 @@ export const iamHandlers = {
       );
     });
     reply.status(204).send();
+  },
+  async listIAMServicePrincipals({ controller, context, request, reply, namespaceId }) {
+    const principals = await controller.listIAMServicePrincipals(context.actorId, namespaceId);
+    reply.send({
+      data: principals.map(clientIAMServicePrincipal),
+      meta: { requestId: request.id },
+    });
+  },
+  async createIAMServicePrincipal({
+    controller,
+    context,
+    request,
+    reply,
+    namespaceId,
+    mutationEvent,
+  }) {
+    const created = await controller.transact(async (unit) => {
+      const servicePrincipal = await controller.createIAMServicePrincipal(
+        context.actorId,
+        namespaceId,
+      );
+      await unit.audit.append(
+        mutationEvent(
+          { kind: "namespace", id: namespaceId, namespaceId },
+          { servicePrincipalId: servicePrincipal.id },
+        ),
+      );
+      return clientIAMServicePrincipal(servicePrincipal);
+    });
+    reply.status(201).send({ data: created, meta: { requestId: request.id } });
+  },
+  async getIAMServicePrincipal({ controller, context, request, reply, params, namespaceId }) {
+    const servicePrincipal = await controller.getIAMServicePrincipal(
+      context.actorId,
+      namespaceId,
+      params.servicePrincipalId as string,
+    );
+    reply.send({
+      data: clientIAMServicePrincipal(servicePrincipal),
+      meta: { requestId: request.id },
+    });
   },
 } satisfies ResourceHandlers;

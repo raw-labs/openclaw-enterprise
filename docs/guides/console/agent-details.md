@@ -40,8 +40,10 @@ another version or the draft. Its milestones use the persisted record:
 | **Deployment work**     | `queued` awaits an initial or subsequent claim; `running` records a worker claim. |
 | **Completion recorded** | `succeeded` means the original work completed activation or was already active.   |
 
-A `failed` result shows the stored error and an **Open vN Logs** link to that
-version's [Logs tab](../topics/agent-logs.md), which the draft does not have.
+A `failed` result shows the stored error. Select **Open vN Logs** to open that
+version's [Logs tab](../topics/agent-logs.md) and bring the panel into view,
+even from the draft or another version. If logs are unavailable, the panel
+shows an access or availability message.
 For `RUNTIME_AUTHENTICATION_FAILED`, `RUNTIME_MODEL_PROBE_FAILED`,
 `RUNTIME_MODEL_PROBE_TIMEOUT` and `AGENT_GATEWAY_UNAUTHORIZED` it also states
 the next step and links **Credentials** or the draft **Configuration** (for
@@ -87,9 +89,10 @@ the viewed version. Checks include a time and `succeeded`, `failed`, or
 `unknown` state; unavailable requests show retryable errors. On Kubernetes
 Compute the gateway checks cover only the Slack channel. A version without
 Slack reports configuration `failed` with `NOT_CONFIGURED` and leaves
-authentication and connectivity `unknown`; the page says this is expected. If
-every check is `unknown` with `UNAVAILABLE`, the runtime did not answer. Either
-way, a recorded deployment failure such as `RUNTIME_AUTHENTICATION_FAILED`
+authentication and connectivity `unknown`; the page says this is expected. A
+version deployed by an earlier controller release still shows three `unknown`
+checks with `PROBE_FAILED` until you deploy a new version. If every check is
+`unknown` with `UNAVAILABLE`, the runtime did not answer. Either way, a recorded deployment failure such as `RUNTIME_AUTHENTICATION_FAILED`
 stays in view: diagnostics do not test model credentials, so they cannot
 confirm or clear it. Diagnostics do not change deployment history, activate a
 version, repeat the startup model probe, or prove message delivery. You need Agent `read` and `operate` plus
@@ -127,6 +130,7 @@ only on the new version draft; Logs only on a version.
 [repository access](../../reference/console/create-and-deploy.md#create-an-agent).
 Browser Back and Forward restore the selected tab. Leaving a tab clears entered
 token values. The workspace remains live regardless of the viewed version.
+Returning from another page rechecks completed reads, so recovered panels refresh.
 
 ### Unreadable saved settings
 
@@ -241,18 +245,24 @@ The console has no chat panel. To give an Agent a task:
 - Message it in a channel its Configuration sets up, such as Slack. The
   [channel settings](channels-and-credentials.md#slack-editor), not OCE grants,
   decide who may mention it.
-- With Agent `administer`, use the [native admin panel](#conditional-native-admin-panel)
+- With Agent `use` and an assigned role, use the [OpenClaw panel](#conditional-native-admin-panel)
   when the Installation enables it. It is unavailable under GitHub, Google, or
   OIDC sign-in.
 - Otherwise ask someone who can edit the Agent's Configuration to let you into
   its channel. An operator with cluster access can check a real response with
   [model verification](../operate/model-verification.md).
 
-## Conditional native admin panel
+<a id="conditional-native-admin-panel"></a>
 
-When enabled by the Installation and permitted for your account, **Native admin
-UI** provides **Refresh access** and **Open native admin UI**. The latter opens
+## Conditional OpenClaw panel
+
+When enabled by the Installation and permitted for your account, **OpenClaw**
+provides **Refresh access** and **Open OpenClaw**. The latter opens
 the active gateway in a new tab, even while you view a draft or older revision.
+
+If you are an Installation administrator without OpenClaw access, the card directs
+you to assign your Principal ID a role in **Share Agent** below. After saving,
+select **Refresh access** to open it in the same tab.
 
 The native UI can change the gateway outside OCE's revision tracking. Use OCE for
 durable configuration. See [native admin access](../../reference/agent-native-admin.md)

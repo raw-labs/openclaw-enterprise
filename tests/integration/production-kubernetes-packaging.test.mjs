@@ -256,6 +256,42 @@ test("sandbox ingress uses a separate listener outside OCE cookie scope", toolin
     render({ ...sandboxValues, "gatewayRouting.sandbox.listenerPort": "10443" }),
     /distinct from private Envoy HTTPS/,
   );
+  // Dedicated Agent hostnames are agent-<32 hex>.<domain>, so the domain stops at 253 - 39.
+  const longestLabel = "a".repeat(63);
+  const longestDomain = [longestLabel, longestLabel, "a".repeat(22), longestLabel].join(".");
+  const overlongDomain = [longestLabel, longestLabel, "a".repeat(23), longestLabel].join(".");
+  const hostnameLimitDomain = [longestLabel, longestLabel, longestLabel, "a".repeat(61)].join(".");
+  assert.equal(longestDomain.length, 214);
+  assert.equal(overlongDomain.length, 215);
+  assert.equal(hostnameLimitDomain.length, 253);
+  assert.equal(`agent-${"0".repeat(32)}.${longestDomain}`.length, 253);
+  const longest = await resources(
+    (await render({ ...sandboxValues, "gatewayRouting.sandbox.domain": longestDomain })).stdout,
+  );
+  assert.equal(
+    longest
+      .find((item) => item.kind === "Gateway")
+      .spec.listeners.find((item) => item.name === "sandbox").hostname,
+    `*.${longestDomain}`,
+  );
+  for (const domain of [
+    "a..b.com",
+    "example.com-",
+    "example.-com",
+    `${"a".repeat(64)}.test`,
+    "localhost",
+  ]) {
+    await assert.rejects(
+      render({ ...sandboxValues, "gatewayRouting.sandbox.domain": domain }),
+      /must be a DNS hostname/,
+    );
+  }
+  for (const domain of [overlongDomain, hostnameLimitDomain]) {
+    await assert.rejects(
+      render({ ...sandboxValues, "gatewayRouting.sandbox.domain": domain }),
+      /must not exceed 214 characters, leaving room for the agent-<32 hex>\. prefix/,
+    );
+  }
   await assert.rejects(
     render({
       ...sandboxValues,
@@ -380,8 +416,19 @@ test(
     ]) {
       await assert.rejects(render(override), /scraperNamespaceLabels/);
     }
-    for (const port of ["0", "65536", "8080", "9.5"]) {
+    for (const port of ["0", "010", "65536", "8080", "9.5"]) {
       await assert.rejects(render({ "metrics.port": port }), /metrics.port/);
+    }
+    const shortPort = await resources((await render({ "metrics.port": "8" })).stdout);
+    for (const component of ["api", "worker"]) {
+      const container = shortPort.find(
+        (item) =>
+          item.kind === "Deployment" && item.metadata.name === `openclaw-enterprise-${component}`,
+      ).spec.template.spec.containers[0];
+      assert.equal(container.env.find((item) => item.name === "OCC_METRICS_PORT").value, "8");
+      assert.ok(
+        container.ports.some((port) => port.name === "metrics" && port.containerPort === 8),
+      );
     }
     const selected = {
       "metrics.enabled": "true",
@@ -421,6 +468,31 @@ test(
     }
   },
 );
+
+test("the chart refuses an API port the server does not bind", tooling, async () => {
+  for (const port of ["0", "010", "65536", "9.5"]) {
+    await assert.rejects(render({ "api.port": port }), /api\.port must be an integer TCP port/);
+  }
+  const objects = await resources((await render({ "api.port": "8081" })).stdout);
+  const container = objects.find(
+    (item) => item.kind === "Deployment" && item.metadata.name === "openclaw-enterprise-api",
+  ).spec.template.spec.containers[0];
+  assert.equal(container.env.find((item) => item.name === "OCC_PORT").value, "8081");
+  assert.ok(container.ports.some((port) => port.name === "http" && port.containerPort === 8081));
+  assert.equal(
+    objects.find(
+      (item) => item.kind === "Service" && item.metadata.name === "openclaw-enterprise-api",
+    ).spec.ports[0].port,
+    8081,
+  );
+  assert.equal(
+    objects.find(
+      (item) =>
+        item.kind === "NetworkPolicy" && item.metadata.name === "openclaw-enterprise-api-ingress",
+    ).spec.ingress[0].ports[0].port,
+    8081,
+  );
+});
 
 function routeNamespaceLabel(namespace, gatewayName) {
   return createHash("sha256").update(`${namespace}/${gatewayName}`).digest("hex").slice(0, 12);
@@ -598,6 +670,49 @@ test("production Helm values example renders the backendless default chart", too
   assert.equal(objects.filter(({ kind }) => kind === "Secret").length, 0);
   assert.ok(!objects.some(({ metadata }) => metadata.name.endsWith("-api-chatgpt-egress")));
 });
+
+test(
+  "initialization hooks fit Kubernetes Job names for valid Helm release names",
+  tooling,
+  async (t) => {
+    const names = new Set();
+    for (const release of [
+      "oce",
+      "a".repeat(48),
+      "a".repeat(49),
+      "a".repeat(53),
+      "a".repeat(52) + "b",
+    ]) {
+      await t.test(`release ${release.length} characters, ending ${release.at(-1)}`, async () => {
+        let installedName;
+        for (const isUpgrade of [false, true]) {
+          const objects = await resources((await render({}, { release, isUpgrade })).stdout);
+          const job = objects.find(({ kind }) => kind === "Job");
+          // The real Helm hook must survive admission before migration/bootstrap can run.
+          assert.ok(
+            job.metadata.name.length <= 63,
+            `Job name exceeds 63 characters: ${job.metadata.name}`,
+          );
+          assert.match(job.metadata.name, /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/);
+          assert.ok(job.metadata.name.startsWith(release));
+          assert.equal(job.metadata.labels["app.kubernetes.io/instance"], release);
+          assert.equal(job.spec.template.metadata.labels["app.kubernetes.io/instance"], release);
+          assert.equal(job.metadata.annotations["helm.sh/hook"], "pre-install,pre-upgrade");
+          if (isUpgrade) {
+            assert.equal(job.metadata.name, installedName);
+          } else {
+            installedName = job.metadata.name;
+            assert.ok(!names.has(installedName), "Distinct releases must keep distinct hook names");
+            names.add(installedName);
+          }
+          if (release.length <= 48) {
+            assert.equal(job.metadata.name, `${release}-initialization`);
+          }
+        }
+      });
+    }
+  },
+);
 
 test("production settings coexist in fresh and upgrade chart renders", tooling, async () => {
   const settings = {
@@ -1623,6 +1738,47 @@ test(
   },
 );
 
+test("the chart refuses installation names the bootstrap Job refuses", tooling, async () => {
+  const message =
+    /installation\.name must follow the Name rule: 1 to 200 characters, with no leading or trailing whitespace and no control characters or line or paragraph separators/;
+  for (const name of [
+    "",
+    " ",
+    " name",
+    "name ",
+    "name\nmore",
+    "a".repeat(201),
+    "名".repeat(201),
+    "\uFEFFname",
+    "name\u00A0",
+  ]) {
+    await assert.rejects(
+      render({ "installation.name": name }),
+      ({ code, stderr }) => code !== 0 && message.test(stderr),
+      JSON.stringify(name),
+    );
+  }
+  for (const name of [
+    "openclaw-enterprise",
+    "OpenClaw Local Development",
+    "a".repeat(200),
+    "名".repeat(200),
+    "a\uFEFFb",
+  ]) {
+    const objects = await resources((await render({ "installation.name": name })).stdout);
+    const bootstrap = objects.find(
+      ({ kind, metadata }) => kind === "Job" && metadata.name.endsWith("-initialization"),
+    );
+    assert.ok(
+      bootstrap.spec.template.spec.containers[0].env.some(
+        ({ name: envName, value }) =>
+          envName === "OCC_BOOTSTRAP_INSTALLATION_NAME" && value === name,
+      ),
+      JSON.stringify(name),
+    );
+  }
+});
+
 test(
   "the production Helm chart renders private least-privilege runtime and ordered bootstrap",
   tooling,
@@ -1712,6 +1868,12 @@ test(
       pod.containers[0].env.some(
         ({ name, value }) =>
           name === "OCC_BOOTSTRAP_ADMIN_EMAIL" && value === "admin@example.invalid",
+      ),
+    );
+    assert.ok(
+      pod.containers[0].env.some(
+        ({ name, value }) =>
+          name === "OCC_BOOTSTRAP_INSTALLATION_NAME" && value === "openclaw-enterprise",
       ),
     );
     assert.ok(
@@ -1966,7 +2128,13 @@ test(
         },
       ],
     });
-    for (const cidr of ["0.0.0.0/0", "198.51.100.0/24", "api.openai.com", "999.1.1.1/32"]) {
+    for (const cidr of [
+      "0.0.0.0/0",
+      "198.51.100.0/24",
+      "api.openai.com",
+      "999.1.1.1/32",
+      "01.2.3.4/32",
+    ]) {
       await assert.rejects(
         render({ "api.modelDiscoveryCidrs[0]": cidr }),
         /api.modelDiscoveryCidrs/,
@@ -2201,6 +2369,14 @@ test(
     ]) {
       await assert.rejects(render({ ...slackProxyValues, ...override }), /slackProxy/);
     }
+    await assert.rejects(
+      render(slackProxyValues, { strings: { "slackProxy.port": "010" } }),
+      /slackProxy\.port must be an integer TCP port/,
+    );
+    await assert.rejects(
+      render(slackProxyValues, { strings: { "slackProxy.port": "9223372036854775808" } }),
+      /slackProxy\.port must be an integer TCP port/,
+    );
   },
 );
 
@@ -2444,6 +2620,17 @@ test(
         "10.42.0.0/16",
         { value: `x-${"a".repeat(62)}` },
       ],
+      [
+        // ::ffff:d.d.d.d is an IPv4 address after the API rewrites it, so /32 stays valid.
+        {
+          "api.trustedProxy.preset": "generic",
+          "api.trustedProxy.cidrs[0]": "::ffff:192.0.2.1/32",
+          "api.trustedProxy.clientAddressHeader": "X-Client-Address",
+        },
+        "generic",
+        "::ffff:192.0.2.1/32",
+        { value: "x-client-address" },
+      ],
     ]) {
       const { selected, apiEnv, egress } = await signInObjects(overrides);
       assert.deepEqual(apiEnv.OCC_AUTH_TRUSTED_PROXY_CIDRS, { value: cidrs });
@@ -2593,6 +2780,36 @@ test(
         /invalid IPv4 address/,
       ],
       [
+        "a trusted proxy with a leading-zero IPv4 address",
+        { ...trustedProxyValues, "api.trustedProxy.cidrs[0]": "01.2.3.4/32" },
+        /invalid IPv4 address/,
+      ],
+      [
+        "a trusted proxy with a malformed IPv6 address",
+        { ...trustedProxyValues, "api.trustedProxy.cidrs[0]": "a:/64" },
+        /invalid IPv6 address/,
+      ],
+      [
+        "a trusted proxy with more than one IPv6 compression",
+        { ...trustedProxyValues, "api.trustedProxy.cidrs[0]": ":::/64" },
+        /invalid IPv6 address/,
+      ],
+      [
+        "a trusted proxy with too many IPv6 groups",
+        { ...trustedProxyValues, "api.trustedProxy.cidrs[0]": "1:2:3:4:5:6:7:8:9/64" },
+        /invalid IPv6 address/,
+      ],
+      [
+        "a trusted proxy with a dotted tail before compression",
+        { ...trustedProxyValues, "api.trustedProxy.cidrs[0]": "1.2.3.4::/96" },
+        /invalid IPv6 address/,
+      ],
+      [
+        "an IPv4-mapped trusted proxy with an IPv6 prefix",
+        { ...trustedProxyValues, "api.trustedProxy.cidrs[0]": "::ffff:192.0.2.1/128" },
+        /prefix must be 1 through 32/,
+      ],
+      [
         "the internal client-address header",
         { ...trustedProxyValues, "api.trustedProxy.clientAddressHeader": "X-OCC-Client-IP" },
         /cannot be x-occ-client-ip/,
@@ -2648,6 +2865,47 @@ test(
   },
 );
 
+test("the chart refuses administrator emails the bootstrap Job refuses", tooling, async () => {
+  const message = /bootstrap\.adminEmail must contain a valid administrator email/;
+  for (const email of [
+    "",
+    " ",
+    "not-an-email",
+    "a@b",
+    "a@b.",
+    "a@.com",
+    "a@b c.com",
+    "a@b\u00A0c.com",
+    "a@b\u000Bc.com",
+  ]) {
+    await assert.rejects(
+      render({}, { strings: { "bootstrap.adminEmail": email } }),
+      ({ code, stderr }) => code !== 0 && message.test(stderr),
+      JSON.stringify(email),
+    );
+  }
+  for (const email of [
+    "admin@example.invalid",
+    " Admin@Example.COM ",
+    "a@b.com ",
+    "\nadmin@example.com",
+    "\uFEFFadmin@example.com",
+    "\u0085a@b.com",
+  ]) {
+    const { stdout } = await render({}, { strings: { "bootstrap.adminEmail": email } });
+    const objects = await resources(stdout);
+    const job = objects.find(
+      (object) =>
+        object.kind === "Job" &&
+        object.metadata.labels?.["app.kubernetes.io/component"] === "initialization",
+    );
+    const value = job.spec.template.spec.containers
+      .find((container) => container.name === "bootstrap")
+      .env.find((entry) => entry.name === "OCC_BOOTSTRAP_ADMIN_EMAIL").value;
+    assert.equal(value, email);
+  }
+});
+
 test(
   "the real Helm renderer rejects mutable images, broad dependencies, and shared credentials",
   tooling,
@@ -2670,7 +2928,11 @@ test(
       ["missing database egress list", { "database.cidrs": "" }],
       ["missing Kubernetes API egress list", { "cluster.cidrs": "" }],
       ["broad database egress", { "database.cidrs[0]": "0.0.0.0/0" }],
+      ["database egress that is not an IPv4 host", { "database.cidrs[0]": "999.1.2.3/32" }],
+      ["database egress with a leading-zero octet", { "database.cidrs[0]": "01.2.3.4/32" }],
       ["broad Kubernetes API egress", { "cluster.cidrs[0]": "10.43.0.0/16" }],
+      ["Kubernetes API egress that is not an IPv4 host", { "cluster.cidrs[0]": "256.0.0.1/32" }],
+      ["Kubernetes API egress with a leading-zero octet", { "cluster.cidrs[0]": "01.2.3.4/32" }],
       ["invalid control-plane node selector", { "controlPlane.nodeSelector": "control" }],
       ["false control-plane node selector", { "controlPlane.nodeSelector": false }],
       [
@@ -2688,6 +2950,14 @@ test(
       [
         "unrestricted ChatGPT provider egress",
         { ...chatgptValues, "backend.chatgpt.providerCidr": "0.0.0.0/0" },
+      ],
+      [
+        "ChatGPT provider host that is not an IPv4 address",
+        { ...chatgptValues, "backend.chatgpt.providerCidr": "999.1.2.3/32" },
+      ],
+      [
+        "ChatGPT provider host with a leading-zero octet",
+        { ...chatgptValues, "backend.chatgpt.providerCidr": "01.2.3.4/32" },
       ],
       [
         "ChatGPT Backend without an approved provider host",
@@ -3351,3 +3621,257 @@ test(
     });
   },
 );
+
+test("Helm rejects worker timings the worker process rejects", tooling, async () => {
+  for (const [key, value] of [
+    ["worker.pollIntervalMs", "0"],
+    ["worker.pollIntervalMs", "abc"],
+    ["worker.leaseDurationMs", "1.5"],
+    ["worker.maxAttempts", "-1"],
+    ["worker.convergenceTimeoutMs", "9007199254740993"],
+  ]) {
+    await assert.rejects(render({ [key]: value }), /must be a positive safe integer/);
+  }
+  const rendered = await render({ "worker.pollIntervalMs": "010" });
+  assert.match(rendered.stdout, /name: OCC_WORKER_POLL_INTERVAL_MS\n\s+value: "010"/);
+});
+
+test("Helm renders a values-file worker timeout of 1800000 as digits", tooling, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "occ-worker-timing-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const valuesFile = join(directory, "worker.yaml");
+  await writeFile(valuesFile, "worker:\n  convergenceTimeoutMs: 1800000\n", { mode: 0o600 });
+  const rendered = await render({}, { valuesFiles: [valuesFile] });
+  assert.match(rendered.stdout, /name: OCC_WORKER_CONVERGENCE_TIMEOUT_MS\n\s+value: "1800000"/);
+  assert.doesNotMatch(rendered.stdout, /OCC_WORKER_CONVERGENCE_TIMEOUT_MS\n\s+value: "1\.8e\+06"/);
+});
+
+test("Helm rejects obvious malformed quantity syntax", tooling, async () => {
+  const collector = {
+    "logging.collector.enabled": "true",
+    "logging.collector.image":
+      "docker.io/otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc",
+    "logging.collector.configSecretName": "occ-otel-collector-config",
+    "logging.collector.envSecretName": "occ-otel-collector-exporter",
+    "logging.collector.exporter.cidr": "203.0.113.10/32",
+  };
+  for (const isUpgrade of [false, true]) {
+    const options = { isUpgrade };
+    for (const [field, value] of [
+      ["logging.collector.state.sizeLimit", "foo"],
+      ["logging.collector.tmp.sizeLimit", "10MiB"],
+      ["resources.requests.cpu", "foo"],
+      ["logging.collector.resources.limits.memory", "10MiB"],
+    ]) {
+      await assert.rejects(render({ ...collector, [field]: value }, options), (error) => {
+        assert.ok(error.stderr.includes(`${field} must be a Kubernetes quantity`));
+        return true;
+      });
+    }
+    const rendered = await render(collector, options);
+    assert.match(rendered.stdout, /sizeLimit: "128Mi"/);
+    assert.match(rendered.stdout, /sizeLimit: "64Mi"/);
+
+    // Numeric YAML quantities must not be mistaken for missing or non-string values.
+    const numeric = await resources(
+      (
+        await render(
+          { ...collector, "resources.requests.cpu": 0, "resources.limits.cpu": 1 },
+          options,
+        )
+      ).stdout,
+    );
+    const api = numeric.find(
+      (object) =>
+        object.kind === "Deployment" &&
+        object.metadata?.labels?.["app.kubernetes.io/component"] === "api",
+    );
+    assert.equal(api.spec.template.spec.containers[0].resources.requests.cpu, 0);
+    assert.equal(api.spec.template.spec.containers[0].resources.limits.cpu, 1);
+
+    // Decimal E is exa; uppercase K is not a suffix. Exponent and binary forms stay.
+    await assert.rejects(
+      render({ "resources.requests.memory": "1K" }, options),
+      /resources\.requests\.memory must be a Kubernetes quantity/,
+    );
+    await assert.rejects(
+      render({ ...collector, "logging.collector.resources.requests.memory": "1K" }, options),
+      /logging\.collector\.resources\.requests\.memory must be a Kubernetes quantity/,
+    );
+    await assert.rejects(
+      render({ ...collector, "logging.collector.state.sizeLimit": "1K" }, options),
+      /logging\.collector\.state\.sizeLimit must be a Kubernetes quantity/,
+    );
+    await assert.rejects(
+      render({ "resources.requests.memory": "1KI" }, options),
+      /resources\.requests\.memory must be a Kubernetes quantity/,
+    );
+    const accepted = await render(
+      {
+        ...collector,
+        "resources.requests.memory": "1E",
+        "logging.collector.resources.requests.memory": "1E",
+        "logging.collector.state.sizeLimit": "1E",
+      },
+      options,
+    );
+    assert.match(accepted.stdout, /memory: 1E/);
+    assert.match(accepted.stdout, /sizeLimit: "1E"/);
+    const preserved = await render(
+      {
+        "resources.requests.memory": "1e3",
+        "resources.limits.memory": "1E3",
+        "resources.requests.cpu": "1k",
+        "resources.limits.cpu": "1Ki",
+      },
+      options,
+    );
+    assert.match(preserved.stdout, /memory: "1e3"/);
+    assert.match(preserved.stdout, /memory: "1E3"/);
+    assert.match(preserved.stdout, /cpu: 1k/);
+    assert.match(preserved.stdout, /cpu: 1Ki/);
+
+    // UnmarshalJSON trims spaces on the raw JSON text. Escaped tabs stay rejected.
+    await assert.rejects(
+      render({}, { ...options, strings: { "resources.requests.cpu": "  foo " } }),
+      /resources\.requests\.cpu must be a Kubernetes quantity/,
+    );
+    await assert.rejects(
+      render({}, { ...options, strings: { "resources.requests.memory": " 1K " } }),
+      /resources\.requests\.memory must be a Kubernetes quantity/,
+    );
+    await assert.rejects(
+      render({}, { ...options, strings: { "resources.requests.memory": "\t64Mi" } }),
+      /resources\.requests\.memory must be a Kubernetes quantity/,
+    );
+    const padded = await render(collector, {
+      ...options,
+      strings: {
+        "resources.requests.cpu": " 100m ",
+        "resources.limits.memory": " 1E ",
+        "logging.collector.resources.requests.memory": " 64Mi ",
+        "logging.collector.state.sizeLimit": " 128Mi ",
+        "logging.collector.tmp.sizeLimit": " 32Mi ",
+      },
+    });
+    assert.match(padded.stdout, /cpu: ["'] 100m ["']/);
+    assert.match(padded.stdout, /memory: ["'] 1E ["']/);
+    assert.match(padded.stdout, /memory: ["'] 64Mi ["']/);
+    assert.match(padded.stdout, /sizeLimit: " 128Mi "/);
+    assert.match(padded.stdout, /sizeLimit: " 32Mi "/);
+
+    // ParseQuantity treats a missing numerator as zero. Bare Pi has an empty numeric token.
+    const zeros = await render(collector, {
+      ...options,
+      strings: {
+        "resources.requests.cpu": "m",
+        "resources.limits.cpu": "+",
+        "resources.requests.memory": ".",
+        "logging.collector.state.sizeLimit": "m",
+      },
+    });
+    assert.match(zeros.stdout, /cpu: m$/m);
+    assert.match(zeros.stdout, /cpu: \+$/m);
+    assert.match(zeros.stdout, /memory: \.$/m);
+    assert.match(zeros.stdout, /sizeLimit: "m"/);
+    await assert.rejects(
+      render({}, { ...options, strings: { "resources.requests.memory": "Pi" } }),
+      /resources\.requests\.memory must be a Kubernetes quantity/,
+    );
+    const withDigit = await render(
+      {},
+      { ...options, strings: { "resources.requests.memory": "1Pi" } },
+    );
+    assert.match(withDigit.stdout, /memory: 1Pi/);
+
+    // sizeLimit is optional. Null clears the chart default and must stay YAML null on install and upgrade.
+    const clearedLimits = await render(
+      {
+        ...collector,
+        "logging.collector.state.sizeLimit": "null",
+        "logging.collector.tmp.sizeLimit": "null",
+      },
+      options,
+    );
+    const clearedVolumes = (await resources(clearedLimits.stdout)).find(
+      (object) =>
+        object.kind === "DaemonSet" && object.metadata?.name === "openclaw-enterprise-collector",
+    ).spec.template.spec.volumes;
+    assert.equal(
+      clearedVolumes.find((volume) => volume.name === "collector-state").emptyDir.sizeLimit,
+      null,
+    );
+    assert.equal(
+      clearedVolumes.find((volume) => volume.name === "collector-tmp").emptyDir.sizeLimit,
+      null,
+    );
+    const stateCleared = await resources(
+      (await render({ ...collector, "logging.collector.state.sizeLimit": "null" }, options)).stdout,
+    );
+    const stateVolumes = stateCleared.find((object) => object.kind === "DaemonSet").spec.template
+      .spec.volumes;
+    assert.equal(
+      stateVolumes.find((volume) => volume.name === "collector-state").emptyDir.sizeLimit,
+      null,
+    );
+    assert.equal(
+      stateVolumes.find((volume) => volume.name === "collector-tmp").emptyDir.sizeLimit,
+      "64Mi",
+    );
+    const tmpCleared = await resources(
+      (await render({ ...collector, "logging.collector.tmp.sizeLimit": "null" }, options)).stdout,
+    );
+    const tmpVolumes = tmpCleared.find((object) => object.kind === "DaemonSet").spec.template.spec
+      .volumes;
+    assert.equal(
+      tmpVolumes.find((volume) => volume.name === "collector-state").emptyDir.sizeLimit,
+      "128Mi",
+    );
+    assert.equal(
+      tmpVolumes.find((volume) => volume.name === "collector-tmp").emptyDir.sizeLimit,
+      null,
+    );
+    await assert.rejects(
+      render(
+        {
+          ...collector,
+          "logging.collector.state.sizeLimit": "null",
+          "logging.collector.tmp.sizeLimit": "10MiB",
+        },
+        options,
+      ),
+      /logging\.collector\.tmp\.sizeLimit must be a Kubernetes quantity/,
+    );
+    await assert.rejects(
+      render(
+        {
+          ...collector,
+          "logging.collector.state.sizeLimit": "foo",
+          "logging.collector.tmp.sizeLimit": "null",
+        },
+        options,
+      ),
+      /logging\.collector\.state\.sizeLimit must be a Kubernetes quantity/,
+    );
+
+    // resources: null clears defaults. Indexing that absent map used to abort the render.
+    const cleared = await render(
+      {
+        ...collector,
+        resources: "null",
+        "logging.collector.resources": "null",
+      },
+      options,
+    );
+    assert.match(cleared.stdout, /sizeLimit: "128Mi"/);
+    assert.doesNotMatch(cleared.stdout, /cpu: 100m/);
+    assert.doesNotMatch(cleared.stdout, /memory: 128Mi/);
+    await assert.rejects(
+      render(
+        { ...collector, resources: "null" },
+        { ...options, strings: { "logging.collector.resources.requests.memory": "foo" } },
+      ),
+      /logging\.collector\.resources\.requests\.memory must be a Kubernetes quantity/,
+    );
+  }
+});

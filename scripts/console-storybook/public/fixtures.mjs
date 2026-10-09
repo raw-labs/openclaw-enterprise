@@ -32,7 +32,12 @@ function slackChannels(scenario) {
 function configurationValues(scenario) {
   const values = {
     gateway: { mode: "local" },
-    agents: { defaults: { model: "codex/gpt-4.1" } },
+    agents: {
+      defaults: {
+        model: "codex/gpt-4.1",
+        models: { "codex/gpt-4.1": { agentRuntime: { id: "codex" } } },
+      },
+    },
     channels: {},
   };
   if (scenario.gatewayPassword) {
@@ -119,8 +124,8 @@ export function installFixture(scenario, evidence) {
   const files = new Map();
   const secrets = new Map();
   const stagedWorkspaceFiles = new Map();
-  const roles = [];
-  const bindings = [];
+  const roles = structuredClone(scenario.sharingRoles ?? []);
+  const bindings = structuredClone(scenario.sharingBindings ?? []);
   const deleted = new Set();
   const session = {
     authenticated: true,
@@ -161,6 +166,7 @@ export function installFixture(scenario, evidence) {
     {
       id: "sa_demo",
       name: "Research service",
+      credential: { kind: "access_token" },
       backendId: "chatgpt-demo",
       status: "active",
       createdAt,
@@ -198,7 +204,7 @@ export function installFixture(scenario, evidence) {
       : scenario.auth === "runtime"
         ? { method: "runtime" }
         : scenario.auth === "service"
-          ? { method: "chatgpt_service_account", serviceAccountId: "sa_demo" }
+          ? { method: "codex_pat", source: { kind: "service_account", namespaceId, id: "sa_demo" } }
           : scenario.auth === "codex_pat"
             ? { method: "codex_pat", source: secretRef("sec_demo_service_account") }
             : scenario.auth === "oauth"
@@ -602,7 +608,7 @@ export function installFixture(scenario, evidence) {
         }
       }
       if (resource === "service-accounts" && method === "GET") {
-        return response(accounts);
+        return response(scenario.serviceAccountsEmpty ? [] : accounts);
       }
       if (
         (resource === "agents/repository-options" ||
@@ -951,8 +957,24 @@ export function installFixture(scenario, evidence) {
           return response(saved, 202);
         }
         if (suffix === "/native-admin" && method === "GET") {
+          if (
+            scenario.nativeAssignmentPrincipal &&
+            !bindings.some(
+              (binding) =>
+                binding.subjectKind === "identity" &&
+                binding.subjectId === scenario.nativeAssignmentPrincipal &&
+                binding.resourceKind === "agent" &&
+                binding.resourceId === id &&
+                binding.runtimeRole !== undefined,
+            )
+          ) {
+            return error(403);
+          }
           return response({
             status: scenario.nativeAdmin ?? "disabled",
+            ...(scenario.nativeAdminReason === undefined
+              ? {}
+              : { reason: scenario.nativeAdminReason }),
             url:
               (id === agent.id ? scenario.nativeAdminUrl : undefined) ??
               "/storybook-fixtures/native-admin.html",
@@ -1218,6 +1240,58 @@ export function installFixture(scenario, evidence) {
           const { reads: _reads, ...status } = deployment;
           return response(status);
         }
+        if (suffix === "/runtime-roles") {
+          if (scenario.runtimeRolesUnavailable) {
+            return error(503);
+          }
+          const runtimeRoles = [
+            {
+              id: "researcher",
+              permissions: {
+                sessions: { others: "none" },
+                agents: ["main"],
+                scopes: ["operator.read", "operator.write"],
+              },
+            },
+            {
+              id: "reviewer",
+              permissions: {
+                sessions: { others: "view" },
+                agents: ["main"],
+                scopes: ["operator.read"],
+              },
+            },
+            {
+              id: "administrator",
+              permissions: {
+                sessions: { others: "write" },
+                agents: "*",
+                scopes: ["operator.admin"],
+              },
+            },
+            {
+              id: "platform-administrator",
+              permissions: {
+                sessions: { others: "write" },
+                agents: "*",
+                scopes: ["operator.admin"],
+              },
+            },
+          ];
+          const deployedRoles = structuredClone(runtimeRoles);
+          if (scenario.runtimeRolePolicyChanged) {
+            runtimeRoles[0].permissions.scopes = ["operator.read"];
+          }
+          const configuration = configs.get(saved.configurationId);
+          return response({
+            configuration: { id: configuration.id, generation: configuration.generation },
+            roles: runtimeRoles,
+            desiredRuntimeState: saved.desiredRuntimeState,
+            ...(saved.activeRevisionId
+              ? { activeRevision: { id: saved.activeRevisionId, roles: deployedRoles } }
+              : {}),
+          });
+        }
         if (suffix.startsWith("/workspace/files/")) {
           const filename = decodeURIComponent(suffix.split("/").at(-1));
           const key = `${id}/${filename}`;
@@ -1249,10 +1323,20 @@ export function installFixture(scenario, evidence) {
           return response(bindings);
         }
         if (method === "POST") {
-          const binding = { ...body, id: `binding_${serial++}`, namespaceId };
+          const { runtimeRoleConfiguration: _runtimeRoleConfiguration, ...assignment } = body;
+          const binding = { ...assignment, id: `binding_${serial++}`, namespaceId };
           bindings.push(binding);
           return response(binding, 201);
         }
+      }
+      const runtimeRoleMatch = resource.match(/^iam\/access-bindings\/([^/]+)\/runtime-role$/);
+      if (runtimeRoleMatch && method === "PATCH") {
+        const binding = bindings.find((item) => item.id === runtimeRoleMatch[1]);
+        if (!binding) {
+          return error(404);
+        }
+        binding.runtimeRole = body.runtimeRole;
+        return response(binding);
       }
       const bindingMatch = resource.match(/^iam\/access-bindings\/([^/]+)$/);
       if (bindingMatch && method === "DELETE") {

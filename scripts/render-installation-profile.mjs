@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { isIP } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,8 +10,24 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
 const profilesDir = resolve(repoRoot, "deploy/profiles");
 const allowedProfiles = new Set(["openclaw", "codex"]);
-const digestImage = /^[^@\s]+@sha256:[a-f0-9]{64}$/i;
-const proxyUrl = /^https?:\/\/(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}:[1-9][0-9]{0,4}$/;
+const helmReleaseName = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+const digestImage = /^[^@\s]+@sha256:[a-f0-9]{64}$/;
+// The chart and Node's URL parser both refuse an octet above 255 and a port above 65535.
+// The shape check alone still matches 192.0.2.999 and port 99999.
+function isLiteralIpv4ProxyUrl(value) {
+  const match =
+    /^https?:\/\/((?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}):([1-9][0-9]{0,4})$/.exec(
+      value,
+    );
+  if (!match) {
+    return false;
+  }
+  if (match[1].split(".").some((octet) => Number(octet) > 255)) {
+    return false;
+  }
+  const port = Number(match[2]);
+  return Number.isInteger(port) && port <= 65535;
+}
 const dnsHostname =
   /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
@@ -195,6 +212,56 @@ function asString(source, path, diagnostics, { pattern, validate, description } 
   return value;
 }
 
+// URL parsing strips only C0 controls and spaces (U+0000 to U+0020) from the ends.
+function stripUrlEdges(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) <= 0x20) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) <= 0x20) {
+    end -= 1;
+  }
+  return value.slice(start, end);
+}
+
+// The API and the bootstrap Job accept only an absolute HTTP(S) origin (validHttpBaseURL).
+// Like the chart, this also refuses spellings URL parsing repairs: https:host, /. and /%2e,
+// and other Unicode spaces or invisible characters at either end (NBSP, U+3000, U+FEFF,
+// U+200B), which the API's parser keeps and mostly refuses. Both ends must be a letter, mark,
+// number, punctuation or symbol, as in the chart. Inside, the chart also allows the joiners
+// U+200C and U+200D that some IDN labels need, and refuses other spaces and invisible
+// characters: the host parser refuses spaces, and drops tabs and most invisible characters.
+// (URL parsing below refuses < and >, which the chart refuses explicitly.) Node's Unicode
+// tables can be newer than Helm's, so a letter assigned since then passes here and fails in
+// the chart; no realistic host uses one. Like both, it refuses a bare ? or # (https://host?),
+// which parses to an empty query or fragment but would break the API's auth routes.
+function httpOrigin(value) {
+  const stripped = stripUrlEdges(value);
+  if (
+    /[?#]/.test(stripped) ||
+    /^[^\p{L}\p{M}\p{N}\p{P}\p{S}]|[^\p{L}\p{M}\p{N}\p{P}\p{S}]$/u.test(stripped) ||
+    /[^\p{L}\p{M}\p{N}\p{P}\p{S}\u200c\u200d]/u.test(stripped) ||
+    !/^https?:\/\/[^/?#]*\/?$/i.test(stripped)
+  ) {
+    return false;
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.username.length === 0 &&
+    url.password.length === 0 &&
+    url.pathname === "/" &&
+    url.search.length === 0 &&
+    url.hash.length === 0
+  );
+}
+
 function observabilityDestination(value) {
   let url;
   try {
@@ -209,6 +276,11 @@ function observabilityDestination(value) {
     url.password === "" &&
     url.hash === ""
   );
+}
+
+// The chart refuses ".", "..", and any database.caKey that is not a basename.
+function simpleBasename(value) {
+  return value !== "." && value !== ".." && /^[A-Za-z0-9._-]+$/.test(value);
 }
 
 function optionalString(source, path, diagnostics, { pattern, validate, description } = {}) {
@@ -294,22 +366,43 @@ function stringArray(
   return value;
 }
 
+// parseCidr accepts only "0" or a decimal prefix with no leading zero. Number("08") is 8,
+// which would admit a prefix the API and the chart both refuse.
+function decimalPrefix(rawPrefix) {
+  if (!/^(0|[1-9][0-9]*)$/.test(rawPrefix ?? "")) {
+    return Number.NaN;
+  }
+  return Number(rawPrefix);
+}
+
 function isIpv4Cidr(value, requiredPrefix) {
   const [address, rawPrefix, extra] = value.split("/");
   if (extra !== undefined || rawPrefix === undefined || isIP(address) !== 4) {
     return false;
   }
-  if (!/^[0-9]+$/.test(rawPrefix)) {
-    return false;
-  }
-  const prefix = Number(rawPrefix);
+  const prefix = decimalPrefix(rawPrefix);
   if (!Number.isSafeInteger(prefix) || prefix < 1 || prefix > 32) {
     return false;
   }
   return requiredPrefix === undefined || prefix === requiredPrefix;
 }
 
-function validateNativeAdminDomains(domain, sharedCookieDomain, diagnostics) {
+// The API refuses a public-suffix shared cookie domain at startup (normalizeSharedCookieDomain)
+// with tldts and its bundled list. Resolve the controller's pinned copy so both use the same
+// list without a new root dependency; load it only when native admin is configured.
+function isPublicSuffix(hostname) {
+  const require = createRequire(new URL("../apps/controller/package.json", import.meta.url));
+  let tldts;
+  try {
+    tldts = require("tldts");
+  } catch {
+    return undefined;
+  }
+  const parsed = tldts.parse(hostname, { allowPrivateDomains: true, validateHostname: true });
+  return parsed.isIp || parsed.domain === null || parsed.publicSuffix === hostname;
+}
+
+function validateNativeAdminDomains(domain, sharedCookieDomain, authBaseUrl, diagnostics) {
   const lowerDomain = domain.toLowerCase();
   const lowerSharedCookieDomain = sharedCookieDomain.toLowerCase();
   if (!dnsHostname.test(lowerDomain)) {
@@ -321,6 +414,15 @@ function validateNativeAdminDomains(domain, sharedCookieDomain, diagnostics) {
     diagnostics.errors.push(
       "controlPlane.sharedCookieDomain must be a DNS hostname without a wildcard, port, scheme, or path.",
     );
+  } else {
+    const publicSuffix = isPublicSuffix(lowerSharedCookieDomain);
+    if (publicSuffix === undefined) {
+      diagnostics.errors.push(
+        "controlPlane.sharedCookieDomain needs the public suffix list: run pnpm install first.",
+      );
+    } else if (publicSuffix) {
+      diagnostics.errors.push("controlPlane.sharedCookieDomain must not be a public suffix.");
+    }
   }
   if (
     dnsHostname.test(lowerDomain) &&
@@ -331,6 +433,25 @@ function validateNativeAdminDomains(domain, sharedCookieDomain, diagnostics) {
     diagnostics.errors.push(
       "controlPlane.agentNativeAdminDomain must be inside controlPlane.sharedCookieDomain.",
     );
+  }
+  // The API refuses these at startup: shared session cookies are secure-only, and the
+  // console host must be inside their parent.
+  let baseUrl;
+  try {
+    baseUrl = new URL(authBaseUrl);
+  } catch {
+    // asString already reported it as not an absolute HTTP(S) origin.
+    return;
+  }
+  if (baseUrl.protocol !== "https:") {
+    diagnostics.errors.push("controlPlane.authBaseUrl must use HTTPS with native admin.");
+  } else if (dnsHostname.test(lowerSharedCookieDomain)) {
+    const host = baseUrl.hostname.replace(/\.$/, "");
+    if (host !== lowerSharedCookieDomain && !host.endsWith(`.${lowerSharedCookieDomain}`)) {
+      diagnostics.errors.push(
+        "controlPlane.authBaseUrl host must be inside controlPlane.sharedCookieDomain.",
+      );
+    }
   }
 }
 
@@ -363,14 +484,49 @@ const githubTeam = /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9][a-z0-9_-]{0,99}$/;
 const trustedProxyPresets = ["ingress-nginx", "aws", "generic"];
 const passwordSignInPolicies = ["all", "recovery-only"];
 
+// Ported from the API's trusted-proxy parser (apps/controller/src/auth/client-address.ts
+// ipv6Groups and parseCidr), which the chart mirrors. Expands an address isIP accepted.
+function ipv6Groups(address) {
+  const hex = address.replace(/\d+\.\d+\.\d+\.\d+$/, (tail) => {
+    const octets = tail.split(".").map(Number);
+    return `${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+  });
+  const [head, tail] = hex.split("::");
+  const left = head === "" ? [] : head.split(":");
+  const right = tail === undefined || tail === "" ? [] : tail.split(":");
+  const zeros = tail === undefined ? [] : Array(8 - left.length - right.length).fill("0");
+  return [...left, ...zeros, ...right].map((group) => parseInt(group, 16));
+}
+
+// A trusted proxy CIDR as the API and the chart accept it. The chart refuses zone IDs,
+// which isIP accepts. An IPv4-mapped address (::ffff:0:0/96) is an IPv4 address to the API,
+// so its prefix is 1 through 32. Any other IPv6 range that contains all of ::ffff:0:0/96
+// would trust every IPv4 peer, because BlockList matches IPv4 peers against it.
 function isCidr(value) {
   const [address, rawPrefix, extra] = value.split("/");
   const family = isIP(address ?? "");
-  if (extra !== undefined || family === 0 || !/^[0-9]+$/.test(rawPrefix ?? "")) {
+  if (extra !== undefined || family === 0 || address.includes("%")) {
     return false;
   }
-  const prefix = Number(rawPrefix);
-  return prefix >= 1 && prefix <= (family === 4 ? 32 : 128);
+  const prefix = decimalPrefix(rawPrefix);
+  if (!Number.isSafeInteger(prefix) || prefix < 1 || prefix > (family === 4 ? 32 : 128)) {
+    return false;
+  }
+  if (family === 4) {
+    return true;
+  }
+  const groups = ipv6Groups(address);
+  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
+    return prefix <= 32;
+  }
+  const coversIpv4 =
+    prefix <= 96 &&
+    groups.slice(0, 6).every((group, index) => {
+      const shift = 16 - Math.min(16, Math.max(0, prefix - index * 16));
+      const mappedGroup = index === 5 ? 0xffff : 0;
+      return group >> shift === mappedGroup >> shift;
+    });
+  return !coversIpv4;
 }
 
 function signInProvider(source, name, diagnostics) {
@@ -419,15 +575,25 @@ function signInProvider(source, name, diagnostics) {
   return rendered;
 }
 
-// The OIDC URLs as the chart and API accept them: https on 443, a DNS host, and no
-// userinfo, query or fragment. Returns the lowercase host, or undefined.
-function oidcEndpointHost(value) {
-  if (/[?#]/.test(value)) {
+// The chart's OIDC URL pattern: https, a DNS host spelled in ASCII, an optional :443, and a
+// path without a query or fragment.
+const oidcEndpoint =
+  /^https:\/\/((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)(?::443)?(?:\/[^?#]*)?$/i;
+
+// The OIDC URLs as both the chart and the API accept them: https on 443, a DNS host, and no
+// userinfo, query or fragment. Like both, it checks the value after JavaScript's trim, which
+// the API applies. URL parsing repairs spellings the chart refuses (a tab or a percent-escape
+// in the host, an IDN host, backslashes), so the chart's pattern applies too, and an issuer
+// must not name a port. Returns the lowercase host, or undefined.
+function oidcEndpointHost(value, { issuer = false } = {}) {
+  const trimmed = value.trim();
+  const match = oidcEndpoint.exec(trimmed);
+  if (match === null || match[1].length > 253 || (issuer && /^https:\/\/[^/]*:/i.test(trimmed))) {
     return undefined;
   }
   let url;
   try {
-    url = new URL(value);
+    url = new URL(trimmed);
   } catch {
     return undefined;
   }
@@ -445,11 +611,12 @@ function renderOidc(source, diagnostics) {
   const path = ["controlPlane", "oidc"];
   const rendered = signInProvider(source, "oidc", diagnostics);
   const issuer = asString(source, [...path, "issuer"], diagnostics, {
-    validate: (value) => oidcEndpointHost(value) !== undefined,
-    description: "an https URL on port 443 with a DNS host name and no query or fragment",
+    validate: (value) => oidcEndpointHost(value, { issuer: true }) !== undefined,
+    description:
+      "an https URL on port 443 with a DNS host name and no query or fragment, written without a port",
   });
   rendered.issuer = issuer;
-  const host = oidcEndpointHost(issuer);
+  const host = oidcEndpointHost(issuer, { issuer: true });
   for (const key of ["authorizationUrl", "tokenUrl", "jwksUrl"]) {
     rendered[key] = asString(source, [...path, key], diagnostics, {
       validate: (value) => host === undefined || oidcEndpointHost(value) === host,
@@ -476,7 +643,8 @@ function renderOidc(source, diagnostics) {
 // Mirrors the chart's auth.github/auth.google/auth.oidc checks. Activation is one-way, so every
 // profile rerender after activation must keep rendering these values.
 function renderExternalSignIn(controlPlane, github, google, oidc, authBaseUrl, diagnostics) {
-  if (!authBaseUrl.startsWith("https://")) {
+  // The scheme as URL parsing reads it, like the API: HTTPS:// and surrounding spaces pass.
+  if (!URL.canParse(authBaseUrl) || new URL(authBaseUrl).protocol !== "https:") {
     diagnostics.errors.push("controlPlane.authBaseUrl must use HTTPS with external sign-in.");
   }
   for (const key of ["agentNativeAdminDomain", "sharedCookieDomain"]) {
@@ -527,7 +695,8 @@ function renderTrustedProxy(source, diagnostics) {
   });
   const cidrs = stringArray(source, [...path, "cidrs"], diagnostics, {
     validate: isCidr,
-    description: "an IPv4 or IPv6 CIDR with a nonzero prefix",
+    description:
+      "an IPv4 or IPv6 CIDR with a nonzero prefix, no zone ID, a prefix of 1 through 32 for an IPv4-mapped address, and not covering every IPv4 address",
   });
   const clientAddressHeader = optionalString(
     source,
@@ -756,7 +925,10 @@ function buildRendered(profile, parsed, diagnostics) {
     oidc,
     trustedProxy,
   } = parsed;
-  const releaseName = asString(controlPlane, ["controlPlane", "releaseName"], diagnostics);
+  const releaseName = asString(controlPlane, ["controlPlane", "releaseName"], diagnostics, {
+    validate: (value) => value.length <= 53 && helmReleaseName.test(value),
+    description: "a valid Helm release name of at most 53 characters",
+  });
   const namespace = asString(controlPlane, ["controlPlane", "namespace"], diagnostics);
   const clusterName = asString(controlPlane, ["controlPlane", "clusterName"], diagnostics);
   const controllerImage = asString(controlPlane, ["controlPlane", "controllerImage"], diagnostics, {
@@ -767,7 +939,10 @@ function buildRendered(profile, parsed, diagnostics) {
     pattern: digestImage,
     description: "an immutable image reference with a SHA-256 digest",
   });
-  const authBaseUrl = asString(controlPlane, ["controlPlane", "authBaseUrl"], diagnostics);
+  const authBaseUrl = asString(controlPlane, ["controlPlane", "authBaseUrl"], diagnostics, {
+    validate: httpOrigin,
+    description: "an absolute HTTP(S) origin URL without a path, query, fragment, or user info",
+  });
   const externalSignIn =
     controlPlane.github !== undefined ||
     controlPlane.google !== undefined ||
@@ -807,8 +982,18 @@ function buildRendered(profile, parsed, diagnostics) {
       ["controlPlane", "sharedCookieDomain"],
       diagnostics,
     );
-    validateNativeAdminDomains(agentNativeAdminDomain, sharedCookieDomain, diagnostics);
-    agentNativeAdmin = { enabled: true, domain: agentNativeAdminDomain, sharedCookieDomain };
+    validateNativeAdminDomains(
+      agentNativeAdminDomain,
+      sharedCookieDomain,
+      authBaseUrl,
+      diagnostics,
+    );
+    // The API lowercases both at startup; the chart accepts only lowercase.
+    agentNativeAdmin = {
+      enabled: true,
+      domain: agentNativeAdminDomain.toLowerCase(),
+      sharedCookieDomain: sharedCookieDomain.toLowerCase(),
+    };
   }
   const envoyNamespace =
     optionalString(controlPlane, ["controlPlane", "envoyNamespace"], diagnostics) ??
@@ -902,8 +1087,10 @@ function buildRendered(profile, parsed, diagnostics) {
               diagnostics,
             ),
             caKey:
-              optionalString(databaseCa, ["controlPlane", "databaseCa", "key"], diagnostics) ??
-              "ca.pem",
+              optionalString(databaseCa, ["controlPlane", "databaseCa", "key"], diagnostics, {
+                validate: simpleBasename,
+                description: "a simple basename",
+              }) ?? "ca.pem",
             caMountPath:
               optionalString(
                 databaseCa,
@@ -922,7 +1109,7 @@ function buildRendered(profile, parsed, diagnostics) {
               ["channels", "directoryProxyUrl"],
               diagnostics,
               {
-                pattern: proxyUrl,
+                validate: isLiteralIpv4ProxyUrl,
                 description: "an HTTP(S) literal IPv4 endpoint with an explicit port",
               },
             ),
@@ -1142,7 +1329,7 @@ function buildRendered(profile, parsed, diagnostics) {
                 : {
                     channels: {
                       proxyUrl: asString(channels, ["channels", "runtimeProxyUrl"], diagnostics, {
-                        pattern: proxyUrl,
+                        validate: isLiteralIpv4ProxyUrl,
                         description: "an HTTP(S) literal IPv4 endpoint with an explicit port",
                       }),
                     },
@@ -1298,7 +1485,7 @@ function buildRendered(profile, parsed, diagnostics) {
       );
     } else {
       diagnostics.prerequisites.push(
-        "ChatGPT service-account app connections configured outside OCE before Agents use chatgpt_service_account auth.",
+        "ChatGPT service-account app connections configured outside OCE before Agents select a managed ServiceAccount as their codex_pat source.",
       );
       diagnostics.warnings.push(
         "Managed ChatGPT service-account issuance is wired but remains unverified until a live admin credential flow is qualified.",

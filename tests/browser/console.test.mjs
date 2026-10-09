@@ -535,12 +535,28 @@ async function expectRetainedPreview(page, visibleText) {
 }
 
 test("console keeps loaded route families visible while return reads refresh", async (t) => {
-  const fixture = await createConsoleAppFixture(t);
+  const fixture = await createConsoleAppFixture(t, {
+    originHost: "console.oce.example.test",
+    publicOrigin: true,
+    authCookieDomain: "oce.example.test",
+    development: { enabled: false },
+    https: true,
+    authSecureCookies: true,
+    nativeAdminGatewayApiKey: async () => "native-admin-gateway-api-key",
+    nativeAdmin: {
+      enabled: true,
+      domain: "agents.oce.example.test",
+      sharedCookieDomain: "oce.example.test",
+    },
+  });
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Retained routes", { ready: true });
   await fixture.createNamespace("A second Namespace", { ready: true });
   const agent = await fixture.createAgent(namespace.id, "Retained route Agent");
-  const { page } = await newPage(t, fixture);
+  const { page } = await newPage(t, fixture, {
+    args: [...fixture.browserArgs, "--host-resolver-rules=MAP console.oce.example.test 127.0.0.1"],
+    context: { ignoreHTTPSErrors: true },
+  });
   await trackSettledFetches(page);
 
   await login(page, fixture, "/console/agents?namespace=" + namespace.id);
@@ -627,6 +643,14 @@ test("console keeps loaded route families visible while return reads refresh", a
   await releaseHeldRoute(page, sessionPattern, sessionHold);
   await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
 
+  const nativeStatusUrl = `${fixture.origin}/namespaces/${namespace.id}/agents/${agent.id}/native-admin`;
+  let nativeStatusReads = 0;
+  page.on("request", (request) => {
+    if (request.url() === nativeStatusUrl) {
+      nativeStatusReads += 1;
+    }
+  });
+  const deniedNativeStatus = page.waitForResponse((response) => response.url() === nativeStatusUrl);
   await page.getByRole("link", { name: "Agents", exact: true }).click();
   await page.getByRole("link", { name: "Retained route Agent", exact: true }).click();
   await page.getByRole("heading", { name: "Retained route Agent", exact: true }).waitFor();
@@ -634,7 +658,11 @@ test("console keeps loaded route families visible while return reads refresh", a
   const workspaceNotice =
     "Workspace files require a deployed Agent with a current version and a reachable gateway.";
   await page.getByText(workspaceNotice, { exact: true }).waitFor();
-  await page.locator(".native-admin-access").waitFor({ state: "attached" });
+  assert.equal((await deniedNativeStatus).status(), 403);
+  await page
+    .locator(".native-admin-access")
+    .getByText(/assign your Principal ID/)
+    .waitFor();
   await waitForSettledView(page);
   const originalNativePanel = await page.locator(".native-admin-access").elementHandle();
   await page.getByRole("link", { name: "← Agents", exact: true }).click();
@@ -650,11 +678,21 @@ test("console keeps loaded route families visible while return reads refresh", a
   assert.equal(new URL(page.url()).searchParams.get("tab"), "workspace");
   await releaseHeldRoute(page, detailPattern, detailHold);
   await page.locator('.content [aria-live="polite"]:not([inert])').waitFor();
+  await page.locator(".native-admin-access").waitFor({ state: "attached" });
+  assert.equal(
+    await page
+      .locator(".native-admin-access")
+      .getByText(/assign your Principal ID/)
+      .isVisible(),
+    true,
+    "Administrator assignment guidance survives route admission",
+  );
   assert.equal(
     await originalNativePanel.evaluate((node) => node.isConnected),
     true,
-    "Native admin access is not reconstructed after admission succeeds",
+    "an unchanged denied OpenClaw panel stays in the retained view",
   );
+  assert.equal(nativeStatusReads, 1, "return navigation does not repeat the audited denial");
   await page.getByRole("heading", { name: "Retained route Agent", exact: true }).waitFor();
 
   await page.getByRole("link", { name: "← Agents", exact: true }).click();
@@ -1590,4 +1628,73 @@ test("console clears private content after session expiry, access revocation, an
   await expectNoText(page, /Revoked agent/);
 
   await page.screenshot({ path: join(artifacts, "session-isolation.png"), fullPage: true });
+});
+
+test("widening an open mobile drawer restores usable desktop content", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Drawer resize", { ready: true });
+  await fixture.createAgent(namespace.id, "Resizable Agent");
+  const { page } = await newPage(t, fixture, {
+    context: { viewport: { width: 390, height: 844 } },
+  });
+  await login(page, fixture, `/console/agents?namespace=${namespace.id}`);
+  await page.getByText("Resizable Agent", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  assert.equal(await page.locator("main").evaluate((node) => node.inert), true);
+
+  // Desktop hides drawer controls, so content must become usable without Escape.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.waitForFunction(() => !globalThis.document.querySelector("main").inert);
+  await page.getByRole("searchbox", { name: "Search Agents", exact: true }).fill("Resizable");
+  await page.getByRole("link", { name: "Resizable Agent", exact: true }).waitFor();
+  assert.equal(await page.locator(".drawer-open").count(), 0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const toggle = page.getByRole("button", { name: "Open navigation", exact: true });
+  assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+  await toggle.click();
+  await page.keyboard.press("Escape");
+  assert.equal(await toggle.evaluate((node) => node === globalThis.document.activeElement), true);
+  assert.equal(await page.locator("main").evaluate((node) => node.inert), false);
+});
+
+test("keyboard page navigation focuses the destination before its controls", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Keyboard navigation", { ready: true });
+  await fixture.createAgent(namespace.id, "Keyboard Agent");
+  const { page } = await newPage(t, fixture);
+  await login(page, fixture, `/console/agents?namespace=${namespace.id}`);
+  await page.getByText("Keyboard Agent", { exact: true }).waitFor();
+  await page.getByRole("link", { name: "Namespaces", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("list", { name: "Namespaces", exact: true }).waitFor();
+  await page.locator('.content [aria-busy="false"]').waitFor();
+  const heading = page.getByRole("heading", { name: "Namespaces", exact: true });
+  assert.equal(await heading.evaluate((node) => node === globalThis.document.activeElement), true);
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Refresh", exact: true })
+      .evaluate((node) => node === globalThis.document.activeElement),
+    true,
+  );
+
+  // Back reuses the admitted collection while giving the destination a focus target.
+  await page.goBack();
+  await page.locator('.content [aria-busy="false"]:not([inert])').waitFor();
+  assert.equal(
+    await page
+      .getByRole("heading", { name: "Agents", exact: true })
+      .evaluate((node) => node === globalThis.document.activeElement),
+    true,
+  );
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await page
+      .getByRole("combobox", { name: "Namespace", exact: true })
+      .evaluate((node) => node === globalThis.document.activeElement),
+    true,
+  );
 });

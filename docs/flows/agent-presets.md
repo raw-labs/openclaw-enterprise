@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
-updated: 2026-09-28
-last_updated_session: authoring-run/c140c47a-799b-48c8-929a-5d1a37eb31d1
+updated: 2026-10-06
+last_updated_session: authoring-run/a45c48cd-bde3-41b1-8e3d-57bf774df237
 ---
 
 # Agent Presets flow
@@ -15,11 +15,10 @@ continues through [revision admission](configuration-driver/persistence-and-revi
 
 ## Entry Points
 
-- [Installation loader](../../apps/controller/src/composition/installation-config.ts):
-  `loadInstallationConfiguration` reads `presets.includeDefaults` and `presets.files`.
+- [Preset file loader](../../apps/controller/src/composition/installation-presets.ts):
+  `loadInstallationPresets` reads `presets.includeDefaults` and `presets.files` before Driver composition.
   Bundled defaults are `default-codex`, **Standard Codex**, and **Standard OpenClaw**; the custom SWE Agent
-  file is loaded only when explicitly listed. Production and PostgreSQL development composition pass generic
-  name/template definitions to OCC and call `initializeDefaultPresets`.
+  file is loaded only when explicitly listed.
 
 - Source: `packages/contracts/src/api/routes.ts:occApiRoutes`.
 - [Preset routes](../../packages/contracts/src/api/routes.ts): authenticated
@@ -70,12 +69,11 @@ administrator Role. Its guarded update preserves customized Roles; the exact
 
 ### 1. Include configured defaults
 
-`apps/controller/src/composition/installation-config.ts:loadInstallationConfiguration`
+`apps/controller/src/composition/installation-presets.ts:loadInstallationPresets`
 
-The loader validates the opt-in boolean and file list. It loads bundled JSON
-when enabled, resolves explicit JSON paths beside the startup YAML, validates
-each name/template definition, and rejects missing, malformed, invalid, or
-duplicate-name files before composition; a file named like a bundled default
+The loader validates the opt-in boolean and file list, reads bundled JSON, and
+resolves explicit paths beside the startup YAML. It validates names/templates and rejects missing,
+malformed, invalid, or duplicate-name files; a file named like a bundled default
 replaces it, and API composition warns `presets.bundled-default-shadowed`. API and worker share the startup
 snapshot and source path (files are not watched), but only the API applies
 defaults and logs Preset warnings. [Production composition](../../apps/controller/src/composition/production.ts)
@@ -147,12 +145,11 @@ path records mutations and denials without template or variable contents.
 `apps/controller/src/console/agents/presets.mjs:createPresetFields`
 
 [`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs)
-lists only readable Presets (the list requires Namespace read), then reads the
-selected resource once. The **Start with default Preset** button uses the listed
-`default-codex` ID through that same exact-resource read. It applies
-variable-free templates immediately; customized variable definitions retain the
-ordinary chooser. If that chooser is
-restored, it preserves the shortcut origin for the eventual form. Missing defaults or
+lists readable Presets with Namespace read, then reads the selected resource once
+with `revalidate: false` for an independent draft.
+**Start with default Preset** reads the listed `default-codex`, applying
+variable-free templates immediately. Variables use the chooser; restoration
+retains the shortcut origin. Missing defaults or
 failed list/read requests cannot open a hidden hardcoded starter. Other readable
 Presets remain selectable. The separate **Start without Preset** action opens
 the ordinary form without reading a Namespace Preset; it does not automatically
@@ -294,6 +291,7 @@ or an immutable admitted revision.
 
 ## Changelog
 
+- 2026-10-06 22:22: Locate Preset file loading in its adjacent composition module; initialization remains unchanged. (authoring-run/a45c48cd-bde3-41b1-8e3d-57bf774df237 - 17e10b6d34cc2c805b3910fddfef191d3dd1b3f8)
 - 2026-10-05 05:30: Only the API logs Preset warnings.
 - 2026-10-05 03:30: A file named like a bundled default replaces it and warns.
 - 2026-10-05 02:30: Skip and warn on a default creation a deny Restriction refuses.
@@ -302,6 +300,8 @@ or an immutable admitted revision.
 - 2026-10-04 22:00: Refresh superseded copies only when `includeDefaults` seeded them; a `presets.files` copy of a bundled file stays.
 - 2026-10-04 14:00: Refresh untouched copies of superseded bundled defaults at startup, and let any shipped version pass the Namespace deletion check.
 - 2026-10-03 20:30: Seed default Presets with the next Installation administrator when one cannot create them, so an upgrade that adds a default no longer stops API startup.
+- 2026-10-03 09:53: Exclude the selected Preset snapshot from replay after its values become an independent draft. (authoring-run/59d7541c-66d2-414c-8139-174fca84fe33 - f7af67dd9a7b6e5571e7d4d7c384966ba7fb31fd)
+
 - 2026-09-28 10:36: Restore explicit creation without a Preset. (authoring-run/c140c47a-799b-48c8-929a-5d1a37eb31d1 - 9f7ae3cfb749a58394f8446f3a429db6ffa6f129)
 
 - 2026-09-27 01:09: Preserve exit discard for the default Preset shortcut and retain explicitly selected Preset drafts. (authoring-run/048d8546-acd0-4d1a-8231-61c9d9ccb9dc - 7d0da53a8f092b0e2533464424dcb9c7fe15b139)

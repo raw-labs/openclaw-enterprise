@@ -23,15 +23,15 @@ Full CI has twenty required lanes. `checks-baseline-1` and `checks-baseline-2` s
 
 Hosted image builds use separate controller/runtime caches. Packaging exports on main pushes; model probes, runtime startup and the repository credential platform restore. A never-cancelled main [cache workflow](../../.github/workflows/ci-image-cache.yml) also exports; pull requests only read main's cache. The platform lane loads its cached runtime image into the Docker engine and derives its fixture from it with the default builder. Transfers time out after one minute, export failures are ignored, and builds load locally. Cache credentials stay in preparation. Local builds remain unchanged.
 
-Compare per-file `wallDurationMs`, preparation `[ci-timing]` phases and Actions timestamps for slow setup or tests. Imports stream `docker image save` into node-local `ctr image import` on each owned k3d node (`image-stream-import`): k3d `tools-node` can hide per-node failures while exiting successfully. Imports are serialized per cluster, then preparation verifies digest and CRI references.
+Compare per-file `wallDurationMs`, preparation `[ci-timing]` phases and Actions timestamps for slow setup or tests. [k3d image preparation](ci-k3d-images.md) covers how images reach the cluster nodes.
 
 `static-checks` runs `pnpm docs:check` and the [dependency policy](repository-boundaries.md). Pages above 1,500 visible words require review; above 2,500 fail except the approved [API reference](../reference/api.md) and `AGENTS.md` files. The generated API, site build, navigation, and links must pass. The [specification check](../contributing/specifications.md#status-and-review) also validates non-archived RFC metadata and spec link targets. Run `pnpm docs:check-length` for word counts alone.
 
-CI Impact and Suite Audit start independently. Full mode runs the nineteen-lane matrix and `runtime-image-fixture`; `CI Required` requires their outcomes and same-source artifacts. Kubernetes fixture and observability lanes use `ubuntu-22.04` for bridge netfilter support; `runtime-image-fixture` and `CI Required` also use it. The repository credential platform lane uses `blacksmith-16vcpu-ubuntu-2404` to build the delivered runtime image and platform fixture in one job; other lanes and the audit use `blacksmith-8vcpu-ubuntu-2404`.
+CI Impact and Suite Audit start independently. Full mode runs the nineteen-lane matrix and `runtime-image-fixture`; `CI Required` requires their outcomes and same-source artifacts. Kubernetes fixture, observability and runtime image startup lanes use `blacksmith-32vcpu-ubuntu-2404` (8 CPUs), whose kernel enforces the NetworkPolicy checks; `runtime-image-fixture` and `CI Required` use `ubuntu-22.04`. Each lane-table row in `ci.yml` names its runner. Other lanes, Static Checks and the audit use `blacksmith-16vcpu-ubuntu-2404`: 4 CPUs (8vcpu exposes 2), and its jobs rarely wait for a runner.
 
 In every mode, `static-checks` verifies checkout identity and runs the workspace, lint, format, OpenAPI and docs checks beside the lanes. The docs check covers word limits, site links and navigation, but not outgoing links in root or `specs/` Markdown. Docs mode (a verified documentation-only PR merge tree) runs no product tests. `CI Required` verifies the mode and requires successful impact, audit and static checks, with docs mode's test jobs skipped. Missing, failed, cancelled or unexpectedly skipped selected jobs fail. Docs mode does not run the test-result aggregator or require test artifacts.
 
-Test-only PRs run only their files' `ci` lanes plus `checks-baseline-1` ([rules](../flows/github-actions-testing.md)).
+Test-only PRs run only their files' `ci` lanes; `checks-baseline-1` runs only when it lists a changed file or when the runtime image fixture would be the only lane ([rules](../flows/github-actions-testing.md)).
 
 An independent full-mode PR advisory job reports pnpm's affected TypeScript workspace packages for verified, clean PR merge checkouts. It uses declared package dependencies; Go, files outside a workspace package, non-TypeScript changes and missing evidence are reported as unavailable. It does not select or skip tests and cannot change the required CI result.
 
@@ -93,13 +93,34 @@ NetworkPolicy enforcement.
 Kubernetes fixture startup logs phase timings and host resource and pressure snapshots. On cluster or readiness failure, preparation collects bounded
 node, system Pod, event and redacted node-container diagnostics before cleanup;
 k3d rollback is disabled long enough to retain them. Inspect the
-`diagnostics-<artifact-prefix>-<lane>` artifact or local
+`diagnostics-<artifact-prefix>-<lane>-attempt-<N>` artifact (one per job attempt) or local
 `<state-file>.diagnostics.json`. Failed diagnostic commands are marked unavailable or timed out; collection preserves the original failure. Raw
 kubeconfig, environment values and Pod specs are excluded. After a failed prepared
 run, local callers must run `node scripts/ci/cleanup.mjs --state <state-file>`.
 Diagnostics explain setup failures without establishing coverage.
 
-The `k3d-model`, `gateway-routing`, `slack`, and `k3d-otel` lanes prepare the controller image and workspace routing for dedicated Harness node enrollment. Supply an immutable `NODE_BASE_IMAGE` for the build. Preparation supplies the imported controller digest and private routing CA paths; Slack still requires approved runtime images and credentials.
+In k3d lanes the runner gives each file a private `OPENCLAW_CI_CONTAINER_LOG_DIR`.
+A test that follows a container with `tests/helpers/container-log-capture.mjs`
+writes a record there only when a wait fails: its markers, Pod and event
+snapshots, and the log, waiting up to 60 s for the container to exit.
+`scripts/ci/k3d-diagnostics.mjs:projectContainerLog` keeps at most 1,500 lines,
+redacts environment values and secret shapes in lines and event messages, and
+adds the record to the same report under `containerLogs`. The platform recovery
+test follows its fixture gateway, which logs its drain, across Agent stop.
+
+The job log and results keep 600 characters of a failure message. In every lane,
+the runner adds each failed file's whole messages and stacks (16 KiB each, 20
+cases) and its last 400 stdout, stderr and diagnostic lines to the same report
+under `failures`, for the first 8 failed files (`omittedFailureFiles` counts the rest). They get the failure-message
+redaction, and lines naming a credential are dropped whole. Test output reaches an
+artifact only here; a runtime-minted value without a known shape is not redacted,
+so tests must not print secrets. Each record has a `reason`. A file stopped at the
+runner timeout gets `timeout`, its elapsed time, the running tests and the output tail
+so far (a long tail can lose its oldest lines; `omittedLines` counts them). A
+preparation failure gets `prepare` with the redacted error message, which can quote a
+command's output, and stack.
+
+The `k3d-model`, `gateway-routing`, `slack`, `openshell`, and `k3d-otel` lanes prepare the controller image and workspace routing for dedicated Harness node enrollment. Supply an immutable Node 24 `NODE_BASE_IMAGE`; gateway-routing, Slack and OpenShell CI use the repository variable `CONTAINER_NODE_BASE_IMAGE`. Preparation supplies the imported controller digest and private routing CA paths; Slack still requires approved runtime images and credentials.
 
 Routing, OpenShell, and logging have CI preparation contracts. Routing installs
 pinned Gateway API, cert-manager v1.18.4 and Envoy Gateway v1.6.7 manifests and
@@ -149,33 +170,7 @@ A retry replaces its lane result artifact; other lanes keep theirs. Each attempt
 
 ### Select immutable images for local preparation
 
-Ordinary Kubernetes lanes default to the digest-pinned K3s 1.35 image in
-`defaultK3sImage` (`scripts/ci/prepare.mjs`), so cluster creation never queries
-k3d's online release channel. Set `OPENCLAW_CI_K3S_IMAGE` to another approved
-`image@sha256:<digest>` before
-`node scripts/ci/prepare.mjs --lane <lane> --state <private-state-file>` to
-override it. Both paths require the API server to report Kubernetes 1.35.x;
-OpenShell retains its separately pinned image. Mutable overrides fail before
-resource creation. Clean up a failed run's owned resources before reusing its state path.
-
-Preparation reuses a supplied immutable workload image in the local Docker daemon
-only when `docker image inspect` records the requested digest in `RepoDigests`;
-a mutable tag or unverified image is insufficient. Missing or mismatched images
-are pulled and rechecked before import. Other Docker inspection failures stop
-preparation. Cleanup removes owned import tags and preserves the supplied image.
-
-On GitHub-hosted runners, both observability lanes require 36 GiB free before
-building and importing images, removing unused SDKs only when less is free
-(concurrently, ten-minute deadline, per-directory timing receipts); local runs
-omit this guarded cleanup. Both use single-node clusters and overlap independent
-pulls, builds, and cluster setup, then serialize k3d imports per cluster to avoid
-importer races. The demo lane imports only its three services and a Node
-image for protocol fixtures; it does not build OCC. State writes remain
-serialized, and all in-flight operations settle before failure cleanup.
-
-Image imports time out after ten minutes. Preparation verifies each immutable
-reference on every schedulable node. Errors and timeouts fail preparation; lane
-cleanup removes the owned cluster and partial imports.
+See [k3d image preparation](ci-k3d-images.md#select-immutable-images-for-local-preparation).
 
 ### Integration coverage by trigger
 

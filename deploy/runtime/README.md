@@ -34,35 +34,42 @@ after enrollment cannot reconnect. The patch lets that path decode an expired
 code and hands the expiry to the node host. The node host then reconnects with
 the saved device token for the same Gateway, or still refuses the code, as
 upstream `node run --pair-if-needed` already does.
+The build also applies `openclaw-trusted-proxy-role.patch`. It adds paired role and policy-digest headers and explicit managed identity selectors to trusted-proxy configuration, then commits the proxy-selected role through native profile writes before WebSocket or HTTP operator admission. It retains native role enforcement, closes existing profile connections when the assignment changes, and rejects missing or mismatched assignments, undeclared identities and ambiguous profile links. The Kubernetes Driver supplies OCE's identity names; the bridge has no built-in OCE identity namespace. See [native authority and drift](../../docs/reference/agent-native-admin.md#native-authority-and-drift) for ownership and digest rules. The patch includes actual Gateway/SQLite integration cases in `server.auth.identity-scopes.test.ts` and `server.plugin-http-role-scopes.test.ts`, plus configuration validation in `zod-schema.gateway-auth.test.ts`. Remove it when upstream supports verified proxy role assignment with the same admission and role-publication guarantees.
 The source archive and patch hashes identify the resulting custom build.
 
-The selected commit does not support dedicated native OpenClaw. That Harness
-needs required worker placement (`cloudWorkers.requiredProfile`) and native
-worker inference (`nodeHost.workerRuns.nativeInferenceConfig`), which are not in
-upstream main yet. This image's configuration validation rejects both keys, so
-its Gateway and Harness exit at startup rather than place sessions on the
-Gateway. `PINNED_OPENCLAW_RUNTIME_SUPPORTS_NATIVE_WORKERS` in
-`packages/occ/src/native-worker-support.ts` records this, and admission refuses
-dedicated native OpenClaw while it is `false`. The images-runtime-startup lane
-runs both entrypoints against this image and fails when the image disagrees with it.
+Dedicated native OpenClaw requires both required worker placement
+(`cloudWorkers.requiredProfile`) and node-local inference from canonical
+`models.providers` configuration. The node snapshots its model credentials and
+projects each worker's managed workspace from its authorized launch descriptor;
+OCE does not write the retired `nodeHost.workerRuns.nativeInferenceConfig` field.
+
+The selected image remains unqualified for the complete dedicated native flow.
+`PINNED_OPENCLAW_RUNTIME_SUPPORTS_NATIVE_WORKERS` in
+`packages/occ/src/native-worker-support.ts` stays false, so admission refuses
+that topology unless the operator declares an explicitly selected custom image.
+The images-runtime-startup lane validates both generated configurations with the
+image's CLI. Schema acceptance alone does not qualify enrollment, workspace
+access, or native model execution.
 
 | Input                                        | Selection                                                                                                    |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Build base                                   | `docker.io/library/node:24-bookworm@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584` |
-| OpenClaw source commit                       | `11d3d04a1279781a770f6a6aa09e6322b064b80a`                                                                   |
-| Source archive SHA-256                       | `b48a59055b2eeb39db06a7b900ade5208fa8f23c3f4f481fd5b5c455ea9436ab`                                           |
+| OpenClaw source commit                       | `90d30a1178a79dddd92e6190b66b95d89dfb3ca8`                                                                   |
+| Source archive SHA-256                       | `c56ea921a033efd95c2c9e43e4255c675939b0aa927c6aaf5bbdb51d5b693a8b`                                           |
 | Dedicated Codex CLI (`OPENAI_CODEX_VERSION`) | `0.160.0`                                                                                                    |
 | Matrix crypto native library                 | `@matrix-org/matrix-sdk-crypto-nodejs` `v0.6.6`, SHA-256 per architecture                                    |
 
 The source's package version is `2026.9.8`; it does not identify this custom
 build. `/opt/oce/runtime/provenance.json` records the source commit, verified archive
-hash, both bridge patch hashes, lockfile hash, pinned package manager, selected plugins, architecture, stock Codex
+hash, all three bridge patch hashes, lockfile hash, pinned package manager, selected plugins, architecture, stock Codex
 package identity, and the SHA-256 of `contents.json`, which inventories
 packaged files, modes, hashes, and symlinks after final-stage permission
 normalization. The final stage copies the assembled
 directory directly, without an intermediate compressed archive. Its pinned
 `node:24-bookworm-slim` base retains required runtime libraries, Git/SSH, GitHub CLI,
 Python, and process utilities. Build compilers stay in the full Bookworm stages.
+The repository credential client stage needs only Node and pnpm, so it builds on the
+slim base too.
 The build selects upstream required bundled plugins plus Codex and Slack before
 installing dependencies for the target architecture with lifecycle
 scripts enabled and runs upstream postinstall, plugin pruning, import-closure,
@@ -102,7 +109,7 @@ checksum-verifying download helper, and both installs read it from a loopback se
 instead of GitHub. When an OpenClaw update changes the locked
 `@matrix-org/matrix-sdk-crypto-nodejs` version, update that stage's version, URL and
 both SHA-256 values. Until then the install fails with a "no pinned file" message.
-Follow the [pinned upstream Docker assembly](https://github.com/openclaw/openclaw/blob/11d3d04a1279781a770f6a6aa09e6322b064b80a/Dockerfile)
+Follow the [pinned upstream Docker assembly](https://github.com/openclaw/openclaw/blob/90d30a1178a79dddd92e6190b66b95d89dfb3ca8/Dockerfile)
 to keep plugin dependencies and runtime assets consistent. Its plugin-local
 dependency layout preserves dependencies that differ from core versions.
 Plugin chunks emitted directly under `dist` also need package-root resolution.

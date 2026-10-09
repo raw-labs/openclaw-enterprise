@@ -93,6 +93,23 @@ node credentials as an operator fail at the native Gateway. Worker callbacks
 authenticate their first WebSocket frame with the Gateway-minted, session-bound
 worker admission credential; the Harness never receives the OCC service key.
 
+Dedicated Codex also receives a POST-only
+`/node/__openclaw__/native-hook/` prefix, rewritten to
+`/__openclaw__/native-hook/`. It preserves the Authorization header while
+removing the administrative identity headers listed above. OpenClaw authenticates
+each callback with its per-relay capability and generation; this route does not
+grant node or operator access. Compute derives the callback URL from this Agent's
+private endpoint and refuses a caller-selected override.
+
+The Gateway delivers each hook capability through its authenticated Codex
+app-server connection. The Harness stores it under `/home/node/.oce-native-hooks`
+with a private directory mode, outside the workspace and file-transfer roots.
+This directory is ephemeral Pod state. It is not an isolation boundary against
+compromised Harness code running as the same user. Gateway checks bind each
+capability to this Agent's live provider/relay and exact generation; it grants
+neither another Agent's callbacks nor node or operator access. Native hooks use the installation's public CA bundle
+with normal HTTPS certificate verification.
+
 Preparation creates or repairs these resources under the serving Gateway's
 revision. Preparing a replacement preserves that ownership until activation
 replaces the Deployment.
@@ -248,15 +265,16 @@ so every matching console and Agent subdomain must be a trusted OCE ingress
 endpoint. OCC authenticates and authorizes the human session before proxying,
 then strips browser cookies and credentials before forwarding to Envoy.
 
-The private Compute endpoint remains:
+The human Compute descriptor selects:
 
 ```text
-wss://<private-host>/namespaces/<namespaceId>/agents/<agentId>
+wss://<private-host>/people/namespaces/<namespaceId>/agents/<agentId>
 ```
 
-OCC converts that endpoint to `https:` for native UI HTTP traffic while keeping
-the same private authority and exact Agent base path. Workspace-file traffic
-continues to use the original WSS endpoint. Native-host requests are
+OCC converts that endpoint to `https:` for native UI HTTP traffic and forwards
+its verified human identity, assigned role and policy digest. Workspace-file
+traffic uses the original `/namespaces` WSS base, with its separate privileged
+service identity. Native-host requests are
 intercepted before the normal API not-found path, resolved to the exact Agent
 represented by the host, and checked against the current active revision before
 the API proxies HTTP or WebSocket traffic through the private route.

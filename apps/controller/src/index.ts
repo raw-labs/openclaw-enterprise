@@ -95,6 +95,7 @@ import type { NativeAdminAccessConfig } from "./gateway/native-admin.ts";
 import { createAgentHandlers } from "./http/agents.ts";
 import { configurationHandlers } from "./http/configurations.ts";
 import { credentialSourceHandlers } from "./http/credential-sources.ts";
+import { jsonPointer, type ErrorDetail } from "./http/error-details.ts";
 import {
   canonicalFailure,
   cappedPath,
@@ -102,12 +103,10 @@ import {
   failure,
   isAuthorizationDenied,
   isDependencyUnavailable,
-  jsonPointer,
   RequestFailure,
   requestFailure,
   responseHeaders,
   unstorableTextFailure,
-  type ErrorDetail,
 } from "./http/errors.ts";
 import { iamHandlers } from "./http/iam.ts";
 import {
@@ -193,10 +192,12 @@ interface RequiredPermission {
     | "directory_lookup"
     | "selected_secret"
     | "iam_binding_target"
+    | "runtime_assignment_target"
     | "provisioning_work"
     | "missing_runtime_credentials"
     | "authenticated_plugin_discovery"
-    | "read_logs_alternative";
+    | "read_logs_alternative"
+    | "bound_credential_source";
 }
 
 interface DocumentedFastifySchema extends FastifySchema {
@@ -566,6 +567,24 @@ function requiredPermissions(operation: OccApiRoute): readonly RequiredPermissio
     return [{ ...permission, scope: "namespace" }];
   }
 
+  if (
+    operation.operationId === "createCredentialSource" ||
+    operation.operationId === "updateCredentialSource"
+  ) {
+    // Mirrors OCC readCredentialSourceSecrets: operate on each Secret whose value the
+    // gateway receives (an update re-sends the current references when it names none).
+    const create = operation.operationId === "createCredentialSource";
+    return [
+      { ...permission, scope: create ? "namespace" : "requested" },
+      {
+        action: "operate",
+        resourceKind: "secret",
+        scope: create ? "request_body" : "requested",
+        condition: "bound_secret",
+      },
+    ];
+  }
+
   if (operation.operationId === "lookupChannelDirectory") {
     return [
       {
@@ -651,13 +670,34 @@ function requiredPermissions(operation: OccApiRoute): readonly RequiredPermissio
   }
 
   if (
+    operation.operationId === "updateIAMRuntimeRole" ||
+    operation.operationId === "listAgentRuntimeRoles"
+  ) {
+    return [
+      { action: "administer", resourceKind: "installation", scope: "requested" },
+      { action: "read", resourceKind: "namespace", scope: "requested" },
+      {
+        action: "read",
+        resourceKind: "agent",
+        scope: "requested",
+        ...(operation.operationId === "updateIAMRuntimeRole"
+          ? { condition: "runtime_assignment_target" as const }
+          : {}),
+      },
+    ];
+  }
+
+  if (
     operation.operationId === "listIAMRoles" ||
     operation.operationId === "createIAMRole" ||
     operation.operationId === "getIAMRole" ||
     operation.operationId === "deleteIAMRole" ||
     operation.operationId === "listIAMAccessBindings" ||
     operation.operationId === "getIAMAccessBinding" ||
-    operation.operationId === "deleteIAMAccessBinding"
+    operation.operationId === "deleteIAMAccessBinding" ||
+    operation.operationId === "listIAMServicePrincipals" ||
+    operation.operationId === "createIAMServicePrincipal" ||
+    operation.operationId === "getIAMServicePrincipal"
   ) {
     return [
       { action: "administer", resourceKind: "installation", scope: "requested" },
@@ -727,6 +767,21 @@ function requiredPermissions(operation: OccApiRoute): readonly RequiredPermissio
         scope: "requested",
         condition: "bound_secret",
       },
+      // Mirrors OCC authorizeHarnessAuthSource and authorizeAgentCredentialSources. Agent
+      // provisioning refuses credential sources, so it needs no such grant.
+      ...(operation.operationId === "provisionAgent"
+        ? []
+        : [
+            {
+              action: "operate" as const,
+              resourceKind: "credential_source" as const,
+              scope:
+                operation.operationId === "createAgent"
+                  ? ("request_body" as const)
+                  : ("requested" as const),
+              condition: "bound_credential_source" as const,
+            },
+          ]),
     ];
   }
 
@@ -906,7 +961,22 @@ function permissionDescription(
         if (operation?.operationId === "updateConfiguration") {
           return `Requires ${action} permission on each ${name} bound by the resulting Configuration.`;
         }
+        if (operation?.operationId === "createCredentialSource") {
+          return `Requires ${action} permission on each ${name} named in the request body secrets.`;
+        }
+        if (operation?.operationId === "updateCredentialSource") {
+          return `Requires ${action} permission on each ${name} the source references after the update, including its current references when the request omits secrets.`;
+        }
         return `Requires ${action} permission on each bound ${name} when Secret bindings are present or selected.`;
+      }
+      if (condition === "bound_credential_source") {
+        if (operation?.operationId === "createAgent") {
+          return `Requires ${action} permission on each ${name} listed in credentialSources or named by a credential-source harnessAuth.`;
+        }
+        if (operation?.operationId === "updateAgent") {
+          return `Requires ${action} permission on each ${name} the Agent lists or names in harnessAuth, before and after the update.`;
+        }
+        return `Requires ${action} permission on each ${name} the Agent lists or names in harnessAuth.`;
       }
       if (condition === "missing_runtime_credentials") {
         return `Requires ${action} permission on the Agent when the selected Compute Driver must generate missing runtime credentials for its first deployment.`;
@@ -919,6 +989,9 @@ function permissionDescription(
       }
       if (condition === "iam_binding_target") {
         return `Requires ${action} permission on the request body ${name} when the AccessBinding targets that resource kind.`;
+      }
+      if (condition === "runtime_assignment_target") {
+        return `Requires ${action} permission on the ${name} targeted by the AccessBinding.`;
       }
       switch (scope) {
         case "installation":
@@ -934,7 +1007,7 @@ function permissionDescription(
     .join(" ");
 
   if (operation?.operationId === "deployAgent") {
-    return `${description} Deployment also requires the owning Agent service principal to have operate permission on each bound Secret.`;
+    return `${description} Deployment also requires the owning Agent service principal to have operate permission on each bound Secret and on each ${names.credential_source} the Agent lists.`;
   }
   return description;
 }
@@ -1050,7 +1123,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     },
     ajv: {
       // `verbose` attaches each failure's schema and value, so contract errors can tell which
-      // shape of a discriminated union a request chose (http/errors.ts). Neither is logged or
+      // shape of a discriminated union a request chose (http/error-details.ts). Neither is logged or
       // returned: problems name only paths and the schema's accepted values, and http/errors.ts
       // drops both from the error once its problems are built. An onError hook runs before
       // that, so none may log `error.validation`.
@@ -1216,8 +1289,18 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
               restrictionIds: authorizationEvidence.restrictionIds,
             },
           };
+    // A request admitted by a service key names that key (its non-secret ID), so an
+    // administrator can tell which of a ServicePrincipal's keys acted. `serviceKeyId` stays
+    // the key a key-management event acts on.
+    const admitted = admissions.get(request);
+    const actorKeyDetails =
+      admitted?.method === "api_key" && admitted.serviceKeyId !== undefined
+        ? { actorServiceKeyId: admitted.serviceKeyId }
+        : undefined;
     const details =
-      result?.details === undefined ? evidenceDetails : { ...evidenceDetails, ...result.details };
+      result?.details === undefined && actorKeyDetails === undefined
+        ? evidenceDetails
+        : { ...evidenceDetails, ...result?.details, ...actorKeyDetails };
     return factory.create({
       installationId,
       ...(resource.namespaceId === undefined ? {} : { namespaceId: resource.namespaceId }),
@@ -2594,10 +2677,11 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
             throw failure(409, "RESOURCE_CONFLICT", "Bootstrap the Installation first.");
           }
           if (!creating && request.body !== undefined) {
+            // The same wording as OCC's operations that take no body.
             throw failure(
               400,
               "INVALID_REQUEST",
-              "The request does not match the operation contract.",
+              "The request does not match the operation contract: this operation accepts no request body.",
             );
           }
           const { selected, target, decision } = await requireInstallationAdmin(
@@ -2605,13 +2689,15 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
             operation,
             context,
           );
-          const audit = (key: { id: string; servicePrincipalId: string }) => {
+          // Names the key acted on by ID and its non-secret name; never the credential.
+          const audit = (key: { id: string; servicePrincipalId: string; name: string }) => {
             const base = event(operation, request, target, "mutation", context, decision.evidence);
             return {
               ...base,
               details: {
                 ...base.details,
                 serviceKeyId: key.id,
+                serviceKeyName: key.name,
                 servicePrincipalId: key.servicePrincipalId,
               },
             };

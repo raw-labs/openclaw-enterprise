@@ -106,6 +106,12 @@ from the default StorageClass, mounted only by its Harness:
 | `codex-sessions`                               | `/home/node/.codex/sessions`         |
 | `workspace-node-<agent-hash>-<harness-hash>`   | `/home/node/.openclaw-node`          |
 
+The nonroot init container creates each subpath as uid 1000 with mode `0700`
+before the kubelet mounts it. Claims from the first release hold root-owned
+`workspace` and `generated-images` directories the kubelet created; the init
+renames such a directory aside, recreates it and moves its entries back. A name
+the new directory already has stays in `.<subpath>.kubelet-created`.
+
 This directory keeps node identity across Pod and revision replacement.
 The node Secret's setup code expires ten minutes after preparation mints it. A
 node with a saved device token for the same Gateway reconnects with that token;
@@ -176,13 +182,14 @@ for retry; it does not remove the Agent's database identity.
 
 ## Managed native configuration
 
-Ordinary runtime gateways read the managed ConfigMap at
+Runtime gateways read the managed ConfigMap at
 `/etc/openclaw/openclaw.json`. Native admin editing uses a writable copy only
 when runtime gateway images and private `gatewayRouting` are configured and
-the saved native Configuration explicitly enables the pilot shape:
+the saved native Configuration enables:
 
-- Trusted-proxy authentication accepts `x-occ-identity: occ-workspace-files`
-  with `operator.admin` identity scopes.
+- `x-occ-identity` retains `occ-workspace-files` with `operator.admin`.
+  Human roles require managed headers and empty `allowUsers`:
+  [native authority](../../agent-native-admin.md#native-authority-and-drift).
 - Trusted-proxy device auto-approval is enabled with `operator.admin` scope.
 - `controlUi.enabled` is true and `controlUi.allowedOrigins` is nonempty.
 - Dangerous device-auth disabling and host-header origin fallback are disabled.

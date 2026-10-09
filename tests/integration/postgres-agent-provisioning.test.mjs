@@ -4,7 +4,13 @@ import test from "node:test";
 import pg from "pg";
 
 import { NativeIAMDriver } from "../../packages/iam/src/index.ts";
-import { NativeWorkerSupportError, PostgresPlatformState } from "../../packages/occ/src/index.ts";
+import {
+  ConfigurationHarnessError,
+  NativeWorkerSupportError,
+  PostgresPlatformState,
+  ProvisioningSecretDriverError,
+  ServiceAccountDriverNotConfiguredError,
+} from "../../packages/occ/src/index.ts";
 import { composePostgresDevelopment } from "../../apps/controller/src/composition/development-postgres.ts";
 import { createControllerWorker } from "../../apps/controller/src/worker.ts";
 import {
@@ -23,6 +29,7 @@ import {
   privateBootstrapDirectory,
 } from "../helpers/bootstrap-installation.mjs";
 import { waitFor } from "../helpers/wait-for.mjs";
+import { withNamespaceLockHeld } from "../helpers/postgres-namespace-lock.mjs";
 import { databaseUrl, requiresPostgres } from "../helpers/postgres-database.mjs";
 
 const adminEmail = "postgres-agent-provisioning-v2@example.test";
@@ -416,23 +423,35 @@ async function createFixture(context, options = {}) {
     workerCompletion = undefined;
   }
 
-  async function revokeCurrentPrincipal() {
+  // The signed-in administrator's Principal, whose subject is its account: a test may add
+  // other administrators, so the first better-auth Principal is not necessarily this one.
+  async function administratorPrincipalId() {
+    const current = await request("GET", "/api/auth/session");
+    assert.equal(current.status, 200, JSON.stringify(current.body));
     const iam = await state.loadNativeIAMState();
-    const principal = iam.identities.find(
-      (identity) => identity.kind === "principal" && identity.issuer.endsWith(":better-auth"),
+    const principals = iam.identities.filter(
+      (identity) =>
+        identity.kind === "principal" &&
+        identity.issuer.endsWith(":better-auth") &&
+        identity.subject === current.data.user.id,
     );
-    assert.ok(principal, "the bootstrapped administrator Principal must exist");
+    assert.equal(principals.length, 1, "exactly one Principal must match the signed-in account");
+    return principals[0].id;
+  }
+
+  async function revokeCurrentPrincipal() {
+    const principalId = await administratorPrincipalId();
     const result = await pool.query(
       `DELETE FROM occ.iam_access_bindings
        WHERE identity_subject_id = $1
          AND namespace_id IS NULL
        RETURNING id, namespace_id, identity_subject_id, group_subject_id, role_id,
                  resource_kind, resource_id`,
-      [principal.id],
+      [principalId],
     );
     assert.ok(result.rowCount > 0, "revocation must remove the exact administrator binding");
     revokedBindings.push(...result.rows);
-    return principal.id;
+    return principalId;
   }
 
   function cancelProvisioningAtTeardown(namespaceId, agentId) {
@@ -440,6 +459,7 @@ async function createFixture(context, options = {}) {
   }
 
   return {
+    administratorPrincipalId,
     app,
     bootstrapNamespace,
     cancelProvisioningAtTeardown,
@@ -833,6 +853,16 @@ for (const authMethod of ["api_key", "codex_pat"]) {
         },
       );
       assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+      // Until the worker runs, the queued plan is a consumer of its Harness Secret, whichever
+      // Secret-backed method it uses.
+      const pending = await fixture.request(
+        "GET",
+        `/namespaces/${namespace.id}/secrets/${secrets.modelKey.id}`,
+      );
+      assert.equal(pending.status, 200, JSON.stringify(pending.body));
+      assert.deepEqual(pending.data.consumers.provisioningRequests, [
+        admitted.data.provisioning.workId,
+      ]);
 
       await fixture.startWorker();
       const status = await waitFor("Agent provisioning to succeed", async () => {
@@ -1004,6 +1034,63 @@ test(
       { status: "running", error: undefined },
       "a status read that started before the failure commit reports the state before it",
     );
+
+    const after = await fixture.request("GET", url);
+    assert.equal(after.status, 200, JSON.stringify(after.body));
+    assert.equal(after.data.status, "failed");
+    assert.deepEqual(after.data.error, failure);
+  },
+);
+
+test(
+  "a provisioning failure takes the Namespace lock before its claimed work row",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const fixture = await createFixture(context);
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+    const admitted = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body: provisioningBody(namespace.id, secrets),
+    });
+    assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+    const { workId, url } = admitted.data.provisioning;
+    const claim = await claimProvisioningWork(fixture.pool, workId);
+    const failure = {
+      code: "PROVISIONING_REJECTED",
+      message: "Agent provisioning could not complete.",
+    };
+
+    // Stopping or deleting a provisioned Agent locks the Namespace, then the Agent, then this
+    // claimed work row (cancelByAgent). Hold the Namespace until the worker's permanent failure
+    // waits on it; the waiting failure must not hold the work row yet, or the two deadlock.
+    let committed;
+    try {
+      await withNamespaceLockHeld(fixture.pool, namespace.id, async (lock) => {
+        committed = fixture.state.transact(async (unit) => {
+          const current = await unit.provisioning.findByWorkId(workId);
+          await unit.provisioning.recordFailure(
+            claim,
+            {
+              completedPhase: current.completedPhase,
+              progress: { ...current.progress, error: failure },
+            },
+            { disposition: "permanent", ...failure },
+          );
+        });
+        // Surface an early failure through the await below instead of an unhandled rejection.
+        committed.catch(() => {});
+        // No worker runs here, so the only backend that can wait on this lock is the failure's.
+        await lock.waitForBlocked("the failure's real wait on the Namespace lock");
+        await lock.assertNotHeld(
+          "SELECT state FROM occ.controller_work WHERE idempotency_key = $1 FOR UPDATE NOWAIT",
+          [workId],
+          "a failure waiting for the Namespace must not already hold its work row",
+        );
+      });
+      await committed;
+    } finally {
+      await committed?.catch(() => {});
+    }
 
     const after = await fixture.request("GET", url);
     assert.equal(after.status, 200, JSON.stringify(after.body));
@@ -1436,11 +1523,26 @@ test(
     assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
     const secretPath = (secret) => `/namespaces/${namespace.id}/secrets/${secret.id}`;
 
-    // Queued: no Configuration or Agent names these Secrets yet, only the accepted plan.
+    // Queued: no Configuration or Agent names these Secrets yet, only the accepted plan. Its
+    // actor, who holds the grants a status read checks, sees the request as a consumer.
+    const { workId } = admitted.data.provisioning;
     for (const secret of [secrets.slackBotToken, secrets.modelKey]) {
       const refused = await fixture.request("DELETE", secretPath(secret));
       assert.equal(refused.status, 409, JSON.stringify(refused.body));
-      assert.match(refused.body.error.message, /pending Agent provisioning request/);
+      assert.equal(
+        refused.body.error.message,
+        `The Secret is still referenced by pending Agent provisioning request ${workId}. Remove those references, or let provisioning finish, first.`,
+      );
+      const read = await fixture.request("GET", secretPath(secret));
+      assert.equal(read.status, 200, JSON.stringify(read.body));
+      assert.deepEqual(read.data.consumers, {
+        agents: [],
+        configurations: [],
+        credentialSources: [],
+        provisioningRequests: [workId],
+        unreadable: 0,
+        truncated: false,
+      });
     }
 
     await fixture.startWorker();
@@ -1477,6 +1579,135 @@ test(
       [admitted.data.provisioning.workId],
     );
     assert.deepEqual(work.rows, [{ state: "failed_permanent" }], "a refused retry queues nothing");
+  },
+);
+
+test(
+  "a provisioning request its actor may no longer read is counted, never named, as a Secret consumer",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const fixture = await createFixture(context);
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+    // No worker runs, so the request stays queued and keeps referencing both Secrets.
+    const admitted = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body: provisioningBody(namespace.id, secrets),
+    });
+    assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+    const { workId } = admitted.data.provisioning;
+    const secretPath = `/namespaces/${namespace.id}/secrets/${secrets.modelKey.id}`;
+    assert.deepEqual(
+      (await fixture.request("GET", secretPath)).data.consumers.provisioningRequests,
+      [workId],
+    );
+
+    // A status read needs Agent create in the Namespace. Once a Restriction denies it, the
+    // actor still reads and may delete the Secret, but no longer sees the request: it is only
+    // counted, and the filtering is not itself a denied operation (no 403, no denial audit).
+    await fixture.pool.query(
+      `INSERT INTO occ.iam_restrictions (id, namespace_id, action, resource_kind, resource_id)
+       VALUES ($1, $2, 'create', 'agent', NULL)`,
+      [`restriction_${randomUUID()}`, namespace.id],
+    );
+    const denials = async () =>
+      (
+        await fixture.pool.query(
+          "SELECT count(*)::int AS count FROM occ.audit_events WHERE namespace_id = $1 AND outcome = 'denied'",
+          [namespace.id],
+        )
+      ).rows[0].count;
+    const denialsBefore = await denials();
+    const read = await fixture.request("GET", secretPath);
+    assert.equal(read.status, 200, JSON.stringify(read.body));
+    assert.deepEqual(read.data.consumers, {
+      agents: [],
+      configurations: [],
+      credentialSources: [],
+      provisioningRequests: [],
+      unreadable: 1,
+      truncated: false,
+    });
+    const refused = await fixture.request("DELETE", secretPath);
+    assert.equal(refused.status, 409, JSON.stringify(refused.body));
+    assert.equal(
+      refused.body.error.message,
+      "The Secret is still referenced by 1 resource you cannot read. Remove those references first.",
+    );
+    for (const body of [read.body, refused.body]) {
+      assert.doesNotMatch(JSON.stringify(body), new RegExp(workId));
+    }
+    const denialsAfter = await denials();
+    assert.equal(denialsAfter, denialsBefore);
+  },
+);
+
+test(
+  "another administrator's pending provisioning request is counted, never named, as a Secret consumer",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const fixture = await createFixture(context);
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+    // No worker runs, so administrator A's request stays queued and keeps referencing both Secrets.
+    const admitted = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body: provisioningBody(namespace.id, secrets),
+    });
+    assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+    const { workId } = admitted.data.provisioning;
+
+    // Administrator B holds A's Installation-wide administrator Role, so every grant a status
+    // read checks passes; only the initiating-actor check keeps A's request from B.
+    const bindings = await fixture.pool.query(
+      `SELECT role_id FROM occ.iam_access_bindings
+       WHERE identity_subject_id = $1 AND namespace_id IS NULL AND resource_kind IS NULL`,
+      [await fixture.administratorPrincipalId()],
+    );
+    assert.equal(bindings.rows.length, 1, JSON.stringify(bindings.rows));
+    const [{ role_id: administratorRoleId }] = bindings.rows;
+    const second = {
+      email: `postgres-agent-provisioning-second-${randomUUID()}@example.test`,
+      password: `generated-password-${randomUUID()}`,
+    };
+    const created = await fixture.request("POST", "/api/auth/accounts", {
+      body: { ...second, name: "Second administrator", roleId: administratorRoleId },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    // Account seeds scope their binding to the Installation resource; B also holds the Role
+    // across the Installation, like the bootstrap administrator.
+    await fixture.pool.query(
+      `INSERT INTO occ.iam_access_bindings (id, identity_subject_id, role_id) VALUES ($1, $2, $3)`,
+      [`binding_second_admin_${randomUUID()}`, created.data.principalId, administratorRoleId],
+    );
+    const secondSession = await signInToControllerApp(fixture.app, second);
+    const status = await fixture.request("GET", admitted.data.provisioning.url, {
+      session: secondSession,
+    });
+    assert.equal(status.status, 403, JSON.stringify(status.body));
+
+    const secretPath = `/namespaces/${namespace.id}/secrets/${secrets.modelKey.id}`;
+    const own = await fixture.request("GET", secretPath);
+    assert.equal(own.status, 200, JSON.stringify(own.body));
+    assert.deepEqual(own.data.consumers.provisioningRequests, [workId]);
+
+    const read = await fixture.request("GET", secretPath, { session: secondSession });
+    assert.equal(read.status, 200, JSON.stringify(read.body));
+    assert.deepEqual(read.data.consumers, {
+      agents: [],
+      configurations: [],
+      credentialSources: [],
+      provisioningRequests: [],
+      unreadable: 1,
+      truncated: false,
+    });
+    const refused = await fixture.request("DELETE", secretPath, { session: secondSession });
+    assert.equal(refused.status, 409, JSON.stringify(refused.body));
+    assert.equal(
+      refused.body.error.message,
+      "The Secret is still referenced by 1 resource you cannot read. Remove those references first.",
+    );
+    for (const body of [read.body, refused.body]) {
+      assert.doesNotMatch(JSON.stringify(body), new RegExp(workId));
+    }
   },
 );
 
@@ -1707,6 +1938,313 @@ test(
 );
 
 test(
+  "a Secret Driver switch before the worker runs rejects the provisioning work with the fixed message",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const computeDriver = createRuntimeComputeDriver();
+    const configurationDriver = createProvisioningConfigurationDriver({
+      id: "configuration-provisioning-secret-switch",
+    });
+    const fixture = await createFixture(context, {
+      computeDriver,
+      configurationDriver,
+      secretDriver: createTestSecretDriver({ id: "secret-provisioning" }),
+    });
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+    const body = provisioningBody(namespace.id, secrets);
+    const admitted = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body,
+    });
+    assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+
+    // The Installation now selects another Secret Driver, which does not own the Secrets the
+    // accepted work binds. Every attempt would refuse them the same way, so the worker fails the
+    // work on the first one with the fixed message that names the fix, as status and retry do.
+    const replacementSecretDriver = createTestSecretDriver({ id: "secret-provisioning-replaced" });
+    const switched = await createFixture(context, {
+      computeDriver,
+      configurationDriver,
+      secretDriver: replacementSecretDriver,
+    });
+    await switched.startWorker();
+    const failed = await waitFor(
+      "the switched worker to refuse the provisioning work",
+      async () => {
+        const row = await provisioningRow(switched.pool, namespace.id, body.requestId);
+        return row.progress.error === undefined ? undefined : row;
+      },
+    );
+    await switched.stopWorker();
+    const message = new ProvisioningSecretDriverError().message;
+    assert.equal(failed.status, "failed");
+    assert.deepEqual(failed.progress.error, { code: "PROVISIONING_REJECTED", message });
+    assert.equal(failed.agent_id, null, "the refusal comes before the work creates its Agent");
+    const work = await switched.pool.query(
+      "SELECT state, reason_code, attempt_count FROM occ.controller_work WHERE idempotency_key = $1",
+      [admitted.data.provisioning.workId],
+    );
+    assert.deepEqual(work.rows, [
+      { state: "failed_permanent", reason_code: "PROVISIONING_REJECTED", attempt_count: 1 },
+    ]);
+    const audit = await switched.pool.query(
+      `SELECT kind, outcome, details->>'code' AS code
+       FROM occ.audit_events
+       WHERE namespace_id = $1
+         AND action = 'openclaw.agents.provision.failure'
+         AND details->>'workId' = $2`,
+      [namespace.id, admitted.data.provisioning.workId],
+    );
+    assert.deepEqual(audit.rows, [
+      { kind: "mutation", outcome: "failure", code: "PROVISIONING_REJECTED" },
+    ]);
+    assert.deepEqual(
+      replacementSecretDriver.calls,
+      [],
+      "the replacement driver never serves a Secret it does not own",
+    );
+
+    // Status and retry answer the same fixed message, so Console says the same thing either way.
+    const status = await switched.request("GET", admitted.data.provisioning.url);
+    assert.equal(status.status, 503, JSON.stringify(status.body));
+    assert.equal(status.body.error.message, message);
+    const retried = await switched.request("POST", `${admitted.data.provisioning.url}/retry`);
+    assert.equal(retried.status, 503, JSON.stringify(retried.body));
+    assert.equal(retried.body.error.message, message);
+  },
+);
+
+test(
+  "an unusable Secret Driver leaves the provisioning work retryable",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const secretDriver = createTestSecretDriver({ id: "secret-provisioning" });
+    const implementation = secretDriver.implementation;
+    let breakSecretDriver = false;
+    const completed = [];
+    const fixture = await createFixture(context, {
+      configurationDriver: createProvisioningConfigurationDriver({
+        id: "configuration-provisioning-secret-outage",
+      }),
+      secretDriver,
+      // The worker registers its Drivers at start; changing the selected Secret Driver's
+      // identity afterwards makes it unusable to the worker, as an outage would.
+      onWorkerEvent: (event) => {
+        if (breakSecretDriver && event.event === "worker.started") {
+          secretDriver.implementation = `${implementation}-unavailable`;
+        }
+        if (breakSecretDriver && event.event === "worker.completed") {
+          completed.push(event);
+        }
+      },
+    });
+    context.after(() => {
+      secretDriver.implementation = implementation;
+    });
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+    const body = provisioningBody(namespace.id, secrets);
+    const admitted = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body,
+    });
+    assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+
+    // No usable Secret Driver is an outage, not an ownership refusal: the worker keeps the
+    // generic message and retries the work.
+    breakSecretDriver = true;
+    await fixture.startWorker();
+    const first = await waitFor("the worker to finish its first provisioning attempt", async () =>
+      completed.find(({ workId }) => workId === admitted.data.provisioning.workId),
+    );
+    await fixture.stopWorker();
+    assert.deepEqual(
+      { attempt: first.attempt, outcome: first.outcome, code: first.code },
+      { attempt: 1, outcome: "retry", code: "PROVISIONING_DEPENDENCY_UNAVAILABLE" },
+    );
+    const row = await provisioningRow(fixture.pool, namespace.id, body.requestId);
+    assert.deepEqual(row.progress.error, {
+      code: "PROVISIONING_DEPENDENCY_UNAVAILABLE",
+      message: "Agent provisioning could not complete.",
+    });
+  },
+);
+
+test(
+  "a permanent refusal after an unfinished Configuration write settles the write and rejects the work",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const computeDriver = createRuntimeComputeDriver();
+    const configurationDriver = createProvisioningConfigurationDriver({
+      id: "configuration-provisioning-unsettled-refusal",
+    });
+    const createExact = configurationDriver.createExact;
+    const created = [];
+    configurationDriver.createExact = async (configuration) => {
+      const stored = await createExact(configuration);
+      created.push(configuration.id);
+      if (created.length === 1) {
+        // The write lands but its receipt is lost, and before the next attempt the
+        // Installation's Compute Driver starts refusing the stored plan (no gateway routing).
+        const unrouted = createTestKubernetesComputeDriver("compute-provisioning-unrouted", {
+          repositoryCredentials: true,
+        });
+        computeDriver.validateAgentProvisioning = (input) =>
+          unrouted.validateAgentProvisioning(input);
+        throw new Error("synthetic Configuration receipt loss");
+      }
+      return stored;
+    };
+    const completed = [];
+    const fixture = await createFixture(context, {
+      computeDriver,
+      configurationDriver,
+      onWorkerEvent: (event) => {
+        if (event.event === "worker.completed") {
+          completed.push(event);
+        }
+      },
+    });
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+    const body = provisioningBody(namespace.id, secrets);
+    const admitted = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body,
+    });
+    assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+
+    // The next attempt inspects the unfinished write before its fence, records the receipt,
+    // and then fails the work on the refusal instead of retrying an unknown outcome.
+    await fixture.startWorker();
+    const failed = await waitFor("the provisioning work to fail", async () => {
+      const row = await provisioningRow(fixture.pool, namespace.id, body.requestId);
+      return row.status === "failed" ? row : undefined;
+    });
+    await fixture.stopWorker();
+    const workId = admitted.data.provisioning.workId;
+    assert.deepEqual(
+      completed
+        .filter((event) => event.workId === workId)
+        .map(({ attempt, outcome, code }) => ({ attempt, outcome, code })),
+      [
+        { attempt: 1, outcome: "retry", code: "PROVISIONING_OUTCOME_UNKNOWN" },
+        { attempt: 2, outcome: "permanent", code: "PROVISIONING_REJECTED" },
+      ],
+    );
+    assert.deepEqual(failed.progress.error, {
+      code: "PROVISIONING_REJECTED",
+      message: "The Compute Driver cannot provision this execution mode or gateway configuration.",
+    });
+    const { pendingEffect, effectReceipt } = failed.progress;
+    assert.equal(pendingEffect?.kind, "configuration");
+    assert.deepEqual(
+      { kind: effectReceipt?.kind, owner: effectReceipt?.owner, targetId: effectReceipt?.targetId },
+      { kind: "configuration", owner: pendingEffect.owner, targetId: pendingEffect.targetId },
+    );
+    assert.deepEqual(
+      created,
+      [pendingEffect.targetId],
+      "recovery never writes the Configuration again",
+    );
+    assert.equal(failed.agent_id, null, "the refusal comes before the work creates its Agent");
+    const work = await fixture.pool.query(
+      "SELECT state, reason_code, attempt_count FROM occ.controller_work WHERE idempotency_key = $1",
+      [workId],
+    );
+    assert.deepEqual(work.rows, [
+      { state: "failed_permanent", reason_code: "PROVISIONING_REJECTED", attempt_count: 2 },
+    ]);
+  },
+);
+
+test(
+  "a lost authority after an unfinished transport write settles the write and rejects the work",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    let fixture;
+    const computeDriver = createRuntimeComputeDriver();
+    const provisionRuntimeCredentials = computeDriver.provisionAgentRuntimeCredentials;
+    let provisioned = 0;
+    computeDriver.provisionAgentRuntimeCredentials = async (...args) => {
+      const status = await provisionRuntimeCredentials(...args);
+      provisioned += 1;
+      if (provisioned === 1) {
+        // The credentials land but their receipt is lost, and the initiating administrator
+        // loses the provisioning grants before the next attempt.
+        await fixture.revokeCurrentPrincipal();
+        throw new Error("synthetic transport receipt loss");
+      }
+      return status;
+    };
+    const completed = [];
+    fixture = await createFixture(context, {
+      computeDriver,
+      onWorkerEvent: (event) => {
+        if (event.event === "worker.completed") {
+          completed.push(event);
+        }
+      },
+    });
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+    const body = provisioningBody(namespace.id, secrets);
+    const admitted = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body,
+    });
+    assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+
+    await fixture.startWorker();
+    const failed = await waitFor("the provisioning work to fail", async () => {
+      const row = await provisioningRow(fixture.pool, namespace.id, body.requestId);
+      return row.status === "failed" ? row : undefined;
+    });
+    await fixture.stopWorker();
+    fixture.cancelProvisioningAtTeardown(namespace.id, failed.agent_id);
+    const workId = admitted.data.provisioning.workId;
+    assert.deepEqual(
+      completed
+        .filter((event) => event.workId === workId)
+        .map(({ attempt, outcome, code }) => ({ attempt, outcome, code })),
+      [
+        { attempt: 1, outcome: "retry", code: "PROVISIONING_OUTCOME_UNKNOWN" },
+        { attempt: 2, outcome: "permanent", code: "PROVISIONING_REJECTED" },
+      ],
+    );
+    assert.equal(failed.progress.error?.code, "PROVISIONING_REJECTED");
+    const { pendingEffect, effectReceipt } = failed.progress;
+    assert.deepEqual(
+      { kind: effectReceipt?.kind, owner: effectReceipt?.owner, targetId: effectReceipt?.targetId },
+      { kind: "transport", owner: pendingEffect?.owner, targetId: failed.agent_id },
+    );
+    assert.equal(provisioned, 1, "recovery never provisions the credentials again");
+    const work = await fixture.pool.query(
+      "SELECT state, reason_code, attempt_count FROM occ.controller_work WHERE idempotency_key = $1",
+      [workId],
+    );
+    assert.deepEqual(work.rows, [
+      { state: "failed_permanent", reason_code: "PROVISIONING_REJECTED", attempt_count: 2 },
+    ]);
+    // One failure audit per attempt: the unknown outcome, then the authorization denial.
+    const audit = await fixture.pool.query(
+      `SELECT kind, outcome FROM occ.audit_events
+       WHERE namespace_id = $1
+         AND action = 'openclaw.agents.provision.failure'
+         AND details->>'workId' = $2
+       ORDER BY kind`,
+      [namespace.id, workId],
+    );
+    assert.deepEqual(audit.rows, [
+      { kind: "authorization_denial", outcome: "denied" },
+      { kind: "mutation", outcome: "failure" },
+    ]);
+    const revisions = await fixture.pool.query(
+      "SELECT id FROM occ.agent_revisions WHERE namespace_id = $1",
+      [namespace.id],
+    );
+    assert.equal(revisions.rowCount, 0);
+  },
+);
+
+test(
   "a Compute gateway change before the worker runs rejects the provisioning work without retrying",
   { ...requiresPostgres, timeout: 60_000 },
   async (context) => {
@@ -1826,6 +2364,152 @@ test(
   },
 );
 
+test(
+  "a Harness authentication refusal of the caller's Configuration is named on create, replay, handoff, in the failed work and on retry",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const computeDriver = createRuntimeComputeDriver();
+    // Kubernetes Compute raises this for a Codex Gateway setting it cannot rewrite; the
+    // setting path can carry a submitted provider key, here with a control character.
+    const settingRefusal = (key) =>
+      `Configuration setting models.providers.${key}.models must be a list of objects: a dedicated Codex Gateway cannot apply it otherwise.`;
+    // Exactly the 256-character status cap, counting the astral character once, so the
+    // status keeps it whole.
+    const fill = 256 - Array.from(settingRefusal("op\u0007enai\u{1F600}")).length;
+    const refusal = settingRefusal(`op\u0007enai${"x".repeat(fill)}\u{1F600}`);
+    assert.equal(Array.from(refusal).length, 256);
+    const named = refusal.replace("\u0007", "?");
+    let refusing = true;
+    let harnessChecks = 0;
+    computeDriver.validateHarnessAuth = () => {
+      harnessChecks += 1;
+      if (refusing) {
+        throw new ConfigurationHarnessError(refusal);
+      }
+    };
+    const fixture = await createFixture(context, {
+      computeDriver,
+      configurationDriver: createProvisioningConfigurationDriver({
+        id: "configuration-provisioning-harness-refusal",
+      }),
+      secretDriver: createTestSecretDriver({ id: "secret-provisioning" }),
+    });
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+
+    // A fresh request is refused as deployment refuses it: a 400 naming the setting.
+    const refused = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body: provisioningBody(namespace.id, secrets),
+    });
+    assert.equal(refused.status, 400, JSON.stringify(refused.body));
+    assert.deepEqual(
+      { code: refused.body.error.code, message: refused.body.error.message },
+      { code: "INVALID_REQUEST", message: named },
+    );
+
+    // The Driver refuses the stored plan only after admission: the worker fails the work on
+    // its first attempt, and the failed work's message names the setting.
+    refusing = false;
+    const body = provisioningBody(namespace.id, secrets);
+    const admitted = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
+      body,
+    });
+    assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+    refusing = true;
+    await fixture.startWorker();
+    const failed = await waitFor("the worker to refuse the provisioning work", async () => {
+      const row = await provisioningRow(fixture.pool, namespace.id, body.requestId);
+      return row.progress.error === undefined ? undefined : row;
+    });
+    await fixture.stopWorker();
+    assert.equal(failed.status, "failed");
+    assert.deepEqual(failed.progress.error, { code: "PROVISIONING_REJECTED", message: named });
+    const work = await fixture.pool.query(
+      "SELECT state, reason_code, attempt_count FROM occ.controller_work WHERE idempotency_key = $1",
+      [admitted.data.provisioning.workId],
+    );
+    assert.deepEqual(work.rows, [
+      { state: "failed_permanent", reason_code: "PROVISIONING_REJECTED", attempt_count: 1 },
+    ]);
+
+    // Status reports the stored failure without rechecking Harness authentication.
+    const checksBeforeStatus = harnessChecks;
+    const status = await fixture.request("GET", admitted.data.provisioning.url);
+    assert.equal(status.status, 200, JSON.stringify(status.body));
+    assert.equal(status.data.status, "failed");
+    assert.deepEqual(status.data.error, failed.progress.error);
+    assert.equal(harnessChecks, checksBeforeStatus, "a status read runs no Harness check");
+    // A replay of the admitted request checks the stored plan again and names the setting too.
+    const provisionPath = `/namespaces/${namespace.id}/agents/provision`;
+    const replayed = await fixture.request("POST", provisionPath, { body });
+    assert.equal(replayed.status, 400, JSON.stringify(replayed.body));
+    assert.deepEqual(
+      { code: replayed.body.error.code, message: replayed.body.error.message },
+      { code: "INVALID_REQUEST", message: named },
+    );
+    // Retry runs the plan again and names the setting too.
+    const retried = await fixture.request("POST", `${admitted.data.provisioning.url}/retry`);
+    assert.equal(retried.status, 400, JSON.stringify(retried.body));
+    assert.deepEqual(
+      { code: retried.body.error.code, message: retried.body.error.message },
+      { code: "INVALID_REQUEST", message: named },
+    );
+    // Any other Harness authentication refusal keeps the fixed 409.
+    computeDriver.validateHarnessAuth = () => {
+      throw new Error("Harness authentication is incompatible with the selected topology.");
+    };
+    const conflicted = await fixture.request("POST", `${admitted.data.provisioning.url}/retry`);
+    assert.equal(conflicted.status, 409, JSON.stringify(conflicted.body));
+    assert.deepEqual(
+      { code: conflicted.body.error.code, message: conflicted.body.error.message },
+      {
+        code: "RESOURCE_CONFLICT",
+        message: "The configured model, authentication, or channel bindings cannot be provisioned.",
+      },
+    );
+
+    // Admission and the worker fences check the placeholder "provisioning" Harness version;
+    // deployment checks the approved runtime version. A Driver that refuses only the latter
+    // fails the work at the deployment handoff, and its message is named as well. Over the
+    // cap, format characters and lone surrogates become "?" and the cut keeps whole
+    // characters.
+    const emoji = "\u{1F600}".repeat(220);
+    computeDriver.validateHarnessAuth = (harness) => {
+      if (harness.version !== "provisioning") {
+        throw new ConfigurationHarnessError(settingRefusal(`op\u200Benai\uD800${emoji}`));
+      }
+    };
+    const handoffBody = provisioningBody(namespace.id, secrets);
+    const handedOff = await fixture.request("POST", provisionPath, { body: handoffBody });
+    assert.equal(handedOff.status, 202, JSON.stringify(handedOff.body));
+    await fixture.startWorker();
+    const handoffFailed = await waitFor("the handoff to refuse the provisioning work", async () => {
+      const row = await provisioningRow(fixture.pool, namespace.id, handoffBody.requestId);
+      return row.progress.error === undefined ? undefined : row;
+    });
+    await fixture.stopWorker();
+    assert.equal(handoffFailed.status, "failed");
+    assert.notEqual(handoffFailed.agent_id, null, "the handoff runs after the Agent exists");
+    const shown = Array.from(settingRefusal(`op?enai?${emoji}`))
+      .slice(0, 255)
+      .join("");
+    assert.deepEqual(handoffFailed.progress.error, {
+      code: "PROVISIONING_REJECTED",
+      message: `${shown}…`,
+    });
+
+    // Authorization comes first: a caller who lost its grants gets 403, not the setting.
+    computeDriver.validateHarnessAuth = () => {
+      throw new ConfigurationHarnessError(refusal);
+    };
+    await fixture.revokeCurrentPrincipal();
+    const denied = await fixture.request("POST", provisionPath, { body });
+    assert.equal(denied.status, 403, JSON.stringify(denied.body));
+    assert.equal(denied.body.error.code, "FORBIDDEN");
+    assert.doesNotMatch(JSON.stringify(denied.body), /models\.providers/);
+  },
+);
+
 // Provision Agents through the worker and return their settled provisioning views.
 async function provisionAgents(fixture, namespaceId, count = 1) {
   const secrets = await createProvisioningSecrets(fixture, namespaceId);
@@ -1920,24 +2604,23 @@ test(
     const account = created.data;
     // Admission would reject this account, which has no Backend-issued credential, so store
     // the plan directly; the worker fails it for the same reason before any effect.
-    const iam = await fixture.state.loadNativeIAMState();
-    const principal = iam.identities.find(
-      (identity) => identity.kind === "principal" && identity.issuer.endsWith(":better-auth"),
-    );
-    assert.ok(principal, "the bootstrapped administrator Principal must exist");
+    const actorId = await fixture.administratorPrincipalId();
     const body = provisioningBody(namespace.id, secrets);
     const workId = `agent-provisioning:${randomUUID().replaceAll("-", "")}`;
     await fixture.state.transact((unit) =>
       unit.provisioning.create({
         workId,
         namespaceId: namespace.id,
-        actorId: principal.id,
+        actorId,
         requestId: body.requestId,
         requestFingerprint: "0".repeat(64),
         plan: {
           name: body.name,
           configuration: body.configuration,
-          harnessAuth: { method: "chatgpt_service_account", serviceAccountId: account.id },
+          harnessAuth: {
+            method: "codex_pat",
+            source: { kind: "service_account", namespaceId: account.namespaceId, id: account.id },
+          },
           executionMode: body.executionMode,
           drivers: {
             compute: fixture.computeDriver.id,
@@ -1968,6 +2651,20 @@ test(
       return rows[0]?.status === "failed" ? true : undefined;
     });
     await fixture.stopWorker();
+    // This Installation has no ChatGPT Backend, so the failure names it instead of the
+    // generic text.
+    const job = await fixture.pool.query(
+      "SELECT progress->'error' AS error FROM occ.agent_provisioning_work WHERE work_id = $1",
+      [workId],
+    );
+    assert.deepEqual(job.rows, [
+      {
+        error: {
+          code: "PROVISIONING_REJECTED",
+          message: new ServiceAccountDriverNotConfiguredError("deploy").message,
+        },
+      },
+    ]);
     const workState = async () =>
       (
         await fixture.pool.query(
@@ -1992,6 +2689,67 @@ test(
       assert.equal(answered.body.error.message, gone);
     }
     assert.deepEqual(await workState(), failedWork, "a refused retry queues nothing");
+  },
+);
+
+test(
+  "a pending provisioning request is named as a Secret consumer only while its actor may read its ServiceAccount",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const fixture = await createFixture(context);
+    const namespace = await fixture.bootstrapNamespace();
+    const secrets = await createProvisioningSecrets(fixture, namespace.id);
+    const created = await fixture.request("POST", `/namespaces/${namespace.id}/service-accounts`, {
+      body: { name: `consumer-account-${randomUUID().slice(0, 8)}` },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const account = created.data;
+    // Admission needs a Backend-issued account, which this fixture cannot issue, so the plan is
+    // stored directly (as above). No worker runs: it stays queued and keeps referencing its Secrets.
+    const actorId = await fixture.administratorPrincipalId();
+    const body = provisioningBody(namespace.id, secrets);
+    const workId = `agent-provisioning:${randomUUID().replaceAll("-", "")}`;
+    await fixture.state.transact((unit) =>
+      unit.provisioning.create({
+        workId,
+        namespaceId: namespace.id,
+        actorId,
+        requestId: body.requestId,
+        requestFingerprint: "0".repeat(64),
+        plan: {
+          name: body.name,
+          configuration: body.configuration,
+          harnessAuth: {
+            method: "codex_pat",
+            source: { kind: "service_account", namespaceId: account.namespaceId, id: account.id },
+          },
+          executionMode: body.executionMode,
+          drivers: {
+            compute: fixture.computeDriver.id,
+            configuration: fixture.configurationDriver.id,
+            iam: "native-iam",
+          },
+        },
+      }),
+    );
+    const secretPath = `/namespaces/${namespace.id}/secrets/${secrets.slackBotToken.id}`;
+    const consumers = async () => {
+      const read = await fixture.request("GET", secretPath);
+      assert.equal(read.status, 200, JSON.stringify(read.body));
+      return read.data.consumers;
+    };
+    assert.deepEqual((await consumers()).provisioningRequests, [workId]);
+
+    // The status read checks the plan's account read; once denied, the request is only counted.
+    await fixture.pool.query(
+      `INSERT INTO occ.iam_restrictions (id, namespace_id, action, resource_kind, resource_id)
+       VALUES ($1, $2, 'read', 'service_account', $3)`,
+      [`restriction_${randomUUID()}`, namespace.id, account.id],
+    );
+    const hidden = await consumers();
+    assert.deepEqual(hidden.provisioningRequests, []);
+    assert.equal(hidden.unreadable, 1);
+    assert.doesNotMatch(JSON.stringify(hidden), new RegExp(workId));
   },
 );
 
