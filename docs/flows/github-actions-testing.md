@@ -61,8 +61,7 @@ CI uses the event checkout without external service credentials. Impact and Suit
 
 For a PR, the selector verifies the tested checkout and that the event head is the merge's second parent, then compares the first parent (the current base) and tested trees. Git path decoding preserves a leading UTF-8 BOM as filename data; paths outside the allowlist select full. API reference outputs and Markdown under `docs/reference/api/` select full for `openapi:check`. Only nonempty changes to allowlisted regular Markdown files select docs mode. Registered test files (with documentation and their own lane manifest entries) select tests mode: their `ci` lanes in either tree (`checks-baseline-1` if only the fixture job would run). Other test-tree, code, configuration, workflow or unknown changes and non-PR events select full. Missing or unverifiable policy or source evidence selects full or fails closed. Policy comes from that first parent; a base without it selects full. `CI Required` re-verifies the mode (and tests mode's lane set) and requires impact, audit and every selected job to succeed and the rest skipped. Full and tests modes aggregate same-source results of their lanes; docs mode does not aggregate or invent test artifacts.
 
-The impact summary reports mode, reason and accepted lanes. Selector failures fail the job; unavailable evidence reports unavailable.
-The summary includes no changed paths or arbitrary selector output.
+The impact summary contains mode, reason and accepted lanes, excluding paths and arbitrary selector output. Selector failures fail the job; unavailable evidence is reported.
 
 For full-mode PRs, `affected-packages` verifies merge identity and checkout
 cleanliness, then reports declared workspace dependents. It is advisory and does
