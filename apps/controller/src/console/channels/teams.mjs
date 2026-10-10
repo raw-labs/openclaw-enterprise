@@ -47,6 +47,9 @@ function support(values) {
     (config.groupAllowFrom === undefined || arrayOfStrings(config.groupAllowFrom)) &&
     (config.teams === undefined || isRecord(config.teams)) &&
     entries.length <= 1 &&
+    (config.groupPolicy === "disabled" ||
+      (config.groupAllowFrom ?? config.allowFrom ?? []).length === 0 ||
+      entries.some(([, team]) => Object.keys(team?.channels ?? {}).length > 0)) &&
     new Set(mentions).size <= 1 &&
     entries.every(
       ([id, team]) =>

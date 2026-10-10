@@ -6953,6 +6953,9 @@ test("native channel providers require Secret bindings and project them only to 
   for (const [channels, expectedSecrets] of [
     [{ slack: {} }, ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]],
     [{ msteams: { enabled: true } }, ["MSTEAMS_APP_PASSWORD"]],
+    // An omitted native webhook path uses /api/messages, including webhook: {}.
+    [{ msteams: { enabled: true, webhook: {} } }, ["MSTEAMS_APP_PASSWORD"]],
+    [{ msteams: { enabled: true, webhook: { path: "/api/messages" } } }, ["MSTEAMS_APP_PASSWORD"]],
     [
       { slack: { enabled: true }, msteams: { enabled: true } },
       ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN", "MSTEAMS_APP_PASSWORD"],
@@ -7248,6 +7251,19 @@ test("native channel providers require Secret bindings and project them only to 
         { SLACK_APP_TOKEN: secretBindings.SLACK_APP_TOKEN },
       ),
     /Secret bindings/i,
+  );
+
+  await assert.rejects(
+    driver.prepareRevision({
+      ...revision,
+      configuration: {
+        agents: { defaults: { model: "codex/gpt-5" } },
+        channels: { msteams: { enabled: true, webhook: { path: "/custom-callback" } } },
+        logging: { level: "info", consoleLevel: "info", consoleStyle: "json" },
+        diagnostics: { otel: { logs: false } },
+      },
+    }),
+    /Microsoft Teams webhook path must be \/api\/messages\./,
   );
 
   const ipv6 = createKubernetesComputeDriver(

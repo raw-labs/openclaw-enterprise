@@ -162,9 +162,11 @@ and [deployment reference](agents/deployment.md#revisions-and-deployment).
 
 Channels edits saved Slack and Microsoft Teams drafts. Teams exposes app and
 tenant IDs, an app-password Secret, one team with selected channels, mentions,
-and separate personal-message access. Advanced shapes remain inspectable in
-Configuration JSON. Operator-configured public callback routing and proxy egress
-are required before Teams deployment; see [Teams setup](../guides/integrations/teams.md).
+and separate personal-message access. Advanced shapes, including native group
+access based only on sender allowlists, disable the editor and remain
+inspectable in Configuration JSON. Operator-configured public callback routing
+and proxy egress are required before Teams deployment; see
+[Teams setup](../guides/integrations/teams.md).
 Saving channel settings patches `values` and includes `secretBindings` for changed
 credentials. Existing plugin allowlists are
 extended; omitted ones stay omitted. Channel allowlists remain native

@@ -1,7 +1,7 @@
 ---
 created: "2026-10-06"
-updated: "2026-10-06"
-last_updated_session: "codex/authoring-run/5ef92e66-9d7a-4101-a43a-59a23d70ef72"
+updated: "2026-10-10"
+last_updated_session: "authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9"
 ---
 
 # Agent channel callback flow
@@ -43,7 +43,9 @@ graph TD
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:enabledChannels`
 requires a Dedicated workload, channel proxy, and channel routing for enabled
-Teams. Custom webhook paths, legacy listeners, and sovereign clouds are refused.
+Teams. An omitted `webhook.path`, including `webhook: {}`, uses the native
+`/api/messages` default. Non-object webhook values, custom paths, legacy
+listeners and sovereign clouds are refused.
 `validateChannelSecretBindings` requires matching admitted bindings.
 `deployment` projects channel Secrets only into the Gateway and records whether
 that serving Deployment owns a Teams callback.
@@ -60,7 +62,7 @@ API keys. Other paths have no callback route.
 
 ### 3. Authenticate and process the activity
 
-The [pinned native monitor](https://github.com/openclaw/openclaw/blob/11d3d04a1279781a770f6a6aa09e6322b064b80a/extensions/msteams/src/monitor.ts)
+The [pinned native monitor](https://github.com/openclaw/openclaw/blob/90d30a1178a79dddd92e6190b66b95d89dfb3ca8/extensions/msteams/src/monitor.ts)
 `extensions/msteams/src/monitor.ts:monitorMSTeamsProvider` registers
 `/api/messages` with plugin authentication. Its Express adapter and
 Microsoft Teams SDK reject unauthenticated activities before Agent execution.
@@ -97,4 +99,5 @@ by the serving revision.
 
 ## Changelog
 
+- 2026-10-10 22:48: Preserve the native Teams default callback path during deployment admission (authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9 - a2f7ad762117)
 - 2026-10-06 16:42: Documented the source-backed Teams callback path (codex/authoring-run/5ef92e66-9d7a-4101-a43a-59a23d70ef72 - 447c387b63c1)

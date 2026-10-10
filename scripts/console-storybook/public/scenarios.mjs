@@ -3371,11 +3371,15 @@ export const scenarios = {
   },
   teamsUnsupported: {
     group: "Components/Channels",
-    name: "Teams advanced native settings",
+    name: "Teams native sender-only access",
     path: `${draft}&tab=channels`,
     teams: true,
-    teamsConfiguration: { cloud: "USGov" },
-    description: "Unsupported native settings keep the editor disabled and remain inspectable.",
+    teamsConfiguration: {
+      teams: {},
+      groupAllowFrom: ["44444444-4444-4444-8444-444444444444"],
+    },
+    description:
+      "A native sender allowlist without selected channels remains inspectable; the limited editor is disabled.",
   },
   teamsReadOnly: {
     group: "Components/Channels",

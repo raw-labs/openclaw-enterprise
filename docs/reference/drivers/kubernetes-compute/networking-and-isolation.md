@@ -1,22 +1,21 @@
 # Kubernetes networking and isolation
 
-Configure tenant network boundaries, private Agent routes, and existing
-namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
+The [Kubernetes Compute Driver](../kubernetes-compute.md) manages tenant
+network boundaries, private Agent routes, and namespace ownership.
 
 ## Networking
 
-Configure the cluster DNS namespace and Pod labels and the gateway port.
-Every peer namespace must be a DNS label of at most 63 characters; startup
-refuses others.
+Configure cluster DNS namespace/Pod labels and gateway port. Startup rejects
+peer namespaces outside DNS label syntax or longer than 63 characters.
 Set `network.gatewayTrustedProxyCidrs` to nonempty, valid CIDRs for the proxy
 socket sources. This trusted Installation setting has no production default and
 rejects all-source ranges, including IPv4-mapped equivalents. Without private
 routing, also configure the namespace and Pod selectors in
 `network.gatewayClients` for your authenticated proxy.
 
-`podLabels` use [Kubernetes label syntax](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set), checked before provisioning.
-Values may be empty; key names and values allow 63 characters, DNS prefixes 253. This covers
-every peer selector setting.
+All peer `podLabels` are validated before provisioning against
+[Kubernetes label syntax](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set):
+values may be empty; keys and values allow 63 characters, DNS prefixes 253.
 
 Each tenant starts with default-deny ingress and egress. Explicit policies allow
 DNS (UDP/TCP ports `53` and `5353` through `allow-dns`), approved gateway clients,
@@ -166,7 +165,7 @@ them only Gateway transport and plugin-status ingress (`allow-agent-runtime` is
 ingress-only for them): no DNS, workspace-node, model or authentication egress.
 Provider Harness readiness and activation reject a Pod with any other profile.
 
-Existing policy names remain stable; upgrading the controller restarts no Pod.
+Policy names stay stable; controller upgrades restart no Pods.
 Compute preserves existing namespace policy selectors until recreation. During
 Agent preparation, it adds missing DNS ports to the tenant and Gateway policies
 with UID/resource-version guards, preserving peers and other rules. Running Pods
@@ -183,11 +182,11 @@ Existing OpenShell Sandboxes are not relabeled because Sandbox names are per
 revision: redeploy the Agent revision. For development, follow the
 [development recovery procedure](../../../guides/deploy/local-operations.md#build-images-for-local-kubernetes).
 
-The separately installed OpenShell gateway needs its own scoped DNS/API and
-callback policies. Its caller is the OpenShell supervisor Pod
+The OpenShell gateway needs scoped DNS/API and callback policies. Its caller is
+the supervisor Pod
 (`openshell.ai/managed-by=openshell`, `openshell.ai/boundary-role=supervisor`),
 which carries no `openclaw.dev` labels; supervisor-labelled peers admit it, not
-the ordinary profile. Platform services retain their existing Helm policy selectors.
+the ordinary profile. Platform services keep their Helm policy selectors.
 
 Profile assignment is a trusted controller decision. The label qualifies a Pod
 for network grants but does not supply workload identity or authorization to
@@ -219,11 +218,10 @@ gatewayRouting:
   envoyNamespace: envoy-gateway-system
 ```
 
-These three settings are required when routing is enabled; `hostname` is
-optional. The Gateway name and namespace must match the Helm-managed Gateway,
-which the chart always creates in its release namespace; `envoyNamespace`
-identifies its Envoy data-plane Pods. `envoyHttpsTargetPort` defaults to
-`10443` and must match Helm. Compute grants Harness egress only to this
+Routing requires all three settings; `hostname` is optional. Gateway name and
+namespace must match the Helm-managed Gateway in its release namespace;
+`envoyNamespace` identifies Envoy data-plane Pods. `envoyHttpsTargetPort`
+defaults to `10443` and must match Helm. Compute grants Harness egress only to this
 installation's Envoy Pods on that port, before waiting for node enrollment.
 `endpointPort` defaults to `443` and changes only the port in generated WSS URLs.
 When set, the external load balancer must forward that port to the HTTPS listener.
@@ -232,7 +230,7 @@ When `hostname` is omitted or empty, Compute and Helm derive the same Envoy
 Service hostname without a lookup; see
 [endpoint and route](../../gateway-routing.md#endpoint-and-route). Set the same
 explicit `hostname` in Compute and Helm for custom DNS or clients outside that
-cluster DNS context. The operator installs Envoy Gateway and cert-manager and configures the
+cluster DNS context. Install Envoy Gateway and cert-manager and configure the
 [private gateway infrastructure](../../../guides/deploy/workspace-routing.md#agent-workspace-files).
 Do not put an Agent endpoint, service key, certificate, or file contents into
 native Configuration or an AgentRevision.
@@ -349,10 +347,9 @@ receive controller credentials.
 
 ## Teams callbacks
 
-Enabled Teams requires `gatewayRouting.channels.hostname`, a separate **channels**
-listener, and the reviewed proxy. Compute exposes only the exact Agent POST
-callback, preserves Microsoft Authorization, strips OCE administrative headers,
-and delegates authentication to the native SDK. The serving revision owns the
-route; disable/stop/delete removes it with ownership preconditions.
-[Teams setup](../../../guides/integrations/teams.md) owns the endpoint, listener,
-certificate, proxy settings, and verification limits.
+Teams requires the reviewed proxy, `gatewayRouting.channels.hostname`, and a
+separate **channels** listener. The serving revision owns the exact Agent POST
+callback: Microsoft Authorization remains, OCE administrative headers are stripped,
+and the native SDK authenticates. Disable/stop/delete removes the route with
+ownership preconditions. [Teams setup](../../../guides/integrations/teams.md)
+covers endpoint, listener, certificate, proxy settings, and verification limits.

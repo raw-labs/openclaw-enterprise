@@ -936,6 +936,47 @@ for (const grantStatus of [403, 429, 503]) {
   });
 }
 
+for (const [name, access] of [
+  ["explicit", { groupPolicy: "allowlist", groupAllowFrom: [teamsMemberId], teams: {} }],
+  ["inherited from personal access", { allowFrom: [teamsMemberId] }],
+]) {
+  test(`Teams editor preserves ${name} native sender-only access without a Team map`, async (t) => {
+    const { fixture, namespace } = await readyNamespace(t, "Native Teams sender access");
+    const teams = {
+      enabled: true,
+      appId: teamsDirectoryContext.appId,
+      tenantId: teamsDirectoryContext.tenantId,
+      appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+      dmPolicy: "allowlist",
+      ...access,
+    };
+    const agent = await fixture.createAgent(
+      namespace.id,
+      "Native Teams Agent",
+      nativeValues("native-teams-senders", { harnessId: "codex", channels: { msteams: teams } }),
+      { executionMode: "dedicated" },
+    );
+    const { page } = await newPage(t, fixture);
+    const requests = apiRequests(page, fixture.origin);
+    await openDraft(page, fixture, agent, "Native Teams Agent");
+
+    // Native sender allowlists work without channel IDs. The limited editor cannot
+    // represent that policy and must not offer a save that disables group access.
+    const edit = page.getByRole("button", { name: "Edit Microsoft Teams", exact: true });
+    await edit.waitFor();
+    assert.equal(await edit.isDisabled(), true);
+    await revealNativeConfiguration(page, "Microsoft Teams native configuration");
+    assert.deepEqual(JSON.parse(await page.locator(".channel-native pre").textContent()), teams);
+    assert.deepEqual(nonAuthWriteRequests(requests), []);
+    const saved = await fixture.request(
+      "GET",
+      `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
+    );
+    assert.equal(saved.data.generation, 1);
+    assert.deepEqual(saved.data.values.channels.msteams, teams);
+  });
+}
+
 test("Teams editor persists separate personal and channel access with an authorized password Secret binding", async (t) => {
   const { fixture, namespace } = await readyNamespace(t, "Teams channels");
   const password = await fixture.createSecret(

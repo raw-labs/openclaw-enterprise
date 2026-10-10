@@ -1,8 +1,7 @@
 # Console Storybook
 
-Browse production Console pages, components, and Agent workflows against an
-in-memory fixture. Previews contact no services and run no workloads. Use dummy
-credentials.
+Browse production Console pages, components and Agent workflows with in-memory
+fixtures and dummy credentials. Previews contact no services or workloads.
 
 ## Run locally
 
@@ -13,9 +12,8 @@ npm run storybook:install
 npm run storybook
 ```
 
-Open `http://127.0.0.1:6006`. Each story starts an independent fixture, ignoring
-existing Installations and other tabs' sessions; **Reset story** discards its
-changes.
+Open `http://127.0.0.1:6006`. Stories use independent fixtures, ignoring existing
+Installations and other tabs' sessions; **Reset story** discards changes.
 
 To build and serve a static copy:
 
@@ -31,8 +29,8 @@ without publishing the documentation site.
 
 ## Appearance review
 
-Use **Pages/Agents → Populated** to review the shared shell and controls at
-desktop (1440 × 1000), tablet (768 × 1024), and mobile (390 × 844).
+Review **Pages/Agents → Populated** at desktop (1440 × 1000), tablet
+(768 × 1024), and mobile (390 × 844).
 Check keyboard focus, search, navigation, an open dialog, and empty, loading,
 error, permission-denied, and missing-credential stories. The console stays light
 under either system appearance.
@@ -147,10 +145,10 @@ selects it. A custom ID outside the list requires a new selection. After a provi
 change through Configuration JSON, the list must match and drop the old
 provider's model.
 
-The fixture supplies a ready Namespace, Preset, and model Secret. Namespace
-provisioning, Preset CRUD, and service-account issuance have no dedicated console
-pages. One Secret picker selects or creates new version model Secrets and Slack
-tokens (Credentials tab and Channels drawer). See
+Fixtures provide a ready Namespace, Preset and model Secret. The console has no
+dedicated pages for Namespace provisioning, Preset CRUD or Service Account
+issuance. One Secret picker selects or creates new version model Secrets and
+Slack tokens (Credentials tab and Channels drawer). See
 [Create and deploy in the console](../reference/console/create-and-deploy.md)
 for the supported installation workflow, prerequisites, and Teams deployment limits.
 
@@ -366,10 +364,9 @@ and PR.
 
 ### Teams editor checks
 
-Follow the [Teams workflow](../../scripts/console-storybook/teams-workflow.md) in
-**Components/Channels → Teams Editor**. Save personal access independently from
-channel senders, disable channel conversations, and reopen to inspect persisted
-controls. Teams stories cover missing password bindings, advanced native settings,
-immutable deployed versions, loading Secret metadata, denied saves, and pending
-saves. These fixtures demonstrate UI behavior; [Teams integration verification](../testing/teams.md)
-owns deployment, SDK authentication, and the pending live-provider proof.
+Follow the [Teams workflow](../../scripts/console-storybook/teams-workflow.md)
+with **Components/Channels → Teams Editor**. Save personal and channel access
+independently; disable channel conversations, reopen and check native JSON and
+Secret controls. Related stories cover missing credentials, advanced settings,
+read-only, loading, denied and pending saves. Backend/live-provider proof:
+[Teams verification](../testing/teams.md).

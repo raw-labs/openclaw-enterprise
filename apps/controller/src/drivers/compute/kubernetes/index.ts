@@ -11705,7 +11705,12 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       }
       if (provider === "msteams") {
         const teams = asRecord(configuration);
-        if (teams?.webhook !== undefined && asRecord(teams.webhook)?.path !== "/api/messages") {
+        const webhook = asRecord(teams?.webhook);
+        if (
+          teams?.webhook !== undefined &&
+          (webhook === undefined ||
+            (webhook.path !== undefined && webhook.path !== "/api/messages"))
+        ) {
           throw new ConfigurationFailure("Microsoft Teams webhook path must be /api/messages.");
         }
         if (teams?.legacyWebhook !== undefined && teams.legacyWebhook !== false) {

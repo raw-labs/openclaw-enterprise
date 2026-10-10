@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
-updated: 2026-10-07
-last_updated_session: authoring-run/5acd9a8d-44df-4f9b-8daa-9269c2040340
+updated: 2026-10-10
+last_updated_session: authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9
 ---
 
 # Agent Channel Directory Lookup Flow
@@ -139,6 +139,10 @@ view.
 
 ### 4. Select Teams names without changing native access semantics
 
+`apps/controller/src/console/channels/teams.mjs:support` first keeps native
+group access based only on sender allowlists outside the limited editor.
+Their JSON remains inspectable; no editor save can disable that existing policy.
+
 `apps/controller/src/console/channels/teams.mjs:appendFields`,
 `apps/controller/src/console/agents/teams-directory.mjs:createTeamsDirectoryField`
 
@@ -188,6 +192,7 @@ Manual IDs remain available after missing-consent or provider errors.
 
 ## Changelog
 
+- 2026-10-10 22:48: Keep sender-only native Teams policies outside the limited channel editor (authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9 - a2f7ad762117)
 - 2026-10-07 11:21: Add Team-scoped Graph lookup, native Team ID resolution and name selection alongside Slack in the accompanying implementation. (authoring-run/5acd9a8d-44df-4f9b-8daa-9269c2040340 - 948cb3e61636338be4692bd45114446d6c941890)
 - 2026-10-05 19:32: Describe failed HTTP response cleanup and native connection recovery. (authoring-run/eb95c719-31db-483c-9db3-c9573329209d - 5a2dd43d2e524637e7173457def040fa79d42a93)
 
