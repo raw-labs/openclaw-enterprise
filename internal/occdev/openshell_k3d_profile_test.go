@@ -1,6 +1,7 @@
 package occdev
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -166,6 +167,11 @@ func TestKubernetesOnlyOpenShellInstallationUsesInClusterServices(t *testing.T) 
 
 	var installation struct {
 		Drivers struct {
+			CredentialGateway struct {
+				Configuration struct {
+					Binaries []string `yaml:"binaries"`
+				} `yaml:"configuration"`
+			} `yaml:"credential_gateway"`
 			Sandbox struct {
 				Configuration struct {
 					StartupDelayMs int `yaml:"startupDelayMs"`
@@ -197,6 +203,12 @@ func TestKubernetesOnlyOpenShellInstallationUsesInClusterServices(t *testing.T) 
 	sandbox := installation.Drivers.Sandbox.Configuration
 	if sandbox.StartupDelayMs != 30_000 {
 		t.Fatalf("unexpected OpenShell startup delay: %d", sandbox.StartupDelayMs)
+	}
+	if !reflect.DeepEqual(installation.Drivers.CredentialGateway.Configuration.Binaries, []string{
+		"/app/node_modules/openclaw/node_modules/.pnpm/@openai+codex@0.163.0-alpha.2-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex",
+		"/app/node_modules/openclaw/node_modules/.pnpm/@openai+codex@0.163.0-alpha.2-linux-arm64/node_modules/@openai/codex/vendor/aarch64-unknown-linux-musl/bin/codex",
+	}) {
+		t.Fatalf("unexpected OpenShell credential binary allowlist: %#v", installation.Drivers.CredentialGateway.Configuration.Binaries)
 	}
 	// Only OpenShell supervisors may use the tenant callback egress rule.
 	if len(sandbox.Gateway.NetworkPolicyResources) == 0 || !reflect.DeepEqual(
@@ -332,25 +344,29 @@ func TestKubernetesOnlyOpenShellGatewayInstallsImportedImagesBehindAClusterIP(t 
 
 func TestOpenShellImageImportRegistersThePodmanRecordedName(t *testing.T) {
 	state := kubernetesOnlyOpenShellState(t)
+	root := t.TempDir()
 	source := "ghcr.io/nvidia/openshell/gateway@" + profileTestDigest
 	staging := "openclaw-development/openshell-gateway:occ-dev-owned"
 	recorded := "localhost/" + staging
+	// The first import also loses its stream into the node, so the retry must
+	// keep the archive, import it again, and still verify the digest.
 	commands := fakeProfileCommands(t, map[string]string{
 		"podman": `"image inspect ` + source + `") ;;
 "image inspect ` + staging + `") exit 1 ;;
 "tag ` + source + ` ` + staging + `") ;;
 "image inspect --format {{json .RepoTags}} ` + staging + `") echo '["` + recorded + `"]' ;;
 "image inspect --format {{.Os}}/{{.Architecture}} ` + source + `") echo linux/amd64 ;;
-"image save --output "*" ` + recorded + `") ;;
+"image save --output "*" ` + recorded + `") printf archive > "$4" ;;
 "exec k3d-occ-dev-owned-server-0 ctr -n k8s.io images list") echo "` + recorded + ` application/vnd.oci.image.manifest.v1+json ` + profileTestDigest + `" ;;
 "exec k3d-occ-dev-owned-server-0 ctr -n k8s.io images tag ` + recorded + ` localhost/openclaw-development/openshell-gateway@` + profileTestDigest + `") ;;
 "image rm ` + staging + `") ;;`,
-		"k3d": `"image import --mode direct "*" -c occ-dev-owned") ;;`,
+		"k3d": flakyK3dImportCase(t, state.Cluster, ""),
 	})
-	r := newRunner(Options{Repository: state.Repository})
+	var stdout bytes.Buffer
+	r := newRunner(Options{Repository: state.Repository, Out: &stdout})
 	r.engine = "podman"
 
-	reference, err := r.importOpenShellImage(context.Background(), state, t.TempDir(), "gateway", source)
+	reference, err := r.importOpenShellImage(context.Background(), state, root, "gateway", source)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, strings.Join(commands(), "\n"))
 	}
@@ -359,6 +375,7 @@ func TestOpenShellImageImportRegistersThePodmanRecordedName(t *testing.T) {
 	if reference != "localhost/openclaw-development/openshell-gateway@"+profileTestDigest {
 		t.Fatalf("unexpected runtime reference: %q", reference)
 	}
+	assertRetriedImport(t, commands(), filepath.Join(root, "gateway-image.tar"), state.Cluster, stdout.String())
 }
 
 func TestKubernetesOnlyControlPlaneKeepsPostgreSQLAcrossClusterRestart(t *testing.T) {

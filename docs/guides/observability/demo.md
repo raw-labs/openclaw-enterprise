@@ -12,7 +12,7 @@ Collector owners must establish equivalent scope. Stop and reconcile uncertain o
 changed scope or ownership. A namespace, kubeconfig or disposable name does not
 prove dedication; demo NetworkPolicy selects Collectors, not records.
 
-From the repository root, use Helm 3, `kubectl`, `yq` v4, Python 3, `openssl`,
+From the repository root, use Helm 3, `kubectl`, `yq` v4, `jq`, Python 3, `openssl`,
 `sha256sum`, `cmp`, an explicit kubeconfig/context and enforcing NetworkPolicy.
 Obtain read access to Helm release Secrets, ConfigMaps and the `kube-system` UID;
 permission to create the demo namespace and OCC Pod-discovery Role/RoleBinding; and
@@ -169,6 +169,15 @@ After you update the checkout for an OCC upgrade, rerun this block to pick up
 dashboard and NetworkPolicy changes. A changed configuration restarts Prometheus,
 Grafana, and Loki: their disposable data is lost, and a `kubectl port-forward` to
 Grafana stops working until you start it again.
+
+For a custom release, read its generated Service names with
+`helm get manifest RELEASE -n NAMESPACE` before adapting the port-forward command
+below. Short DNS-label names stay unchanged; other names include the original
+release hash to fit the 63-character Service limit.
+If an upgrade changes the Loki name, update every managed or external Collector
+that saved the old address and refresh its process configuration; see
+[refresh a renamed Loki address](demo-cleanup.md#refresh-a-renamed-loki-address).
+Grafana provisioning does not update separate exporter Secrets.
 
 Services use `ClusterIP`. Prometheus reads Pod metadata, not Secrets. Grafana
 bundles plugins; startup downloads are disabled. Its disposable database is
@@ -342,7 +351,12 @@ Helm's `--wait` can return while a new Collector Pod is still starting (a
 DaemonSet may have one unavailable Pod), so the block waits for its rollout before
 forwarding. Keep forwarding running. Sign in at `http://127.0.0.1:3001` as `admin` with
 the generated password. Open **OCC → OCC observability** for metrics and logs.
-Point `observability.url` to its `/d/occ-observability` URL.
+For a console link, set `observability.url` to its `/d/occ-observability` URL in
+the [Installation startup YAML](../../reference/configuration.md#installation-startup-configuration),
+not `occ-demo.yaml` (profile installs set `controlPlane.observabilityUrl`). Apply it
+as a separate change with
+[Apply other Installation changes](../deploy/production-upgrade.md#apply-other-installation-changes);
+the new checksum restarts the API and worker.
 
 ## Verify actual data
 

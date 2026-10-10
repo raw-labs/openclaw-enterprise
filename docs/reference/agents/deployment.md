@@ -34,7 +34,7 @@ authentication through the controller API remain deferred.
 
 An Agent may also reference one same-Namespace, OCC-owned
 [service account](../service-accounts.md) through
-`harnessAuth: { method: "chatgpt_service_account", serviceAccountId }`; setting
+`harnessAuth: { method: "codex_pat", source: { kind: "service_account", namespaceId, id: serviceAccountId } }`; setting
 `harnessAuth` to `null` clears it. This credential binding does not
 replace its ServicePrincipal or Kubernetes ServiceAccount.
 
@@ -64,8 +64,17 @@ An Agent update may include `executionMode`, `harnessAuth`, and `backendId`
 alongside its required `configurationId`. Omission preserves the current value;
 `harnessAuth: null` clears authentication and `backendId: null` clears the
 Backend. Existing revisions retain their immutable placement, auth binding, and
-Backend association.
-See the
+Backend association. For the current `harnessAuth` source, an update checks only
+the caller's grant (Secret or credential source `operate`, account `read`) and
+reads no record. After the Installation selects another Secret Driver or
+Credential Gateway, an update can still omit, clear, or replace the old binding;
+naming it again fails with `503`, and so does deploying with it. For a Secret,
+that `503`, like creating an Agent with one, says to bind a Secret stored
+through the selected driver. The named Configuration's Secret bindings get the
+full check on every update, even when `configurationId` is unchanged: until
+that Configuration's `secretBindings` name Secrets stored through the selected
+driver, updates and deploys fail with `503` and a message that says so.
+Updating that Configuration, or naming another one, resolves it. See the
 [Harness execution topology flow](../../flows/harness-execution-topology.md) for
 runtime selection, identity boundaries, and activation.
 
@@ -186,6 +195,18 @@ The worker retries on the same cadence without spending its
 `OCC_WORKER_MAX_ATTEMPTS` budget. A dependency still failing at the convergence
 deadline fails the deployment with its own code.
 
+`REFUSED_CANDIDATE_STOP_PENDING` means the worker refused the candidate but could
+not yet stop its workload, for example Pods stuck terminating. The message names
+the refusal, such as `AUTHORIZATION_DENIED`, that `error` carries once the stop
+succeeds, unless a newer revision supersedes the deployment; a superseded one
+retries the stop of an earlier refusal even if that refusal has since lifted. The wait has no
+deadline or attempt limit, since the refused version could still serve. Each
+failed stop doubles the recheck, from the cadence above to 5 minutes, and waits
+at least four times the stop's duration, so other Agents' deployments keep
+running; every try moves `lastAttempt.at`. If an authorization or backend refusal lifts
+(`deploy` granted again), the deployment continues, or past its convergence deadline
+stops the candidate and fails `CONVERGENCE_DEADLINE_EXCEEDED`; other refusals stand. The worker log's `worker.completed` `cause` says why the stop fails.
+
 ### Model check failure cause
 
 When the startup model check fails with `RUNTIME_MODEL_PROBE_FAILED`, the
@@ -219,7 +240,16 @@ activation finishes.
 If a revision fails before the worker sets the pointer, the pointer is
 unchanged. After a failed first deployment, the Agent has no active revision.
 With [exclusive replacement](../drivers/compute.md#production-revision-stages),
-the unchanged pointer names a predecessor that was already stopped.
+the unchanged pointer names a predecessor that was already stopped, so nothing
+serves until a new revision activates. When the worker refuses such a candidate,
+or any first deployment, for example because its deploying actor lost `deploy`
+or a credential source was revoked, it stops the candidate's workload too, and
+records the refusal only after the stop succeeds; until then the deployment
+waits as [`REFUSED_CANDIDATE_STOP_PENDING`](#pending-deployment-progress). Other
+refused candidates stay until a later successful deployment, stop or delete. A candidate whose runtime
+failed by itself, such as `RUNTIME_MODEL_PROBE_FAILED` or
+`CONVERGENCE_DEADLINE_EXCEEDED`, keeps its Pods so its version's Logs tab can
+show the cause; the next deployment stops them.
 Kubernetes embedded replacement reports ready while the predecessor still
 serves, so the worker sets the pointer first. Activation then replaces the
 shared gateway, and the new gateway runs the startup model probe. If that

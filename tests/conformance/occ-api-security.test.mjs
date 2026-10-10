@@ -293,6 +293,14 @@ test("development admission fails closed outside explicit loopback-only developm
     createFixture({ development: { trustedCidrs: ["not-a-cidr"] } }),
     /IPv4 CIDR/,
   );
+  // "08" is prefix 8, and "010" is decimal 10. Production trusted proxies refuse both.
+  for (const cidr of ["192.168.0.0/08", "10.0.0.010/32", "10.0.0.0/032"]) {
+    await assert.rejects(
+      createFixture({ development: { trustedCidrs: [cidr] } }),
+      /IPv4 CIDR/,
+      cidr,
+    );
+  }
 
   const fixture = await createFixture();
   const remote = await request(fixture.app, "/installation/bootstrap", {
@@ -683,6 +691,26 @@ test("malformed, non-JSON, invalid, and oversized inputs fail without mutations"
     assert.equal(fixture.controller.pendingOperations().length, before);
   }
 
+  // Route-specific Preset defaults must still obey an explicitly smaller application limit.
+  for (const method of ["POST", "PATCH"]) {
+    const suffix = method === "PATCH" ? "/pre_00000000-0000-4000-8000-000000000001" : "";
+    const result = await request(
+      fixture.app,
+      `/namespaces/${tenantANamespaceId}/presets${suffix}`,
+      {
+        method,
+        body: {
+          name: "Bounded",
+          template: {
+            variables: { guidance: { type: "string", default: "Routine guidance. ".repeat(40) } },
+          },
+        },
+      },
+    );
+    assert.equal(result.response.status, 413);
+    assert.equal(fixture.controller.pendingOperations().length, before);
+  }
+
   assert.equal(
     fixture.auditSink.events.filter(
       (event) => event.kind === "mutation" && event.resource.kind === "namespace",
@@ -732,12 +760,12 @@ test("NUL characters and unpaired surrogates are refused in bodies and path para
     assert.equal(result.response.status, 400, body.slice(0, 80));
     assert.equal(result.payload.error.code, "INVALID_REQUEST");
     assert.deepEqual(result.payload.error.details, [{ path, code }]);
-    const expected = `The request does not match the operation contract: body ${path} contains ${problem}.`;
-    // The deep path is cut to the 256-character message cap.
-    assert.equal(
-      result.payload.error.message,
-      expected.length <= 256 ? expected : `${expected.slice(0, 255)}…`,
-    );
+    const before = "The request does not match the operation contract: body ";
+    const after = ` contains ${problem}.`;
+    // A path too long for the 256-character message cap is cut, never the problem wording.
+    const room = 256 - before.length - after.length;
+    const shown = path.length <= room ? path : `${path.slice(0, room - 1)}…`;
+    assert.equal(result.payload.error.message, `${before}${shown}${after}`);
   }
   // A surrogate pair is one well-formed character.
   const paired = await request(fixture.app, "/namespaces", { body: { name: "Paired \u{1F600}" } });
@@ -1756,6 +1784,63 @@ test("contract error details stay within the published path cap and name what a 
     const result = await request(fixture.app, route, { body });
     assert.equal(result.response.status, 400, JSON.stringify(result.payload).slice(0, 200));
     assert.equal(result.payload.error.message, `${contract} ${message}`);
+  }
+
+  // A path too long for the 256-character message cap is cut, never the problem wording,
+  // whether the detail path kept the long key or dropped it.
+  for (const [length, wording] of [
+    [300, " has an invalid format."],
+    // The detail path keeps /secretBindings/<key> and drops the field under it.
+    [494, " contains a field that has an invalid format."],
+  ]) {
+    const key = "K".repeat(length);
+    const result = await request(fixture.app, configurations, {
+      body: { ...configuration, secretBindings: { [key]: { source: { ...source, id: "x" } } } },
+    });
+    assert.equal(result.response.status, 400);
+    const { message } = result.payload.error;
+    assert.equal(Array.from(message).length, 256, message);
+    assert.ok(message.startsWith(`${contract} /secretBindings/KKK`), message);
+    assert.ok(message.endsWith(`…${wording}`), message);
+  }
+  // With several problems the long path is cut, and the short ones and every wording stay.
+  const several = await request(fixture.app, agents, {
+    body: { ...agent, harnessAuth: { method: "x", ["Q".repeat(150)]: 1 } },
+  });
+  assert.equal(several.response.status, 400);
+  const severalMessage = several.payload.error.message;
+  assert.equal(Array.from(severalMessage).length, 256, severalMessage);
+  assert.ok(severalMessage.startsWith(`${contract} /harnessAuth/QQQ`), severalMessage);
+  assert.ok(
+    severalMessage.endsWith(
+      "… is not an accepted field; body /harnessAuth/source is required;" +
+        " body /harnessAuth/sourceId is required; and 2 more.",
+    ),
+    severalMessage,
+  );
+  // Paths that exactly fill the cap stay whole.
+  const exact = await request(fixture.app, agents, {
+    body: { ...agent, harnessAuth: { method: "x", ["Q".repeat(71)]: 1 } },
+  });
+  assert.equal(
+    exact.payload.error.message,
+    `${contract} /harnessAuth/${"Q".repeat(71)} is not an accepted field;` +
+      " body /harnessAuth/source is required; body /harnessAuth/sourceId is required;" +
+      " and 2 more.",
+  );
+  assert.equal(Array.from(exact.payload.error.message).length, 256);
+  // The cap counts characters, not UTF-16 code units: an astral key that fits stays whole,
+  // and a cut keeps whole characters.
+  const room = 256 - `${contract} / is not an accepted field.`.length;
+  for (const [count, shown] of [
+    [150, "\u{1F600}".repeat(150)],
+    [200, `${"\u{1F600}".repeat(room - 1)}…`],
+  ]) {
+    const astral = await request(fixture.app, agents, {
+      body: { ...agent, ["\u{1F600}".repeat(count)]: 1 },
+    });
+    assert.equal(astral.response.status, 400);
+    assert.equal(astral.payload.error.message, `${contract} /${shown} is not an accepted field.`);
   }
 
   // A union whose shapes all accept one type names that type, not "one of" a single entry.

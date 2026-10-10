@@ -1,6 +1,10 @@
 import { dirname } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
-import { betterAuthIssuer, validHttpBaseURL } from "../apps/controller/src/auth/configuration.ts";
+import {
+  betterAuthIssuer,
+  refuseRewrittenIpv4AuthHost,
+  validHttpBaseURL,
+} from "../apps/controller/src/auth/configuration.ts";
 import {
   bootstrapOutputPath,
   writeProtectedBootstrapFile,
@@ -13,6 +17,7 @@ import {
   OpenClawController,
   PostgresPlatformState,
 } from "../packages/occ/src/index.ts";
+import { isName, NAME_RULE } from "../packages/contracts/src/index.ts";
 import { createOccLogger, emitOccLogEvent } from "../apps/controller/src/logging.ts";
 import { loadOperationalLoggingConfiguration } from "../apps/controller/src/composition/installation-config.ts";
 
@@ -49,6 +54,14 @@ function optional(name, fallback) {
   return value;
 }
 
+// The Installation name skips the API schema, so check its Name rule before anything is created.
+function installationName(value, name) {
+  if (!isName(value)) {
+    throw new Error(`${name} breaks the Name rule: ${NAME_RULE}.`);
+  }
+  return value;
+}
+
 function normalizeEmail(raw, name) {
   const email = raw.trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
@@ -64,11 +77,13 @@ function authBaseURL(raw, mode) {
   } catch {
     throw new Error("OCC_AUTH_BASE_URL must contain an absolute URL.");
   }
+  // Before the loopback exception: Node rewrites 127.1, 0177.0.0.1 and
+  // 192.168.010.001, and the rewritten host must not become the published origin.
+  refuseRewrittenIpv4AuthHost(raw, parsed);
   if (
     mode === "production" &&
     parsed.protocol !== "https:" &&
-    parsed.hostname !== "127.0.0.1" &&
-    parsed.hostname !== "localhost"
+    !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
   ) {
     throw new Error("OCC_AUTH_BASE_URL must be HTTPS except for loopback development tests.");
   }
@@ -111,6 +126,9 @@ function randomPassword() {
 
 function bootstrapFailureCode(error) {
   const message = error instanceof Error ? error.message : "";
+  if (/installation[ _]name breaks the Name rule/i.test(message)) {
+    return "INSTALLATION_NAME_INVALID";
+  }
   if (/OCC_AUTH_SECRET/.test(message)) {
     return "AUTH_SECRET_INVALID";
   }
@@ -175,7 +193,10 @@ function freshBootstrapConfig(config) {
     const passwordPath = passwordOutputPath(required("OCC_BOOTSTRAP_PASSWORD_FILE"));
     return {
       password: randomPassword(),
-      installationName: required("OCC_BOOTSTRAP_INSTALLATION_NAME"),
+      installationName: installationName(
+        required("OCC_BOOTSTRAP_INSTALLATION_NAME"),
+        "OCC_BOOTSTRAP_INSTALLATION_NAME",
+      ),
       passwordPath,
       serviceKeyPath: serviceKeyOutputPath(
         required("OCC_BOOTSTRAP_SERVICE_KEY_FILE"),
@@ -185,7 +206,10 @@ function freshBootstrapConfig(config) {
   }
   return {
     password: optional("OPENCLAW_DEV_PASSWORD", DEFAULT_DEV_ADMIN_PASSWORD),
-    installationName: optional("OPENCLAW_DEV_INSTALLATION_NAME", DEFAULT_DEV_INSTALLATION_NAME),
+    installationName: installationName(
+      optional("OPENCLAW_DEV_INSTALLATION_NAME", DEFAULT_DEV_INSTALLATION_NAME),
+      "OPENCLAW_DEV_INSTALLATION_NAME",
+    ),
     serviceKeyPath: serviceKeyOutputPath(required("OCC_BOOTSTRAP_SERVICE_KEY_FILE")),
   };
 }

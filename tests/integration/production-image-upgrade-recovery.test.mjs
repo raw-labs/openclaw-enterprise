@@ -74,13 +74,19 @@ const runPreflight = (pod) => {
     }
     mounts.push([directory, mount.mountPath]);
   }
-  const env = (container.env ?? []).filter((item) => typeof item.value === 'string');
+  // Kubernetes expands $(VAR) in literal values from earlier variables and turns $$ into $.
+  const expanded = {};
+  const env = (container.env ?? []).filter((item) => typeof item.value === 'string').map((item) => {
+    const value = item.value.replace(/\\$\\$|\\$\\(([A-Za-z_][A-Za-z0-9_]*)\\)/g, (match, name) => match === '$$' ? '$' : expanded[name] ?? match);
+    expanded[item.name] = value;
+    return {name: item.name, value};
+  });
   const image = process.env.OCC_TEST_PRODUCTION_IMAGE;
   const result = image
     // Host networking reaches the test's loopback Kubernetes API only with rootful Docker.
     ? spawnSync('docker', ['run', '--rm', ...(state.kubeconfig ? ['--network', 'host', '--mount', 'type=bind,src=' + state.kubeconfig + ',dst=' + state.kubeconfig + ',readonly'] : ['--network', 'none']), ...mounts.flatMap(([source, target]) => ['--mount', 'type=bind,src=' + source + ',dst=' + target + ',readonly']), ...env.flatMap((item) => ['--env', item.name + '=' + item.value]), '--entrypoint', container.command[0], image, ...container.args], {encoding: 'utf8'})
     : (() => {
-      const local = (value) => mounts.reduce((current, [source, target]) => current.split(target).join(source), value).split('/app/apps/').join(process.cwd() + '/apps/');
+      const local = (value) => mounts.reduce((current, [source, target]) => current.split(target).join(source), value).split('/app/apps/').join(process.cwd() + '/apps/').split('/app/packages/').join(process.cwd() + '/packages/');
       return spawnSync(process.execPath, container.args.map(local), {encoding: 'utf8', env: Object.fromEntries(env.map((item) => [item.name, local(item.value)]))});
     })();
   return {phase: result.status === 0 ? 'Succeeded' : 'Failed', log: (result.stdout ?? '') + (result.stderr ?? '')};
@@ -211,14 +217,23 @@ if (tool === 'helm') {
   }
 } else if (tool === 'occ') {
   if (args.includes('deployment-inventory')) {
-    out({installationId: 'ins_test', namespaces: [{id: 'ns_test', status: 'ready', agents: state.agent ? [{id: 'agt_test', status: 'active', desiredRuntimeState: 'running', executionMode: 'embedded', activeRevisionId: 'rev_old', deploymentInProgress: false}] : []}]});
+    out({installationId: 'ins_test', namespaces: state.inventoryNamespaces ?? [{id: 'ns_test', status: 'ready', agents: state.agent ? [{id: 'agt_test', status: 'active', desiredRuntimeState: 'running', executionMode: 'embedded', activeRevisionId: 'rev_old', deploymentInProgress: false}] : []}]});
+  } else if (state.names && args.includes('get') && (args.includes('agent') || args.includes('namespace'))) {
+    // Reads a scripted resource name; an unlisted ID stands for a denied read, and so does an
+    // Agent read outside its own Namespace. Like a CLI that can take input, it drains stdin.
+    fs.readFileSync(0);
+    log('read ' + args.at(-1));
+    const home = (state.inventoryNamespaces ?? []).find((ns) => ns.agents.some((a) => a.id === args.at(-1)));
+    const name = args.includes('agent') && (!args.includes('--namespace') || fileArg('--namespace') !== home?.id) ? undefined : state.names[args.at(-1)];
+    if (name === undefined) { process.stderr.write('permission denied\\n'); process.exit(1); }
+    out({id: args.at(-1), name});
   } else if (args.includes('deploy')) {
     state.dispatches += 1; state.activeRevision = 'rev_new'; save(); log('agent-deploy');
     if (take('lost-agent-response')) process.exit(9);
     out({id: 'rev_new'});
   } else if (args.includes('agent') && args.includes('get')) out({id: 'agt_test', activeRevisionId: state.activeRevision ?? 'rev_old'});
   else if (args.includes('deployment-status')) out({status: 'succeeded'});
-  else out({id: 'ins_test'});
+  else out({id: 'ins_test', name: state.installationName});
 }
 `;
 
@@ -260,11 +275,13 @@ async function collectorConfigSecret(name, collector) {
 }
 
 // A stand-in Kubernetes API for the startup preflight's Compute check. It serves
-// only the version and Namespace list reads that check makes, over verified HTTPS
-// with a bearer token, from the Namespaces a case seeds. The real Kubernetes
-// Compute Driver in the preflight Pod decides whether that state may start; this
-// is not live cluster or RBAC proof.
-async function kubernetesApi(t, directory, namespaces, denied) {
+// only the version, Namespace and SelfSubjectAccessReview requests that check makes,
+// over verified HTTPS with a bearer token, from the Namespaces a case seeds. With
+// `execution`, a second stand-in serves the two-cluster execution target under the
+// kubeconfig context `execution`, granting the rules its `allows` callback admits.
+// The real Kubernetes Compute Driver in the preflight Pod decides whether that state
+// may start; this is not live cluster or RBAC proof.
+async function kubernetesApi(t, directory, namespaces, denied, execution = null) {
   const certificate = join(directory, "kubernetes-api.crt");
   const key = join(directory, "kubernetes-api.key");
   await execute("openssl", [
@@ -284,26 +301,51 @@ async function kubernetesApi(t, directory, namespaces, denied) {
     "-out",
     certificate,
   ]);
-  const reads = [];
-  const server = createServer(
-    { key: await readFile(key), cert: await readFile(certificate) },
-    (request, response) => {
+  const tls = { key: await readFile(key), cert: await readFile(certificate) };
+  const serve = async ({ namespaces, uid, allows }) => {
+    const reads = [];
+    const reviews = [];
+    const server = createServer(tls, async (request, response) => {
       const url = new URL(request.url, "https://127.0.0.1");
       const reply = (status, body) => {
         response.writeHead(status, { "content-type": "application/json" });
         response.end(JSON.stringify(body));
       };
+      const review =
+        request.method === "POST" &&
+        url.pathname === "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
       if (
         denied ||
-        request.method !== "GET" ||
+        (request.method !== "GET" && !review) ||
         request.headers.authorization !== "Bearer preflight-token"
       ) {
         reply(403, { kind: "Status", apiVersion: "v1", status: "Failure", code: 403 });
         return;
       }
+      if (review) {
+        let body = "";
+        for await (const chunk of request) {
+          body += chunk;
+        }
+        const attributes = JSON.parse(body).spec.resourceAttributes;
+        // `allows` answers a decision, or a whole review status such as an evaluation error.
+        const decision = allows(attributes);
+        const status = typeof decision === "object" ? decision : { allowed: decision };
+        reviews.push({ ...attributes, allowed: status.allowed });
+        reply(201, {
+          kind: "SelfSubjectAccessReview",
+          apiVersion: "authorization.k8s.io/v1",
+          spec: { resourceAttributes: attributes },
+          status,
+        });
+        return;
+      }
       reads.push(url.pathname);
       if (url.pathname === "/version") {
         reply(200, { major: "1", minor: "35", gitVersion: "v1.35.0" });
+      } else if (url.pathname === "/api/v1/namespaces/kube-system") {
+        // Two-cluster preflight tells the clusters apart by this Namespace's UID.
+        reply(200, { kind: "Namespace", apiVersion: "v1", metadata: { name: "kube-system", uid } });
       } else if (url.pathname === "/api/v1/namespaces") {
         // Only label-existence selectors, which is what Compute preflight sends.
         const keys = (url.searchParams.get("labelSelector") ?? "").split(",").filter(Boolean);
@@ -314,11 +356,26 @@ async function kubernetesApi(t, directory, namespaces, denied) {
       } else {
         reply(404, { kind: "Status", apiVersion: "v1", status: "Failure", code: 404 });
       }
-    },
-  );
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    return { port: server.address().port, reads, reviews };
+  };
+  const control = await serve({ namespaces, uid: "control-cluster", allows: () => false });
+  const target =
+    execution === null
+      ? null
+      : await serve({
+          namespaces: execution.namespaces,
+          uid: "execution-cluster",
+          allows: execution.allows,
+        });
+  const authority = (await readFile(certificate)).toString("base64");
+  const cluster = (name, port) => ({
+    name,
+    cluster: { server: `https://127.0.0.1:${port}`, "certificate-authority-data": authority },
+  });
   const kubeconfig = join(directory, "preflight-kubeconfig.json");
   await writeFile(
     kubeconfig,
@@ -326,22 +383,27 @@ async function kubernetesApi(t, directory, namespaces, denied) {
       apiVersion: "v1",
       kind: "Config",
       clusters: [
-        {
-          name: "preflight",
-          cluster: {
-            server: `https://127.0.0.1:${server.address().port}`,
-            "certificate-authority-data": (await readFile(certificate)).toString("base64"),
-          },
-        },
+        cluster("preflight", control.port),
+        ...(target === null ? [] : [cluster("execution", target.port)]),
       ],
       users: [{ name: "preflight", user: { token: "preflight-token" } }],
-      contexts: [{ name: "preflight", context: { cluster: "preflight", user: "preflight" } }],
+      contexts: [
+        { name: "preflight", context: { cluster: "preflight", user: "preflight" } },
+        ...(target === null
+          ? []
+          : [{ name: "execution", context: { cluster: "execution", user: "preflight" } }]),
+      ],
       "current-context": "preflight",
     }),
   );
   // The controller image's unprivileged user reads this file through a bind mount.
   await chmod(kubeconfig, 0o644);
-  return { kubeconfig, reads };
+  return {
+    kubeconfig,
+    reads: control.reads,
+    executionReads: target?.reads ?? [],
+    reviews: target?.reviews ?? [],
+  };
 }
 
 async function fixture(
@@ -358,6 +420,10 @@ async function fixture(
     preflightResults = null,
     kubernetesNamespaces = [],
     kubernetesDenied = false,
+    executionCluster = null,
+    installationName = "Production",
+    inventoryNamespaces = null,
+    names = null,
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "occ-upgrade-recovery-"));
@@ -471,19 +537,45 @@ if (args[0] === 'scripts/upgrade-repository-image-probe.mjs') {
       secretName: "occ-installation-startup",
       key: "installation.yaml",
     };
-    values = JSON.stringify(exampleValues);
+    values = JSON.stringify(chart.values ? chart.values(exampleValues) : exampleValues);
     const exampleInstallation = await example("installation.yaml");
     exampleInstallation.drivers.compute.configuration.network.gatewayTrustedProxyCidrs = [
       "10.42.0.0/16",
     ];
     // Outside a cluster the preflight Pod has no service account, so Compute
     // reaches the stand-in Kubernetes API through an explicit kubeconfig.
-    api = await kubernetesApi(t, directory, kubernetesNamespaces, kubernetesDenied);
-    exampleInstallation.drivers.compute.configuration.authentication = {
+    api = await kubernetesApi(
+      t,
+      directory,
+      kubernetesNamespaces,
+      kubernetesDenied,
+      executionCluster,
+    );
+    const compute = exampleInstallation.drivers.compute.configuration;
+    compute.authentication = {
       mode: "kubeconfig",
       kubeconfigPath: api.kubeconfig,
       context: "preflight",
     };
+    if (executionCluster) {
+      // The experimental two-cluster profile: the same kubeconfig selects the
+      // execution stand-in, with documentation-range endpoint CIDRs.
+      compute.gatewayRouting.hostname = "gateway.example.test";
+      compute.executionCluster = {
+        authentication: {
+          mode: "kubeconfig",
+          kubeconfigPath: api.kubeconfig,
+          context: "execution",
+        },
+        harnessRouting: { ...compute.gatewayRouting, hostname: "harness.example.test" },
+        network: {
+          dns: compute.network.dns,
+          harnessEndpointCidrs: ["192.0.2.2/32"],
+          gatewayEndpointCidrs: ["192.0.2.1/32"],
+          pluginStatusProxySourceCidrs: ["192.0.2.2/32"],
+        },
+      };
+    }
     installation = JSON.stringify(chart.installation(exampleInstallation));
   }
   const state = {
@@ -491,6 +583,9 @@ if (args[0] === 'scripts/upgrade-repository-image-probe.mjs') {
     startupCheck: Boolean(chart),
     kubeconfig: api?.kubeconfig ?? null,
     preflightResults,
+    installationName,
+    inventoryNamespaces,
+    names,
     version: 1,
     helmStatus: "deployed",
     api: 1,
@@ -588,6 +683,8 @@ if (args[0] === 'scripts/upgrade-repository-image-probe.mjs') {
     directory,
     evidence,
     kubernetesReads: api?.reads ?? [],
+    executionReads: api?.executionReads ?? [],
+    accessReviews: api?.reviews ?? [],
     run: (...extra) => execute(script, [...args, ...extra], { cwd: repository, env }),
     state: async () => JSON.parse(await readFile(join(directory, "state.json"), "utf8")),
     events: async () =>
@@ -1022,6 +1119,71 @@ test("an unchecked repository image pair cannot start an upgrade", async (t) => 
   assert.deepEqual(await f.events(), []);
 });
 
+// Twelve stranded Agents list ten plus "and 2 more"; exactly ten list all of them, with no
+// "and N more" line.
+for (const count of [12, 10]) {
+  test(`${count} running Agents without an active revision are named with their remedy before mutation`, async (t) => {
+    const agent = (id, fields = {}) => ({
+      id,
+      status: "active",
+      desiredRuntimeState: "running",
+      executionMode: "dedicated",
+      deploymentInProgress: false,
+      ...fields,
+    });
+    const stranded = Array.from({ length: count }, (_, index) => `agt_stranded_${index + 1}`);
+    const f = await fixture(t, {
+      inventoryNamespaces: [
+        {
+          id: "ns_alpha",
+          status: "ready",
+          agents: [
+            agent("agt_healthy", { activeRevisionId: "rev_old" }),
+            agent("agt_stopped", { desiredRuntimeState: "stopped" }),
+            ...stranded.slice(0, 2).map((id) => agent(id)),
+          ],
+        },
+        { id: "ns_beta", status: "ready", agents: stranded.slice(2).map((id) => agent(id)) },
+      ],
+      // agt_stranded_2 and ns_beta have no readable name, and agt_stranded_3's is not a string;
+      // agt_stranded_1's name carries a quote, a newline, DEL, and a C1 control.
+      names: {
+        ns_alpha: "Team Alpha",
+        agt_stranded_1: 'Mail "triage"\nbot\u007f\u009b',
+        agt_stranded_3: 42,
+      },
+    });
+    const failure = await f.run().then(
+      () => assert.fail("the upgrade must refuse"),
+      (error) => error,
+    );
+    const lines = failure.stderr.trimEnd().split("\n");
+    assert.deepEqual(lines, [
+      "upgrade-production-images: the deployment inventory contains a running Agent without an active revision; resolve its initial deployment first. No cluster changes were made.",
+      '  - Agent agt_stranded_1 "Mail \\"triage\\"\\nbot\\u007f?" in Namespace ns_alpha "Team Alpha"',
+      '  - Agent agt_stranded_2 (name unavailable) in Namespace ns_alpha "Team Alpha"',
+      ...stranded
+        .slice(2, 10)
+        .map((id) => `  - Agent ${id} (name unavailable) in Namespace ns_beta (name unavailable)`),
+      ...(count > 10
+        ? [
+            `  - and ${count - 10} more; see ${join(f.evidence, "inventory/deployment-inventory.json")}`,
+          ]
+        : []),
+      "Stop or delete each running Agent without an active revision (occ --namespace NAMESPACE_ID agent stop AGENT_ID), or deploy it until it succeeds (occ --namespace NAMESPACE_ID agent deploy AGENT_ID), then start again with a new evidence directory. See docs/guides/deploy/production-upgrade.md#upgrade-agent-runtimes.",
+    ]);
+    // Only name reads: one per listed Agent and one per Namespace, nothing beyond the first ten.
+    assert.deepEqual(await f.events(), [
+      "read ns_alpha",
+      "read agt_stranded_1",
+      "read agt_stranded_2",
+      "read ns_beta",
+      ...stranded.slice(2, 10).map((id) => `read ${id}`),
+    ]);
+    assert.equal((await f.state()).dispatches, 0);
+  });
+}
+
 test("a changed eligible node stops the upgrade before mutation", async (t) => {
   const f = await fixture(t, {
     agent: true,
@@ -1191,6 +1353,20 @@ test(
   },
 );
 
+// A startup preflight refusal stops the upgrade before quiescence: both writers keep the
+// old release, nothing migrates, and the temporary preflight resources are removed.
+async function assertStoppedBeforeWriters(f) {
+  const state = await f.state();
+  assert.equal(state.api, 1);
+  assert.equal(state.worker, 1);
+  assert.equal(state.version, 1);
+  assert.deepEqual(await f.events(), []);
+  assert.deepEqual(state.preflight.secrets, {});
+  assert.deepEqual(state.preflight.pods, {});
+  assert.deepEqual(state.preflight.networkpolicies, {});
+  return state;
+}
+
 // The 2026-09-28 release example offered DevDay Presets through presets.files; later
 // images no longer ship those files (finding 436). The selected controller image must
 // reject that Installation before quiescence, so the old release keeps serving.
@@ -1213,11 +1389,8 @@ test("an Installation the selected controller image cannot load stops before any
       error.stderr,
     ),
   );
-  const state = await f.state();
-  assert.equal(state.api, 1);
-  assert.equal(state.worker, 1);
-  assert.equal(state.version, 1);
-  assert.deepEqual(await f.events(), []);
+  // The temporary NetworkPolicy, Secret and both Pods are removed after the refusal.
+  const state = await assertStoppedBeforeWriters(f);
   // Both components fail the same way, and both logs are saved (finding 447).
   for (const component of ["api", "worker"]) {
     assert.match(
@@ -1225,14 +1398,93 @@ test("an Installation the selected controller image cannot load stops before any
       /Preset file \/app\/deploy\/presets\/devday\.json is unavailable\./,
     );
   }
-  // The temporary NetworkPolicy, Secret and both Pods are removed after the refusal.
-  assert.deepEqual(state.preflight.secrets, {});
-  assert.deepEqual(state.preflight.pods, {});
-  assert.deepEqual(state.preflight.networkpolicies, {});
   assert.deepEqual(state.preflight.deleted.map((resource) => resource.split("/")[0]).sort(), [
     "networkpolicy.networking.k8s.io",
     "pod",
     "pod",
+    "secret",
+  ]);
+});
+
+// The API and worker read the stored Installation name from the database and refuse
+// one that breaks the Name rule (INSTALLATION_NAME_INVALID). The preflight Pods check
+// the name OCC returns with the selected image's rule, so the refusal comes before any
+// writer stops instead of after (dogfood D525). The Pod carries the stored name as JSON,
+// so a trailing no-break space survives and a line break (a control character) gets the
+// same refusal rather than a parse failure. Each case reads a different component's Pod.
+for (const [name, installationName, component] of [
+  [
+    "a stored Installation name that breaks the Name rule stops before any writer stops",
+    "Production\u00a0",
+    "api",
+  ],
+  [
+    "a stored Installation name with a line break gets the Name rule refusal",
+    "Production\n",
+    "worker",
+  ],
+]) {
+  test(name, async (t) => {
+    if (!realHelm) {
+      t.skip("helm is unavailable to render the real chart");
+      return;
+    }
+    const f = await fixture(t, {
+      controllerOnly: true,
+      installationName,
+      chart: { installation: (installation) => installation },
+    });
+    await assert.rejects(f.run(), (error) => {
+      for (const stopped of ["api", "worker"]) {
+        assert.match(
+          error.stderr,
+          new RegExp(
+            `the ${stopped} startup preflight stopped: The stored Installation name breaks the Name rule: 1 to 200 characters, .*\\. \\(INSTALLATION_NAME_INVALID\\) No OCC writer was stopped; the old release keeps serving\\. Rename the Installation as in docs/guides/deploy/production-upgrade-recovery\\.md#correct-an-invalid-installation-name`,
+          ),
+        );
+      }
+      return true;
+    });
+    await assertStoppedBeforeWriters(f);
+    const pod = JSON.parse(
+      await readFile(join(f.evidence, `preflight-${component}-pod.json`), "utf8"),
+    );
+    assert.deepEqual(
+      pod.spec.containers[0].env.find(
+        (variable) => variable.name === "OCC_UPGRADE_PREFLIGHT_INSTALLATION_NAME",
+      ),
+      { name: "OCC_UPGRADE_PREFLIGHT_INSTALLATION_NAME", value: JSON.stringify(installationName) },
+    );
+  });
+}
+
+// An OCC that returns no stored name cannot be checked, so the upgrade stops while
+// building the first preflight Pod, before it creates one or stops a writer.
+test("an Installation read without a stored name stops before any preflight Pod", async (t) => {
+  if (!realHelm) {
+    t.skip("helm is unavailable to render the real chart");
+    return;
+  }
+  const f = await fixture(t, {
+    controllerOnly: true,
+    installationName: null,
+    chart: { installation: (installation) => installation },
+  });
+  await assert.rejects(f.run(), (error) => {
+    assert.match(
+      error.stderr,
+      /upgrade-startup-preflight: OCC did not return the stored Installation name\./,
+    );
+    assert.match(
+      error.stderr,
+      /cannot build the api startup preflight Pod from the rendered chart; no OCC writer was stopped\./,
+    );
+    return true;
+  });
+  // Only the NetworkPolicy and Secret were created, and both are removed again.
+  const state = await assertStoppedBeforeWriters(f);
+  assert.deepEqual(state.preflight.deleted.map((resource) => resource.split("/")[0]).sort(), [
+    "networkpolicy.networking.k8s.io",
     "secret",
   ]);
 });
@@ -1311,6 +1563,174 @@ test("a denied Kubernetes API stops the startup preflight as incomplete", async 
   assert.deepEqual(await f.events(), []);
   assert.deepEqual(state.preflight.pods, {});
   assert.deepEqual(state.preflight.networkpolicies, {});
+});
+
+// Two-cluster tenant grants in the execution stand-in. Both preflight Pods share
+// one kubeconfig there, so a grant set is the union of the API and worker roles.
+const tenantNamespaces = ["oce-unbound", "oce-tenant"].map((name) => ({
+  metadata: { name, labels: { "openclaw.dev/namespace": `ns_${name}` } },
+}));
+const rule = (attributes) =>
+  [
+    attributes.group === "apps" ? "apps" : "core",
+    attributes.verb,
+    attributes.resource + (attributes.subresource ? `/${attributes.subresource}` : ""),
+  ].join(" ");
+// The openclaw-execution release-era tenant roles: API Deployment lists; worker Pod
+// reads and proxy reads (plus writes the check never asks about).
+const releaseTenantRules = [
+  "apps list deployments",
+  "core get pods",
+  "core list pods",
+  "core get pods/proxy",
+];
+const currentTenantRules = [
+  ...releaseTenantRules,
+  "core patch pods",
+  "core get pods/log",
+  "core get events",
+  "core list events",
+];
+// oce-unbound has no tenant RoleBinding, so nothing is allowed there.
+const tenantGrants = (rules) => (attributes) =>
+  attributes.namespace === "oce-tenant" && rules.includes(rule(attributes));
+
+// The execution chart is a separate Helm release that the helper does not upgrade.
+// Each startup preflight Pod asks the execution cluster, as its own identity, for
+// the tenant rules this release needs, so a chart left at the release-era grants
+// stops the upgrade before any writer stops and names the documented step.
+test("a two-cluster execution chart without the new tenant grants stops the startup preflight", async (t) => {
+  if (!realHelm) {
+    t.skip("helm is unavailable to render the real chart");
+    return;
+  }
+  const f = await fixture(t, {
+    controllerOnly: true,
+    chart: { installation: (installation) => installation },
+    executionCluster: { namespaces: tenantNamespaces, allows: tenantGrants(releaseTenantRules) },
+  });
+  await assert.rejects(f.run(), (error) => {
+    for (const [component, missing] of [
+      ["api", "get pods/log, get events, list events"],
+      ["worker", "patch pods"],
+    ]) {
+      assert.match(
+        error.stderr,
+        new RegExp(
+          `the ${component} startup preflight stopped: Kubernetes Compute startup preflight refused the candidate release: The execution cluster's tenant ${component} grant in Namespace oce-tenant lacks ${missing}\\. Upgrade the openclaw-execution chart before this release\\. No OCC writer was stopped; the old release keeps serving\\. Upgrade the execution release as in docs/testing/two-cluster-local\\.md#upgrade-the-execution-chart`,
+        ),
+      );
+    }
+    return true;
+  });
+  // The unbound tenant Namespace was skipped after its baseline review.
+  assert.deepEqual(
+    f.accessReviews
+      .filter((review) => review.namespace === "oce-unbound")
+      .map(rule)
+      .sort(),
+    ["apps list deployments", "core get pods"],
+  );
+  await assertStoppedBeforeWriters(f);
+});
+
+test("a two-cluster execution chart with the new tenant grants passes the startup preflight", async (t) => {
+  if (!realHelm) {
+    t.skip("helm is unavailable to render the real chart");
+    return;
+  }
+  const f = await fixture(t, {
+    controllerOnly: true,
+    chart: { installation: (installation) => installation },
+    executionCluster: { namespaces: tenantNamespaces, allows: tenantGrants(currentTenantRules) },
+  });
+  await f.run();
+  assert.deepEqual(await f.events(), ["scale-api", "scale-worker", "migration"]);
+  // Each component asked for its own new rules in the bound tenant Namespace.
+  assert.deepEqual(
+    f.accessReviews
+      .filter((review) => review.namespace === "oce-tenant")
+      .map(rule)
+      .sort(),
+    [
+      "apps list deployments",
+      "core get events",
+      "core get pods",
+      "core get pods",
+      "core get pods/log",
+      "core get pods/proxy",
+      "core list events",
+      "core list pods",
+      "core patch pods",
+    ],
+  );
+  assert.ok(f.executionReads.includes("/api/v1/namespaces/kube-system"));
+});
+
+// An execution authorizer that cannot evaluate the reviews leaves the check incomplete:
+// the helper says which kubeconfig and access the Pod needed, and still stops first.
+test("an unevaluated two-cluster tenant grant review stops the startup preflight as incomplete", async (t) => {
+  if (!realHelm) {
+    t.skip("helm is unavailable to render the real chart");
+    return;
+  }
+  const f = await fixture(t, {
+    controllerOnly: true,
+    chart: { installation: (installation) => installation },
+    executionCluster: {
+      namespaces: tenantNamespaces,
+      allows: () => ({ allowed: false, evaluationError: "webhook authorizer unavailable" }),
+    },
+  });
+  await assert.rejects(f.run(), (error) => {
+    for (const component of ["api", "worker"]) {
+      assert.match(
+        error.stderr,
+        new RegExp(
+          `the ${component} startup preflight stopped: Kubernetes Compute startup preflight could not complete: The execution cluster tenant grant review failed: could not evaluate .* in Namespace oce-unbound: webhook authorizer unavailable No OCC writer was stopped; the old release keeps serving\\. The Pod used its execution cluster kubeconfig, which must list Namespaces and create SelfSubjectAccessReviews there`,
+        ),
+      );
+    }
+    assert.doesNotMatch(error.stderr, /refused the candidate release|openclaw-execution chart/);
+    return true;
+  });
+  await assertStoppedBeforeWriters(f);
+});
+
+// With runtime logs off, the release's tenant API role carries no log or Event reads, so
+// the preflight asks only for the rules that release needs.
+test("a two-cluster upgrade with runtime logs off needs no log grants in the execution chart", async (t) => {
+  if (!realHelm) {
+    t.skip("helm is unavailable to render the real chart");
+    return;
+  }
+  const f = await fixture(t, {
+    controllerOnly: true,
+    chart: {
+      installation: (installation) => installation,
+      values: (values) => ({ ...values, agentRuntimeLogs: { enabled: false } }),
+    },
+    executionCluster: {
+      namespaces: tenantNamespaces,
+      allows: tenantGrants([...releaseTenantRules, "core patch pods"]),
+    },
+  });
+  await f.run();
+  assert.deepEqual(await f.events(), ["scale-api", "scale-worker", "migration"]);
+  assert.deepEqual(
+    f.accessReviews
+      .filter((review) => review.namespace === "oce-tenant")
+      .map(rule)
+      .sort(),
+    [
+      "apps list deployments",
+      "core get pods",
+      "core get pods",
+      "core get pods/proxy",
+      "core list pods",
+      "core patch pods",
+    ],
+  );
 });
 
 // The helper waits for every preflight Pod and saves its status and log before it
@@ -1410,6 +1830,9 @@ test("an Installation the selected controller image loads passes the preflight a
   }
   const f = await fixture(t, {
     controllerOnly: true,
+    // A 200-character name: if Kubernetes expanded $(OCC_CONFIG_PATH) in the Pod's
+    // environment, the preflight would see a longer name and refuse it.
+    installationName: `${"A".repeat(182)}$(OCC_CONFIG_PATH)`,
     chart: { installation: (installation) => installation },
   });
   await f.run();

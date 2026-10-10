@@ -1099,6 +1099,38 @@ test("CI Required always reports and fails at once when a dependency was cancell
   }
 });
 
+test("full-integration lanes read NODE_BASE_IMAGE from a variable their environment has", () => {
+  // Only the integration-model and integration-otel environments define NODE_BASE_IMAGE; every
+  // other lane reads the repository variable, or it can never start (finding 662).
+  const { loadYaml } = createRequire(
+    new URL("../../apps/controller/package.json", import.meta.url),
+  )("@kubernetes/client-node");
+  const source = readFileSync(
+    join(repositoryRoot, ".github/workflows/full-integration.yml"),
+    "utf8",
+  );
+  const workflow = loadYaml(source);
+  const lanes = Object.entries(workflow.jobs).filter(([, job]) => job.env?.NODE_BASE_IMAGE);
+  const repository = "${{ vars.CONTAINER_NODE_BASE_IMAGE }}";
+  const environment = "${{ vars.NODE_BASE_IMAGE }}";
+  for (const [lane, job] of lanes) {
+    const name = job.environment?.name ?? job.environment;
+    const allowed = ["integration-model", "integration-otel"].includes(name)
+      ? [repository, environment]
+      : [repository];
+    assert.ok(allowed.includes(job.env.NODE_BASE_IMAGE), lane);
+  }
+  // No workflow- or step-level read escapes the job check.
+  assert.equal(
+    source.split("vars.NODE_BASE_IMAGE").length - 1,
+    lanes.filter(([, job]) => job.env.NODE_BASE_IMAGE === environment).length,
+  );
+  const names = lanes.map(([name]) => name);
+  for (const lane of ["gateway-routing", "slack", "openshell"]) {
+    assert.ok(names.includes(lane), lane);
+  }
+});
+
 test("Static Checks runs every check the CI lanes skip", () => {
   const { loadYaml } = createRequire(
     new URL("../../apps/controller/package.json", import.meta.url),
@@ -1174,7 +1206,7 @@ test("workflow selection flows through the gate and full-mode source-bound aggre
   );
   assert.deepEqual(
     ["runtime-image-fixture", ...matrixLanes(fullWorkflow)].sort(),
-    [...lanes, "k3d-observability-demo"].sort(),
+    [...lanes, "k3d-observability-demo", "keycloak-oidc"].sort(),
   );
   for (const expected of ["docs", "full"]) {
     const f = fixture(
@@ -1776,22 +1808,35 @@ const editTest =
 test("a test-only change selects the lanes that list its files", (t) => {
   const initial = suiteFiles();
   const cases = [
-    [editTest("tests/integration/postgres-a.test.mjs"), ["checks-baseline-1", "postgres"]],
+    [editTest("tests/integration/postgres-a.test.mjs"), ["postgres"]],
     [
       ({ put }) => {
         put("tests/integration/postgres-b.test.mjs", "// edited\n");
         put("docs/testing.md", "Notes on tests/integration/postgres-b.test.mjs.\n");
       },
-      ["checks-baseline-1", "postgres"],
+      ["postgres"],
     ],
     [
       ({ put }) => {
         put("tests/integration/k3d-a.test.mjs", "// edited\n");
         put("tests/integration/fixture-image.test.mjs", "// edited\n");
       },
-      ["checks-baseline-1", "k3d-fixture-state", "runtime-image-fixture"],
+      ["k3d-fixture-state", "runtime-image-fixture"],
     ],
+    // Checks and Conformance 1 runs when it lists the test, and as the matrix
+    // lane when only the fixture job would run.
     [editTest("tests/conformance/lint-rules.test.mjs"), ["checks-baseline-1"]],
+    [
+      editTest("tests/integration/fixture-image.test.mjs"),
+      ["checks-baseline-1", "runtime-image-fixture"],
+    ],
+    [
+      ({ put }) => {
+        put("tests/integration/postgres-a.test.mjs", "// edited\n");
+        put("tests/conformance/lint-rules.test.mjs", "// edited\n");
+      },
+      ["checks-baseline-1", "postgres"],
+    ],
     // A new file registered in its lane's manifest.
     [
       ({ put }) => {
@@ -1801,7 +1846,7 @@ test("a test-only change selects the lanes that list its files", (t) => {
           laneManifest([...suiteLanes.postgres, "tests/integration/postgres-c.test.mjs"]),
         );
       },
-      ["checks-baseline-1", "postgres"],
+      ["postgres"],
     ],
     // A deleted file and its manifest entry.
     [
@@ -1812,7 +1857,7 @@ test("a test-only change selects the lanes that list its files", (t) => {
           laneManifest(["tests/integration/postgres-a.test.mjs"]),
         );
       },
-      ["checks-baseline-1", "postgres"],
+      ["postgres"],
     ],
     // A file that moves between lanes runs in both.
     [
@@ -1824,7 +1869,7 @@ test("a test-only change selects the lanes that list its files", (t) => {
           laneManifest([...suiteLanes.postgres, "tests/integration/k3d-a.test.mjs"]),
         );
       },
-      ["checks-baseline-1", "k3d-fixture-state", "postgres"],
+      ["k3d-fixture-state", "postgres"],
     ],
   ];
   for (const [change, lanes] of cases) {
@@ -1848,8 +1893,8 @@ test("a test-only change keeps its lanes after main moves", (t) => {
     },
   );
   assert.notEqual(f.base, f.mergeBase);
-  f.expectTests(["checks-baseline-1", "k3d-fixture-state"]);
-  shallowBootstrap(t, f).expectTests(["checks-baseline-1", "k3d-fixture-state"]);
+  f.expectTests(["k3d-fixture-state"]);
+  shallowBootstrap(t, f).expectTests(["k3d-fixture-state"]);
 });
 
 test("helper, fixture and other test-tree changes select full", (t) => {
@@ -1983,7 +2028,7 @@ test("unmapped, non-CI, referenced or irregular test files select full", (t) => 
     ...initial,
     "docs/testing.md": "See tests/integration/k3d-a.test.mjs.\n",
   });
-  mentioned.expectTests(["checks-baseline-1", "k3d-fixture-state"]);
+  mentioned.expectTests(["k3d-fixture-state"]);
   // Executable or symlinked test files.
   reason(
     ({ repo }) => chmodSync(join(repo, "tests/integration/postgres-a.test.mjs"), 0o755),
@@ -2099,8 +2144,26 @@ function buildMatrix(t, mode, lanes) {
 
 test("the lane matrix runs every lane in full mode and only selected lanes in tests mode", (t) => {
   const table = laneTable(readFileSync(join(repositoryRoot, ".github/workflows/ci.yml"), "utf8"));
+  // A runner label nobody provides leaves the job queued until it times out.
+  // Every lane must use a self-hosted label that actionlint knows (the only
+  // list in .github/actionlint.yaml).
+  const selfHostedLabels = [
+    ...readFileSync(join(repositoryRoot, ".github/actionlint.yaml"), "utf8").matchAll(
+      /^ {4}- (\S+)$/gm,
+    ),
+  ].map((match) => match[1]);
+  assert.ok(
+    selfHostedLabels.includes("blacksmith-16vcpu-ubuntu-2404"),
+    "actionlint.yaml lists the self-hosted runner labels",
+  );
   for (const row of table) {
-    assert.deepEqual(Object.keys(row), ["lane", "title", "profile", "timeout"]);
+    assert.deepEqual(Object.keys(row), ["lane", "title", "profile", "timeout", "runner"]);
+    assert.ok(selfHostedLabels.includes(row.runner), `${row.lane} runner ${row.runner}`);
+    // NetworkPolicy proofs need a runner kernel shown to enforce them.
+    const netfilter = row.lane.startsWith("k3d-fixture-") || row.lane === "k3d-observability";
+    if (netfilter) {
+      assert.equal(row.runner, "blacksmith-32vcpu-ubuntu-2404", row.lane);
+    }
   }
   for (const mode of ["full", "docs"]) {
     const full = buildMatrix(t, mode, "");
@@ -2249,8 +2312,48 @@ test("workflow runs selected lanes in tests mode and gates them by the verified 
   }
 });
 
-test("tests mode flows through the gate to a source-bound aggregate of only its lanes", (t) => {
+test("a test-only selection without Checks and Conformance 1 passes the gate", (t) => {
   const f = fixture(t, editTest("tests/integration/postgres-a.test.mjs"), suiteFiles());
+  const bootstrap = shallowBootstrap(t, f);
+  const selected = bootstrap.run("select");
+  assert.equal(selected.status, 0, selected.stderr);
+  const lanes = /\nlanes=(.*)\n$/.exec(selected.output)[1];
+  assert.equal(lanes, '["postgres"]');
+  assert.equal(bootstrap.run("verify", "tests", { EXPECTED_LANES: lanes }).status, 0);
+  const raw = join(bootstrap.checkout, "raw-needs.json");
+  writeFileSync(
+    raw,
+    JSON.stringify({
+      impact: { result: "success", outputs: { mode: "tests", lanes } },
+      audit: { result: "success", outputs: {} },
+      "static-checks": { result: "success", outputs: {} },
+      "pr-safe": { result: "success", outputs: {} },
+      "runtime-image-fixture": { result: "skipped", outputs: {} },
+    }),
+  );
+  const expanded = join(bootstrap.checkout, "needs.json");
+  const gated = spawnSync(
+    process.execPath,
+    [gate, "--needs", raw, "--mode", "tests", "--output", expanded, "--lanes", lanes],
+    { encoding: "utf8" },
+  );
+  assert.equal(gated.status, 0, gated.stderr);
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(expanded, "utf8"))), [
+    "impact",
+    "audit",
+    "postgres",
+  ]);
+});
+
+test("tests mode flows through the gate to a source-bound aggregate of only its lanes", (t) => {
+  const f = fixture(
+    t,
+    ({ put }) => {
+      put("tests/integration/postgres-a.test.mjs", "// edited\n");
+      put("tests/conformance/lint-rules.test.mjs", "// edited\n");
+    },
+    suiteFiles(),
+  );
   const bootstrap = shallowBootstrap(t, f);
   const selected = bootstrap.run("select");
   assert.equal(selected.status, 0, selected.stderr);
@@ -2378,7 +2481,7 @@ test("the checked-in suite index and manifests support test-only selection", (t)
   const manifest = JSON.parse(initial[join("scripts/ci", index.lanes[lane])]);
   const file = manifest.files[0].path;
   const f = fixture(t, ({ put }) => put(file, "// edited\n"), initial);
-  const expected = ["checks-baseline-1", lane].sort();
+  const expected = [lane];
   f.expectTests(expected);
   shallowBootstrap(t, f).expectTests(expected);
 });

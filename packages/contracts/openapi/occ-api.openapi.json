@@ -405,7 +405,7 @@
               "name": {
                 "maxLength": 200,
                 "minLength": 1,
-                "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                 "type": "string"
               },
               "namespaceId": {
@@ -468,7 +468,7 @@
               "name": {
                 "maxLength": 200,
                 "minLength": 1,
-                "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                 "type": "string"
               },
               "namespaceId": {
@@ -526,6 +526,33 @@
                 "description": "Live status reported by the selected Credential Gateway. It never contains credential values.",
                 "properties": {
                   "reason": { "maxLength": 512, "type": "string" },
+                  "refresh": {
+                    "additionalProperties": false,
+                    "description": "Token refresh status reported by the selected Credential Refresh Driver for a refresh-type source. It never contains tokens or refresh material.",
+                    "properties": {
+                      "expiresAt": { "format": "date-time", "type": "string" },
+                      "failureCode": { "maxLength": 128, "type": "string" },
+                      "lastRefreshAt": { "format": "date-time", "type": "string" },
+                      "nextRefreshAt": { "format": "date-time", "type": "string" },
+                      "recoveryAction": {
+                        "anyOf": [
+                          { "const": "retry", "type": "string" },
+                          { "const": "reauthorize", "type": "string" },
+                          { "const": "fix_configuration", "type": "string" },
+                          { "const": "investigate", "type": "string" }
+                        ]
+                      },
+                      "state": {
+                        "anyOf": [
+                          { "const": "pending", "type": "string" },
+                          { "const": "ready", "type": "string" },
+                          { "const": "failed", "type": "string" }
+                        ]
+                      }
+                    },
+                    "required": ["state"],
+                    "type": "object"
+                  },
                   "state": {
                     "anyOf": [
                       { "const": "ready", "type": "string" },
@@ -689,6 +716,16 @@
                   {
                     "const": "CREDENTIAL_GATEWAY_NOT_CONFIGURED",
                     "description": "The Installation selects no Credential Gateway, so credential sources cannot be registered.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "CREDENTIAL_WITHDRAWAL_IN_PROGRESS",
+                    "description": "Only credential withdrawal work still queued or running for an Agent revision that held the source keeps it from being deleted.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "SERVICE_ACCOUNT_DRIVER_NOT_CONFIGURED",
+                    "description": "The Installation has no ChatGPT Backend, so service-account credentials cannot be issued, used for Harness authentication, or revoked to delete their account.",
                     "type": "string"
                   },
                   {
@@ -860,6 +897,45 @@
           "data": {
             "additionalProperties": false,
             "properties": {
+              "harness": {
+                "additionalProperties": false,
+                "description": "A provider-owned Harness Sandbox (OpenShell) as its Sandbox Driver records it. lost means the Sandbox is not serving this revision and OCC will not restart it; deploy the Agent again to replace it. starting with HARNESS_RESTARTING means the provider is restarting a Harness process that exited.",
+                "properties": {
+                  "code": {
+                    "anyOf": [
+                      { "const": "SANDBOX_MISSING", "type": "string" },
+                      { "const": "SANDBOX_DELETING", "type": "string" },
+                      { "const": "SANDBOX_STOPPED", "type": "string" },
+                      { "const": "SANDBOX_FAILED", "type": "string" },
+                      { "const": "HARNESS_EXITED", "type": "string" },
+                      { "const": "HARNESS_RESTARTING", "type": "string" },
+                      { "const": "UNAVAILABLE", "type": "string" }
+                    ]
+                  },
+                  "exitCode": {
+                    "description": "Present only with HARNESS_RESTARTING: the Harness process's last exit code.",
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  },
+                  "restarts": {
+                    "description": "Present only with HARNESS_RESTARTING: the restart number in the current crash loop (1 for a first restart).",
+                    "maximum": 4294967295,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "state": {
+                    "anyOf": [
+                      { "const": "running", "type": "string" },
+                      { "const": "starting", "type": "string" },
+                      { "const": "lost", "type": "string" },
+                      { "const": "unknown", "type": "string" }
+                    ]
+                  }
+                },
+                "required": ["state"],
+                "type": "object"
+              },
               "observedAt": {
                 "format": "date-time",
                 "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
@@ -10533,7 +10609,7 @@
                           "id": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "type": {
@@ -10767,7 +10843,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         }
                       },
@@ -10850,7 +10926,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   }
                 },
@@ -11012,7 +11088,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         }
                       },
@@ -11278,7 +11354,7 @@
                           "name": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "status": {
@@ -11375,7 +11451,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   }
                 },
@@ -11414,7 +11490,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "status": {
@@ -11559,7 +11635,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "status": {
@@ -11684,7 +11760,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "status": {
@@ -11785,7 +11861,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "data": {
-                      "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, and harnessAuth.",
+                      "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources.",
                       "items": {
                         "anyOf": [
                           {
@@ -11800,7 +11876,7 @@
                                   {
                                     "maxLength": 200,
                                     "minLength": 1,
-                                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                     "type": "string"
                                   },
                                   { "type": "null" }
@@ -11814,6 +11890,23 @@
                                 "format": "date-time",
                                 "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                                 "type": "string"
+                              },
+                              "credentialSources": {
+                                "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "sourceId": {
+                                      "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["sourceId"],
+                                  "type": "object"
+                                },
+                                "maxItems": 8,
+                                "type": "array",
+                                "uniqueItems": true
                               },
                               "desiredRuntimeState": {
                                 "anyOf": [
@@ -11869,21 +11962,44 @@
                                         "properties": {
                                           "method": { "const": "codex_pat", "type": "string" },
                                           "source": {
-                                            "additionalProperties": false,
-                                            "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                            "properties": {
-                                              "id": {
-                                                "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                                "type": "string"
+                                            "anyOf": [
+                                              {
+                                                "additionalProperties": false,
+                                                "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                                "properties": {
+                                                  "id": {
+                                                    "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                    "type": "string"
+                                                  },
+                                                  "kind": { "const": "secret", "type": "string" },
+                                                  "namespaceId": {
+                                                    "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "namespaceId", "id"],
+                                                "type": "object"
                                               },
-                                              "kind": { "const": "secret", "type": "string" },
-                                              "namespaceId": {
-                                                "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                                "type": "string"
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "id": {
+                                                    "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                    "type": "string"
+                                                  },
+                                                  "kind": {
+                                                    "const": "service_account",
+                                                    "type": "string"
+                                                  },
+                                                  "namespaceId": {
+                                                    "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "namespaceId", "id"],
+                                                "type": "object"
                                               }
-                                            },
-                                            "required": ["kind", "namespaceId", "id"],
-                                            "type": "object"
+                                            ]
                                           }
                                         },
                                         "required": ["method", "source"],
@@ -11918,21 +12034,6 @@
                                         "additionalProperties": false,
                                         "properties": {
                                           "method": {
-                                            "const": "chatgpt_service_account",
-                                            "type": "string"
-                                          },
-                                          "serviceAccountId": {
-                                            "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                            "type": "string"
-                                          }
-                                        },
-                                        "required": ["method", "serviceAccountId"],
-                                        "type": "object"
-                                      },
-                                      {
-                                        "additionalProperties": false,
-                                        "properties": {
-                                          "method": {
                                             "const": "credential_source",
                                             "type": "string"
                                           },
@@ -11956,7 +12057,7 @@
                               "name": {
                                 "maxLength": 200,
                                 "minLength": 1,
-                                "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                 "type": "string"
                               },
                               "namespaceId": {
@@ -12065,7 +12166,7 @@
                                   {
                                     "maxLength": 200,
                                     "minLength": 1,
-                                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                     "type": "string"
                                   },
                                   { "type": "null" }
@@ -12089,6 +12190,7 @@
                                       { "const": "repositoryBindings", "type": "string" },
                                       { "const": "repositoryAccess", "type": "string" },
                                       { "const": "harnessAuth", "type": "string" },
+                                      { "const": "credentialSources", "type": "string" },
                                       { "const": "secretBindings", "type": "string" },
                                       { "const": "repositoryCredentials", "type": "string" },
                                       { "const": "configuration", "type": "string" }
@@ -12122,7 +12224,7 @@
                               "name": {
                                 "maxLength": 200,
                                 "minLength": 1,
-                                "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                 "type": "string"
                               },
                               "namespaceId": {
@@ -12157,7 +12259,7 @@
                             "type": "object"
                           }
                         ],
-                        "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, and harnessAuth."
+                        "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources."
                       },
                       "type": "array"
                     },
@@ -12225,7 +12327,7 @@
         ]
       },
       "post": {
-        "description": "Requires create permission for Agent resources in the requested Namespace. Requires read permission on the requested Configuration. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected.",
+        "description": "Requires create permission for Agent resources in the requested Namespace. Requires read permission on the requested Configuration. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected. Requires operate permission on each CredentialSource listed in credentialSources or named by a credential-source harnessAuth.",
         "operationId": "createAgent",
         "parameters": [
           {
@@ -12249,7 +12351,7 @@
                       {
                         "maxLength": 200,
                         "minLength": 1,
-                        "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                        "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                         "type": "string"
                       },
                       { "type": "null" }
@@ -12258,6 +12360,23 @@
                   "configurationId": {
                     "pattern": "^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                     "type": "string"
+                  },
+                  "credentialSources": {
+                    "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "sourceId": {
+                          "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["sourceId"],
+                      "type": "object"
+                    },
+                    "maxItems": 8,
+                    "type": "array",
+                    "uniqueItems": true
                   },
                   "executionMode": {
                     "anyOf": [
@@ -12305,21 +12424,41 @@
                             "properties": {
                               "method": { "const": "codex_pat", "type": "string" },
                               "source": {
-                                "additionalProperties": false,
-                                "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                "properties": {
-                                  "id": {
-                                    "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                    "type": "string"
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      },
+                                      "kind": { "const": "secret", "type": "string" },
+                                      "namespaceId": {
+                                        "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["kind", "namespaceId", "id"],
+                                    "type": "object"
                                   },
-                                  "kind": { "const": "secret", "type": "string" },
-                                  "namespaceId": {
-                                    "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                    "type": "string"
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      },
+                                      "kind": { "const": "service_account", "type": "string" },
+                                      "namespaceId": {
+                                        "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["kind", "namespaceId", "id"],
+                                    "type": "object"
                                   }
-                                },
-                                "required": ["kind", "namespaceId", "id"],
-                                "type": "object"
+                                ]
                               }
                             },
                             "required": ["method", "source"],
@@ -12348,18 +12487,6 @@
                               }
                             },
                             "required": ["method", "source"],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "method": { "const": "chatgpt_service_account", "type": "string" },
-                              "serviceAccountId": {
-                                "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                "type": "string"
-                              }
-                            },
-                            "required": ["method", "serviceAccountId"],
                             "type": "object"
                           },
                           {
@@ -12408,7 +12535,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   },
                   "pluginApprovers": { "$ref": "#/components/schemas/def-2" },
@@ -12502,7 +12629,7 @@
                             {
                               "maxLength": 200,
                               "minLength": 1,
-                              "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                              "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                               "type": "string"
                             },
                             { "type": "null" }
@@ -12516,6 +12643,23 @@
                           "format": "date-time",
                           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                           "type": "string"
+                        },
+                        "credentialSources": {
+                          "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "sourceId": {
+                                "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                "type": "string"
+                              }
+                            },
+                            "required": ["sourceId"],
+                            "type": "object"
+                          },
+                          "maxItems": 8,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "desiredRuntimeState": {
                           "anyOf": [
@@ -12571,21 +12715,44 @@
                                   "properties": {
                                     "method": { "const": "codex_pat", "type": "string" },
                                     "source": {
-                                      "additionalProperties": false,
-                                      "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                      "properties": {
-                                        "id": {
-                                          "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": { "const": "secret", "type": "string" },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         },
-                                        "kind": { "const": "secret", "type": "string" },
-                                        "namespaceId": {
-                                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": {
+                                              "const": "service_account",
+                                              "type": "string"
+                                            },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         }
-                                      },
-                                      "required": ["kind", "namespaceId", "id"],
-                                      "type": "object"
+                                      ]
                                     }
                                   },
                                   "required": ["method", "source"],
@@ -12619,21 +12786,6 @@
                                 {
                                   "additionalProperties": false,
                                   "properties": {
-                                    "method": {
-                                      "const": "chatgpt_service_account",
-                                      "type": "string"
-                                    },
-                                    "serviceAccountId": {
-                                      "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": ["method", "serviceAccountId"],
-                                  "type": "object"
-                                },
-                                {
-                                  "additionalProperties": false,
-                                  "properties": {
                                     "method": { "const": "credential_source", "type": "string" },
                                     "sourceId": {
                                       "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -12655,7 +12807,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -12842,6 +12994,12 @@
             "condition": "bound_secret",
             "resourceKind": "secret",
             "scope": "requested"
+          },
+          {
+            "action": "operate",
+            "condition": "bound_credential_source",
+            "resourceKind": "credential_source",
+            "scope": "request_body"
           }
         ]
       }
@@ -13998,7 +14156,7 @@
                       {
                         "maxLength": 200,
                         "minLength": 1,
-                        "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                        "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                         "type": "string"
                       },
                       { "type": "null" }
@@ -14101,21 +14259,41 @@
                             "properties": {
                               "method": { "const": "codex_pat", "type": "string" },
                               "source": {
-                                "additionalProperties": false,
-                                "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                "properties": {
-                                  "id": {
-                                    "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                    "type": "string"
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      },
+                                      "kind": { "const": "secret", "type": "string" },
+                                      "namespaceId": {
+                                        "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["kind", "namespaceId", "id"],
+                                    "type": "object"
                                   },
-                                  "kind": { "const": "secret", "type": "string" },
-                                  "namespaceId": {
-                                    "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                    "type": "string"
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      },
+                                      "kind": { "const": "service_account", "type": "string" },
+                                      "namespaceId": {
+                                        "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["kind", "namespaceId", "id"],
+                                    "type": "object"
                                   }
-                                },
-                                "required": ["kind", "namespaceId", "id"],
-                                "type": "object"
+                                ]
                               }
                             },
                             "required": ["method", "source"],
@@ -14149,18 +14327,6 @@
                           {
                             "additionalProperties": false,
                             "properties": {
-                              "method": { "const": "chatgpt_service_account", "type": "string" },
-                              "serviceAccountId": {
-                                "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                "type": "string"
-                              }
-                            },
-                            "required": ["method", "serviceAccountId"],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
                               "method": { "const": "credential_source", "type": "string" },
                               "sourceId": {
                                 "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -14174,7 +14340,7 @@
                       },
                       { "type": "null" }
                     ],
-                    "description": "Dedicated Harness authentication. `credential_source` is refused with 400 INVALID_REQUEST: create the Agent with the source, then deploy it."
+                    "description": "Dedicated Harness authentication, required. Omitted, null, `runtime` and `credential_source` are refused with 400 INVALID_REQUEST; for a credential source, create the Agent with the source, then deploy it."
                   },
                   "initialWorkspaceFiles": {
                     "additionalProperties": false,
@@ -14205,7 +14371,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   },
                   "pluginApprovers": { "$ref": "#/components/schemas/def-2" },
@@ -14901,7 +15067,7 @@
                           "displayName": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "repositoryRef": {
@@ -15030,7 +15196,7 @@
                             {
                               "maxLength": 200,
                               "minLength": 1,
-                              "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                              "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                               "type": "string"
                             },
                             { "type": "null" }
@@ -15044,6 +15210,23 @@
                           "format": "date-time",
                           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                           "type": "string"
+                        },
+                        "credentialSources": {
+                          "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "sourceId": {
+                                "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                "type": "string"
+                              }
+                            },
+                            "required": ["sourceId"],
+                            "type": "object"
+                          },
+                          "maxItems": 8,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "desiredRuntimeState": {
                           "anyOf": [
@@ -15099,21 +15282,44 @@
                                   "properties": {
                                     "method": { "const": "codex_pat", "type": "string" },
                                     "source": {
-                                      "additionalProperties": false,
-                                      "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                      "properties": {
-                                        "id": {
-                                          "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": { "const": "secret", "type": "string" },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         },
-                                        "kind": { "const": "secret", "type": "string" },
-                                        "namespaceId": {
-                                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": {
+                                              "const": "service_account",
+                                              "type": "string"
+                                            },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         }
-                                      },
-                                      "required": ["kind", "namespaceId", "id"],
-                                      "type": "object"
+                                      ]
                                     }
                                   },
                                   "required": ["method", "source"],
@@ -15147,21 +15353,6 @@
                                 {
                                   "additionalProperties": false,
                                   "properties": {
-                                    "method": {
-                                      "const": "chatgpt_service_account",
-                                      "type": "string"
-                                    },
-                                    "serviceAccountId": {
-                                      "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": ["method", "serviceAccountId"],
-                                  "type": "object"
-                                },
-                                {
-                                  "additionalProperties": false,
-                                  "properties": {
                                     "method": { "const": "credential_source", "type": "string" },
                                     "sourceId": {
                                       "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -15183,7 +15374,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -15392,7 +15583,7 @@
                                 {
                                   "maxLength": 200,
                                   "minLength": 1,
-                                  "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                  "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                   "type": "string"
                                 },
                                 { "type": "null" }
@@ -15406,6 +15597,23 @@
                               "format": "date-time",
                               "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                               "type": "string"
+                            },
+                            "credentialSources": {
+                              "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "sourceId": {
+                                    "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["sourceId"],
+                                "type": "object"
+                              },
+                              "maxItems": 8,
+                              "type": "array",
+                              "uniqueItems": true
                             },
                             "desiredRuntimeState": {
                               "anyOf": [
@@ -15461,21 +15669,44 @@
                                       "properties": {
                                         "method": { "const": "codex_pat", "type": "string" },
                                         "source": {
-                                          "additionalProperties": false,
-                                          "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                          "properties": {
-                                            "id": {
-                                              "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                              "type": "string"
+                                          "anyOf": [
+                                            {
+                                              "additionalProperties": false,
+                                              "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                              "properties": {
+                                                "id": {
+                                                  "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                  "type": "string"
+                                                },
+                                                "kind": { "const": "secret", "type": "string" },
+                                                "namespaceId": {
+                                                  "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["kind", "namespaceId", "id"],
+                                              "type": "object"
                                             },
-                                            "kind": { "const": "secret", "type": "string" },
-                                            "namespaceId": {
-                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                              "type": "string"
+                                            {
+                                              "additionalProperties": false,
+                                              "properties": {
+                                                "id": {
+                                                  "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                  "type": "string"
+                                                },
+                                                "kind": {
+                                                  "const": "service_account",
+                                                  "type": "string"
+                                                },
+                                                "namespaceId": {
+                                                  "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["kind", "namespaceId", "id"],
+                                              "type": "object"
                                             }
-                                          },
-                                          "required": ["kind", "namespaceId", "id"],
-                                          "type": "object"
+                                          ]
                                         }
                                       },
                                       "required": ["method", "source"],
@@ -15510,21 +15741,6 @@
                                       "additionalProperties": false,
                                       "properties": {
                                         "method": {
-                                          "const": "chatgpt_service_account",
-                                          "type": "string"
-                                        },
-                                        "serviceAccountId": {
-                                          "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
-                                        }
-                                      },
-                                      "required": ["method", "serviceAccountId"],
-                                      "type": "object"
-                                    },
-                                    {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "method": {
                                           "const": "credential_source",
                                           "type": "string"
                                         },
@@ -15548,7 +15764,7 @@
                             "name": {
                               "maxLength": 200,
                               "minLength": 1,
-                              "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                              "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                               "type": "string"
                             },
                             "namespaceId": {
@@ -15657,7 +15873,7 @@
                                 {
                                   "maxLength": 200,
                                   "minLength": 1,
-                                  "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                  "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                   "type": "string"
                                 },
                                 { "type": "null" }
@@ -15681,6 +15897,7 @@
                                     { "const": "repositoryBindings", "type": "string" },
                                     { "const": "repositoryAccess", "type": "string" },
                                     { "const": "harnessAuth", "type": "string" },
+                                    { "const": "credentialSources", "type": "string" },
                                     { "const": "secretBindings", "type": "string" },
                                     { "const": "repositoryCredentials", "type": "string" },
                                     { "const": "configuration", "type": "string" }
@@ -15714,7 +15931,7 @@
                             "name": {
                               "maxLength": 200,
                               "minLength": 1,
-                              "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                              "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                               "type": "string"
                             },
                             "namespaceId": {
@@ -15749,7 +15966,7 @@
                           "type": "object"
                         }
                       ],
-                      "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, and harnessAuth."
+                      "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources."
                     },
                     "meta": {
                       "additionalProperties": false,
@@ -15814,7 +16031,7 @@
         ]
       },
       "patch": {
-        "description": "Requires update permission on the requested Agent. Requires read permission on the requested Configuration. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected.",
+        "description": "Requires update permission on the requested Agent. Requires read permission on the requested Configuration. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected. Requires operate permission on each CredentialSource the Agent lists or names in harnessAuth, before and after the update.",
         "operationId": "updateAgent",
         "parameters": [
           {
@@ -15847,7 +16064,7 @@
                       {
                         "maxLength": 200,
                         "minLength": 1,
-                        "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                        "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                         "type": "string"
                       },
                       { "type": "null" }
@@ -15856,6 +16073,23 @@
                   "configurationId": {
                     "pattern": "^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                     "type": "string"
+                  },
+                  "credentialSources": {
+                    "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "sourceId": {
+                          "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["sourceId"],
+                      "type": "object"
+                    },
+                    "maxItems": 8,
+                    "type": "array",
+                    "uniqueItems": true
                   },
                   "executionMode": {
                     "anyOf": [
@@ -15903,21 +16137,41 @@
                             "properties": {
                               "method": { "const": "codex_pat", "type": "string" },
                               "source": {
-                                "additionalProperties": false,
-                                "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                "properties": {
-                                  "id": {
-                                    "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                    "type": "string"
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      },
+                                      "kind": { "const": "secret", "type": "string" },
+                                      "namespaceId": {
+                                        "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["kind", "namespaceId", "id"],
+                                    "type": "object"
                                   },
-                                  "kind": { "const": "secret", "type": "string" },
-                                  "namespaceId": {
-                                    "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                    "type": "string"
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      },
+                                      "kind": { "const": "service_account", "type": "string" },
+                                      "namespaceId": {
+                                        "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["kind", "namespaceId", "id"],
+                                    "type": "object"
                                   }
-                                },
-                                "required": ["kind", "namespaceId", "id"],
-                                "type": "object"
+                                ]
                               }
                             },
                             "required": ["method", "source"],
@@ -15946,18 +16200,6 @@
                               }
                             },
                             "required": ["method", "source"],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "method": { "const": "chatgpt_service_account", "type": "string" },
-                              "serviceAccountId": {
-                                "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                "type": "string"
-                              }
-                            },
-                            "required": ["method", "serviceAccountId"],
                             "type": "object"
                           },
                           {
@@ -16069,7 +16311,7 @@
                             {
                               "maxLength": 200,
                               "minLength": 1,
-                              "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                              "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                               "type": "string"
                             },
                             { "type": "null" }
@@ -16083,6 +16325,23 @@
                           "format": "date-time",
                           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                           "type": "string"
+                        },
+                        "credentialSources": {
+                          "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "sourceId": {
+                                "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                "type": "string"
+                              }
+                            },
+                            "required": ["sourceId"],
+                            "type": "object"
+                          },
+                          "maxItems": 8,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "desiredRuntimeState": {
                           "anyOf": [
@@ -16138,21 +16397,44 @@
                                   "properties": {
                                     "method": { "const": "codex_pat", "type": "string" },
                                     "source": {
-                                      "additionalProperties": false,
-                                      "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                      "properties": {
-                                        "id": {
-                                          "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": { "const": "secret", "type": "string" },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         },
-                                        "kind": { "const": "secret", "type": "string" },
-                                        "namespaceId": {
-                                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": {
+                                              "const": "service_account",
+                                              "type": "string"
+                                            },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         }
-                                      },
-                                      "required": ["kind", "namespaceId", "id"],
-                                      "type": "object"
+                                      ]
                                     }
                                   },
                                   "required": ["method", "source"],
@@ -16186,21 +16468,6 @@
                                 {
                                   "additionalProperties": false,
                                   "properties": {
-                                    "method": {
-                                      "const": "chatgpt_service_account",
-                                      "type": "string"
-                                    },
-                                    "serviceAccountId": {
-                                      "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": ["method", "serviceAccountId"],
-                                  "type": "object"
-                                },
-                                {
-                                  "additionalProperties": false,
-                                  "properties": {
                                     "method": { "const": "credential_source", "type": "string" },
                                     "sourceId": {
                                       "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -16222,7 +16489,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -16409,6 +16676,12 @@
             "condition": "bound_secret",
             "resourceKind": "secret",
             "scope": "requested"
+          },
+          {
+            "action": "operate",
+            "condition": "bound_credential_source",
+            "resourceKind": "credential_source",
+            "scope": "requested"
           }
         ]
       }
@@ -16483,6 +16756,7 @@
                           "type": "string"
                         },
                         "revisionId": {
+                          "description": "The revision whose withdrawal is reported: the active one, unless an earlier revision not yet retired or a later admitted one still has a `pending` withdrawal of the source (one with no attempt queued first). So `revoked` means every revision that may run with the source confirmed it.",
                           "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                           "type": "string"
                         },
@@ -16649,6 +16923,7 @@
                           "type": "string"
                         },
                         "revisionId": {
+                          "description": "The revision whose withdrawal is reported: the active one, unless an earlier revision not yet retired or a later admitted one still has a `pending` withdrawal of the source (one with no attempt queued first). So `revoked` means every revision that may run with the source confirmed it.",
                           "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                           "type": "string"
                         },
@@ -16732,7 +17007,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get the withdrawal state of a credential source for an Agent's active revision",
+        "summary": "Get the withdrawal state of a credential source for an Agent",
         "tags": ["Agents"],
         "x-openclaw-permissions": [
           { "action": "read", "resourceKind": "agent", "scope": "requested" }
@@ -16741,7 +17016,7 @@
     },
     "/namespaces/{namespaceId}/agents/{agentId}/deploy": {
       "post": {
-        "description": "Requires deploy permission on the requested Agent. Requires read permission on the requested Configuration. Requires read permission on the Agent when the selected Compute Driver must generate missing runtime credentials for its first deployment. Requires operate permission on the Agent when the selected Compute Driver must generate missing runtime credentials for its first deployment. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected. Deployment also requires the owning Agent service principal to have operate permission on each bound Secret.",
+        "description": "Requires deploy permission on the requested Agent. Requires read permission on the requested Configuration. Requires read permission on the Agent when the selected Compute Driver must generate missing runtime credentials for its first deployment. Requires operate permission on the Agent when the selected Compute Driver must generate missing runtime credentials for its first deployment. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected. Requires operate permission on each CredentialSource the Agent lists or names in harnessAuth. Deployment also requires the owning Agent service principal to have operate permission on each bound Secret and on each CredentialSource the Agent lists.",
         "operationId": "deployAgent",
         "parameters": [
           {
@@ -16782,7 +17057,7 @@
                             {
                               "maxLength": 200,
                               "minLength": 1,
-                              "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                              "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                               "type": "string"
                             },
                             { "type": "null" }
@@ -16817,6 +17092,23 @@
                           "format": "date-time",
                           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                           "type": "string"
+                        },
+                        "credentialSources": {
+                          "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "sourceId": {
+                                "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                "type": "string"
+                              }
+                            },
+                            "required": ["sourceId"],
+                            "type": "object"
+                          },
+                          "maxItems": 8,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "harness": {
                           "additionalProperties": false,
@@ -16871,21 +17163,41 @@
                               "properties": {
                                 "method": { "const": "codex_pat", "type": "string" },
                                 "source": {
-                                  "additionalProperties": false,
-                                  "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                  "properties": {
-                                    "id": {
-                                      "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                      "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                      "properties": {
+                                        "id": {
+                                          "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                          "type": "string"
+                                        },
+                                        "kind": { "const": "secret", "type": "string" },
+                                        "namespaceId": {
+                                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["kind", "namespaceId", "id"],
+                                      "type": "object"
                                     },
-                                    "kind": { "const": "secret", "type": "string" },
-                                    "namespaceId": {
-                                      "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                      "type": "string"
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "id": {
+                                          "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                          "type": "string"
+                                        },
+                                        "kind": { "const": "service_account", "type": "string" },
+                                        "namespaceId": {
+                                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["kind", "namespaceId", "id"],
+                                      "type": "object"
                                     }
-                                  },
-                                  "required": ["kind", "namespaceId", "id"],
-                                  "type": "object"
+                                  ]
                                 }
                               },
                               "required": ["method", "source"],
@@ -16914,18 +17226,6 @@
                                 }
                               },
                               "required": ["method", "source"],
-                              "type": "object"
-                            },
-                            {
-                              "additionalProperties": false,
-                              "properties": {
-                                "method": { "const": "chatgpt_service_account", "type": "string" },
-                                "serviceAccountId": {
-                                  "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                  "type": "string"
-                                }
-                              },
-                              "required": ["method", "serviceAccountId"],
                               "type": "object"
                             },
                             {
@@ -17151,6 +17451,12 @@
             "action": "operate",
             "condition": "bound_secret",
             "resourceKind": "secret",
+            "scope": "requested"
+          },
+          {
+            "action": "operate",
+            "condition": "bound_credential_source",
+            "resourceKind": "credential_source",
             "scope": "requested"
           }
         ]
@@ -17698,6 +18004,45 @@
                     "data": {
                       "additionalProperties": false,
                       "properties": {
+                        "harness": {
+                          "additionalProperties": false,
+                          "description": "A provider-owned Harness Sandbox (OpenShell) as its Sandbox Driver records it. lost means the Sandbox is not serving this revision and OCC will not restart it; deploy the Agent again to replace it. starting with HARNESS_RESTARTING means the provider is restarting a Harness process that exited.",
+                          "properties": {
+                            "code": {
+                              "anyOf": [
+                                { "const": "SANDBOX_MISSING", "type": "string" },
+                                { "const": "SANDBOX_DELETING", "type": "string" },
+                                { "const": "SANDBOX_STOPPED", "type": "string" },
+                                { "const": "SANDBOX_FAILED", "type": "string" },
+                                { "const": "HARNESS_EXITED", "type": "string" },
+                                { "const": "HARNESS_RESTARTING", "type": "string" },
+                                { "const": "UNAVAILABLE", "type": "string" }
+                              ]
+                            },
+                            "exitCode": {
+                              "description": "Present only with HARNESS_RESTARTING: the Harness process's last exit code.",
+                              "maximum": 2147483647,
+                              "minimum": -2147483648,
+                              "type": "integer"
+                            },
+                            "restarts": {
+                              "description": "Present only with HARNESS_RESTARTING: the restart number in the current crash loop (1 for a first restart).",
+                              "maximum": 4294967295,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "state": {
+                              "anyOf": [
+                                { "const": "running", "type": "string" },
+                                { "const": "starting", "type": "string" },
+                                { "const": "lost", "type": "string" },
+                                { "const": "unknown", "type": "string" }
+                              ]
+                            }
+                          },
+                          "required": ["state"],
+                          "type": "object"
+                        },
                         "observedAt": {
                           "format": "date-time",
                           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
@@ -19846,7 +20191,7 @@
                           "displayName": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "repositoryRef": {
@@ -19979,7 +20324,7 @@
                                   {
                                     "maxLength": 200,
                                     "minLength": 1,
-                                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                     "type": "string"
                                   },
                                   { "type": "null" }
@@ -20014,6 +20359,23 @@
                                 "format": "date-time",
                                 "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                                 "type": "string"
+                              },
+                              "credentialSources": {
+                                "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "sourceId": {
+                                      "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["sourceId"],
+                                  "type": "object"
+                                },
+                                "maxItems": 8,
+                                "type": "array",
+                                "uniqueItems": true
                               },
                               "harness": {
                                 "additionalProperties": false,
@@ -20070,21 +20432,44 @@
                                     "properties": {
                                       "method": { "const": "codex_pat", "type": "string" },
                                       "source": {
-                                        "additionalProperties": false,
-                                        "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                        "properties": {
-                                          "id": {
-                                            "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                            "type": "string"
+                                        "anyOf": [
+                                          {
+                                            "additionalProperties": false,
+                                            "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                            "properties": {
+                                              "id": {
+                                                "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                "type": "string"
+                                              },
+                                              "kind": { "const": "secret", "type": "string" },
+                                              "namespaceId": {
+                                                "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["kind", "namespaceId", "id"],
+                                            "type": "object"
                                           },
-                                          "kind": { "const": "secret", "type": "string" },
-                                          "namespaceId": {
-                                            "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                            "type": "string"
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "id": {
+                                                "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                "type": "string"
+                                              },
+                                              "kind": {
+                                                "const": "service_account",
+                                                "type": "string"
+                                              },
+                                              "namespaceId": {
+                                                "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["kind", "namespaceId", "id"],
+                                            "type": "object"
                                           }
-                                        },
-                                        "required": ["kind", "namespaceId", "id"],
-                                        "type": "object"
+                                        ]
                                       }
                                     },
                                     "required": ["method", "source"],
@@ -20113,21 +20498,6 @@
                                       }
                                     },
                                     "required": ["method", "source"],
-                                    "type": "object"
-                                  },
-                                  {
-                                    "additionalProperties": false,
-                                    "properties": {
-                                      "method": {
-                                        "const": "chatgpt_service_account",
-                                        "type": "string"
-                                      },
-                                      "serviceAccountId": {
-                                        "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["method", "serviceAccountId"],
                                     "type": "object"
                                   },
                                   {
@@ -20278,7 +20648,7 @@
                                   {
                                     "maxLength": 200,
                                     "minLength": 1,
-                                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                     "type": "string"
                                   },
                                   { "type": "null" }
@@ -20298,6 +20668,7 @@
                                       { "const": "repositoryBindings", "type": "string" },
                                       { "const": "repositoryAccess", "type": "string" },
                                       { "const": "harnessAuth", "type": "string" },
+                                      { "const": "credentialSources", "type": "string" },
                                       { "const": "secretBindings", "type": "string" },
                                       { "const": "repositoryCredentials", "type": "string" },
                                       { "const": "configuration", "type": "string" }
@@ -20456,7 +20827,7 @@
                                 {
                                   "maxLength": 200,
                                   "minLength": 1,
-                                  "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                  "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                   "type": "string"
                                 },
                                 { "type": "null" }
@@ -20491,6 +20862,23 @@
                               "format": "date-time",
                               "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                               "type": "string"
+                            },
+                            "credentialSources": {
+                              "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "sourceId": {
+                                    "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["sourceId"],
+                                "type": "object"
+                              },
+                              "maxItems": 8,
+                              "type": "array",
+                              "uniqueItems": true
                             },
                             "harness": {
                               "additionalProperties": false,
@@ -20547,21 +20935,44 @@
                                   "properties": {
                                     "method": { "const": "codex_pat", "type": "string" },
                                     "source": {
-                                      "additionalProperties": false,
-                                      "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                      "properties": {
-                                        "id": {
-                                          "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": { "const": "secret", "type": "string" },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         },
-                                        "kind": { "const": "secret", "type": "string" },
-                                        "namespaceId": {
-                                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": {
+                                              "const": "service_account",
+                                              "type": "string"
+                                            },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         }
-                                      },
-                                      "required": ["kind", "namespaceId", "id"],
-                                      "type": "object"
+                                      ]
                                     }
                                   },
                                   "required": ["method", "source"],
@@ -20590,21 +21001,6 @@
                                     }
                                   },
                                   "required": ["method", "source"],
-                                  "type": "object"
-                                },
-                                {
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "method": {
-                                      "const": "chatgpt_service_account",
-                                      "type": "string"
-                                    },
-                                    "serviceAccountId": {
-                                      "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": ["method", "serviceAccountId"],
                                   "type": "object"
                                 },
                                 {
@@ -20753,7 +21149,7 @@
                                 {
                                   "maxLength": 200,
                                   "minLength": 1,
-                                  "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                                  "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                                   "type": "string"
                                 },
                                 { "type": "null" }
@@ -20773,6 +21169,7 @@
                                     { "const": "repositoryBindings", "type": "string" },
                                     { "const": "repositoryAccess", "type": "string" },
                                     { "const": "harnessAuth", "type": "string" },
+                                    { "const": "credentialSources", "type": "string" },
                                     { "const": "secretBindings", "type": "string" },
                                     { "const": "repositoryCredentials", "type": "string" },
                                     { "const": "configuration", "type": "string" }
@@ -21283,7 +21680,7 @@
                             {
                               "maxLength": 200,
                               "minLength": 1,
-                              "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                              "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                               "type": "string"
                             },
                             { "type": "null" }
@@ -21297,6 +21694,23 @@
                           "format": "date-time",
                           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
                           "type": "string"
+                        },
+                        "credentialSources": {
+                          "description": "Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "sourceId": {
+                                "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                "type": "string"
+                              }
+                            },
+                            "required": ["sourceId"],
+                            "type": "object"
+                          },
+                          "maxItems": 8,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "desiredRuntimeState": {
                           "anyOf": [
@@ -21352,21 +21766,44 @@
                                   "properties": {
                                     "method": { "const": "codex_pat", "type": "string" },
                                     "source": {
-                                      "additionalProperties": false,
-                                      "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
-                                      "properties": {
-                                        "id": {
-                                          "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": { "const": "secret", "type": "string" },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         },
-                                        "kind": { "const": "secret", "type": "string" },
-                                        "namespaceId": {
-                                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                          "type": "string"
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "id": {
+                                              "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            },
+                                            "kind": {
+                                              "const": "service_account",
+                                              "type": "string"
+                                            },
+                                            "namespaceId": {
+                                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["kind", "namespaceId", "id"],
+                                          "type": "object"
                                         }
-                                      },
-                                      "required": ["kind", "namespaceId", "id"],
-                                      "type": "object"
+                                      ]
                                     }
                                   },
                                   "required": ["method", "source"],
@@ -21400,21 +21837,6 @@
                                 {
                                   "additionalProperties": false,
                                   "properties": {
-                                    "method": {
-                                      "const": "chatgpt_service_account",
-                                      "type": "string"
-                                    },
-                                    "serviceAccountId": {
-                                      "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": ["method", "serviceAccountId"],
-                                  "type": "object"
-                                },
-                                {
-                                  "additionalProperties": false,
-                                  "properties": {
                                     "method": { "const": "credential_source", "type": "string" },
                                     "sourceId": {
                                       "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -21436,7 +21858,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -22988,7 +23410,7 @@
                           "name": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "namespaceId": {
@@ -23046,6 +23468,33 @@
                             "description": "Live status reported by the selected Credential Gateway. It never contains credential values.",
                             "properties": {
                               "reason": { "maxLength": 512, "type": "string" },
+                              "refresh": {
+                                "additionalProperties": false,
+                                "description": "Token refresh status reported by the selected Credential Refresh Driver for a refresh-type source. It never contains tokens or refresh material.",
+                                "properties": {
+                                  "expiresAt": { "format": "date-time", "type": "string" },
+                                  "failureCode": { "maxLength": 128, "type": "string" },
+                                  "lastRefreshAt": { "format": "date-time", "type": "string" },
+                                  "nextRefreshAt": { "format": "date-time", "type": "string" },
+                                  "recoveryAction": {
+                                    "anyOf": [
+                                      { "const": "retry", "type": "string" },
+                                      { "const": "reauthorize", "type": "string" },
+                                      { "const": "fix_configuration", "type": "string" },
+                                      { "const": "investigate", "type": "string" }
+                                    ]
+                                  },
+                                  "state": {
+                                    "anyOf": [
+                                      { "const": "pending", "type": "string" },
+                                      { "const": "ready", "type": "string" },
+                                      { "const": "failed", "type": "string" }
+                                    ]
+                                  }
+                                },
+                                "required": ["state"],
+                                "type": "object"
+                              },
                               "state": {
                                 "anyOf": [
                                   { "const": "ready", "type": "string" },
@@ -23144,7 +23593,7 @@
         ]
       },
       "post": {
-        "description": "Requires create permission for CredentialSource resources in the requested Namespace.",
+        "description": "Requires create permission for CredentialSource resources in the requested Namespace. Requires operate permission on each Secret named in the request body secrets.",
         "operationId": "createCredentialSource",
         "parameters": [
           {
@@ -23172,7 +23621,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   },
                   "secrets": {
@@ -23277,7 +23726,13 @@
         "summary": "Register a credential source with the selected Credential Gateway",
         "tags": ["Credential sources"],
         "x-openclaw-permissions": [
-          { "action": "create", "resourceKind": "credential_source", "scope": "namespace" }
+          { "action": "create", "resourceKind": "credential_source", "scope": "namespace" },
+          {
+            "action": "operate",
+            "condition": "bound_secret",
+            "resourceKind": "secret",
+            "scope": "request_body"
+          }
         ]
       }
     },
@@ -23430,7 +23885,7 @@
         ]
       },
       "patch": {
-        "description": "Requires update permission on the requested CredentialSource.",
+        "description": "Requires update permission on the requested CredentialSource. Requires operate permission on each Secret the source references after the update, including its current references when the request omits secrets.",
         "operationId": "updateCredentialSource",
         "parameters": [
           {
@@ -23457,7 +23912,7 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
-                "description": "Re-reads the source's Secret values, or those of replacement Secret references, and updates the Credential Gateway copy. Non-secret config is immutable.",
+                "description": "Re-reads the source's Secret values, or those of replacement Secret references, and updates the Credential Gateway copy. A refresh token field (`refresh_token` of `oauth2-refresh-token`) must reference a new Secret. Non-secret config is immutable.",
                 "properties": {
                   "secrets": {
                     "additionalProperties": {
@@ -23486,7 +23941,7 @@
               }
             }
           },
-          "description": "Re-reads the source's Secret values, or those of replacement Secret references, and updates the Credential Gateway copy. Non-secret config is immutable.",
+          "description": "Re-reads the source's Secret values, or those of replacement Secret references, and updates the Credential Gateway copy. A refresh token field (`refresh_token` of `oauth2-refresh-token`) must reference a new Secret. Non-secret config is immutable.",
           "required": true
         },
         "responses": {
@@ -23552,6 +24007,93 @@
           }
         },
         "summary": "Push current or replacement Secret values to the Credential Gateway copy",
+        "tags": ["Credential sources"],
+        "x-openclaw-permissions": [
+          { "action": "update", "resourceKind": "credential_source", "scope": "requested" },
+          {
+            "action": "operate",
+            "condition": "bound_secret",
+            "resourceKind": "secret",
+            "scope": "requested"
+          }
+        ]
+      }
+    },
+    "/namespaces/{namespaceId}/credential-sources/{credentialSourceId}/rotate": {
+      "post": {
+        "description": "Requires update permission on the requested CredentialSource.",
+        "operationId": "rotateCredentialSource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "credentialSourceId",
+            "required": true,
+            "schema": {
+              "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-13" } }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Force the Credential Refresh Driver to mint a new token for a refresh-type source",
         "tags": ["Credential sources"],
         "x-openclaw-permissions": [
           { "action": "update", "resourceKind": "credential_source", "scope": "requested" }
@@ -24219,7 +24761,7 @@
                           "name": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "namespaceId": {
@@ -24355,7 +24897,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   },
                   "permissions": {
@@ -24416,7 +24958,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -24653,7 +25195,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -24765,6 +25307,336 @@
         ]
       }
     },
+    "/namespaces/{namespaceId}/iam/service-principals": {
+      "get": {
+        "description": "Requires administer permission on the requested Installation. Requires read permission on the requested Namespace.",
+        "operationId": "listIAMServicePrincipals",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "additionalProperties": false,
+                        "description": "A non-Agent automation identity fixed to one Namespace. It holds only the grants of AccessBindings that name it.",
+                        "properties": {
+                          "id": { "maxLength": 200, "minLength": 1, "type": "string" },
+                          "namespaceId": {
+                            "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id", "namespaceId"],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "pattern": "^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "List the Namespace's non-Agent ServicePrincipals",
+        "tags": ["IAM"],
+        "x-openclaw-permissions": [
+          { "action": "administer", "resourceKind": "installation", "scope": "requested" },
+          { "action": "read", "resourceKind": "namespace", "scope": "requested" }
+        ]
+      },
+      "post": {
+        "description": "Requires administer permission on the requested Installation. Requires read permission on the requested Namespace.",
+        "operationId": "createIAMServicePrincipal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "additionalProperties": false, "properties": {}, "type": "object" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "description": "A non-Agent automation identity fixed to one Namespace. It holds only the grants of AccessBindings that name it.",
+                      "properties": {
+                        "id": { "maxLength": 200, "minLength": 1, "type": "string" },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "namespaceId"],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "pattern": "^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "413": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "415": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Create a Namespace ServicePrincipal with no grants for automation or CLI keys",
+        "tags": ["IAM"],
+        "x-openclaw-permissions": [
+          { "action": "administer", "resourceKind": "installation", "scope": "requested" },
+          { "action": "read", "resourceKind": "namespace", "scope": "requested" }
+        ]
+      }
+    },
+    "/namespaces/{namespaceId}/iam/service-principals/{servicePrincipalId}": {
+      "get": {
+        "description": "Requires administer permission on the requested Installation. Requires read permission on the requested Namespace.",
+        "operationId": "getIAMServicePrincipal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "servicePrincipalId",
+            "required": true,
+            "schema": { "maxLength": 200, "minLength": 1, "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "description": "A non-Agent automation identity fixed to one Namespace. It holds only the grants of AccessBindings that name it.",
+                      "properties": {
+                        "id": { "maxLength": 200, "minLength": 1, "type": "string" },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "namespaceId"],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "pattern": "^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get an exact Namespace ServicePrincipal",
+        "tags": ["IAM"],
+        "x-openclaw-permissions": [
+          { "action": "administer", "resourceKind": "installation", "scope": "requested" },
+          { "action": "read", "resourceKind": "namespace", "scope": "requested" }
+        ]
+      }
+    },
     "/namespaces/{namespaceId}/presets": {
       "get": {
         "description": "Requires read permission on the requested Namespace. Only Preset resources with individual read permission are returned.",
@@ -24803,7 +25675,7 @@
                           "name": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "namespaceId": {
@@ -24998,7 +25870,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   },
                   "template": {
@@ -25123,7 +25995,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -25427,7 +26299,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -25625,7 +26497,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   },
                   "template": {
@@ -25749,7 +26621,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -25966,7 +26838,7 @@
                           "name": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "namespaceId": {
@@ -26082,7 +26954,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   },
                   "value": {
@@ -26270,7 +27142,127 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/def-12" } }
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "consumers": {
+                          "additionalProperties": false,
+                          "description": "Current references that block deletion of the Secret. Returned by the exact Secret read only.",
+                          "properties": {
+                            "agents": {
+                              "description": "Readable Agents whose draft, active revision, or pending deployment references the Secret. Each needs a new deployment to receive a rotated value.",
+                              "items": {
+                                "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                "type": "string"
+                              },
+                              "maxItems": 50,
+                              "type": "array"
+                            },
+                            "configurations": {
+                              "description": "Readable Configurations whose `secretBindings` reference the Secret.",
+                              "items": {
+                                "pattern": "^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                "type": "string"
+                              },
+                              "maxItems": 50,
+                              "type": "array"
+                            },
+                            "credentialSources": {
+                              "description": "Readable credential sources that hold the Secret.",
+                              "items": {
+                                "pattern": "^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                                "type": "string"
+                              },
+                              "maxItems": 50,
+                              "type": "array"
+                            },
+                            "provisioningRequests": {
+                              "description": "Work IDs of queued or running Agent provisioning requests that reference the Secret, listed only for the actor that started them.",
+                              "items": {
+                                "maxLength": 200,
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9._~:@/-]{1,200}$",
+                                "type": "string"
+                              },
+                              "maxItems": 50,
+                              "type": "array"
+                            },
+                            "truncated": {
+                              "description": "`true` when the Secret has more than 50 references; only the first 50, ordered by kind and ID, are examined.",
+                              "type": "boolean"
+                            },
+                            "unreadable": {
+                              "description": "Examined references to resources the caller may not read. They are counted, never named.",
+                              "maximum": 50,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "agents",
+                            "configurations",
+                            "credentialSources",
+                            "provisioningRequests",
+                            "unreadable",
+                            "truncated"
+                          ],
+                          "type": "object"
+                        },
+                        "id": {
+                          "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "name": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
+                          "type": "string"
+                        },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "ref": {
+                          "additionalProperties": false,
+                          "description": "Exact OCC Secret reference. Shape: `{ \"kind\": \"secret\", \"namespaceId\": \"ns_...\", \"id\": \"sec_...\" }`.",
+                          "properties": {
+                            "id": {
+                              "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                              "type": "string"
+                            },
+                            "kind": { "const": "secret", "type": "string" },
+                            "namespaceId": {
+                              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                              "type": "string"
+                            }
+                          },
+                          "required": ["kind", "namespaceId", "id"],
+                          "type": "object"
+                        }
+                      },
+                      "required": ["id", "namespaceId", "name", "ref", "consumers"],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "pattern": "^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
             },
             "description": "Default Response"
           },
@@ -26311,7 +27303,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get exact Namespace-owned Secret metadata without revealing material",
+        "summary": "Get exact Namespace-owned Secret metadata and its readable consumers",
         "tags": ["Secrets"],
         "x-openclaw-permissions": [
           { "action": "read", "resourceKind": "secret", "scope": "requested" }
@@ -26477,7 +27469,7 @@
                           "name": {
                             "maxLength": 200,
                             "minLength": 1,
-                            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                            "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                             "type": "string"
                           },
                           "namespaceId": {
@@ -26576,7 +27568,7 @@
                   "name": {
                     "maxLength": 200,
                     "minLength": 1,
-                    "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                    "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                     "type": "string"
                   }
                 },
@@ -26618,7 +27610,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -26716,6 +27708,18 @@
         "operationId": "deleteServiceAccount",
         "parameters": [
           {
+            "description": "`true` deletes an account whose issued access token no ChatGPT Backend can revoke, and leaves the token for an administrator to revoke at the provider. With a ChatGPT Backend configured it is ignored and the token is revoked as usual.",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "const": "true", "type": "string" },
+                { "const": "false", "type": "string" }
+              ]
+            }
+          },
+          {
             "in": "path",
             "name": "namespaceId",
             "required": true,
@@ -26735,6 +27739,58 @@
           }
         ],
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "A forced deletion removed the account and its credential Secret but could not revoke its issued access token.",
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "backendId": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
+                          "type": "string"
+                        },
+                        "id": {
+                          "pattern": "^sa_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "revocation": {
+                          "const": "skipped",
+                          "description": "The account's issued access token was not revoked: no ChatGPT Backend can revoke it. Revoke it at the provider; the audit event names its Backend and credential ID.",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "namespaceId", "revocation"],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "pattern": "^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A forced deletion removed the account and its credential Secret but could not revoke its issued access token."
+          },
           "204": { "description": "Default Response" },
           "400": {
             "content": {
@@ -26839,7 +27895,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -27005,7 +28061,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
@@ -27160,7 +28216,7 @@
                         "name": {
                           "maxLength": 200,
                           "minLength": 1,
-                          "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f]).+$",
+                          "pattern": "^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+$",
                           "type": "string"
                         },
                         "namespaceId": {
