@@ -29,8 +29,8 @@ still block initial workspace files and Secret-backed environment projection.
    **Create Agent**.
 2. Choose a [Preset](../presets.md), fill its variables, and select **Use Preset**.
    Review defaults and choose an existing or new model Secret.
-   **Start with default Preset** loads `default-codex`; **Start without Preset**
-   skips Presets.
+   **Start with default Preset** uses the [readable default selection](../presets.md#plain-console-default);
+   **Start without Preset** skips Presets.
 3. Enter a unique name within the Namespace. Choose **Provider**, then
    **Harness**. OpenAI offers **Codex** by default and **OpenClaw**;
    Anthropic offers only **OpenClaw**. **Execution mode** is Dedicated for Codex,
@@ -53,7 +53,9 @@ still block initial workspace files and Secret-backed environment projection.
 4. Confirm the Installation, credential, and runtime support the chosen model. Primary and fallback
    models must use the same supported provider and Harness. For custom settings,
    open **Advanced settings**. Selection changes preserve unrelated JSON edits;
-   **Reset template** replaces them.
+   **Reset template** replaces them. Harness switches keep omitted or empty native
+   `plugins.allow` unrestricted, and add/remove `codex` only in a non-empty allowlist.
+   Other native plugin entries remain separate from Agent plugin policies.
 5. Under **Repository access**, optionally select up to 16 approved repositories
    and set their access levels. Kubernetes supports Codex (Dedicated) or OpenClaw
    (Embedded), without a Sandbox Driver. Dedicated OpenClaw requires a Sandbox
@@ -147,8 +149,14 @@ provider acceptance or runtime readiness. See
 
 Successful draft-save steps retain IDs and freeze inputs, including authentication.
 Correct conflicting names or permissions, then retry those resources.
-If model/Slack Secret grants fail after Agent creation,
-select **Retry credential access** or ask an administrator to check its grants.
+For an ordinary draft, the Console grants its ServicePrincipal exact `operate`
+access to the model Secret and every unique same-Namespace Secret in the saved
+Configuration's environment bindings, including Preset bindings. These IAM writes
+require [Installation administration](../authorization.md#manage-namespace-policy);
+permission to use a Secret does not authorize delegation.
+If a grant fails after Agent creation, select **Retry credential access** or ask
+an administrator to check its grants. The saved Agent and Configuration remain;
+the retry rereads existing grants instead of duplicating them.
 Uncertain responses block another attempt: check displayed IDs and the Agents list;
 give the request ID to your operator if the outcome remains unknown.
 

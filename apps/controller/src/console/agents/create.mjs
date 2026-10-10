@@ -138,7 +138,8 @@ function wait(ms) {
 
 // Failed provisioning codes that a retry of the same job cannot fix: the worker rejected
 // the request (a taken name, a scope or authorization rejection, a Namespace or Agent
-// lifecycle change) or the job was cancelled. Every other code, including the worker's
+// lifecycle change, an Installation Driver change the stored plan no longer passes, or a
+// Secret Driver switch) or the job was cancelled. Every other code, including the worker's
 // PROVISIONING_FAILED and PROVISIONING_WORK_NOT_FOUND, keeps Retry.
 const PERMANENT_PROVISIONING_CODES = new Set(["PROVISIONING_REJECTED", "PROVISIONING_CANCELLED"]);
 
@@ -264,23 +265,48 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
       Object.keys(agent.initialWorkspaceFiles).every((filename) =>
         workspaceFileNames.includes(filename),
       ));
-  if (
-    (agent.name !== undefined && typeof agent.name !== "string") ||
-    (agent.executionMode !== undefined &&
-      !["embedded", "dedicated"].includes(agent.executionMode)) ||
-    (agent.backendId != null && typeof agent.backendId !== "string") ||
-    (agent.plugins !== undefined && !isObject(agent.plugins)) ||
-    (agent.pluginApprovers !== undefined &&
+  // Name the first field the form cannot use, so a Preset editor knows what to fix.
+  const invalidField = (() => {
+    if (agent.name !== undefined && typeof agent.name !== "string") {
+      return "agent.name must be text";
+    }
+    if (
+      agent.executionMode !== undefined &&
+      !["embedded", "dedicated"].includes(agent.executionMode)
+    ) {
+      return 'agent.executionMode must be "embedded" or "dedicated"';
+    }
+    if (agent.backendId != null && typeof agent.backendId !== "string") {
+      return "agent.backendId must be text";
+    }
+    if (agent.plugins !== undefined && !isObject(agent.plugins)) {
+      return "agent.plugins must be an object";
+    }
+    if (
+      agent.pluginApprovers !== undefined &&
       (!Array.isArray(agent.pluginApprovers) ||
         !agent.pluginApprovers.every(
           (entry) =>
             isObject(entry) && typeof entry.channel === "string" && typeof entry.id === "string",
-        ))) ||
-    !hasRenderableWorkspaceFiles ||
-    (rendered.configuration?.secretBindings !== undefined &&
-      !isObject(rendered.configuration.secretBindings))
-  ) {
-    throw new Error("Rendered Preset contains invalid Agent fields or Secret bindings.");
+        ))
+    ) {
+      return "agent.pluginApprovers must list objects with text channel and id";
+    }
+    if (!hasRenderableWorkspaceFiles) {
+      return `agent.initialWorkspaceFiles must be an object with only ${workspaceFileNames.join(", ")}`;
+    }
+    if (
+      rendered.configuration?.secretBindings !== undefined &&
+      !isObject(rendered.configuration.secretBindings)
+    ) {
+      return "configuration.secretBindings must be an object";
+    }
+    return undefined;
+  })();
+  if (invalidField) {
+    throw new Error(
+      `Rendered Preset contains invalid Agent fields or Secret bindings: ${invalidField}. Check the variables you entered, or ask a Preset editor to fix the template.`,
+    );
   }
   const passwordAuth =
     isObject(agent.harnessAuth) && Object.hasOwn(agent.harnessAuth, "secret")
@@ -618,11 +644,31 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
       ...(selectedModel ? next.agents.defaults.models[selectedModel] : {}),
     };
     pendingModelSettings = selectedModel ? undefined : selectedSettings;
-    delete modelSettings[previousModel];
     const nextModel =
       typeof previous === "object" && previous !== null
         ? { ...previous, primary: selectedModel }
         : selectedModel;
+    const selections = [
+      nextModel,
+      ...(values.agents?.entries &&
+      typeof values.agents.entries === "object" &&
+      !Array.isArray(values.agents.entries)
+        ? Object.values(values.agents.entries).map((entry) => entry?.model)
+        : []),
+    ];
+    const referencedModels = new Set(
+      selections.flatMap((selection) =>
+        typeof selection === "string"
+          ? [selection]
+          : [
+              selection?.primary,
+              ...(Array.isArray(selection?.fallbacks) ? selection.fallbacks : []),
+            ],
+      ),
+    );
+    if (!referencedModels.has(previousModel)) {
+      delete modelSettings[previousModel];
+    }
     values.agents = {
       ...values.agents,
       defaults: {
@@ -652,8 +698,10 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
       const existingProvider = providers[providerId] ?? templateProvider;
       const existingModels = existingProvider.models ?? [];
       const selectedId = model.value.trim();
-      if (!existingModels.some((entry) => entry.id === selectedId)) {
-        const previousEntry = existingModels.find((entry) => entry.id === previousId);
+      const retainPrevious = referencedModels.has(`${providerId}/${previousId}`);
+      const namesModel = (entry, id) => entry.id === id || entry.id === `${providerId}/${id}`;
+      if (!existingModels.some((entry) => namesModel(entry, selectedId))) {
+        const previousEntry = existingModels.find((entry) => namesModel(entry, previousId));
         const selectedEntry = {
           ...(previousEntry ?? templateProvider.models[0]),
           id: selectedId,
@@ -664,19 +712,28 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
         };
         providers[providerId] = {
           ...existingProvider,
-          models: previousEntry
-            ? existingModels.map((entry) => (entry === previousEntry ? selectedEntry : entry))
-            : [...existingModels, selectedEntry],
+          models:
+            previousEntry && !retainPrevious
+              ? existingModels.map((entry) => (entry === previousEntry ? selectedEntry : entry))
+              : [...existingModels, selectedEntry],
         };
       } else {
-        providers[providerId] = existingProvider;
+        providers[providerId] = {
+          ...existingProvider,
+          models: existingModels.filter(
+            (entry) =>
+              !namesModel(entry, previousId) || namesModel(entry, selectedId) || retainPrevious,
+          ),
+        };
       }
     }
     values.models = { ...values.models, providers };
     if (next.plugins) {
       values.plugins = {
         ...values.plugins,
-        allow: [...new Set([...(values.plugins?.allow ?? []), ...next.plugins.allow])],
+        ...(Array.isArray(values.plugins?.allow) && values.plugins.allow.length > 0
+          ? { allow: [...new Set([...values.plugins.allow, ...next.plugins.allow])] }
+          : {}),
         entries: {
           ...values.plugins?.entries,
           codex: resetTransport
@@ -906,6 +963,7 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
   );
   let capabilityDiscoveryDone = false;
   let capabilityDiscoveryFailed = false;
+  let capabilityDiscoveryDenied = false;
   const provisionableExecutionModes = new Set();
   let nativeWorkersAvailable = false;
   let provisioningRequestId = createClientRequestId();
@@ -924,7 +982,6 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
   let savedSecret;
   let savedConfiguration;
   let savedAgent;
-  let stagedChannelSecrets = draft.stagedChannelSecrets ?? [];
   const feedback = element("p", { className: "error", role: "alert" });
   const savedStatus = element("p", { className: "hint", role: "status" });
   const submit = element(
@@ -1135,7 +1192,6 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
     pendingModelSettings,
     pendingProviderModel,
     configurationSecretBindings,
-    stagedChannelSecrets,
     modelCredentialSource,
     modelCredentialSecret,
     oauthLogin: oauthLogin.capture(),
@@ -1175,28 +1231,26 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
       );
     });
   }
-  async function grantConfigurationSecretAccess(agent, secrets) {
-    const bindings = Object.values(savedConfiguration.secretBindings ?? {});
-    const seen = new Set();
-    for (const secret of secrets) {
+  async function grantConfigurationSecretAccess(agent) {
+    const sources = new Map();
+    for (const binding of Object.values(savedConfiguration.secretBindings ?? {})) {
+      const source = binding?.source;
       if (
-        secret.namespaceId !== namespaceId ||
-        seen.has(secret.id) ||
-        !bindings.some(
-          (binding) =>
-            binding?.source?.kind === "secret" &&
-            binding.source.namespaceId === namespaceId &&
-            binding.source.id === secret.id &&
-            binding.delivery?.type === "env",
-        )
+        source?.kind !== "secret" ||
+        source.namespaceId !== namespaceId ||
+        typeof source.id !== "string" ||
+        !source.id.trim() ||
+        binding.delivery?.type !== "env"
       ) {
-        continue;
+        throw new Error("The saved Configuration contains an unsupported Secret binding.");
       }
-      seen.add(secret.id);
+      sources.set(source.id, source);
+    }
+    for (const source of sources.values()) {
       if (!context.isCurrent()) {
         throw new Error("This view has changed. Reopen Agent creation before binding Secrets.");
       }
-      await ensureSecretOperateBinding(context, agent, secret);
+      await ensureSecretOperateBinding(context, agent, source);
     }
   }
   function renderChannelEditor() {
@@ -1252,7 +1306,6 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
         configuration.value = JSON.stringify(updatedValues, null, 2);
         if (options.secretBindings !== undefined) {
           configurationSecretBindings = structuredClone(options.secretBindings);
-          stagedChannelSecrets = [...stagedChannelSecrets, ...(options.changedSecrets ?? [])];
           defaultApprovers.refreshValue();
           pluginDiscovery.update();
         }
@@ -1450,7 +1503,7 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
       Boolean(provisioningAttempt);
     retryProvisioning.hidden = !provisioningAttempt;
     retryProvisioning.disabled = pending || !provisioningAttempt;
-    retryCapabilityDiscovery.hidden = !capabilityDiscoveryFailed;
+    retryCapabilityDiscovery.hidden = !capabilityDiscoveryFailed || capabilityDiscoveryDenied;
     retryCapabilityDiscovery.disabled = pending;
     submit.textContent = savedAgent ? "Retry credential access" : "Create Agent";
   };
@@ -1475,6 +1528,7 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
   async function loadInstallationCapabilities() {
     capabilityDiscoveryDone = false;
     capabilityDiscoveryFailed = false;
+    capabilityDiscoveryDenied = false;
     updateControls();
     try {
       const installation = await request("/installation");
@@ -1505,7 +1559,12 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
         return;
       }
       capabilityDiscoveryFailed = true;
-      capabilityStatus.textContent = `Installation capabilities unavailable. ${message(error)} Retry before creating an Agent.`;
+      // A denial is permanent for this account: creating Agents needs Installation access,
+      // which only Installation administrators hold, so retrying cannot help.
+      capabilityDiscoveryDenied = error.status === 403;
+      capabilityStatus.textContent = capabilityDiscoveryDenied
+        ? "Creating an Agent needs Installation access that your account does not have. Ask an Installation administrator to create this Agent."
+        : `Installation capabilities unavailable. ${message(error)} Retry before creating an Agent.`;
     } finally {
       if (context.isCurrent()) {
         updateControls();
@@ -1765,7 +1824,7 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
         }
         showSavedStatus();
       }
-      // Grant retries reread exact bindings, so uncertain model or channel grants never recreate the Agent.
+      // Grant retries reread exact bindings, so uncertain model or Configuration grants never recreate the Agent.
       mutationStarted = false;
       const modelSecret =
         savedSecret ??
@@ -1775,7 +1834,7 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
       if (modelSecret) {
         await ensureSecretOperateBinding(context, savedAgent, modelSecret);
       }
-      await grantConfigurationSecretAccess(savedAgent, stagedChannelSecrets);
+      await grantConfigurationSecretAccess(savedAgent);
       if (context.isCurrent()) {
         context.navigate(`agents/${savedAgent.id}?revision=draft`);
       }
@@ -1788,7 +1847,7 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
         return;
       }
       const detail = savedAgent
-        ? `The Agent was created, but credential access is not confirmed. ${message(error)} Retry credential access, or open the saved Agent and ask an administrator to check access to its saved model and channel Secrets.`
+        ? `The Agent was created, but credential access is not confirmed. ${message(error)} Retry credential access, or open the saved Agent and ask an administrator to check access to its saved model and Configuration Secrets.`
         : error.status === 409 && creatingSecret && error.code !== "NAMESPACE_NOT_READY"
           ? `A Secret named "${body.name}" already exists in this Namespace, possibly from an earlier Agent with this name. Choose another Agent name, delete that Secret, or select Start over, choose the Preset again, and set its Secret source to Use existing Secret.`
           : error.status === 409 && savedConfiguration && error.code !== "NAMESPACE_NOT_READY"

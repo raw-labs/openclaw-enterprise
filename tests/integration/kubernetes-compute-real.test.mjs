@@ -28,6 +28,7 @@ import {
   gatewayName,
   revisionName,
   assertReadyGateway,
+  gatewayConnectionsState,
   assertHarnessWorkspaceClaim,
   assertAgentServiceEndpointCount,
   fixtureComputeConfiguration,
@@ -454,7 +455,7 @@ test(
       const baseValues = {
         gateway: {
           mode: "local",
-          bind: "loopback",
+          bind: "lan",
           controlUi: { enabled: false },
           auth: {
             password: { source: "env", provider: "default", id: "OPENCLAW_GATEWAY_PASSWORD" },
@@ -906,6 +907,37 @@ test(
       );
     }
 
+    const connectionsStates = new Map();
+    let embeddedRevision = admitted[3];
+    async function assertConnectionsState(namespaceId, agentId) {
+      assert.deepEqual(
+        await gatewayConnectionsState(placements.get(namespaceId), agentId),
+        connectionsStates.get(agentId),
+        "Gateway replacement must retain the exact Agent-owned claim and SQLite identity",
+      );
+    }
+    if (runtimeImage !== undefined) {
+      // Both execution modes use the same private Gateway category. A sibling in
+      // the same tenant must retain its own database at the identical runtime path.
+      for (const [namespaceId, agent] of [
+        [namespaceIds[0], first],
+        [namespaceIds[0], second],
+        [namespaceIds[1], embeddedDelete],
+      ]) {
+        const record = { identity: randomUUID(), marker: `retained-${randomUUID()}` };
+        const stored = await gatewayConnectionsState(placements.get(namespaceId), agent.id, record);
+        assert.deepEqual(stored.record, record);
+        connectionsStates.set(agent.id, stored);
+      }
+      assert.notEqual(
+        connectionsStates.get(first.id).claimUid,
+        connectionsStates.get(second.id).claimUid,
+        "sibling Agents must never share Gateway state claims",
+      );
+      await assertConnectionsState(namespaceIds[0], first.id);
+      await assertConnectionsState(namespaceIds[0], second.id);
+    }
+
     const deploymentPath = `/namespaces/${namespaceIds[0]}/agents/${first.id}/deployments/${admitted[0].id}`;
     const persistedBefore = await waitFor("first revision deployment to settle", async () => {
       const observed = await request("GET", deploymentPath);
@@ -1013,6 +1045,10 @@ test(
       },
       180_000,
     );
+    if (runtimeImage !== undefined) {
+      await assertConnectionsState(namespaceIds[0], first.id);
+      await assertConnectionsState(namespaceIds[0], second.id);
+    }
     const replaced = await request(
       "GET",
       `${runtimePath}/logs?source=gateway&cursor=${encodeURIComponent(followPage.data.cursor)}`,
@@ -1084,6 +1120,41 @@ test(
     }
 
     const embeddedPlacement = placements.get(namespaceIds[1]);
+    if (runtimeImage !== undefined) {
+      const embeddedPod = (await resources("pods", embeddedPlacement)).find(
+        ({ metadata }) =>
+          metadata.labels?.["openclaw.dev/agent"] === embeddedDelete.id &&
+          metadata.labels?.["openclaw.dev/workload-role"] === "gateway" &&
+          !metadata.deletionTimestamp,
+      );
+      assert.ok(embeddedPod);
+      await kubectl(
+        "delete",
+        "pod",
+        embeddedPod.metadata.name,
+        "-n",
+        embeddedPlacement,
+        "--wait=false",
+      );
+      await waitFor("a replacement embedded Gateway Pod to become ready", async () =>
+        (await resources("pods", embeddedPlacement)).find(
+          ({ metadata, status }) =>
+            metadata.labels?.["openclaw.dev/agent"] === embeddedDelete.id &&
+            metadata.labels?.["openclaw.dev/workload-role"] === "gateway" &&
+            metadata.uid !== embeddedPod.metadata.uid &&
+            !metadata.deletionTimestamp &&
+            status.conditions?.some(
+              ({ type, status: condition }) => type === "Ready" && condition === "True",
+            ),
+        ),
+      );
+      await assertConnectionsState(namespaceIds[1], embeddedDelete.id);
+      // Go through admission and the real worker: merely remounting a PVC does
+      // not prove that ordinary OCE revision cutover retains this directory.
+      embeddedRevision = await deploy(namespaceIds[1], embeddedDelete.id);
+      await waitForActive(namespaceIds[1], embeddedDelete.id, embeddedRevision.id);
+      await assertConnectionsState(namespaceIds[1], embeddedDelete.id);
+    }
     const embeddedOwned = await ownedComputeResources(embeddedPlacement, embeddedDelete.id);
     assert.ok(
       embeddedOwned.some(
@@ -1103,7 +1174,7 @@ test(
       embeddedOwned.some(
         ({ kind, name }) =>
           kind === "configmap" &&
-          name === `gateway-${hash(embeddedDelete.id)}-rev-${hash(admitted[3].id)}`,
+          name === `gateway-${hash(embeddedDelete.id)}-rev-${hash(embeddedRevision.id)}`,
       ),
     );
 
@@ -1333,6 +1404,10 @@ test(
     const replacement = await deploy(namespaceIds[0], first.id);
     await startWorker();
     await waitForActive(namespaceIds[0], first.id, replacement.id);
+    if (runtimeImage !== undefined) {
+      await assertConnectionsState(namespaceIds[0], first.id);
+      await assertConnectionsState(namespaceIds[0], second.id);
+    }
     for (const previous of legacyDnsPolicies) {
       const current = await resource("networkpolicy", "allow-dns", previous.metadata.namespace);
       const expected = structuredClone(previous.spec);

@@ -109,9 +109,25 @@ export const RepositoryRecovery = {
   name: "Reselect repositories after rejection",
 };
 export const CreatePreset = { ...story("createPreset"), name: "Preset variables" };
+export const CreateCustomPresetStarter = {
+  ...story("createCustomPresetStarter"),
+  name: "Custom Preset quick-start",
+};
 export const CreateBoundCredentialPreset = {
   ...story("createBoundCredentialPreset"),
   name: "Preset with saved model credential",
+};
+export const CreatePresetInvalidField = {
+  ...story("createPresetInvalidField"),
+  name: "Preset with an invalid field",
+};
+export const CreateCapabilitiesDenied = {
+  ...story("createCapabilitiesDenied"),
+  name: "Agent creation needs an administrator",
+};
+export const CreateCapabilitiesError = {
+  ...story("createCapabilitiesError"),
+  name: "Capability check failure",
 };
 export const CreateNoPresets = { ...story("createNoPresets"), name: "No Presets" };
 export const CreateWithoutPreset = {
@@ -148,6 +164,10 @@ export const CreateSecretDenied = {
   name: "API key storage denied",
 };
 export const CreateGrantDenied = { ...story("createGrantDenied"), name: "Credential access retry" };
+export const CreateBoundSecretsGrantDenied = {
+  ...story("createBoundSecretsGrantDenied"),
+  name: "Preset Secret access retry",
+};
 export const CreateInvalid = { ...story("createInvalid"), name: "Invalid JSON" };
 export const CreateConflict = { ...story("createConflict"), name: "Provisioning conflict" };
 export const CreateUnknown = { ...story("createUnknown"), name: "Provisioning outcome unknown" };
@@ -176,6 +196,10 @@ export const RepositoryLargeCatalog = story("createRepositories140");
 export const RepositoryExactSearch = story("createRepositoriesExactSearch");
 export const RepositoryCustom = story("createRepositoriesCustom");
 export const RepositoryPolicyConflict = story("createRepositoriesPolicyConflict");
+
+export const NativePluginsUnrestricted = story("createNativePluginsUnrestricted");
+export const NativePluginsAllowlist = story("createNativePluginsAllowlist");
+export const NativePluginsEmptyAllowlist = story("createNativePluginsEmptyAllowlist");
 
 export const CreateStandardOpenclawPreset = {
   ...story("createStandardOpenclawPreset"),
@@ -207,3 +231,8 @@ export const RepositoryNavigationOutage = story("createRepositoryNavigationOutag
 
 export const DefaultPresetLoading = story("createDefaultPresetLoading");
 export const DefaultPresetDenied = story("createDefaultPresetDenied");
+
+export const ExistingFallbackPrimary = {
+  ...story("createModelFallbackSelection"),
+  name: "Choose an existing fallback as primary",
+};

@@ -61,9 +61,16 @@ database skips the provisioning handoff and API-plus-worker cases. The two
 PostgreSQL-backed files share one database here, so run them one at a time
 (`--test-concurrency=1`); CI gives each file its own database.
 
+The provisioning case also activates two embedded fixture Agents through the API
+and worker. It verifies a real SQLite file and synthetic identity at the
+Connections path across Pod and revision replacement, sibling-Agent isolation,
+and final claim removal. This proves Compute storage through the production
+Gateway wrapper, not the Connections plugin or provider authentication.
+
 An imported immutable `OCC_TEST_KUBERNETES_RUNTIME_IMAGE` extends the
 API-plus-worker case through real runtime credential Secret and private-state
-claim deletion. The case uses synthetic, nonfunctional
+claim deletion, including the same Connections-path durability in both execution
+modes. The case uses synthetic, nonfunctional
 fixture credentials and performs no model turn. Channel runtime needs the
 real-runtime images and credentials below.
 
@@ -271,7 +278,7 @@ Embedded cases run the production API and worker in the Node test process.
 Dedicated and routing cases run both as Kubernetes Deployments with separate
 identities; the coordinator stays in Node. These suites do not install OCC with
 Helm. Missing prerequisites fail selected suites; unselected suites skip.
-The default Codex version is `0.160.0`; see
+The default Codex version is `0.163.0-alpha.2`; see
 [runtime settings](#kubernetes-real-runtime-test-environment) for alternate images.
 
 ### Candidate Skill source lifecycle
