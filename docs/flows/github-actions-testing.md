@@ -197,6 +197,8 @@ Per-file cleanup releases its disposable database; job cleanup removes only stat
 
 ## Changelog
 
+- 2026-10-10 20:40: Document downstream runner overrides and job-owned Codex AppArmor enforcement. (01a10be2-3f86-7c02-ae8f-1dceca2a9193 - 7de4878389300e180858daa14c60cffa6ddf216f)
+
 - 2026-10-06 02:00: Per-file Agent namespace watch files. (audit-followup-ci-runner)
 
 - 2026-10-04 03:44: Add a non-required affected-package advisory to the accompanying CI change. (authoring-run/5808365b-c590-4c11-92d6-4ee32efc3626 - 070147565f45e720918de9e649b93cad71820b07)
