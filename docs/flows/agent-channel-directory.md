@@ -95,6 +95,11 @@ consent is checked by Microsoft, independently of OCC authorization. The Driver
 bounds requests, bodies and continuation, rejects redirects, and reconstructs
 Graph URLs from checked scope and pagination tokens. Missing Graph consent does
 not participate in bot deployment credential admission.
+`apps/controller/src/drivers/channel/slack.ts:SlackChannelDriver.call`
+cancels an unused response body on a non-success HTTP status before returning
+the safe rate-limit or unavailable error. This releases occupied transport
+capacity even when the error body has not finished. The same request owner
+serves credential validation; no automatic retry is added.
 
 ### 3. Display names and save IDs
 
@@ -157,7 +162,8 @@ Manual IDs remain available after missing-consent or provider errors.
   Enable Helm `slackProxy.enabled` or set the approved
   external proxy IP and port in `api.channelDirectoryProxyUrl`, then verify that
   the proxy permits CONNECT to `slack.com:443`.
-- Directory conformance tests cover provider pagination and safe errors. The
+- Directory conformance tests cover provider pagination, safe errors, and native
+  HTTP connection recovery after unfinished 429 and 503 response bodies. The
   OCC API integration test covers both authorization checks and response
   projection. Browser checks cover name display and exact-ID saving.
 - The Agent plugin approver browser check holds the refocus access read and
@@ -183,6 +189,7 @@ Manual IDs remain available after missing-consent or provider errors.
 ## Changelog
 
 - 2026-10-07 11:21: Add Team-scoped Graph lookup, native Team ID resolution and name selection alongside Slack in the accompanying implementation. (authoring-run/5acd9a8d-44df-4f9b-8daa-9269c2040340 - 948cb3e61636338be4692bd45114446d6c941890)
+- 2026-10-05 19:32: Describe failed HTTP response cleanup and native connection recovery. (authoring-run/eb95c719-31db-483c-9db3-c9573329209d - 5a2dd43d2e524637e7173457def040fa79d42a93)
 
 - 2026-09-28 15:37: Document the managed Helm Slack proxy path and selector-scoped API egress. (authoring-run/5b79ed06-59ff-4a5d-9cf4-0479d7c8d717 - 6c56149f1f2b7290d8526d87c3624c9b7db09fbf)
 

@@ -18,6 +18,7 @@ export type ChannelRequest = (
 ) => Promise<
   Pick<Response, "status" | "ok" | "text"> & {
     readonly body: {
+      cancel(): Promise<void>;
       getReader(): {
         read(): Promise<ReadableStreamReadResult<Uint8Array>>;
         cancel(): Promise<void>;
