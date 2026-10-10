@@ -101,6 +101,42 @@ export async function missing(kind, name, namespace) {
   }
 }
 
+// This probes Compute-owned storage, not the Connections schema or plugin RPC.
+export async function gatewayConnectionsState(placement, agentId, initialRecord) {
+  const claim = await resource(
+    "persistentvolumeclaim",
+    `gateway-state-${hash(agentId)}`,
+    placement,
+  );
+  const execute = initialRecord === undefined ? kubectlRead : kubectl;
+  const output = await execute(
+    "exec",
+    `deployment/${gatewayName(agentId)}`,
+    "--namespace",
+    placement,
+    "-c",
+    "gateway",
+    "--",
+    "node",
+    "-e",
+    `const { DatabaseSync } = require('node:sqlite');
+const { chmodSync, mkdirSync } = require('node:fs');
+const path = '/home/node/.openclaw/connections/connections.sqlite';
+const record = ${JSON.stringify(initialRecord ?? null)};
+if (record) { mkdirSync('/home/node/.openclaw/connections', { recursive: true }); }
+const db = new DatabaseSync(path, { readOnly: !record });
+try {
+  if (record) {
+    db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE storage_probe (identity TEXT PRIMARY KEY, marker TEXT NOT NULL)');
+    db.prepare('INSERT INTO storage_probe (identity, marker) VALUES (?, ?)').run(record.identity, record.marker);
+    chmodSync(path, 0o600);
+  }
+  process.stdout.write(JSON.stringify(db.prepare('SELECT identity, marker FROM storage_probe').get()));
+} finally { db.close(); }`,
+  );
+  return { claimUid: claim.metadata.uid, record: JSON.parse(output) };
+}
+
 export async function waitFor(description, operation, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
