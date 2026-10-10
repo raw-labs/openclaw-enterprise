@@ -11114,6 +11114,12 @@ test("Gateway and Harness storage are separate and preserve ephemeral Codex cred
           subPath: "media",
           readOnly: false,
         },
+        {
+          name: privateVolume.name,
+          mountPath: "/home/node/.openclaw/connections",
+          subPath: "connections",
+          readOnly: false,
+        },
         ...(!embedded
           ? [
               {
