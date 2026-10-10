@@ -111,23 +111,21 @@ Compare **New version queued**, **Deployment waiting for runtime**, and
 **Deployment retry after dependency failure**; switch versions and check
 **Since**.
 
-In **Custom Preset quick-start**, fill variables, inspect the draft, then leave
-and return to check discard. Compare **No Presets**, **Loading default Preset**,
-and **Default Preset access denied**; manual setup remains available.
+In **Custom Preset quick-start**, fill variables, inspect the draft, and check
+discard on return. Compare **No Presets**, **Loading default Preset**, and
+**Default Preset access denied**; manual setup stays available.
 
 **First deployment creates credentials** accepts **Deploy new version** without
 a separate credential action. Its initial state is not a Stop request; OCC
 generation is simulated.
 
-Choose a Preset, fill variables, review workspace files, and create a Codex Agent
-to follow simulated provisioning. With the default Preset, choose a model and
-new/existing Secret, edit IDENTITY.md, and clear USER.md. OpenClaw and unsupported
-runtimes keep the draft workflow: provision credentials and deploy from Agent detail.
+Create a Codex Agent from a Preset through simulated provisioning. With the default,
+choose a model/Secret, edit IDENTITY.md, and clear USER.md. OpenClaw and unsupported
+runtimes remain drafts; provision credentials and deploy from Agent detail.
 
-In **Preset Secret access retry**, a separate tool Secret has two environment
-bindings. Check that denied delegation retains saved IDs, locks fields, and offers
-**Open saved Agent**. Select **Retry credential access** to open that draft.
-IAM responses are simulated; browser tests verify policy writes and deployment admission.
+**Preset Secret access retry** simulates denied IAM delegation for two bindings of
+one tool Secret. Check retained IDs, locked fields, **Open saved Agent**, then
+**Retry credential access**. Browser tests prove policy writes and deployment admission.
 
 **Plugins Curated** exercises token-free discovery against simulated Driver
 responses, leaving access unverified. Hosted discovery requires an eligible Codex
@@ -140,11 +138,11 @@ gives presenter actions, expected visible states, and fallbacks for creating an
 Agent from the SWE Agent Preset and opening the deployed `oceclaw` Agent's
 simulated Admin UI, connected to no gateway, Slack, credential, or model.
 
-**Choose provider, harness, and authentication** covers the supported
-combinations; models appear before credentials. **Enter another model ID**
-allows manual entry but does not prove access. Execution mode follows the
-harness; saved tokens require Codex. **Experimental Dedicated OpenClaw** shows
-the runtime-build warning; Embedded OpenClaw does not.
+**Choose provider, harness, and authentication**: models precede credentials;
+execution follows the harness; saved tokens require Codex. Manual entry proves no
+model access. **Experimental Dedicated OpenClaw** shows its runtime-build warning;
+Embedded does not. **Native plugins**: switch to Codex and back; check omitted,
+empty, and selected allowlists and the retained entry.
 
 In **Enter another model ID**, switch to **Choose a model from the list** and
 back: listed models survive both switches, focus moves to the active input, and

@@ -5,11 +5,12 @@ Secrets for the [Kubernetes Compute Driver](../kubernetes-compute.md).
 
 ## Shared contracts and the Codex implementation
 
-The public `ComputeDriver` and `HarnessWorkloadRequirements` contracts describe
-platform operations and workload requirements; OpenClaw's `AgentWorkspaceAccess`
-provides workspace capabilities without the Codex app-server protocol. The dedicated storage implementation below currently supports Codex;
-its launcher and filesystem layout are Codex-specific Kubernetes choices, not
-requirements for every Harness or additions to the public Compute contract.
+`ComputeDriver` and `HarnessWorkloadRequirements` define platform operations and
+workload requirements. OpenClaw's `AgentWorkspaceAccess` provides workspace
+capabilities without the Codex app-server protocol. The dedicated storage below
+supports Codex; its launcher and filesystem layout are Kubernetes implementation
+choices, not requirements for every Harness or additions to the public Compute
+contract.
 
 | Boundary         | Shared behavior                                                                           | Current dedicated Codex implementation                                                                                      |
 | ---------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -36,11 +37,10 @@ use the control-cluster Gateway namespace only with the two-cluster profile. The
 `runtime.gatewayStorageClassName` selects an operator-provisioned
 StorageClass for a local or cloud block disk mounted as a filesystem.
 
-The filesystem must be SQLite-compatible: reliable file locking, durable writes
-through `fsync`, and support for SQLite's database and companion WAL/SHM files
-in the same directory. The driver checks the claim configuration but does not
-certify the storage provider's locking or durability guarantees.
-See [SQLite's filesystem requirements](https://sqlite.org/useovernet.html).
+SQLite requires reliable file locking, durable `fsync` writes, and database and
+WAL/SHM files in the same directory. The Driver checks claim configuration, not
+the storage provider's locking or durability guarantees. See
+[SQLite's filesystem requirements](https://sqlite.org/useovernet.html).
 
 Do not use NFS or SMB/CIFS for gateway databases:
 [SQLite WAL does not support network filesystems](https://sqlite.org/wal.html).
@@ -54,11 +54,12 @@ gateway replacement uses one replica with `Recreate`; node partitions and
 forced replacements still require operator fencing before permitting another
 writer.
 
-A stop deletes the Gateway and waits for its Pod to disappear before stopping the
-Harness, which finishes active work meanwhile; a refused candidate's stop deletes
-both at once. The Gateway supervisor and Pod allow up to 330 seconds for the
-pinned runtime's drain and cleanup; idle Gateways exit promptly. Forced termination can leave an owner lease until it
-expires and delay the successor; a longer grace period does not make it a clean shutdown.
+Stopping deletes the Gateway and waits for its Pod to disappear before stopping
+the Harness, which finishes active work meanwhile. A refused candidate stops both
+at once. The Gateway supervisor and Pod allow 330 seconds for runtime drain and
+cleanup; idle Gateways exit promptly. Forced termination can leave an owner lease
+that delays the successor until expiry; a longer grace period does not ensure
+clean shutdown.
 
 Only the gateway Pod receives this claim. Its complete writable directories
 include database files and their WAL/SHM siblings:
@@ -179,16 +180,15 @@ required; the Driver never force detaches a disk. A local-path PV keeps its node
 affinity and cannot move its data to another node. Cross-node rescheduling needs
 an appropriate portable StorageClass, not RWX.
 
-Both claims retain exact Namespace and Agent ownership across revision
-cutover and gateway Pod replacement. Reconciliation rejects foreign,
-terminating, or incompatible claims without mutating them. The driver creates
-the claims before their consumers and relies on gateway workload readiness;
-waiting for `Bound` before creating a Pod would deadlock
-`WaitForFirstConsumer` storage classes. Stopping or retiring a revision retains
-both claims, including when the gateway has already stopped. Agent deletion
-retires every revision before its final cleanup hook deletes the owned claims
-using their exact Kubernetes UIDs. A cleanup failure keeps deletion pending
-for retry; it does not remove the Agent's database identity.
+Both claims retain exact Namespace and Agent ownership across revision cutover
+and Gateway Pod replacement. Reconciliation refuses foreign, terminating or
+incompatible claims without mutation. The Driver creates claims before consumers
+and relies on Gateway readiness; waiting for `Bound` before creating Pods would
+deadlock `WaitForFirstConsumer` storage classes. Revision stop and retirement
+retain both claims, including after Gateway shutdown. Agent deletion retires
+every revision before its final cleanup hook deletes owned claims by exact
+Kubernetes UID. Cleanup failures keep deletion pending for retry and preserve
+the Agent's database identity.
 
 ## Managed native configuration
 

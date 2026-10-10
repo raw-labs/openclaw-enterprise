@@ -18,9 +18,10 @@ retires predecessors before exactly-once activation audit.
   reconciliation.
 - Source: `packages/occ/src/index.ts:OpenClawController.deployAgent` and
   `apps/controller/src/worker.ts:ControllerWorker`.
-- Assumptions: authorized actor; ready Namespace; same-Namespace native agent Configuration;
-  explicit Agent execution mode; and a supported `harnessAuth` binding. Managed methods reference an authorized OCC
-  Secret API key or a Driver-issued account-owned access-token credential.
+- Assumptions: authorized actor, ready Namespace, same-Namespace native agent
+  Configuration, explicit execution mode and supported `harnessAuth` binding.
+  Managed methods reference an authorized OCC Secret API key or Driver-issued
+  account-owned access token.
 
 ## Flow
 
@@ -106,15 +107,13 @@ runtime configuration.
 See the [harness authentication flow](native-service-account-credential-delivery.md)
 for admission, immutable source snapshots, and worker reauthorization.
 
-API composition, including development, and worker startup call
-`KubernetesComputeDriver.preflight` before reconciliation. `KubernetesComputeDriver.validateConfiguration`
-first rejects native Gateway or derived sandbox listener ports overlapping private
-runtime status TCP/18791. Single-cluster
-preflight checks every storage-namespace page and refuses split targets without
-the tenant label. Resolution accepts an adopted `oce-gateways-<hash>` tenant
-only beside its storage label.
-The [upgrade requirements](../reference/drivers/kubernetes-compute.md#existing-split-layout-installations)
-own the operator boundary.
+API composition (including development) and worker startup run
+`KubernetesComputeDriver.preflight` before reconciliation.
+`validateConfiguration` first rejects native Gateway or derived sandbox listener
+ports overlapping private status TCP/18791. Single-cluster preflight checks all
+storage-namespace pages and refuses split targets without the tenant label.
+Resolution accepts an adopted `oce-gateways-<hash>` tenant only beside its
+storage label. See the [upgrade requirements](../reference/drivers/kubernetes-compute.md#existing-split-layout-installations).
 
 Kubernetes `ensureNamespace` prepares one tenant namespace in a single cluster,
 including adopted namespaces; its storage-role label enables discovery.
@@ -166,11 +165,10 @@ unless an endpoint overrides it. OpenClaw snapshots node-local models/credential
 and derives exact managed workspaces from authorized launch descriptors, without
 an inference file, grant catalog, or retired `nativeInferenceConfig` setting.
 
-Embedded OpenClaw uses one combined workload with its exact Agent identity
-and model key. The worker
-has scoped Secret permissions for admitted delivery and node enrollment. Its
-trusted workload-writing authority also projects tenant Secrets. Gateway Pods
-receive no controller or Harness Kubernetes credentials.
+Embedded OpenClaw combines its exact Agent identity and model key in one
+workload. The worker has scoped Secret permissions for admitted delivery and node
+enrollment; its trusted workload-writing authority also projects tenant Secrets.
+Gateway Pods receive no controller or Harness Kubernetes credentials.
 
 The selected Sandbox consumes the same rendered projections and explicit login
 mode in `HarnessWorkloadRequirements`. Unsupported upstream projection fails
@@ -295,19 +293,19 @@ owns claim sizes, mount paths, StorageClass requirements, and final teardown.
   `pnpm test:files --test-name-pattern='dedicated replacement starts a candidate Gateway' -- tests/conformance/kubernetes-compute.test.mjs`.
 - Check embedded Gateway repair after a never-served unready predecessor:
   `pnpm test:files --test-name-pattern='never-served unready Gateway' -- tests/conformance/kubernetes-compute.test.mjs`.
-- Run real disposable-k3d Kubernetes coverage for both production topologies, exact identity and
-  model-key placement, authenticated dedicated transport, isolated networking, and active routing.
-- Run `node --test tests/integration/docker-compute-real.test.mjs` for real Docker Compose
-  embedded and dedicated model turns, or
-  `node --test tests/integration/harness-topology-k3d-real.test.mjs` for real Kubernetes
-  model turns. Select each suite's runtime images, infrastructure, and credentials through the
+- Run disposable-k3d Kubernetes coverage for both production topologies, exact identity,
+  model-key placement, authenticated dedicated transport, isolated networking and active routing.
+- Run `node --test tests/integration/docker-compute-real.test.mjs` for Docker Compose
+  embedded/dedicated model turns, or
+  `node --test tests/integration/harness-topology-k3d-real.test.mjs` for Kubernetes
+  model turns. Select suite images, infrastructure and credentials through
   [test environment settings](../testing/docker.md#docker-compose-development-test-environment).
 - Verify provider-backed dedicated Codex separately with
   `node --test tests/integration/service-account-driver-real.test.mjs`,
   `OCC_TEST_CHATGPT_SERVICE_ACCOUNT_REAL=1`, and an authorized mounted
   `OCC_TEST_CHATGPT_ADMIN_KEY_PATH`; this scenario does not use `OPENAI_API_KEY`.
-- Treat unavailable credentials, runtime images, provider access, or either real model response as
-  a verification failure. Never substitute a readiness probe, handshake, fixture, or skipped test.
+- Missing credentials, images, provider access or either real model response fail
+  verification. Never substitute readiness, handshake, fixture or skipped-test proof.
 - An HTTP 401 before worker admission means the callback missed the node-only
   worker ingress and fell through to the administrative route.
 

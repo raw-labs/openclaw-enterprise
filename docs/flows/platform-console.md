@@ -1,7 +1,7 @@
 ---
 created: 2026-09-01
 updated: 2026-10-10
-last_updated_session: 01a11ac0-ab87-7d21-8df5-a306d8563a19
+last_updated_session: authoring-run/3ff29db6-adc3-43bf-b3fb-b39e9aad30d9
 ---
 
 # Platform console request flow
@@ -182,7 +182,10 @@ missing wiring or failed dependencies return errors.
 
 `apps/controller/src/console/agents/create.mjs:renderCreateAgent` composes Provider,
 Harness, Preset, Configuration, and workspace inputs. Provider/Harness changes
-reset incompatible credentials and model choices while retaining unrelated JSON. The
+reset incompatible credentials and model choices while retaining unrelated JSON.
+`updateModelConfiguration` adds Codex only to a non-empty native `plugins.allow`
+array; omitted or empty lists remain unrestricted. Returning to OpenClaw removes Codex's entry and
+allowlist ID while retaining other native plugin settings. The
 [creation reference](../reference/console/create-and-deploy.md) owns combinations,
 Preset constraints, token handling, permissions, and recovery.
 
@@ -190,12 +193,11 @@ Preset constraints, token handling, permissions, and recovery.
 from Configuration. Invalid JSON and untouched fields survive; clearing overrides
 restores inheritance. Submission, uncertain outcomes, or invalid JSON lock editing.
 `capabilities.pluginPolicies` gates policy edits; unsupported reviewers remain clearable.
-The picker keeps a compact credential/access reminder beside an expandable
-**Access and credential setup** disclosure. Its bounded instructions, list, and
-details scroll within the dialog while search and pagination remain reachable.
-While mounted, Available and Configured retain separate selected plugins, queries,
-tool filters, and expanded rows without fetching pages or changing drafts.
-Removed selections clear their details; discovery resets clear both tabs.
+The picker has a compact credential/access reminder, expandable **Access and
+credential setup**, and bounded scrolling with reachable search/pagination.
+Available and Configured retain separate selections, queries, filters, and expanded
+rows without requests or draft edits. Removal clears details; discovery resets
+clear both tabs.
 
 `create.mjs:loadPluginCatalog` and `loadPluginTools` implement
 [PAT discovery](agent-plugins.md#credential-scoped-discovery): the selected or
@@ -203,15 +205,14 @@ Preset Secret takes precedence over an entered token. OCC reads the
 Secret server-side. Pagination is upstream; filtering is local. Selecting a plugin loads tools.
 Credential, provider, and Harness changes clear results and invalidate pending reads.
 
-`create.mjs:MODEL_CHOICES` supplies static model lists and manual entry.
-In `renderAgentForm`, the model-entry button toggles `manualModel`, updates
-Configuration and controls, and focuses the visible input. Manual entry retains
-`model.value` and clears the hidden dropdown. Returning to the list calls
-`resetModelChoices` for the current provider, retaining only a listed model;
-otherwise both inputs clear. Provider/authentication changes reset without a
-retained model. Submission requires the primary Configuration model to match
-`model.value`. Both directions preserve credentials and unrelated Configuration,
-and respect saved-Configuration and pending-request locks.
+`create.mjs:MODEL_CHOICES` supplies static unauthenticated lists and manual entry.
+`renderAgentForm` switches `manualModel`, calls `updateModelConfiguration` and
+`updateControls`, and focuses the required input. Manual mode keeps `model.value`
+and clears the hidden dropdown. `resetModelChoices` rebuilds the current provider's
+list after JSON provider edits, retaining listed models or clearing both inputs.
+Provider/authentication changes reset without retention. Submission requires primary
+model equality with `model.value`. Both directions retain credentials, unrelated
+Configuration, and saved-Configuration/pending-request locks.
 
 `configurationTemplate` enables Control UI with loopback origins on port 18789.
 Compute supplies gateway authentication; Presets replace the starter unchanged.
@@ -236,16 +237,14 @@ Ordinary drafts post `{kind: "agent", values, secretBindings}` to
 OCC stages all four workspace textareas, including unchanged/empty values, outside
 Agent/Configuration for [workspace setup](workspace-files.md).
 
-`create.mjs:grantConfigurationSecretAccess` enumerates the saved Configuration's
-normalized same-Namespace `env` bindings, deduplicates their Secret sources, and
-rejects unsupported accepted bindings before granting any Configuration access.
-`agents/secret-access.mjs:ensureSecretOperateBinding` reads and creates exact
-Secret `operate` grants through the IAM APIs. The caller must hold existing
-Installation-admin delegation authority; Secret access alone grants no delegation.
-Failure retains the Agent; **Retry credential access** rereads grants without
-duplication. Failed Agent writes retain Configuration ID and lock JSON/Harness
-for explicit reuse. Writes never retry automatically; drafts
-admit no revision and start no runtime.
+`create.mjs:grantConfigurationSecretAccess` deduplicates saved Configuration's
+normalized same-Namespace `env` Secret sources, rejecting unsupported bindings
+before any grant. `agents/secret-access.mjs:ensureSecretOperateBinding` reads/creates
+exact Secret `operate` grants through IAM. Installation-admin delegation is required;
+Secret access alone cannot delegate. Failure retains the Agent; **Retry credential
+access** rereads grants without duplicates. Failed Agent writes retain Configuration
+ID and lock JSON/Harness for explicit reuse. Writes never retry automatically;
+drafts admit no revision or runtime.
 
 `agents/harness-auth.mjs` edits bindings and shows
 [Secret identities](platform-console/agent-editing.md#4-render-draft-revision-or-channels),
@@ -373,6 +372,9 @@ refresh and inspection.
 
 ## Changelog
 
+- 2026-10-10 22:36: Integrate native plugin preservation with saved Secret delegation. (authoring-run/3ff29db6-adc3-43bf-b3fb-b39e9aad30d9 - a535a417d0fe2bb52c2be0f3c8c9398f85a382e7)
+
+- 2026-10-10 22:27: Preserve native plugin allowlists across Harness switches. (authoring-run/73ca79b6-4687-4e93-a98f-d46b194ee2ed - 80725162a946f80652b939a32a57ee4e922eeb5c)
 - 2026-10-10 22:15: Trace saved Configuration Secret enumeration and existing IAM delegation checks. (01a11ac0-ab87-7d21-8df5-a306d8563a19 - 80725162a946f80652b939a32a57ee4e922eeb5c)
 - 2026-10-08 15:59: Trace responsive drawer and tab visibility, destination focus, scoped authentication feedback, and compact plugin setup. (01a11d68-d6e8-7033-ab93-03767bced2da - 58daaa5a3ac4c64bc5fb3af00759b59b365b20ca)
 - 2026-10-08 14:30: Trace client navigation from a failed deployment to its exact version and focus its Logs tab and scroll the panel into view. (01a11d68-d6e8-7033-ab93-03767bced2da - 0ff96342dc416325770eebed5963e9886fd3dff3)
