@@ -66,8 +66,8 @@ jobs:
 
   pr-safe-same-sha:
     name: Same-SHA ${{ matrix.title }}
-    # Match source CI compatibility and image-startup capacity overrides.
-    runs-on: ${{ (startsWith(matrix.lane, 'k3d-fixture-') || matrix.lane == 'k3d-observability') && (vars.CI_COMPAT_RUNNER || 'blacksmith-32vcpu-ubuntu-2404') || (matrix.lane == 'k3d-observability-demo' || matrix.lane == 'postgres-auth') && (vars.CI_COMPAT_RUNNER || 'ubuntu-22.04') || startsWith(matrix.lane, 'images-runtime-startup') && (vars.CI_LARGE_RUNNER || 'blacksmith-32vcpu-ubuntu-2404') || matrix.lane == 'repository-credentials-platform' && (vars.CI_LARGE_RUNNER || 'blacksmith-16vcpu-ubuntu-2404') || (vars.CI_RUNNER || 'ubuntu-24.04') }}
+    # Match source CI compatibility and capacity overrides, including PostgreSQL's default.
+    runs-on: ${{ (startsWith(matrix.lane, 'k3d-fixture-') || matrix.lane == 'k3d-observability') && (vars.CI_COMPAT_RUNNER || 'blacksmith-32vcpu-ubuntu-2404') || (matrix.lane == 'k3d-observability-demo' || matrix.lane == 'postgres-auth') && (vars.CI_COMPAT_RUNNER || 'ubuntu-22.04') || startsWith(matrix.lane, 'images-runtime-startup') && (vars.CI_LARGE_RUNNER || 'blacksmith-32vcpu-ubuntu-2404') || matrix.lane == 'repository-credentials-platform' && (vars.CI_LARGE_RUNNER || 'blacksmith-16vcpu-ubuntu-2404') || matrix.lane == 'postgres-application' && (vars.CI_RUNNER || 'blacksmith-32vcpu-ubuntu-2404') || (vars.CI_RUNNER || 'ubuntu-24.04') }}
     needs: preflight
     if: needs.preflight.outputs.run_all == 'true'
     timeout-minutes: ${{ matrix.timeout }}
@@ -533,6 +533,10 @@ jobs:
     timeout-minutes: 240
     environment: integration-qa
     env:
+      # The Compose launcher otherwise resolves the +v1.35 K3s channel online (update.k3s.io).
+      # Keep in step with defaultK3sImage in scripts/ci/prepare.mjs. Job-scoped: dev-up.test.mjs
+      # in checks-baseline-1 asserts the +v1.35 default.
+      OCC_DEVELOPMENT_K3S_IMAGE: docker.io/rancher/k3s:v1.35.9-k3s1@sha256:ec9868c6a38d4e8c1869832fb5fd1eb8473c39794a0b44d2b952e7ba911951bc
       OCC_TEST_QA_INSTALLATION: all
       OCC_TEST_QA_PRESET: all
       OCC_TEST_QA_SCENARIOS: all
