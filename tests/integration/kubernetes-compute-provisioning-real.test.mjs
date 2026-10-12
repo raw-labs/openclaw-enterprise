@@ -6,7 +6,6 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 import { kubernetesConfigurationName } from "../../apps/controller/src/drivers/configuration/kubernetes/index.ts";
 import { createGatewayNodeEnrollment } from "../../apps/controller/src/gateway/node-enrollment-client.ts";
-import { withStubbedProviderEndpoint } from "../helpers/harness-configuration.mjs";
 import {
   requiresKubernetes,
   requiresKubernetesAndPostgres,
@@ -27,8 +26,6 @@ import {
   harnessWorkspaceClaimName,
   revisionName,
   assertReadyGateway,
-  gatewayConnectionsState,
-  workloadPod,
   assertHarnessWorkspaceClaim,
   createDriver,
   createScopedController,
@@ -654,163 +651,6 @@ test(
       /at-kubernetes-(fixture|rotated)-/,
     );
     provider.mock.restore();
-
-    // Storage needs the real Gateway wrapper but no public route. Keep the
-    // existing handoff fixture's routing permissions and denial cases unchanged.
-    const { driver: storageDriver } = await createDriver({
-      authentication: controller.authentication,
-      runtime: {
-        transportSecretPrefix: "transport",
-        gatewayStorageClassName: "local-path",
-        gatewayNodeSelector: {
-          "kubernetes.io/hostname": JSON.parse(await kubectl("get", "nodes", "-o", "json")).items[0]
-            .metadata.name,
-        },
-      },
-    });
-    const storageFixture = await createProvisioningApiFixture(
-      context,
-      storageDriver,
-      controller.authentication,
-    );
-    // This proves real SQLite storage and OCE lifecycles, not native OpenClaw or provider calls.
-    const embeddedConfiguration = await storageFixture.request(
-      "POST",
-      `/namespaces/${namespaceOwner.id}/configurations`,
-      {
-        kind: "agent",
-        values: withStubbedProviderEndpoint({
-          gateway: { mode: "local", bind: "lan", controlUi: { enabled: false } },
-          logging: { level: "info" },
-          agents: {
-            defaults: {
-              model: "openai/gpt-4.1",
-              models: { "openai/gpt-4.1": { agentRuntime: { id: "openclaw" } } },
-            },
-          },
-        }),
-      },
-    );
-    assert.equal(embeddedConfiguration.status, 201, JSON.stringify(embeddedConfiguration.body));
-    const embeddedRole = await storageFixture.request(
-      "POST",
-      `/namespaces/${namespaceOwner.id}/iam/roles`,
-      {
-        name: `embedded-storage-secret-${randomUUID()}`,
-        permissions: [{ action: "operate", resourceKind: "secret" }],
-      },
-    );
-    assert.equal(embeddedRole.status, 201, JSON.stringify(embeddedRole.body));
-    const embeddedAgents = [];
-    const embeddedStates = new Map();
-    const embeddedPodSelector = (agentId) => `app.kubernetes.io/name=${gatewayName(agentId)}`;
-    async function replacementEmbeddedPod(agentId, previousUid) {
-      return waitFor("embedded Gateway replacement to have a new ready Pod identity", async () => {
-        const successor = await workloadPod(gatewayPlacement, embeddedPodSelector(agentId));
-        return successor !== undefined &&
-          !successor.metadata.deletionTimestamp &&
-          successor.metadata.uid !== previousUid &&
-          successor.status.conditions?.some(
-            ({ type, status }) => type === "Ready" && status === "True",
-          )
-          ? successor
-          : undefined;
-      });
-    }
-    async function deployEmbedded(agentId) {
-      const path = `/namespaces/${namespaceOwner.id}/agents/${agentId}`;
-      const deployment = await storageFixture.request("POST", `${path}/deploy`);
-      assert.equal(deployment.status, 202, JSON.stringify(deployment.body));
-      await waitFor(
-        `embedded Agent ${agentId} revision ${deployment.data.id} to activate`,
-        async () => {
-          const current = await storageFixture.request("GET", path);
-          assert.equal(current.status, 200, JSON.stringify(current.body));
-          return current.data.activeRevisionId === deployment.data.id ? current.data : undefined;
-        },
-      );
-      return deployment.data;
-    }
-    await storageFixture.startWorker();
-    for (const label of ["first", "sibling"]) {
-      const created = await storageFixture.request(
-        "POST",
-        `/namespaces/${namespaceOwner.id}/agents`,
-        {
-          name: `embedded-storage-${label}-${randomUUID()}`,
-          configurationId: embeddedConfiguration.data.id,
-          executionMode: "embedded",
-          harnessAuth: { method: "api_key", source: modelSecret.data.ref },
-        },
-      );
-      assert.equal(created.status, 201, JSON.stringify(created.body));
-      const granted = await storageFixture.request(
-        "POST",
-        `/namespaces/${namespaceOwner.id}/iam/access-bindings`,
-        {
-          subjectKind: "identity",
-          subjectId: created.data.servicePrincipalId,
-          roleId: embeddedRole.data.id,
-          resourceKind: "secret",
-          resourceId: modelSecret.data.id,
-        },
-      );
-      assert.equal(granted.status, 201, JSON.stringify(granted.body));
-      await deployEmbedded(created.data.id);
-      const record = { identity: randomUUID(), marker: `retained-${randomUUID()}` };
-      const stored = await gatewayConnectionsState(gatewayPlacement, created.data.id, record);
-      assert.deepEqual(stored.record, record);
-      embeddedStates.set(created.data.id, stored);
-      embeddedAgents.push(created.data);
-    }
-    assert.notEqual(
-      embeddedStates.get(embeddedAgents[0].id).claimUid,
-      embeddedStates.get(embeddedAgents[1].id).claimUid,
-    );
-    const firstEmbedded = embeddedAgents[0];
-    const oldEmbeddedPod = await workloadPod(
-      gatewayPlacement,
-      embeddedPodSelector(firstEmbedded.id),
-    );
-    assert.ok(oldEmbeddedPod);
-    await kubectl(
-      "delete",
-      "pod",
-      oldEmbeddedPod.metadata.name,
-      "--namespace",
-      gatewayPlacement,
-      "--wait=true",
-    );
-    await replacementEmbeddedPod(firstEmbedded.id, oldEmbeddedPod.metadata.uid);
-    assert.deepEqual(
-      await gatewayConnectionsState(gatewayPlacement, firstEmbedded.id),
-      embeddedStates.get(firstEmbedded.id),
-    );
-    const beforeEmbeddedRevision = await workloadPod(
-      gatewayPlacement,
-      embeddedPodSelector(firstEmbedded.id),
-    );
-    assert.ok(beforeEmbeddedRevision);
-    await deployEmbedded(firstEmbedded.id);
-    await replacementEmbeddedPod(firstEmbedded.id, beforeEmbeddedRevision.metadata.uid);
-    // Both Agents use the identical runtime pathname but retain different claim identities and contents.
-    for (const agent of embeddedAgents) {
-      assert.deepEqual(
-        await gatewayConnectionsState(gatewayPlacement, agent.id),
-        embeddedStates.get(agent.id),
-      );
-      const deleted = await storageFixture.request(
-        "DELETE",
-        `/namespaces/${namespaceOwner.id}/agents/${agent.id}`,
-      );
-      assert.equal(deleted.status, 202, JSON.stringify(deleted.body));
-    }
-    for (const agent of embeddedAgents) {
-      await waitFor(`embedded Agent ${agent.id} Gateway claim to retire`, async () =>
-        missing("persistentvolumeclaim", `gateway-state-${hash(agent.id)}`, gatewayPlacement),
-      );
-    }
-    await storageFixture.stopWorker();
 
     const body = provisioningRequestBody({
       modelSecretRef: modelSecret.data.ref,

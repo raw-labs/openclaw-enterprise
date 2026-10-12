@@ -1,7 +1,7 @@
 ---
 created: 2026-08-21
-updated: 2026-10-10 22:12
-last_updated_session: authoring-run/79e37cda-15db-4e88-9d4a-c8a476663115
+updated: 2026-10-10 02:49
+last_updated_session: authoring-run/8446b4d7-87ac-43ab-9323-5fc7f6953628
 ---
 
 # Harness Execution Topology Flow
@@ -244,11 +244,8 @@ the Harness, which stays available for active work. Idle shutdown, or one before
 OpenClaw starts (wrappers run under `tini`), completes promptly. Forced
 termination can delay the successor until the persistent owner lease expires.
 
-`KubernetesComputeDriver.gatewayPrivateStateVolumeMounts` and
-`privateStateInitContainer` mount and prepare the Agent-owned Gateway directories
-in both modes. This distribution also retains the Connections state directory;
-its scope is defined by the [Gateway storage contract](../reference/drivers/kubernetes-compute/storage-and-credentials.md#gateway-storage).
-Embedded gateways also keep their attested default workspace on
+Kubernetes gateways in both modes mount their own persistent SQLite and media
+directories; embedded gateways also keep their attested default workspace on
 that private claim so continued turns survive Pod replacement. Dedicated
 Harnesses receive only the Harness workspace claim, which keeps the node
 identity across Pod and revision replacement. The driver creates both claims
@@ -326,8 +323,6 @@ owns claim sizes, mount paths, StorageClass requirements, and final teardown.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
-
-- 2026-10-10 22:12: Retain distribution-specific Connections state on the Agent-owned Gateway claim. (authoring-run/79e37cda-15db-4e88-9d4a-c8a476663115 - 80725162a946f80652b939a32a57ee4e922eeb5c)
 
 - 2026-10-10 02:49: Refuse native listener TLS before deployment work. (authoring-run/8446b4d7-87ac-43ab-9323-5fc7f6953628 - 5d303757fb488fe34c8cbb9e7b6b975921fc1061)
 

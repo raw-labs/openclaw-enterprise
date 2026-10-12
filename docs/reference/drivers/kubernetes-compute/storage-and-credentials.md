@@ -69,12 +69,7 @@ include database files and their WAL/SHM siblings:
 | `state`                     | `/home/node/.openclaw/state`                |
 | `agent`                     | `/home/node/.openclaw/agents/main/agent`    |
 | `media`                     | `/home/node/.openclaw/media`                |
-| `connections`               | `/home/node/.openclaw/connections`          |
 | `sessions` (dedicated mode) | `/home/node/.openclaw/agents/main/sessions` |
-
-The `connections` subpath is a distribution-specific mount for the Connections
-plugin's SQLite state. It does not install or configure that plugin and is not a
-general plugin-storage contract. Unlisted state directories remain Pod-local.
 
 Embedded gateways also mount the same private claim's `workspace` subpath at
 `/home/node/.openclaw/workspace`, the default workspace under the configured
