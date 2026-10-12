@@ -1,14 +1,14 @@
 ---
 created: 2026-09-04
 updated: 2026-10-12
-last_updated_session: authoring-run/7ac9cf09-08a4-490c-a762-a2a0b1dc7f19
+last_updated_session: authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb
 ---
 
 # GitHub Actions testing flow
 
 ## Overview
 
-GitHub Actions selects coverage for each event and ends at `CI Required` and resource cleanup. Full CI runs twenty noncredentialed test lanes, prepares disposable resources, and rejects missing or skipped required coverage. A verified documentation-only PR runs Suite Audit and documentation checks without product tests. Neither route establishes protected model or service integrations.
+GitHub Actions selects coverage and ends at `CI Required` and resource cleanup. Full CI requires twenty noncredentialed lanes with disposable resources; missing or skipped required coverage fails. Verified documentation-only PRs run Suite Audit and docs checks without product tests. Neither route proves protected model/service integrations.
 
 ## Entry Points
 
@@ -91,7 +91,7 @@ The provider job uses `CI_RUNNER` (default `blacksmith-8vcpu-ubuntu-2404`) for i
 
 For `logging-collector`, `scripts/ci/prepare.mjs:prepareLane` pre-pulls the pinned Collector, Node, Prometheus and Grafana images before publishing lane inputs. The metrics test and preparation share the digests in `scripts/ci/metrics-monitoring-images.mjs:metricsMonitoringImages`. `scripts/ci/prepare.mjs:ensureDockerSourceImage` reuses a verified local repository digest or pulls through `scripts/ci/image-pull.mjs:pullImage`, then verifies that digest before tests start containers. Registry 5xx and rate limits retry within the shared pull budget; missing manifests and authorization refusals fail preparation immediately. Explicit unpinned Node overrides keep the existing test-owned pull behavior.
 
-`checks-browser`, `checks-browser-2`, `postgres-auth`, `postgres-platform`, `images-model-probes`, `images-runtime-startup`, and `images-runtime-startup-2` use separate runners and required artifacts. `scripts/ci/prepare.mjs:imageBuildArgs` enables scoped BuildKit caches for hosted image jobs: packaging exports; probes, runtime startup and `repository-credentials-platform` restore. Images load into the job's Docker engine; cache credentials stay in preparation.
+`scripts/ci/prepare.mjs:imageBuildArgs` restores scoped BuildKit caches for hosted image lanes; only main's cache-warm job exports. Images load into each job's Docker engine; cache credentials stay in preparation. Browser, PostgreSQL and image lanes retain separate runners and required result artifacts.
 
 Kubernetes fixture startup records phase timings and host snapshots. On failure,
 bounded reads save `<state-file>.diagnostics.json` outside the cluster directory
@@ -196,7 +196,7 @@ Per-file cleanup releases its disposable database; job cleanup removes only stat
 
 ## Changelog
 
-- 2026-10-12 16:12: Preserve downstream runner overrides while integrating upstream CI changes. (authoring-run/7ac9cf09-08a4-490c-a762-a2a0b1dc7f19 - 2ef2aecfec417518cbf06e6c5023c4f8f87f0a4f)
+- 2026-10-12 16:26: Reconcile upstream behavior and condense the combined flow. (authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb - 8579ab708615e4cf7214704eae3894231d1a3412)
 
 - 2026-10-10 20:40: Document downstream runner overrides and job-owned Codex AppArmor enforcement. (01a10be2-3f86-7c02-ae8f-1dceca2a9193 - 7de4878389300e180858daa14c60cffa6ddf216f)
 

@@ -1,27 +1,20 @@
 ---
 created: 2026-09-01
 updated: 2026-10-12
-last_updated_session: authoring-run/7ac9cf09-08a4-490c-a762-a2a0b1dc7f19
+last_updated_session: authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb
 ---
 
 # Platform console request flow
 
 ## Overview
 
-`/console/` renders session-authorized resources.
-The [console reference](../reference/console.md) owns user-visible behavior;
-API and IAM authorize access.
+`/console/` renders session-authorized resources. The [reference](../reference/console.md) owns behavior; API/IAM authorize access.
 
 ## Entry Points
 
-- Browser entry: `apps/controller/src/console/console.mjs` composes the session,
-  request client, view lifetime, navigation, and shell.
-- `api-client.mjs` owns cancellation and session expiry; `view-lifetime.mjs`
-  owns generation and abort state; `navigation.mjs` owns return paths and history;
-  `shell.mjs` owns navigation and collections.
-- `agents/{list,create,detail}.mjs` own Agent views;
-  `channels/{slack,shared-ui}.mjs` own Slack editing. `agents.mjs` and
-  `channels.mjs` compose them.
+- Browser entry: `apps/controller/src/console/console.mjs` composes session, requests, view lifetime, navigation and shell.
+- `api-client.mjs` owns cancellation/session expiry; `view-lifetime.mjs`, generation/abort; `navigation.mjs`, return paths/history; `shell.mjs`, navigation/collections.
+- Agent views: `agents/{list,create,detail}.mjs`; Slack editing: `channels/{slack,shared-ui}.mjs`; composition: `agents.mjs` and `channels.mjs`.
 - HTTP: `apps/controller/src/index.ts:createFastifyApp`.
 - Startup: `apps/controller/src/composition/production.ts:composeProduction`
   and `development-postgres.ts:composePostgresDevelopment`.
@@ -118,11 +111,7 @@ stops reads. Missing provenance stays explicit.
 
 `apps/controller/src/console/console.mjs:loadPage`
 
-`loadPage` advances the request generation and requests `GET /api/auth/session`.
-First loads show loading. Return navigation and Refresh can restore one of at most
-16 document-local views keyed by route, Namespace, and session owner while reads
-run. Password fields and their derived discovery state clear before retention.
-Controls stay inert until admission succeeds; navigation remains available.
+`loadPage` advances the request generation and requests `GET /api/auth/session`. Initial loads show loading. Return navigation and Refresh can restore up to 16 document-local views keyed by route, Namespace and session owner during reads. Retention clears passwords and derived discovery state. Controls remain inert until admission; navigation stays available.
 
 `apps/controller/src/console/api-client.mjs:createApiClient` keeps its composed
 abort signal through JSON and text body consumption. After headers arrive,
@@ -130,13 +119,7 @@ cancellation retains the signal's reason and socket failures reach the caller's
 interrupted-read recovery. Only JSON syntax failures become invalid-response
 errors; a failed body never causes an automatic replay.
 
-Completed views retain DOM, handlers, and draft capture callbacks. On return,
-`loadPage` rereads GET dependencies and compares data and user identity. Unchanged
-views reactivate; changed data or the first readable Namespace for a view without
-a selection rebuilds them.
-Pending or failed reads, password input, and mutations prevent reuse; read-only
-catalog and diagnostic POSTs do not. Refresh always rebuilds. Debug runtime
-disclosures retain expanded state under the same validation.
+Retained views include DOM, handlers and draft capture callbacks. On return, `loadPage` rereads GET dependencies and user identity: unchanged views reactivate; changed data rebuilds them, including the first readable Namespace when unselected. Pending/failed reads, passwords and mutations prevent reuse; read-only catalog/diagnostic POSTs do not. Refresh always rebuilds; debug disclosures retain their expansion under the same validation.
 
 A changed user or session key clears retained views and drafts before further
 private reads. Missing sessions open login; failed reads offer Retry.
@@ -211,14 +194,7 @@ Preset Secret takes precedence over an entered token. OCC reads the
 Secret server-side. Pagination is upstream; filtering is local. Selecting a plugin loads tools.
 Credential, provider, and Harness changes clear results and invalidate pending reads.
 
-`create.mjs:MODEL_CHOICES` supplies static unauthenticated lists and manual entry.
-`renderAgentForm` switches `manualModel`, calls `updateModelConfiguration` and
-`updateControls`, and focuses the required input. Manual mode retains `model.value`
-and clears the hidden dropdown. `resetModelChoices` rebuilds the current provider's
-list after JSON provider edits, retaining listed models or clearing both inputs.
-Provider/authentication changes reset without retention. Submission requires primary
-model equality with `model.value`. Both directions retain credentials, unrelated
-Configuration, and saved-Configuration/pending-request locks.
+`create.mjs:MODEL_CHOICES` supplies unauthenticated lists and manual entry. `renderAgentForm` toggles `manualModel`, updates Configuration and controls, and focuses the required input. Manual mode keeps `model.value`, clearing the dropdown. `resetModelChoices` rebuilds provider choices after JSON edits, retaining listed models or clearing both inputs. Provider/authentication changes clear the model. Submission requires the primary model to match `model.value`. Both modes retain credentials, unrelated Configuration, and saved/pending locks.
 
 `configurationTemplate` enables Control UI with loopback origins on port 18789.
 Compute supplies gateway authentication; Presets replace the starter unchanged.
@@ -375,7 +351,7 @@ refresh and inspection.
 
 ## Changelog
 
-- 2026-10-12 16:12: Combine refreshed Preset, Configuration Secret and native plugin flows with upstream. (authoring-run/7ac9cf09-08a4-490c-a762-a2a0b1dc7f19 - 2ef2aecfec417518cbf06e6c5023c4f8f87f0a4f)
+- 2026-10-12 16:26: Reconcile upstream behavior and condense the combined flow. (authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb - 8579ab708615e4cf7214704eae3894231d1a3412)
 
 - 2026-10-12 15:30: Refresh native plugin preservation against current upstream. (authoring-run/86831b3d-1b20-4d59-8b4f-e814f6bdb488 - 1c722bea21fabefffc112b23bb739c88dbcecf4b)
 - 2026-10-12 15:31: Refresh upstream. (authoring-run/5d7618e0-3207-4553-a028-5149ef0697e2 - 06bb7d0e6e18ea337ba7dbcac892337e96b206a1)

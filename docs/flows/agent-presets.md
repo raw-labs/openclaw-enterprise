@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
 updated: 2026-10-12
-last_updated_session: authoring-run/df6d4023-3aec-45e7-aa7d-8eca68711247
+last_updated_session: authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb
 ---
 
 # Agent Presets flow
@@ -70,18 +70,9 @@ administrator Role. Its guarded update preserves customized Roles; the exact
 
 `apps/controller/src/composition/installation-presets.ts:loadInstallationPresets`
 
-The loader validates the opt-in boolean and file list, reads bundled JSON, and
-resolves explicit paths beside the startup YAML. It validates names/templates and rejects missing,
-malformed, invalid, or duplicate-name files; a file named like a bundled default
-replaces it, and API composition warns `presets.bundled-default-shadowed`. API and worker share the startup
-snapshot and source path (files are not watched), but only the API applies
-defaults and logs Preset warnings. [Production composition](../../apps/controller/src/composition/production.ts)
+The loader validates the boolean, paths, names and templates, reading bundled JSON and resolving explicit paths beside startup YAML. Missing, malformed, invalid or duplicate-name files fail. An explicit file named like a bundled default replaces it; API composition warns `presets.bundled-default-shadowed`. API and worker share the startup snapshot/source path without watching files; only the API applies defaults and logs warnings. [Production composition](../../apps/controller/src/composition/production.ts)
 and [development composition](../../apps/controller/src/composition/development-postgres.ts)
-pass generic definitions into `ControllerOptions.defaultPresets` and initialize
-defaults after selecting Configuration and IAM Drivers. They try each persisted
-Installation administrator in turn, moving on when one cannot create a
-Namespace's Presets (say, its grant stops at the Installation); startup fails
-only when none can seed. Native template contents
+supply `ControllerOptions.defaultPresets` after selecting Configuration and IAM Drivers. API startup tries each persisted Installation administrator; it fails only when none can seed Namespace Presets. Native template contents
 remain in the application bundle; OCC owns generic Preset lifecycle. Seeding and
 rendering copy the native policy of the [standard Codex artifact](../../deploy/presets/standard-codex.json)
 ([build hosts](../guides/topics/standard-codex-preset.md#build-network-allowlist));
@@ -148,14 +139,7 @@ path records mutations and denials without template or variable contents.
 
 `apps/controller/src/console/agents/presets.mjs:createPresetFields`
 
-[`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs)
-lists only readable Presets (the list requires Namespace read), then reads the
-selected resource once. It sorts by case-insensitive locale order, then exact name.
-**Start with default Preset** prefers its `default-codex` ID, otherwise the first
-listed ID, through that same exact-resource read. Variable-free templates apply immediately; others retain the chooser and shortcut
-origin when restored. Empty lists or failed list/read requests cannot open a hidden
-hardcoded starter. **Start without Preset** opens the ordinary form without reading a Preset;
-it does not replace a denied selection. Creation authorization still applies.
+[`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs) lists readable Presets after Namespace-read authorization, sorts by case-insensitive locale order then exact name, and reads the selected resource once. **Start with default Preset** prefers `default-codex`, otherwise the first listed ID, through that exact read. Variable-free templates apply immediately; others retain the chooser and shortcut origin on restoration. Empty lists and failed list/read requests never open a hardcoded starter. **Start without Preset** opens the ordinary form without a Preset read or replacing a denied selection. Creation authorization still applies.
 
 `console-assets.ts:readConsoleAsset` serves the public
 [`default-codex`](../../deploy/presets/default-codex.json) as
@@ -287,6 +271,8 @@ or an immutable admitted revision.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-12 16:26: Preserve combined flow provenance and condense the unchanged chooser trace. (authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb - 8579ab708615e4cf7214704eae3894231d1a3412)
 
 - 2026-10-12 15:28: Integrate upstream b195e54e9 while retaining the custom profile and readable starter contracts. (authoring-run/df6d4023-3aec-45e7-aa7d-8eca68711247 - 85561c4fc4666805b187d0a554c872938eb9b048)
 
