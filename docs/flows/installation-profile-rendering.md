@@ -1,18 +1,17 @@
 ---
 created: 2026-09-28
 updated: 2026-10-12
-last_updated_session: authoring-run/d5a03f17-87b8-4652-bfd0-e703b8e20eb7
+last_updated_session: authoring-run/dcccee96-5080-4cc0-a3fa-96168c7016d7
 ---
 
 # Installation Profile Rendering Flow
 
 ## Overview
 
-An operator runs `scripts/render-installation-profile.mjs` to validate site
-inputs and write Helm values, Installation startup YAML, and a preflight report.
-This flow stops at rendered files. The operator still provisions infrastructure,
-creates Secrets, applies Helm, supplies catalog and Agent credentials, and sets
-up optional service accounts, repository registries, and Slack consumers.
+`scripts/render-installation-profile.mjs` validates site inputs and writes Helm
+values, Installation startup YAML, and preflight diagnostics. Operators then
+provision infrastructure, apply Helm, supply Secrets and credentials, and set up
+optional service accounts, repository registries, and Slack consumers.
 
 ## Entry Points
 
@@ -50,15 +49,14 @@ graph TD
 
 `scripts/render-installation-profile.mjs:parseArgs`
 
-The command requires `--profile`, `--input`, and `--out-dir`, and accepts
-`--profile-file`. Unknown flags fail before rendering. `--profile` must be
-`openclaw` or `codex`. The release name and namespace come from site inputs and
-feed both Helm instructions and Installation settings.
+Required flags are `--profile openclaw|codex`, `--input`, and `--out-dir`;
+`--profile-file` is optional. Unknown flags fail. Site release names and
+namespaces feed Helm instructions and Installation settings.
 
-Once the arguments are valid, the renderer deletes any prior `values.yaml`,
-`installation.yaml`, and `preflight.json` from the output directory and leaves
-other files in place. It does this before loading input, so an unreadable or
-malformed input cannot leave deployable files or an old success report behind.
+After argument validation, the renderer deletes prior `values.yaml`,
+`installation.yaml`, and `preflight.json`, preserving other files. This precedes
+input loading: unreadable or malformed input leaves no stale deployment files
+or success report.
 
 ### 2. Load profile and site input
 
@@ -277,6 +275,8 @@ activation, and repository registry creation need separate evidence.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-12 23:13: Trim repeated rendering prose after integration. (authoring-run/dcccee96-5080-4cc0-a3fa-96168c7016d7 - 5954985afee60c992d3c8297d8c56cfeabad1521)
 
 - 2026-10-12 22:38: Derive hosted catalog prerequisites from the selected PluginDriver under either profile family. (authoring-run/d5a03f17-87b8-4652-bfd0-e703b8e20eb7 - 2f94a9ef472f4f7a2168f08df0e478ea7a4eb67b)
 
