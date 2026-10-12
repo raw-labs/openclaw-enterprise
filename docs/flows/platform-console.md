@@ -1,7 +1,7 @@
 ---
 created: 2026-09-01
-updated: 2026-10-10
-last_updated_session: authoring-run/3ff29db6-adc3-43bf-b3fb-b39e9aad30d9
+updated: 2026-10-12
+last_updated_session: authoring-run/5d7618e0-3207-4553-a028-5149ef0697e2
 ---
 
 # Platform console request flow
@@ -244,14 +244,12 @@ Ordinary drafts post `{kind: "agent", values, secretBindings}` to
 OCC stages all four workspace textareas, including unchanged/empty values, outside
 Agent/Configuration for [workspace setup](workspace-files.md).
 
-`create.mjs:grantConfigurationSecretAccess` deduplicates saved Configuration's
-normalized same-Namespace `env` Secret sources, rejecting unsupported bindings
-before any grant. `agents/secret-access.mjs:ensureSecretOperateBinding` reads/creates
-exact Secret `operate` grants through IAM. Installation-admin delegation is required;
-Secret access alone cannot delegate. Failure retains the Agent; **Retry credential
-access** rereads grants without duplicates. Failed Agent writes retain Configuration
-ID and lock JSON/Harness for explicit reuse. Writes never retry automatically;
-drafts admit no revision or runtime.
+`create.mjs:grantConfigurationSecretAccess` deduplicates saved same-Namespace
+`env` Secret sources, rejecting unsupported bindings first.
+`agents/secret-access.mjs:ensureSecretOperateBinding` reads/creates exact
+`operate` grants requiring Installation administration. Secret use cannot delegate.
+**Retry credential access** retains IDs and rereads grants without duplicates.
+Failed Agent writes retain locked Configuration; drafts start no runtime. Agent writes never retry automatically.
 
 `agents/harness-auth.mjs` edits bindings and shows
 [Secret identities](platform-console/agent-editing.md#4-render-draft-revision-or-channels),
@@ -378,6 +376,7 @@ refresh and inspection.
 
 ## Changelog
 
+- 2026-10-12 15:31: Refresh upstream. (authoring-run/5d7618e0-3207-4553-a028-5149ef0697e2 - 06bb7d0e6e18ea337ba7dbcac892337e96b206a1)
 - 2026-10-10 22:36: Integrate native plugin preservation with saved Secret delegation. (authoring-run/3ff29db6-adc3-43bf-b3fb-b39e9aad30d9 - a535a417d0fe2bb52c2be0f3c8c9398f85a382e7)
 
 - 2026-10-10 22:27: Preserve native plugin allowlists across Harness switches. (authoring-run/73ca79b6-4687-4e93-a98f-d46b194ee2ed - 80725162a946f80652b939a32a57ee4e922eeb5c)
