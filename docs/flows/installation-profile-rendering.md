@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
-updated: 2026-10-10
-last_updated_session: authoring-run/f39c7c2c-32e4-4409-8333-c018f226985c
+updated: 2026-10-12
+last_updated_session: authoring-run/41b6a9fe-f98e-419b-904b-6f24815b6dd2
 ---
 
 # Installation Profile Rendering Flow
@@ -33,7 +33,7 @@ graph TD
   C -->|No| X["Exit before reading input"]
   C -->|Yes| R["Clear prior generated files and preflight"]
   R --> D["Load selected or bundled profile and input JSON"]
-  D -->|Unreadable or mismatched| Y["Exit without rendered files or preflight"]
+  D -->|Unreadable or invalid| Y["Exit without rendered files or preflight"]
   D -->|Valid| E["Reject unsupported sections and fields"]
   E --> F["Validate consumed image, CIDR, proxy, label, and Backend inputs"]
   F --> G{"Any diagnostics errors?"}
@@ -64,9 +64,13 @@ malformed input cannot leave deployable files or an old success report behind.
 
 `scripts/render-installation-profile.mjs:readProfile`
 
-The renderer reads `--profile-file` or `deploy/profiles/<profile>.json`, resolving
-relative paths from the working directory. It checks that `name` matches
-`--profile`; loading failures never fall back to the bundled definition.
+Selected paths resolve from the working directory; bundled profiles live under
+`deploy/profiles/`. The renderer requires a matching `name`, descriptive strings,
+and a bundled PluginDriver; unknown fields fail. Omitted configuration renders
+as `{}`; supplied values must be objects. Driver options are validated at startup.
+Failures never fall back.
+`recommendedPreset` remains metadata; the [Preset flow](agent-presets.md) owns
+Console selection.
 
 The trusted profile selects the PluginDriver. Site inputs supply infrastructure
 settings. Credential diagnostics follow that Driver's catalog: Codex hosted
@@ -281,7 +285,7 @@ activation, and repository registry creation need separate evidence.
 
 ## Changelog
 
-- 2026-10-10 22:12: Added explicit profile-file selection, configurable bundled Preset seeding, and catalog-specific credential diagnostics. (authoring-run/f39c7c2c-32e4-4409-8333-c018f226985c - 80725162a946f80652b939a32a57ee4e922eeb5c)
+- 2026-10-12 14:04: Document the validated profile and omitted-configuration contract. (authoring-run/41b6a9fe-f98e-419b-904b-6f24815b6dd2 - 80725162a946f80652b939a32a57ee4e922eeb5c)
 
 - 2026-10-10: One `dedicatedSecrets` rule replaces the sign-in, gateway API key and credential Secret checks and adds the database CA Secret.
 

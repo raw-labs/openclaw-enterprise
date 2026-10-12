@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
-updated: 2026-10-10
-last_updated_session: authoring-run/3bda898e-2a6d-44ac-adf6-cd00cf0033c9
+updated: 2026-10-12
+last_updated_session: authoring-run/41b6a9fe-f98e-419b-904b-6f24815b6dd2
 ---
 
 # Agent Presets flow
@@ -150,14 +150,12 @@ path records mutations and denials without template or variable contents.
 
 [`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs)
 lists only readable Presets (the list requires Namespace read), then reads the
-selected resource once. It sorts the readable list by name (case-insensitive).
+selected resource once. It sorts by case-insensitive locale order, then exact name.
 **Start with default Preset** prefers its `default-codex` ID, otherwise the first
-listed ID, through that same exact-resource read. Variable-free templates apply
-immediately; templates with variables retain the chooser and its shortcut origin
-when restored. Empty lists or failed list/read requests cannot open a hidden
-hardcoded starter. Other readable Presets remain selectable. The separate **Start without Preset** action opens
-the ordinary form without reading a Namespace Preset; it does not automatically
-replace a denied selection. Normal creation authorization still applies.
+listed ID, through that same exact-resource read. Variable-free templates apply immediately; others retain the chooser and shortcut
+origin when restored. Empty lists or failed list/read requests cannot open a hidden
+hardcoded starter. **Start without Preset** opens the ordinary form without reading a Preset;
+it does not replace a denied selection. Creation authorization still applies.
 
 `console-assets.ts:readConsoleAsset` serves the public
 [`default-codex`](../../deploy/presets/default-codex.json) as
@@ -291,7 +289,7 @@ or an immutable admitted revision.
 
 ## Changelog
 
-- 2026-10-10 22:21: Choose a readable custom Preset when default-codex is absent; retain exact-resource authorization and independent manual setup. (authoring-run/3bda898e-2a6d-44ac-adf6-cd00cf0033c9 - 80725162a946f80652b939a32a57ee4e922eeb5c)
+- 2026-10-12 14:04: Document readable starter selection and exact-name ties. (authoring-run/41b6a9fe-f98e-419b-904b-6f24815b6dd2 - 80725162a946f80652b939a32a57ee4e922eeb5c)
 
 - 2026-10-10 07:02: Integrate main without changing the model-selection repair; retain both flow histories. (authoring-run/93ddce15-e08f-4d84-9e30-6c2cb0f1e838 - 500ca364793d117e7996ef568ac144df877e5b8b)
 
