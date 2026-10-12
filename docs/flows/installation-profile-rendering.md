@@ -286,6 +286,7 @@ activation, and repository registry creation need separate evidence.
 ## Changelog
 
 - 2026-10-12 14:04: Document the validated profile and omitted-configuration contract. (authoring-run/41b6a9fe-f98e-419b-904b-6f24815b6dd2 - 80725162a946f80652b939a32a57ee4e922eeb5c)
+- 2026-10-10 22:12: Added explicit profile-file selection, configurable bundled Preset seeding, and catalog-specific credential diagnostics. (authoring-run/f39c7c2c-32e4-4409-8333-c018f226985c - 80725162a946f80652b939a32a57ee4e922eeb5c)
 
 - 2026-10-10: One `dedicatedSecrets` rule replaces the sign-in, gateway API key and credential Secret checks and adds the database CA Secret.
 
