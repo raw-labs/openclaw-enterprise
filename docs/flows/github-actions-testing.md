@@ -1,7 +1,7 @@
 ---
 created: 2026-09-04
-updated: 2026-10-05
-last_updated_session: authoring-run/5808365b-c590-4c11-92d6-4ee32efc3626
+updated: 2026-10-12
+last_updated_session: authoring-run/7ac9cf09-08a4-490c-a762-a2a0b1dc7f19
 ---
 
 # GitHub Actions testing flow
@@ -195,6 +195,8 @@ Per-file cleanup releases its disposable database; job cleanup removes only stat
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-12 16:12: Preserve downstream runner overrides while integrating upstream CI changes. (authoring-run/7ac9cf09-08a4-490c-a762-a2a0b1dc7f19 - 2ef2aecfec417518cbf06e6c5023c4f8f87f0a4f)
 
 - 2026-10-10 20:40: Document downstream runner overrides and job-owned Codex AppArmor enforcement. (01a10be2-3f86-7c02-ae8f-1dceca2a9193 - 7de4878389300e180858daa14c60cffa6ddf216f)
 
