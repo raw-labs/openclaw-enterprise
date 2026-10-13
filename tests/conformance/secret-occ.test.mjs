@@ -600,6 +600,7 @@ function directoryLookup() {
   const controller = new OpenClawController(installation, { state: new InMemoryPlatformState() });
   return (input) =>
     controller.lookupChannelDirectory(administrator, "ns_directory", {
+      provider: "slack",
       secretId: "secret_directory",
       kind: "users",
       ...input,

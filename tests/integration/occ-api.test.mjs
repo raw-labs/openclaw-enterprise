@@ -3235,7 +3235,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.deepEqual(longQuery.body.error.details, [{ path: "/query", code: "TOO_LONG" }]);
   // A string array declared uniqueItems names the rule, not just an unsupported value.
   const repeatedIds = await controller.request("POST", path, {
-    body: { secretId: secret.data.id, kind: "users", ids: ["U123", "U123"] },
+    body: { provider: "slack", secretId: secret.data.id, kind: "users", ids: ["U123", "U123"] },
   });
   assert.equal(repeatedIds.status, 400, JSON.stringify(repeatedIds.body));
   assert.equal(

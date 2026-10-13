@@ -3889,15 +3889,22 @@ test(
     const status = await waitFor("native admin provisioning handoff", async () => {
       const observed = await fixture.request("GET", admitted.data.provisioning.url);
       assert.equal(observed.status, 200, JSON.stringify(observed.body));
-      return observed.data.status === "succeeded" ? observed.data : undefined;
+      assert.notEqual(observed.data.status, "failed", JSON.stringify(observed.body));
+      // Admission persists the revision before deployment completes. This fixture stops
+      // at the queued deployment wait and does not prove runtime readiness.
+      return observed.data.revisionId !== undefined && observed.data.status === "queued"
+        ? observed.data
+        : undefined;
     });
     await fixture.stopWorker();
+    assert.equal(status.status, "queued");
     fixture.cancelProvisioningAtTeardown(namespace.id, status.agentId);
     const revisions = await fixture.state.read((view) =>
       view.revisions.listRevisions(namespace.id, status.agentId),
     );
     assert.equal(revisions.length, 1);
     const revision = revisions[0];
+    assert.equal(revision.id, status.revisionId);
     const installation = await fixture.state.loadInstallation();
     const origin = `https://${deriveNativeAdminHost(installation.id, { namespaceId: namespace.id, id: status.agentId }, "agents.oce.example.test")}:8443`;
     assert.equal(nativeAdminConfigurationSupported(revision, origin), true);
@@ -3923,6 +3930,9 @@ test(
     const retried = await fixture.request("POST", `/namespaces/${namespace.id}/agents/provision`, {
       body,
     });
+    assert.equal(retried.status, 202, JSON.stringify(retried.body));
+    assert.equal(retried.data.provisioning.workId, admitted.data.provisioning.workId);
+    assert.equal(retried.data.provisioning.status, "queued");
     assert.equal(retried.data.provisioning.revisionId, revision.id);
     assert.equal(
       (
