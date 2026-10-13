@@ -12,8 +12,8 @@ npm run storybook:install
 npm run storybook
 ```
 
-Open `http://127.0.0.1:6006`. Stories have independent fixtures; **Reset story**
-discards changes.
+Open `http://127.0.0.1:6006`. Stories have independent fixtures and ignore existing
+Installations and other tabs’ sessions; **Reset story** discards changes.
 
 To build and serve a static copy:
 
@@ -29,8 +29,8 @@ without publishing the documentation site.
 
 ## Appearance review
 
-Use **Pages/Agents → Populated** to review the shared shell and controls at
-desktop (1440 × 1000), tablet (768 × 1024), and mobile (390 × 844).
+Review **Pages/Agents → Populated** at desktop (1440 × 1000), tablet
+(768 × 1024), and mobile (390 × 844).
 Check keyboard focus, search, navigation, an open dialog, and empty, loading,
 error, permission-denied, and missing-credential stories. The console stays light
 under either system appearance.
@@ -154,10 +154,10 @@ input. Enter another listed model ID, return, and check its selection. A custom
 ID requires a new selection. Change the provider through Configuration JSON;
 the list must match without retaining the old provider's model.
 
-The fixture supplies a ready Namespace, Preset, and model Secret. Namespace
-provisioning, Preset CRUD, and service-account issuance have no dedicated console
-pages. One Secret picker selects or creates new version model Secrets and Slack
-tokens (Credentials tab and Channels drawer). See
+Fixtures provide a ready Namespace, Preset and model Secret. The console has no
+dedicated pages for Namespace provisioning, Preset CRUD or Service Account
+issuance. One Secret picker selects or creates new version model Secrets and
+Slack tokens (Credentials tab and Channels drawer). See
 [Create and deploy in the console](../reference/console/create-and-deploy.md)
 for the supported installation workflow, prerequisites, and Teams deployment limits.
 
@@ -373,3 +373,12 @@ shows organization-wide policy restrictions. Missing-credential, read-only, and
 save-failure stories cover surrounding states. Capture final interactions and
 native values outside the repository; attach screenshots and video to the task
 and PR.
+
+### Teams editor checks
+
+Follow the [Teams workflow](../../scripts/console-storybook/teams-workflow.md)
+with **Components/Channels → Teams Editor**. Save personal and channel access
+independently; disable channel conversations, reopen and check native JSON and
+Secret controls. Related stories cover missing credentials, advanced settings,
+read-only, loading, denied and pending saves. Backend/live-provider proof:
+[Teams verification](../testing/teams.md).

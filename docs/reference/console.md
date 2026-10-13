@@ -115,8 +115,7 @@ requires exact Agent `read`/`update` and a catalog-capable Driver. The curated
 catalog needs no Secret. Hosted browsing reads bound `codex_pat` server-side and
 requires caller and Agent ServicePrincipal Secret `operate`.
 **Access and credential setup** expands the Driver guidance and help links;
-the compact reminder stays visible. Search and pagination remain reachable
-while the catalog list and plugin details scroll within the picker.
+the compact reminder stays visible. Search and pagination remain reachable while catalog and plugin details scroll.
 **Save plugin selections** updates the Agent; deployment snapshots them.
 **Operator-managed credentials** saves `{ "method": "runtime" }` for SSH embedded
 OpenClaw; OCC neither validates host credentials nor generates metadata for that
@@ -126,10 +125,8 @@ own result. The Agent list’s **Latest deployment** links failure details besid
 Current version. Unreadable results remain unavailable. Bootstrap failures keep
 safe evidence; revision cleanup progress refreshes separately.
 
-For a failed deployment, **Open vN Logs** opens that exact version and brings
-its Logs panel into view, including when starting from the draft or another
-version. The panel shows runtime output or the applicable access or availability
-message; see [Agent logs](../guides/topics/agent-logs.md).
+**Open vN Logs** opens a failed version’s Logs panel from any draft or version.
+It shows runtime output or access and availability messages; see [Agent logs](../guides/topics/agent-logs.md).
 
 **Run diagnostics for this version** fills **Current observations** with a
 bodyless POST that checks the exact viewed version. It requires Agent
@@ -161,10 +158,15 @@ separate facts, and startup evidence does not establish live gateway health; see
 [deployment guide](../guides/deploy/production-agents.md#configure-the-agent-runtime)
 and [deployment reference](agents/deployment.md#revisions-and-deployment).
 
-Channels edits the saved Slack draft. Teams credentials and Bot Framework ingress
-require operator setup; Teams has no editor, its settings remain in Configuration
-JSON, and it blocks Console deployment. Saving Slack patches `values` and
-includes `secretBindings` only for changed tokens. Existing plugin allowlists are
+Channels edits saved Slack and Microsoft Teams drafts. Teams exposes app and
+tenant IDs, an app-password Secret, one team with selected channels, mentions,
+and separate personal-message access. Advanced shapes, including native group
+access based only on sender allowlists, disable the editor and remain
+inspectable in Configuration JSON. Operator-configured public callback routing
+and proxy egress are required before Teams deployment; see
+[Teams setup](../guides/integrations/teams.md).
+Saving channel settings patches `values` and includes `secretBindings` for changed
+credentials. Existing plugin allowlists are
 extended; omitted ones stay omitted. Channel allowlists remain native
 Configuration changes, and shared Configurations can affect other Agents' future
 deployments.

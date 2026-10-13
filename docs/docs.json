@@ -334,6 +334,10 @@
                       {
                         "page": "reference/drivers/slack-channel",
                         "label": "Slack Directory"
+                      },
+                      {
+                        "page": "reference/drivers/teams-channel",
+                        "label": "Teams Directory"
                       }
                     ]
                   },
@@ -409,6 +413,10 @@
                   {
                     "page": "guides/integrations/slack",
                     "label": "Slack"
+                  },
+                  {
+                    "page": "guides/integrations/teams",
+                    "label": "Microsoft Teams"
                   }
                 ]
               }
@@ -962,6 +970,7 @@
               "flows/driver-plugin-loading",
               "flows/agent-plugins",
               "flows/agent-channel-directory",
+              "flows/agent-channel-ingress",
               "flows/agent-plugin-approvals",
               "flows/agent-provisioning",
               "flows/agent-native-admin",
@@ -988,6 +997,7 @@
               "testing/gateway-routing",
               "testing/production-tui",
               "testing/slack",
+              "testing/teams",
               "testing/qa-matrix",
               "testing/qa-matrix-results",
               "testing/service-accounts",

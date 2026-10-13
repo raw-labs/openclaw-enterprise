@@ -7,6 +7,19 @@ export const SLACK_SECRET_BINDINGS = [
   { key: "SLACK_APP_TOKEN", label: "Slack app token", secretName: "Slack app token" },
   { key: "SLACK_BOT_TOKEN", label: "Slack bot token", secretName: "Slack bot token" },
 ];
+export const TEAMS_SECRET_BINDINGS = [
+  { key: "MSTEAMS_APP_PASSWORD", label: "Teams app password", secretName: "Teams app password" },
+];
+
+function channelSecretBindings(values) {
+  return [
+    ...(slackEnabled(values) && namedSlackAccountKeys(values) === null
+      ? SLACK_SECRET_BINDINGS
+      : []),
+    ...(teamsEnabled(values) ? TEAMS_SECRET_BINDINGS : []),
+  ];
+}
+
 function slackEnabled(values) {
   const slack = values?.channels?.slack;
   return (
@@ -63,21 +76,49 @@ function slackBindingState(configuration, binding) {
 }
 
 export function channelCredentialBlockReason(values) {
-  return teamsEnabled(values)
-    ? "Microsoft Teams credentials and readiness are operator-managed and cannot be confirmed by this Credentials tab. Use the operator deployment workflow for Teams, or disable Teams through the Configuration API to deploy here."
-    : null;
+  const teams = values?.channels?.msteams;
+  if (!teamsEnabled(values)) {
+    return null;
+  }
+  const ref = teams.appPassword;
+  if (
+    typeof teams.appId !== "string" ||
+    !teams.appId.trim() ||
+    typeof teams.tenantId !== "string" ||
+    !teams.tenantId.trim() ||
+    ref?.source !== "env" ||
+    ref.provider !== "default" ||
+    ref.id !== "MSTEAMS_APP_PASSWORD"
+  ) {
+    return "Configure the Teams app ID, tenant ID, and app password Secret reference in Channels before deploying.";
+  }
+  return null;
 }
 
 export function missingChannelCredentialGroups(values, configuration) {
-  if (!slackEnabled(values)) {
-    return [];
+  const missing = [];
+  if (slackEnabled(values)) {
+    const named = namedSlackAccountKeys(values);
+    if (named === null) {
+      if (!hasSlackBindings(configuration)) {
+        missing.push("Slack Secret bindings");
+      }
+    } else {
+      const unbound = named.filter(
+        (key) => !secretIdForBinding(configuration?.secretBindings?.[key]),
+      );
+      if (unbound.length) {
+        missing.push(`Slack Secret bindings (${unbound.join(", ")})`);
+      }
+    }
   }
-  const named = namedSlackAccountKeys(values);
-  if (named === null) {
-    return hasSlackBindings(configuration) ? [] : ["Slack Secret bindings"];
+  if (
+    teamsEnabled(values) &&
+    !secretIdForBinding(configuration?.secretBindings?.MSTEAMS_APP_PASSWORD)
+  ) {
+    missing.push("Teams app password Secret binding");
   }
-  const unbound = named.filter((key) => !secretIdForBinding(configuration?.secretBindings?.[key]));
-  return unbound.length ? [`Slack Secret bindings (${unbound.join(", ")})`] : [];
+  return missing;
 }
 
 export function hasRequiredChannelCredentials(values, configuration) {
@@ -111,10 +152,15 @@ function isDefinitiveRejection(error) {
   return [400, 403, 404, 409, 429].includes(error.status);
 }
 
-function renderSlackBindings(state) {
+function renderChannelBindings(state) {
   const list = element("dl", { className: "credential-status-list" });
   const named = namedSlackAccountKeys(state.values);
-  const bindings = named?.map((key) => ({ key, label: key })) ?? SLACK_SECRET_BINDINGS;
+  const bindings = [
+    ...(named === null
+      ? channelSecretBindings(state.values)
+      : named.map((key) => ({ key, label: key }))),
+    ...(named === null || !teamsEnabled(state.values) ? [] : TEAMS_SECRET_BINDINGS),
+  ];
   for (const binding of bindings) {
     const stored = Boolean(secretIdForBinding(state.configuration.secretBindings?.[binding.key]));
     list.append(
@@ -175,7 +221,7 @@ export function createChannelSecretsPanel({
       !state.saving &&
       !state.outcomeUnknown &&
       !state.reloadRequired &&
-      slackEnabled(state.values) &&
+      (slackEnabled(state.values) || teamsEnabled(state.values)) &&
       servicePrincipalId(state.agent) !== null
     );
   }
@@ -186,9 +232,9 @@ export function createChannelSecretsPanel({
 
   function referencedSecretIds(secretBindings) {
     return new Set(
-      SLACK_SECRET_BINDINGS.map((binding) =>
-        secretIdForBinding(secretBindings?.[binding.key]),
-      ).filter((id) => id !== null),
+      channelSecretBindings(state.values)
+        .map((binding) => secretIdForBinding(secretBindings?.[binding.key]))
+        .filter((id) => id !== null),
     );
   }
 
@@ -212,7 +258,7 @@ export function createChannelSecretsPanel({
 
   function secretGrantTargets(secretBindings, changedSecrets) {
     prunePendingSecretGrants(secretBindings);
-    for (const binding of SLACK_SECRET_BINDINGS) {
+    for (const binding of channelSecretBindings(state.values)) {
       const secret = changedSecrets[binding.key];
       if (secret?.id && secretIdForBinding(secretBindings?.[binding.key]) === secret.id) {
         state.pendingSecretGrants[secret.id] = secret;
@@ -264,10 +310,10 @@ export function createChannelSecretsPanel({
   }
 
   function renderChannelForm(error) {
-    if (!slackEnabled(state.values)) {
+    if (!(slackEnabled(state.values) || teamsEnabled(state.values))) {
       return null;
     }
-    if (namedSlackAccountKeys(state.values) !== null) {
+    if (namedSlackAccountKeys(state.values) !== null && !teamsEnabled(state.values)) {
       return element(
         "p",
         { className: "hint" },
@@ -310,7 +356,7 @@ export function createChannelSecretsPanel({
         createFixedKey: {
           label: "Binding key",
           value: binding.key,
-          hint: "This environment key is fixed for Slack Socket Mode.",
+          hint: "This environment key is fixed for the selected channel.",
         },
         metadataLabel: `View ${binding.label.replace("Slack ", "")} Secret metadata`,
         required: true,
@@ -322,7 +368,7 @@ export function createChannelSecretsPanel({
     const updateControls = () => {
       const changedSecrets = Object.values(draft.changedSecrets);
       const pendingSecrets = pendingSecretGrants();
-      const missing = SLACK_SECRET_BINDINGS.filter(
+      const missing = channelSecretBindings(state.values).filter(
         (binding) =>
           slackBindingState({ secretBindings: draft.secretBindings }, binding) === "missing",
       );
@@ -340,7 +386,14 @@ export function createChannelSecretsPanel({
     const form = element(
       "form",
       { id: formId, className: "credential-form" },
-      ...SLACK_SECRET_BINDINGS.map((binding) => createTokenPicker(binding)),
+      namedSlackAccountKeys(state.values) === null
+        ? null
+        : element(
+            "p",
+            { className: "hint" },
+            "Named Slack accounts use their own token keys. Bind them through the Configuration API.",
+          ),
+      ...channelSecretBindings(state.values).map((binding) => createTokenPicker(binding)),
       status,
       element("div", { className: "form-actions" }, save),
     );
@@ -352,7 +405,7 @@ export function createChannelSecretsPanel({
       if (!form.reportValidity()) {
         return;
       }
-      const missing = SLACK_SECRET_BINDINGS.filter(
+      const missing = channelSecretBindings(state.values).filter(
         (binding) =>
           slackBindingState({ secretBindings: draft.secretBindings }, binding) === "missing",
       );
@@ -454,7 +507,10 @@ export function createChannelSecretsPanel({
         "Credential entry requires readable version history.",
       );
     }
-    if (slackEnabled(state.values) && servicePrincipalId(state.agent) === null) {
+    if (
+      (slackEnabled(state.values) || teamsEnabled(state.values)) &&
+      servicePrincipalId(state.agent) === null
+    ) {
       return element(
         "p",
         { className: "error", role: "alert" },
@@ -476,9 +532,9 @@ export function createChannelSecretsPanel({
         element(
           "p",
           { className: "muted" },
-          "Save Slack tokens as Secrets, then deploy a new version to apply them. Saved bindings do not confirm live channel readiness.",
+          "Save channel credentials as Secrets, then deploy a new version to apply them. Saved bindings do not confirm live channel readiness.",
         ),
-        renderSlackBindings(state),
+        renderChannelBindings(state),
         error,
         state.reloadRequired
           ? element(
@@ -509,7 +565,7 @@ export function createChannelSecretsPanel({
 
   render();
   return {
-    section: slackEnabled(values) ? section : null,
+    section: slackEnabled(values) || teamsEnabled(values) ? section : null,
     canDeploy,
     deployGateMessage,
     isSaving: () => state.saving,
