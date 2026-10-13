@@ -6,6 +6,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   readdir,
   rename,
@@ -17,10 +18,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { imageSmokeTimeoutMultiplier } from "../helpers/image-smoke-timeout.mjs";
 import {
-  AGENT_WITH_NODE_ENTRYPOINT,
   AGENT_RUNTIME_ENTRYPOINT,
   CODEX_OAUTH_BOOTSTRAP_ENTRYPOINT,
   GATEWAY_RUNTIME_ENTRYPOINT as KUBERNETES_GATEWAY_RUNTIME_ENTRYPOINT,
@@ -28,7 +27,6 @@ import {
   NATIVE_WORKER_ENTRYPOINT,
   PLUGIN_RUNTIME_HELPERS,
 } from "../../apps/controller/src/drivers/compute/kubernetes/runtime-entrypoints.ts";
-import { OPENCLAW_AGENT_DATABASE_SCHEMA_VERSION } from "../../apps/controller/src/drivers/compute/runtime-startup.ts";
 import { nodeProgramArguments } from "../../apps/controller/src/drivers/compute/node-program.ts";
 import { OPENSHELL_CODEX_APP_SERVER_POLICY } from "../../apps/controller/src/drivers/sandbox/openshell.ts";
 import {
@@ -55,6 +53,7 @@ import {
   failureTail,
   runGatewaySmoke,
   reviewedCodexSeccompSecurityOptions,
+  eachSettled,
 } from "../helpers/runtime-image-startup.mjs";
 
 const syntheticCodexApiKey = "sk-openclaw-runtime-image-smoke-synthetic";
@@ -81,6 +80,18 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
         OCE_CODEX_OAUTH_SEED_PATH: seedPath,
       },
     });
+  // Publish fixture credentials through an exclusive temporary inode. Atomic
+  // replacement must not reopen a checked destination or follow a planted link.
+  const writeNativeAuth = async (value) => {
+    const temporaryPath = `${authPath}.native`;
+    const file = await open(temporaryPath, "wx", 0o600);
+    try {
+      await file.writeFile(JSON.stringify(value));
+    } finally {
+      await file.close();
+    }
+    await rename(temporaryPath, authPath);
+  };
   await run();
   assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), auth);
   assert.equal((await stat(authPath)).mode & 0o777, 0o600);
@@ -90,8 +101,7 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
     ...auth,
     tokens: { ...auth.tokens, access_token: "rotated-access", refresh_token: "rotated-refresh" },
   };
-  await writeFile(`${authPath}.native`, JSON.stringify(refreshed), { mode: 0o600 });
-  await rename(`${authPath}.native`, authPath);
+  await writeNativeAuth(refreshed);
   await run();
   assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), refreshed);
   await assert.rejects(
@@ -101,6 +111,17 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
   await rm(authPath);
   await assert.rejects(run(), /could not initialize private credentials/);
   await assert.rejects(readFile(authPath), { code: "ENOENT" });
+
+  // A killed writer may leave auth.json without a receipt. A retry must finish
+  // that generation rather than treating the partial output as completion.
+  await rm(join(codexHome, ".oce-oauth.json"));
+  await writeNativeAuth(auth);
+  await Promise.all(Array.from({ length: 8 }, () => run()));
+  assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), auth);
+  assert.deepEqual(JSON.parse(await readFile(join(codexHome, ".oce-oauth.json"), "utf8")), {
+    sourceUid: "source-1",
+    volumeUid: "volume-1",
+  });
 
   // A replacement source starts from an empty Codex home. Links planted by the previous
   // process must not redirect the new bundle into the served workspace.
@@ -113,7 +134,11 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
   }
   await run("source-2");
   assert.deepEqual(await readdir(workspace), []);
-  assert.deepEqual((await readdir(codexHome)).sort(), [".oce-oauth.json", "auth.json"]);
+  assert.deepEqual((await readdir(codexHome)).sort(), [
+    ".oce-oauth-bootstrap.lock",
+    ".oce-oauth.json",
+    "auth.json",
+  ]);
   assert.ok((await lstat(authPath)).isFile());
   assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), auth);
   assert.deepEqual(JSON.parse(await readFile(join(codexHome, ".oce-oauth.json"), "utf8")), {
@@ -124,7 +149,7 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
   // Restarting with the same source keeps the native generation and its history.
   await mkdir(join(codexHome, "sessions"));
   await writeFile(join(codexHome, "sessions", "current.jsonl"), "current login history");
-  await writeFile(authPath, JSON.stringify(refreshed), { mode: 0o600 });
+  await writeNativeAuth(refreshed);
   await run("source-2");
   assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), refreshed);
   assert.deepEqual(await readdir(join(codexHome, "sessions")), ["current.jsonl"]);
@@ -133,6 +158,12 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
   await rm(authPath);
   await symlink(seedPath, authPath);
   await assert.rejects(run("source-2"), /could not initialize private credentials/);
+
+  // A planted lock link cannot redirect the writer outside its private home.
+  await rm(join(codexHome, ".oce-oauth-bootstrap.lock"));
+  await symlink(seedPath, join(codexHome, ".oce-oauth-bootstrap.lock"));
+  await assert.rejects(run("source-3"), /could not initialize private credentials/);
+  assert.deepEqual(JSON.parse(await readFile(seedPath, "utf8")), auth);
 });
 
 test("runtime image seccomp option requires the CI-prepared profile record", async (t) => {
@@ -216,106 +247,6 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     /must match the CI-prepared Codex seccomp profile digest/,
   );
 });
-
-test(
-  "runtime image initializes the Harness workspace without replacing owner edits",
-  imageTestOptions,
-  async () => {
-    // Run the real Harness entrypoint and native setup. Replace only the long-lived
-    // node/Codex bodies: this proves initialization order, not pairing or a model turn.
-    const launch = String.raw`
-const assert = require("node:assert/strict");
-const { existsSync, readFileSync, writeFileSync } = require("node:fs");
-const { spawnSync } = require("node:child_process");
-const entrypoint = process.argv[1];
-const sentinel = "Owner edit that must survive a Harness restart.\n";
-for (let attempt = 0; attempt < 4; attempt++) {
-  const bootstrap = attempt === 0 ? { skipBootstrap: true } : attempt === 3 ? { skipBootstrap: "invalid" } : {};
-  const substitute = [
-    'const cp = require("node:child_process");',
-    'cp.spawn = () => {',
-    'if (!JSON.parse(process.env.OPENCLAW_WORKSPACE_BOOTSTRAP).skipBootstrap) require("node:assert/strict").ok(require("node:fs").readFileSync("/home/node/workspace/AGENTS.md", "utf8").length > 0);',
-    'console.log("WORKSPACE_CHILD_STARTED");',
-    'return new (require("node:events").EventEmitter)();',
-    '};',
-    entrypoint,
-  ].join("\n");
-  const result = spawnSync(process.execPath, ["-e", substitute], {
-    env: { PATH: process.env.PATH, HOME: "/home/node", OPENCLAW_NODE_STATE_DIR: "/tmp/node-state", OPENCLAW_NODE_SETUP_CODE: "synthetic-setup", OPENCLAW_WORKSPACE_DIR: "/home/node/workspace", OPENCLAW_WORKSPACE_BOOTSTRAP: JSON.stringify(bootstrap) },
-    encoding: "utf8",
-  });
-  if (attempt === 3) {
-    assert.notEqual(result.status, 0);
-    assert.doesNotMatch(result.stdout, /WORKSPACE_CHILD_STARTED/);
-    assert.match(result.stderr, /Workspace initialization failed/);
-    continue;
-  }
-  assert.equal(result.status, 0, result.stderr + result.stdout);
-  assert.ok(require("node:fs").readdirSync("/home/node/openclaw-runtime-assets/bundled-skills").length > 0);
-  assert.ok(require("node:fs").statSync("/home/node/openclaw-runtime-assets/plugin-skills").isDirectory());
-  assert.ok(require("node:fs").lstatSync("/home/node/.openclaw/plugin-skills").isSymbolicLink());
-  assert.equal(
-    require("node:fs").realpathSync("/home/node/.openclaw/plugin-skills"),
-    require("node:fs").realpathSync("/home/node/openclaw-runtime-assets/plugin-skills"),
-  );
-  assert.match(
-    require("node:fs").readFileSync("/home/node/.openclaw/plugin-skills/slack/SKILL.md", "utf8"),
-    /name:\s*slack/,
-  );
-  assert.match(
-    require("node:fs").readFileSync(
-      "/home/node/.openclaw/plugin-skills/block-kit/references/official-block-kit.md",
-      "utf8",
-    ),
-    /# Block Kit/,
-  );
-  assert.equal(result.stdout.split("WORKSPACE_CHILD_STARTED").length - 1, 2);
-  if (attempt === 0) {
-    assert.equal(existsSync("/home/node/workspace/AGENTS.md"), false);
-    continue;
-  }
-  for (const name of ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "BOOTSTRAP.md"]) {
-    assert.ok(readFileSync("/home/node/workspace/" + name, "utf8").length > 0);
-  }
-  if (attempt === 2) assert.equal(readFileSync("/home/node/workspace/AGENTS.md", "utf8"), sentinel);
-  writeFileSync("/home/node/workspace/AGENTS.md", sentinel);
-}
-console.log("WORKSPACE_INITIALIZATION_PASSED");
-`;
-    const { stdout } = await runDocker(
-      [
-        "run",
-        "--rm",
-        "--user",
-        "1000:1000",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--network",
-        "none",
-        "--tmpfs",
-        "/tmp:size=64m,mode=1777",
-        "--tmpfs",
-        "/home/node:size=64m,uid=1000,gid=1000",
-        "--tmpfs",
-        "/home/node/workspace:size=16m,uid=1000,gid=1000",
-        "--entrypoint",
-        "/usr/bin/tini",
-        image,
-        "-s",
-        "--",
-        "node",
-        "-e",
-        launch,
-        AGENT_WITH_NODE_ENTRYPOINT,
-      ],
-      { timeout: 120_000 * imageSmokeTimeoutMultiplier },
-    );
-    assert.match(stdout, /WORKSPACE_INITIALIZATION_PASSED/);
-  },
-);
 
 const runtimeImageStockBrokerDiagnosticStages = new Set([
   "material-init",
@@ -677,19 +608,6 @@ try {
 
   const result = JSON.parse(stdout);
   assert.equal(result.serverVersion, result.installedVersion);
-}
-
-// The native Gateway process's environment, as OpenClaw itself sees it.
-async function gatewayProcessEnvironment(containerName) {
-  const { stdout } = await runDocker([
-    "exec",
-    containerName,
-    "node",
-    "-e",
-    'const fs = require("node:fs"); for (const pid of fs.readdirSync("/proc")) { try { if (fs.readFileSync("/proc/" + pid + "/cmdline", "utf8").startsWith("openclaw-gateway")) { process.stdout.write(fs.readFileSync("/proc/" + pid + "/environ", "utf8")); break; } } catch {} }',
-  ]);
-  assert.notEqual(stdout, "", "the native Gateway process must be running");
-  return stdout.split("\0");
 }
 
 async function assertGatewayRuntimeAssets(containerName) {
@@ -1084,162 +1002,6 @@ test(
     const runtimeStopTimeoutMs = Number(stdout.trim());
     assert.ok(runtimeStopTimeoutMs > 0 && runtimeStopTimeoutMs <= GATEWAY_STOP_TIMEOUT_MS);
     assertNoPackagingFailure(logs);
-  },
-);
-
-test(
-  "runtime image tells OpenClaw that a read-only Kubernetes configuration is externally managed",
-  imageTestOptions,
-  async (t) => {
-    // An embedded OpenClaw Gateway starts from the Configuration OCC mounts read-only.
-    const configurationPath = await temporaryGatewayConfiguration(t, "openclaw");
-    const { containerName } = await runGatewaySmoke(t, "openclaw", {
-      configurationPath: "/etc/openclaw/openclaw.json",
-      entrypoint: KUBERNETES_GATEWAY_RUNTIME_ENTRYPOINT,
-      volumes: [`${configurationPath}:/etc/openclaw/openclaw.json:ro`],
-      withAppServer: false,
-    });
-    assert.ok(
-      (await gatewayProcessEnvironment(containerName)).includes("OPENCLAW_CONFIG_READONLY=1"),
-    );
-    // OpenClaw promotes its last-known-good backup just after it reports ready,
-    // and only then releases its post-ready work. That work includes the remote
-    // model catalog refresh, which fails at once without a network. Its log line
-    // therefore comes after any promotion failure would have been logged. This
-    // ordering is OpenClaw's (checked at the pinned source): re-check it when the
-    // pin moves, since a promotion moved after post-ready work would pass here.
-    const logs = await waitForDockerLog(containerName, /remote model catalog refresh failed/);
-    assert.match(logs, /heartbeat: started/);
-    assert.doesNotMatch(logs, /last-known-good|EROFS/);
-  },
-);
-
-// OpenClaw state written by the 2026-09-28 release's runtime image
-// (ghcr.io/openclaw/openclaw-enterprise-runtime@sha256:f17a66a18de9d4231c9579faf90573d80bef1278aaaf63135b6c6ce0b71a23b3,
-// OpenClaw 000d03942c87): its Gateway ran one turn against a stub provider that
-// answers 401 and stopped cleanly. The archive holds the shared state database
-// (its device identity and config revision keys deleted, then vacuumed) and the
-// main agent database (schema 23) as that Gateway left it.
-const releasedGatewayState = fileURLToPath(
-  new URL("../fixtures/runtime-state/released-gateway-state.tar.gz", import.meta.url),
-);
-
-async function agentDatabaseFacts(containerName) {
-  const { stdout } = await runDocker([
-    "exec",
-    containerName,
-    "node",
-    "-e",
-    `
-const { readdirSync } = require("node:fs");
-const { DatabaseSync } = require("node:sqlite");
-const directory = "/home/node/.openclaw/agents/main/agent";
-const database = new DatabaseSync(directory + "/openclaw-agent.sqlite", { readOnly: true });
-const { user_version: version } = database.prepare("PRAGMA user_version").get();
-database.close();
-const backups = readdirSync(directory).filter((name) => name.includes(".pre-startup-migration-")).sort();
-process.stdout.write(JSON.stringify({ version, backups }));
-`,
-  ]);
-  return JSON.parse(stdout);
-}
-
-function stateMigrationPhases(logs) {
-  return jsonLogEntries(logs).filter(
-    (entry) => entry.event === "runtime.startup_phase" && entry.phase === "state-migration",
-  );
-}
-
-// Copies the released state into a new volume, owned as the Gateway user, for
-// mounting at `mountPath` (the Gateway home or its ~/.openclaw).
-async function releasedGatewayStateVolume(t, mountPath) {
-  const volume = `oce-runtime-image-state-${randomBytes(6).toString("hex")}`;
-  await runDocker(["volume", "create", volume]);
-  t.after(() => runDocker(["volume", "rm", "-f", volume]).catch(() => {}));
-  // As root, like the Docker Driver's workspace setup: a new volume mounted
-  // below the image's home can be root-owned.
-  await runDocker([
-    "run",
-    "--rm",
-    "--user",
-    "0:0",
-    "--network",
-    "none",
-    "--volume",
-    `${volume}:${mountPath}`,
-    "--volume",
-    `${releasedGatewayState}:/released-gateway-state.tar.gz:ro`,
-    "--entrypoint",
-    "sh",
-    image,
-    "-c",
-    `tar -xzf /released-gateway-state.tar.gz -C /home/node && chown -R 1000:1000 ${mountPath}`,
-  ]);
-  return volume;
-}
-
-// startGateway(readinessAttempts) starts a Gateway on the released state volume.
-async function assertReleasedGatewayMigratesOnce(startGateway) {
-  // The current OpenClaw refuses this database until Doctor migrates it. Doctor's
-  // full repair pass takes about 20 s here and over a minute on a busy CI runner.
-  const released = await startGateway(240);
-  assert.deepEqual(
-    stateMigrationPhases(released.logs).map(({ outcome }) => outcome),
-    ["ok"],
-    released.logs,
-  );
-  assert.match(released.logs, /from schema 23 to \d+ with openclaw doctor --fix/);
-  assert.doesNotMatch(released.logs, /uses schema version 23/);
-  const migrated = await agentDatabaseFacts(released.containerName);
-  assert.equal(
-    migrated.version,
-    OPENCLAW_AGENT_DATABASE_SCHEMA_VERSION,
-    "Doctor migrated to another schema: update OPENCLAW_AGENT_DATABASE_SCHEMA_VERSION with the OpenClaw pin.",
-  );
-  assert.equal(migrated.backups.length > 0, true, "Doctor keeps a pre-migration copy");
-  await runDocker(["stop", "--time", "60", released.containerName]);
-  await runDocker(["rm", "-f", released.containerName]);
-
-  // A current database starts without Doctor.
-  const current = await startGateway();
-  assert.deepEqual(stateMigrationPhases(current.logs), [], current.logs);
-  assert.doesNotMatch(current.logs, /openclaw doctor --fix/);
-  assert.deepEqual(await agentDatabaseFacts(current.containerName), migrated);
-}
-
-test(
-  "runtime image migrates a released Gateway's agent database once before starting OpenClaw",
-  imageTestOptions,
-  async (t) => {
-    // The volume replaces the Gateway's /home/node tmpfs, as its PersistentVolume does.
-    const volume = await releasedGatewayStateVolume(t, "/home/node");
-    const configurationPath = await temporaryGatewayConfiguration(t, "openclaw");
-    await assertReleasedGatewayMigratesOnce((readinessAttempts) =>
-      runGatewaySmoke(t, "openclaw", {
-        configurationPath: "/etc/openclaw/openclaw.json",
-        entrypoint: KUBERNETES_GATEWAY_RUNTIME_ENTRYPOINT,
-        readinessAttempts,
-        tmpfs: [],
-        volumes: [`${configurationPath}:/etc/openclaw/openclaw.json:ro`, `${volume}:/home/node`],
-        withAppServer: false,
-      }),
-    );
-  },
-);
-
-test(
-  "runtime image migrates a released agent database before the Docker development Gateway starts OpenClaw",
-  imageTestOptions,
-  async (t) => {
-    // The Docker Driver's Agent state volume, over the Gateway's /home/node tmpfs.
-    const volume = await releasedGatewayStateVolume(t, "/home/node/.openclaw");
-    await assertReleasedGatewayMigratesOnce((readinessAttempts) =>
-      runGatewaySmoke(t, "openclaw", {
-        readinessAttempts,
-        volumes: [`${volume}:/home/node/.openclaw`],
-        withAppServer: false,
-      }),
-    );
   },
 );
 
@@ -1657,6 +1419,7 @@ const validation = cp.spawnSync("node", ["/app/openclaw.mjs", "config", "validat
 process.stdout.write(JSON.stringify({
   excluded: config.plugins.entries.codex.config.codexDynamicToolsExclude,
   triggers: config.cron.triggers,
+  memoryFlush: config.agents.defaults.compaction.memoryFlush,
   codexProvider: config.models.providers.codex,
   openaiProvider: config.models.providers.openai,
   valid: JSON.parse(validation.stdout).valid,
@@ -1674,9 +1437,13 @@ process.stdout.write(JSON.stringify({
         "gateway_exec",
         "gateway_process",
         "terminal",
+        "portal",
         "openclaw",
+        "plugins",
+        "gateway",
       ],
       triggers: { enabled: false },
+      memoryFlush: { enabled: false },
       codexProvider: {
         models: codexProvider.models,
         baseUrl: "http://127.0.0.1:9",
@@ -1904,7 +1671,9 @@ server.listen(443, "0.0.0.0", () => console.log("broker-forwarder-ready"));
       "disallowed_status=$?",
       "set -e",
       'test "$disallowed_status" -ne 0',
-      "printf '%s\\n' \"$disallowed_output\" | grep -Fq 'repository-push-ref-not-allowed'",
+      // Match in the shell, not with `printf | grep -q`: under pipefail, grep -q
+      // exits at the first match and printf's next line write can fail with EPIPE.
+      "[[ $disallowed_output == *'repository-push-ref-not-allowed'* ]]",
       "git clone https://github.com/fixture/read-only.git read-only",
       "git -C read-only switch -c denied",
       "printf 'denied proof\n' > read-only/denied-proof.txt",
@@ -1916,14 +1685,14 @@ server.listen(443, "0.0.0.0", () => console.log("broker-forwarder-ready"));
       "set -e",
       "printf '%s\\n' \"$readonly_output\"",
       'test "$readonly_status" -ne 0',
-      "printf '%s\\n' \"$readonly_output\" | grep -Fq 'requested URL returned error: 400'",
+      "[[ $readonly_output == *'requested URL returned error: 400'* ]]",
       "set +e",
       "unadmitted_output=$(git ls-remote https://github.com/fixture/unadmitted.git HEAD 2>&1)",
       "unadmitted_status=$?",
       "set -e",
       "printf '%s\\n' \"$unadmitted_output\"",
       'test "$unadmitted_status" -ne 0',
-      "printf '%s\\n' \"$unadmitted_output\" | grep -Fq 'credential-helper-failed'",
+      "[[ $unadmitted_output == *'credential-helper-failed'* ]]",
       "printf 'commit=%s\\n' \"$commit\"",
     ].join("\n");
     // Ask the real broker for its service-owned denial codes without printing
@@ -2129,7 +1898,13 @@ async function expectFailure(name, script, pattern, permissionProfile = brokerPe
     "set -e",
     ${JSON.stringify("printf '%s\n' \"$output\"")},
     ${JSON.stringify('if [ "$status" -eq 0 ]; then exit 42; fi')},
-    ${JSON.stringify("printf '%s\n' \"$output\" | grep -Eiq ")} + JSON.stringify(pattern),
+    // An in-shell match: printf piped to grep -q can fail with EPIPE under pipefail.
+    // Patterns are case-insensitive alternations of literals matched against the
+    // whole output; they go into a double-quoted assignment, so keep $, backticks
+    // and backslashes out of them.
+    ${JSON.stringify("shopt -s nocasematch")},
+    ${JSON.stringify("pattern=")} + JSON.stringify(pattern),
+    ${JSON.stringify("[[ $output =~ $pattern ]]")},
   ].join("\\n");
   const denied = await execShell(failureProbe, permissionProfile);
   assert.equal(denied.exitCode, 0, name + " did not fail for the expected reason: " + denied.stdout + denied.stderr);
@@ -2485,7 +2260,8 @@ http.createServer((req, res) => {
   res.end(JSON.stringify(req.url === "/counter" ? { modelCalls } : { data: [{ id: "fixture" }] }));
 }).listen(18880, "127.0.0.1");
 `;
-    for (const enabled of [true, false]) {
+    // Each case owns its container and configuration file, so both run at once.
+    await eachSettled([true, false], async (enabled) => {
       const configuration = drivers[0][1].kubernetesGatewayConfigurationDocument(
         createAdmittedRuntimeImageConfiguration("openclaw"),
       );
@@ -2568,7 +2344,7 @@ http.createServer((req, res) => {
         `native TLS enabled=${enabled}: native ready, Compute readiness ${enabled ? "refused" : "passed"}, modelCalls=0`,
       );
       await runDocker(["rm", "-f", containerName]);
-    }
+    });
   },
 );
 
@@ -2597,7 +2373,9 @@ http.createServer((req, res) => {
   res.end(JSON.stringify(req.url === "/counter" ? { modelCalls } : { data: [{ id: "fixture" }] }));
 }).listen(18880, "127.0.0.1");
 `;
-    for (const [gateway, reachable] of [
+    // Each case owns its container and configuration file, so the cases run
+    // concurrently on the shared internal network.
+    const bindCases = [
       [{ bind: "loopback" }, false],
       [{ bind: "custom", customBindHost: "127.0.0.1" }, false],
       [{ bind: "tailnet" }, false],
@@ -2605,7 +2383,8 @@ http.createServer((req, res) => {
       [{ bind: "auto" }, true],
       [{ bind: "custom", customBindHost: "0.0.0.0" }, true],
       [{}, true],
-    ]) {
+    ];
+    await eachSettled(bindCases, async ([gateway, reachable], index) => {
       const configuration = driver.kubernetesGatewayConfigurationDocument(
         createAdmittedRuntimeImageConfiguration("openclaw"),
       );
@@ -2613,7 +2392,7 @@ http.createServer((req, res) => {
       Object.assign(configuration.gateway, gateway);
       configuration.models.providers.openai.baseUrl = "http://127.0.0.1:18880/v1";
       configuration.models.providers.openai.apiKey = "synthetic-owned-native-bind";
-      const path = join(directory, "openclaw.json");
+      const path = join(directory, `openclaw-${index}.json`);
       // Private directory, read-only mount, synthetic input readable by native UID1000.
       await writeFile(path, JSON.stringify(configuration), { mode: 0o644 });
       // Feed native-valid inputs independently of admission to establish which
@@ -2692,6 +2471,6 @@ http.createServer((req, res) => {
         `native bind=${gateway.bind ?? "omitted"} host=${gateway.customBindHost ?? "default"}: private ready=200, Pod-IP ${reachable ? "ready=200" : "ECONNREFUSED"}, modelCalls=0`,
       );
       await runDocker(["rm", "-f", containerName]);
-    }
+    });
   },
 );

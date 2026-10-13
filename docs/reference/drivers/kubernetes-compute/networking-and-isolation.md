@@ -1,19 +1,19 @@
 # Kubernetes networking and isolation
 
 The [Kubernetes Compute Driver](../kubernetes-compute.md) manages tenant
-network boundaries, private Agent routes, and namespace ownership.
+networking, private Agent routes, and namespaces.
 
 ## Networking
 
 Configure cluster DNS namespace/Pod labels and gateway port. Startup rejects
-peer namespaces outside DNS label syntax or longer than 63 characters.
+peer namespaces violating DNS label syntax or exceeding 63 characters.
 Set `network.gatewayTrustedProxyCidrs` to nonempty, valid CIDRs for the proxy
 socket sources. This trusted Installation setting has no production default and
 rejects all-source ranges, including IPv4-mapped equivalents. Without private
 routing, also configure the namespace and Pod selectors in
 `network.gatewayClients` for your authenticated proxy.
 
-All peer `podLabels` are validated before provisioning against
+Peer `podLabels` are validated before provisioning against
 [Kubernetes label syntax](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set):
 values may be empty; keys and values allow 63 characters, DNS prefixes 253.
 
@@ -34,13 +34,14 @@ the endpoint capability retain ordinary Service or private routing.
 
 For Compute-owned startup failure evidence, plugin reporting, and on-demand
 deployment diagnostics, set `network.pluginStatusProxySourceCidrs` to the
-Kubernetes API server's source addresses for Pod proxy requests, preferably
-individual `/32` or `/128` addresses. On overlay networks, the source may be the
-control-plane node's overlay address rather than its node IP; verify it across
+Kubernetes API server's source addresses for Pod proxy requests, as `/32` or
+`/128` addresses: wider ranges warn and all-address ranges fail. On overlay
+networks, the source may be the control-plane node's overlay address rather than
+its node IP; verify it across
 nodes with enforced policies. The policy allows those sources only to the private
 status port, TCP/18791, even when an Agent has no enabled plugins. Worker and API
-ServiceAccounts each need namespace-local `get` on `pods/proxy`. An omitted list
-adds no API-proxy ingress rule and leaves status unavailable where the cluster
+ServiceAccounts each need namespace-local `get` on `pods/proxy`. Omitting the list
+adds no API-proxy ingress and leaves status unavailable where the cluster
 blocks that traffic. It also restarts the Gateway once on each
 dedicated Codex first deploy. This setting does not expose the native
 gateway or grant workloads Kubernetes API access.
@@ -62,8 +63,7 @@ identity `occ-workspace-files` with `operator.admin`, and
 `gateway.allowRealIpFallback: true`. Configuration and Console starters
 can omit these fields. Unsupported auth fields or conflicting trust fields fail
 deployment; matching CIDR lists are accepted regardless of order. Deployment and
-provisioning check the same fields and answer `409 RESOURCE_CONFLICT` naming the setting and requirement, for example `Configuration setting gateway.auth.mode must be
-trusted-proxy: …`, never its value. `trustedProxy.allowUsers` is checked later:
+provisioning check the same fields and answer `409 RESOURCE_CONFLICT` naming the setting and requirement, never its value. `trustedProxy.allowUsers` is checked later:
 provisioning returns fixed `409` text with the reason in the API log; deployment
 is admitted, then fails with `DEPENDENCY_UNAVAILABLE` and the reason in the
 worker's `worker.compute-prepare-failed` line. `trustedProxy.allowLoopback` must be omitted or false:
@@ -83,7 +83,7 @@ readiness gates; Gateway probes HTTP. `gateway.tls.enabled: true` is refused
 before revision creation. Envoy terminates TLS. Docker/SSH
 retain managed-password defaults and explicit trusted-proxy HTTP.
 
-Verify that configured CIDRs contain the proxy's
+Configured CIDRs must contain the proxy's
 source addresses and exclude untrusted sources. CIDRs do not authenticate a
 proxy: retain the exact Envoy NetworkPolicy peer, TLS verification, service-key
 authentication, and identity/header sanitization.
@@ -161,8 +161,9 @@ the expected template profile.
 
 Harness Pods provisioned by a SandboxDriver, such as OpenShell, carry
 `provider-fenced-v1` instead. The provider fences their egress, so Compute grants
-them only Gateway transport and plugin-status ingress (`allow-agent-runtime` is
-ingress-only for them): no DNS, workspace-node, model or authentication egress.
+them only Gateway transport and status ingress (`allow-agent-runtime` is
+ingress-only for them) and the workspace-node route: no DNS, model or
+authentication egress.
 Provider Harness readiness and activation reject a Pod with any other profile.
 
 Policy names stay stable; controller upgrades restart no Pods.
@@ -182,11 +183,11 @@ Existing OpenShell Sandboxes are not relabeled because Sandbox names are per
 revision: redeploy the Agent revision. For development, follow the
 [development recovery procedure](../../../guides/deploy/local-operations.md#build-images-for-local-kubernetes).
 
-The OpenShell gateway needs scoped DNS/API and callback policies. Its caller is
-the supervisor Pod
-(`openshell.ai/managed-by=openshell`, `openshell.ai/boundary-role=supervisor`),
-which carries no `openclaw.dev` labels; supervisor-labelled peers admit it, not
-the ordinary profile. Platform services keep their Helm policy selectors.
+The separately installed OpenShell gateway needs its own scoped DNS/API and
+callback policies. Its caller, the OpenShell supervisor Pod
+(`openshell.ai/boundary-role=supervisor`), carries no `openclaw.dev` labels, so
+supervisor-labelled peers admit it; an Agent Gateway admits only its Sandbox's.
+Platform services keep their Helm policy selectors.
 
 Profile assignment is a trusted controller decision. The label qualifies a Pod
 for network grants but does not supply workload identity or authorization to

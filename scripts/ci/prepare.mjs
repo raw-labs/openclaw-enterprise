@@ -53,11 +53,14 @@ const fixtureLanes = new Set([
   "k3d-fixture-configuration",
   "k3d-fixture-state",
   "k3d-fixture-plugins",
+  "k3d-fixture-oauth",
 ]);
 // Ordinary k3d lanes pin the K3s node image by digest so cluster creation
 // never depends on k3d's online release-channel lookup (update.k3s.io). Bump
 // it deliberately to a newer v1.35 patch; OPENCLAW_CI_K3S_IMAGE still
-// overrides it with another immutable reference.
+// overrides it with another immutable reference. The QA workflows pass the same
+// image to the Compose launcher as OCC_DEVELOPMENT_K3S_IMAGE (ci-prepare.test.mjs
+// checks they match).
 const defaultK3sImage =
   "docker.io/rancher/k3s:v1.35.9-k3s1@sha256:ec9868c6a38d4e8c1869832fb5fd1eb8473c39794a0b44d2b952e7ba911951bc";
 const nativeIAMBarrierFile = "tests/integration/postgres-native-iam-policy-barrier.test.mjs";
@@ -361,6 +364,13 @@ async function markResourceReady(statePath, state, resource) {
   await writeState(statePath, state);
 }
 
+// A timed-out command gets SIGTERM, SIGKILL after this grace, and after the same
+// grace again its held output pipes are abandoned. Tests shorten it.
+const commandKillGraceMs =
+  Number(process.env.OPENCLAW_CI_COMMAND_KILL_GRACE_MS) > 0
+    ? Number(process.env.OPENCLAW_CI_COMMAND_KILL_GRACE_MS)
+    : 5_000;
+
 function execFile(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -425,8 +435,8 @@ function execFile(command, args, options = {}) {
             child.stdout?.destroy();
             child.stderr?.destroy();
             finish(() => reject(timedOutError(child.exitCode, child.signalCode)));
-          }, 5_000);
-        }, 5_000);
+          }, commandKillGraceMs);
+        }, commandKillGraceMs);
       }, options.timeoutMs);
     }
     let stdout = "";
@@ -850,11 +860,10 @@ async function validateLaneInputsBeforeSideEffects(lane, env = {}) {
   }
 }
 
-// Lanes that may restore the hosted BuildKit cache. Only images-packaging
-// exports it, on main pushes, and the main-only warm job (ci-image-cache.yml)
-// builds with that lane's state. The repository platform lane loads its
-// runtime image into the Docker engine so a default-builder fixture build can
-// derive from it.
+// Lanes that restore the hosted BuildKit cache. Only the main-only warm job
+// (ci-image-cache.yml) exports it, building with images-packaging's state. The
+// repository platform lane loads its runtime image into the Docker engine so a
+// default-builder fixture build can derive from it.
 const imageCacheLanes = new Map([
   ["images-packaging", { localStore: false }],
   ["images-model-probes", { localStore: false }],
@@ -886,21 +895,14 @@ function imageBuildArgs(state, role, localStore, cacheWarm = false) {
       "SOURCE_DATE_EPOCH=0",
       "--cache-from",
       `${cache},timeout=60s`,
-      // One writer per image among the parallel image lanes; on main the warm job
-      // writes the same scope too (the last index wins). The warm job exists to
-      // export, so each cache transfer may take longer and a failed export fails
-      // the job instead of being ignored. Pull request runs only restore: their
-      // export cost Images and Packaging about 40 s and filled only their own
-      // merge ref's scope. Main pushes keep the lane's export as a backstop.
-      ...(state.lane === "images-packaging" &&
-      (cacheWarm || process.env.GITHUB_EVENT_NAME === "push")
-        ? [
-            "--cache-to",
-            cacheWarm
-              ? `${cache},mode=max,timeout=10m`
-              : `${cache},mode=max,ignore-error=true,timeout=60s`,
-          ]
-        : []),
+      // Only main's warm job (ci-image-cache.yml) writes the cache. It runs for
+      // every image input change, in order and never cancelled, so the newest
+      // commit's export lands last. CI lanes only restore: a lane export on main
+      // could land after a newer commit's warm export and replace it, and on a
+      // pull request it cost about 40 s and filled only the merge ref's scope.
+      // The warm job exists to export, so each transfer may take longer and a
+      // failed export fails the job instead of being ignored.
+      ...(cacheWarm ? ["--cache-to", `${cache},mode=max,timeout=10m`] : []),
     ];
   }
   return [
@@ -917,8 +919,8 @@ function imageBuildArgs(state, role, localStore, cacheWarm = false) {
 // image from the BuildKit cache without exporting its layers, then tag the
 // engine's image if it has the same ID. The ID is the digest of a config that
 // names every layer's content digest, so the tagged image is the one the build
-// would load. Lanes that export the cache, and any probe failure (a timeout, an
-// engine error, unreadable metadata, a failed tag), build as before. The log
+// would load. The warm job, which exports the cache, and any probe failure (a
+// timeout, an engine error, unreadable metadata, a failed tag) build as before. The log
 // says "absent" only when the engine reports no such image, "different" when it
 // holds another image under that reference, and "probe-failed" otherwise.
 async function reuseEngineImage(state, role, args, tag) {
@@ -1366,11 +1368,16 @@ async function waitForK3dNodesRegistered(kubectl, kubectlArgs, nodes) {
 // Hosted CI creates a cluster, node image pull included, in 26-48 s (284 runs,
 // 2026-10-08: p50 27 s, p99 44 s). A create that never returns once held a lane
 // for 44 minutes until the job timeout (finding 840).
-const k3dCreateTimeoutMs =
-  Number(process.env.OPENCLAW_CI_K3D_CREATE_TIMEOUT_MS) > 0
-    ? Number(process.env.OPENCLAW_CI_K3D_CREATE_TIMEOUT_MS)
-    : 5 * 60_000;
-const k3dCreateAttempts = 2;
+// A hung first attempt once held a lane for its full five minutes before a 12 s
+// retry (finding 1174), so the first attempt gets two minutes, still well over
+// the p99, and the retry keeps five for a slow runner.
+// OPENCLAW_CI_K3D_CREATE_TIMEOUT_MS sets both attempts.
+const k3dCreateTimeoutOverrideMs = Number(process.env.OPENCLAW_CI_K3D_CREATE_TIMEOUT_MS);
+const k3dCreateTimeoutsMs =
+  k3dCreateTimeoutOverrideMs > 0
+    ? [k3dCreateTimeoutOverrideMs, k3dCreateTimeoutOverrideMs]
+    : [2 * 60_000, 5 * 60_000];
+const k3dCreateAttempts = k3dCreateTimeoutsMs.length;
 
 // Bound each create. After a timeout, keep diagnostics, delete what the
 // attempt created, and try once more with the same owned name and directory.
@@ -1378,9 +1385,10 @@ const k3dCreateAttempts = 2;
 async function createK3dCluster(statePath, state, resource, args) {
   const k3d = process.env.OPENCLAW_CI_K3D_BIN ?? "k3d";
   for (let attempt = 1; ; attempt += 1) {
+    const timeoutMs = k3dCreateTimeoutsMs[attempt - 1];
     try {
       await k3dStage(state, "k3d-create", () =>
-        execFile(k3d, args, { timeoutMs: k3dCreateTimeoutMs, processGroup: true }),
+        execFile(k3d, args, { timeoutMs, processGroup: true }),
       );
       return;
     } catch (error) {
@@ -1388,7 +1396,7 @@ async function createK3dCluster(statePath, state, resource, args) {
         throw error;
       }
       const summary =
-        `k3d cluster create ${resource.name} did not finish within ${k3dCreateTimeoutMs} ms ` +
+        `k3d cluster create ${resource.name} did not finish within ${timeoutMs} ms ` +
         `(attempt ${attempt} of ${k3dCreateAttempts})`;
       progress(state.lane, summary);
       await captureK3dDiagnostics({
@@ -1397,6 +1405,7 @@ async function createK3dCluster(statePath, state, resource, args) {
         lane: state.lane,
         statePath,
         failure: summary,
+        k3dOutput: error,
       }).catch(() => progress(state.lane, "k3d diagnostics unavailable"));
       if (attempt >= k3dCreateAttempts) {
         const failure = new Error(
@@ -2472,7 +2481,8 @@ async function prepareLane({ lane, statePath }) {
       break;
     case "k3d-fixture-configuration":
     case "k3d-fixture-state":
-    case "k3d-fixture-plugins": {
+    case "k3d-fixture-plugins":
+    case "k3d-fixture-oauth": {
       // PostgreSQL, the cluster and the fixture build are independent; the
       // fixture is imported only after the cluster passed its readiness gates.
       const [, cluster, built] = await timedPreparation(

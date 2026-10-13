@@ -86,7 +86,7 @@ export interface OpenShellSandboxDriverOptions {
     readonly readiness?: {
       readonly serviceName: string;
       readonly podSelector: Readonly<Record<string, string>>;
-      readonly timeoutMs?: number;
+      readonly timeoutMs: number;
       readonly pollIntervalMs?: number;
     };
     readonly operatorWorkspaceResources?: readonly KubernetesNamespacedResource[];
@@ -172,6 +172,10 @@ const OPENSHELL_MANAGED_BY_LABEL = "app.kubernetes.io/managed-by";
 const OPENSHELL_NAMESPACE_LABEL = "openclaw.dev/namespace";
 const OPENSHELL_NAMESPACE_ID_LABEL = "openclaw.dev/namespace-id";
 const OPENSHELL_MANAGED_BY = "openclaw-enterprise";
+/** OpenShell's supervisor Pod labels (pinned `sandbox_runtime.rs` `control_labels`). */
+const OPENSHELL_SANDBOX_ID_LABEL = "openshell.ai/sandbox-id";
+const OPENSHELL_BOUNDARY_ROLE_LABEL = "openshell.ai/boundary-role";
+const KUBERNETES_LABEL_VALUE = /^[A-Za-z0-9](?:[-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
 const OPENSHELL_RUNTIME_ROOT = "/sandbox/.openclaw-runtime";
 const OPENSHELL_HOME = `${OPENSHELL_RUNTIME_ROOT}/home`;
 const OPENSHELL_WORKSPACE_MOUNTS = "/sandbox/.openclaw-mounts";
@@ -399,7 +403,8 @@ function environment(
       );
     }
     result[nonempty(entry.name, "Environment variable name")] =
-      workspaceMountPaths.get(entry.value) ?? entry.value.replaceAll("/home/node", OPENSHELL_HOME);
+      workspaceMountPaths.get(entry.value) ??
+      entry.value.replaceAll(/\/home\/node(\/|$)/g, `${OPENSHELL_HOME}$1`);
   }
   result.HOME = OPENSHELL_HOME;
   result.TMPDIR = OPENSHELL_TEMPORARY;
@@ -1079,7 +1084,7 @@ async function waitForGatewayReadiness(
   readiness: NonNullable<OpenShellSandboxDriverOptions["gateway"]["readiness"]>,
 ): Promise<void> {
   const namespace = namespaceName(context.namespace);
-  const deadline = Date.now() + (readiness.timeoutMs ?? 0);
+  const deadline = Date.now() + readiness.timeoutMs;
   const pollIntervalMs = readiness.pollIntervalMs ?? 1_000;
   let unavailable = "OpenShell gateway Service is unavailable.";
   for (;;) {
@@ -1551,15 +1556,22 @@ function validateOptions(options: OpenShellSandboxDriverOptions): void {
   if (options.gateway.readiness !== undefined) {
     nonempty(options.gateway.readiness.serviceName, "OpenShell gateway Service name");
     labels(options.gateway.readiness.podSelector, "OpenShell gateway Pod selector");
-    for (const [value, description] of [
-      [options.gateway.readiness.timeoutMs, "OpenShell gateway readiness timeout"],
-      [options.gateway.readiness.pollIntervalMs, "OpenShell gateway readiness poll interval"],
-    ] as const) {
-      if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
-        throw new OpenShellSandboxConfigurationFailure(
-          `${description} must be a positive safe integer.`,
-        );
-      }
+    if (
+      !Number.isSafeInteger(options.gateway.readiness.timeoutMs) ||
+      options.gateway.readiness.timeoutMs < 1
+    ) {
+      throw new OpenShellSandboxConfigurationFailure(
+        "OpenShell gateway readiness timeout must be a positive safe integer.",
+      );
+    }
+    const pollIntervalMs = options.gateway.readiness.pollIntervalMs;
+    if (
+      pollIntervalMs !== undefined &&
+      (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 1)
+    ) {
+      throw new OpenShellSandboxConfigurationFailure(
+        "OpenShell gateway readiness poll interval must be a positive safe integer.",
+      );
     }
   }
   options.gateway.networkPolicyResources?.forEach((resource, index) =>
@@ -2444,6 +2456,50 @@ export class OpenShellSandboxDriver implements SandboxDriver {
       );
     }
     return harnessObservation(existing);
+  }
+
+  /**
+   * The revision's supervisor Pod opens its workspace-node connection. OpenShell labels that
+   * Pod with the Sandbox's gateway-minted ID (`sandbox_runtime.rs` `control_labels`), a UUID
+   * distinct from the Sandbox name, so the ID is read from the gateway's own record.
+   */
+  async workspaceNodePeerLabels(
+    context: SandboxNamespaceContext & { readonly revision: Readonly<AgentRevision> },
+  ): Promise<Readonly<Record<string, string>> | undefined> {
+    this.requireOperatorWorkspaceMode("resolve a workspace-node peer");
+    if (
+      context.revision.namespaceId !== context.namespace.id ||
+      context.revision.sandboxDriverId !== this.id ||
+      context.revision.harness.mode !== "dedicated"
+    ) {
+      throw new OpenShellSandboxConfigurationFailure(
+        "Refusing to resolve a workspace-node peer outside its selected dedicated AgentRevision and Namespace.",
+      );
+    }
+    const sandbox = this.sandboxRef(context);
+    const existing = await openShellSandboxObserver(
+      this.gatewayClientForNamespace(sandbox.namespaceName),
+    ).getSandbox(
+      { name: sandbox.resourceName, workspace: workspaceName(context.namespace) },
+      context.signal,
+    );
+    if (existing === undefined) {
+      return undefined;
+    }
+    if (existing.annotations["openclaw.dev/revision-id"] !== context.revision.id) {
+      throw new OpenShellSandboxConfigurationFailure(
+        `Refusing OpenShell Sandbox ${sandbox.resourceName} without exact AgentRevision ownership.`,
+      );
+    }
+    if (existing.id === undefined || !KUBERNETES_LABEL_VALUE.test(existing.id)) {
+      throw new OpenShellSandboxConfigurationFailure(
+        `OpenShell Sandbox ${sandbox.resourceName} has no ID usable as a supervisor Pod label.`,
+      );
+    }
+    return Object.freeze({
+      [OPENSHELL_SANDBOX_ID_LABEL]: existing.id,
+      [OPENSHELL_BOUNDARY_ROLE_LABEL]: "supervisor",
+    });
   }
 
   close(): void {

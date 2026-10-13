@@ -1,6 +1,6 @@
 ---
 created: "2026-10-06"
-updated: "2026-10-10"
+updated: "2026-10-13"
 last_updated_session: "authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9"
 ---
 
@@ -42,8 +42,9 @@ graph TD
 ### 1. Admit runtime prerequisites and credentials
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:enabledChannels`
-requires a Dedicated workload, channel proxy, and channel routing for enabled
-Teams. An omitted `webhook.path`, including `webhook: {}`, uses the native
+uses `configuration-rules.ts:enabledChannelProviders` and `requireChannelTopology`
+to require supported providers, a Dedicated workload and a channel proxy.
+It additionally requires channel routing for enabled Teams. An omitted `webhook.path`, including `webhook: {}`, uses the native
 `/api/messages` default. Non-object webhook values, custom paths, legacy
 listeners and sovereign clouds are refused.
 `validateChannelSecretBindings` requires matching admitted bindings.

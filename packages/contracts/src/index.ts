@@ -1,4 +1,7 @@
 import type { WorkspaceSetup } from "./workspace-setup.ts";
+
+export type { ComputePreparationFailureEvidence } from "./compute-preparation.ts";
+export { isComputePreparationFailureEvidence } from "./compute-preparation.ts";
 import type {
   AgentRuntimeDescription,
   AgentRuntimeDescribeOptions,
@@ -1477,6 +1480,15 @@ export interface SandboxDriver extends Driver {
   harnessResource?(
     context: Pick<SandboxHarnessContext, "namespace" | "revision">,
   ): SandboxResourceRef;
+  /**
+   * Exact Pod labels of the provider Pods that open this revision's workspace-node connection to
+   * its Agent Gateway, in the Sandbox namespace, or `undefined` while the revision has no Sandbox.
+   * Compute admits only Pods with these labels to that Gateway's port, so they must select this
+   * revision's Sandbox alone, never another Sandbox in the namespace.
+   */
+  workspaceNodePeerLabels?(
+    context: SandboxNamespaceContext & { readonly revision: Readonly<AgentRevision> },
+  ): Promise<Readonly<Record<string, string>> | undefined>;
   /** Required for revision stop, retirement, and Namespace cleanup, independent of Harness ownership. */
   cleanup(
     context: SandboxNamespaceContext & { readonly revision?: Readonly<AgentRevision> },
@@ -1632,7 +1644,8 @@ export interface RuntimeFailureEvidence {
  * Why an unready revision is still pending, when Compute knows: its Pods cannot be
  * scheduled, or its workloads are ready but the workspace node has not connected.
  */
-export type ComputePendingReason = "WORKLOAD_UNSCHEDULABLE" | "WORKSPACE_NODE_PENDING";
+export type ComputePendingReason =
+  "WORKLOAD_UNSCHEDULABLE" | "WORKSPACE_NODE_PENDING" | "HARNESS_CREDENTIAL_BOOTSTRAP_PENDING";
 
 export interface ComputeReadiness extends Scope {
   readonly namespaceId: string;
@@ -1772,11 +1785,36 @@ export interface ComputeDriver extends Driver {
    * every preparation attempt would refuse; other refusals stay with preparation.
    */
   validateGatewaySettings?(configuration: Readonly<OpenClawConfigurationDocument>): void;
+  /**
+   * Side-effect-free check of Configuration values against rules the Driver applies on every
+   * topology, at Configuration create and update, Agent provisioning and Preset save (on the
+   * values rendered with defaults). Throws ConfigurationHarnessError, naming the setting but
+   * never its value. validateHarnessAuth applies the same rules at deployment.
+   */
+  validateConfiguration?(configuration: Readonly<OpenClawConfigurationDocument>): void;
+  /**
+   * Side-effect-free check that the first deployment of an Agent with initial workspace files
+   * can deliver them on this Harness topology, at Agent create and update while the setup is
+   * pending, at deployment and at provisioning. `sandboxDriverId` names the Sandbox Driver the
+   * revision would be pinned to, if any. Throws ConfigurationHarnessError, naming the setting,
+   * for Configuration content preparation would refuse; any other error is an Installation
+   * refusal.
+   */
+  validateWorkspaceSetup?(
+    harness: RevisionHarnessDescriptor,
+    configuration: Readonly<OpenClawConfigurationDocument>,
+    sandboxDriverId?: string,
+  ): void;
   validateHarnessAuth?(
     harness: RevisionHarnessDescriptor,
     auth: HarnessAuthSnapshot,
     configuration: OpenClawConfigurationDocument,
-    secretBindings?: SecretBindings,
+    /**
+     * The Configuration's Secret bindings. Agent save passes `null` and expects only the rules
+     * that depend on the Agent: a Configuration may stage its bindings after its values, and
+     * Installation-wide facts about the Configuration wait for deployment.
+     */
+    secretBindings?: SecretBindings | null,
     /** Catalog entry for a `credential_source` binding; absent for every other method. */
     credentialSourceType?: CredentialSourceType,
   ): void;
@@ -1842,6 +1880,10 @@ export interface ComputeDriver extends Driver {
     signal: AbortSignal,
     options?: { readonly recheck?: boolean },
   ): Promise<CredentialAttachmentStatus>;
+  /**
+   * Throws OCC's ComputePreparationFailedError when initialization is terminal.
+   * The worker durably fails deployment and schedules stopRevision for cleanup.
+   */
   prepareRevision(
     revision: AgentRevision,
     context?: ComputeRevisionContext,

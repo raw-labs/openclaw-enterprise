@@ -31,12 +31,26 @@ OpenShell retains its separately pinned image. Mutable overrides fail before
 resource creation. Clean up a failed run's owned resources with
 `node scripts/ci/cleanup.mjs --state <private-state-file>` before reusing its state path.
 
-`k3d cluster create` times out after five minutes (hosted runners take under a
-minute, node image pull included; `OPENCLAW_CI_K3D_CREATE_TIMEOUT_MS` overrides
-it). The timeout stops k3d's whole process group. Preparation then writes the
-lane's cluster diagnostics, deletes the partial cluster and retries once; a second
-timeout fails preparation and leaves the cluster to lane cleanup. The node Ready wait
-starts only after every owned node has registered (up to two minutes).
+`k3d cluster create` times out after two minutes, and its retry after five
+(hosted runners take under a minute, node image pull included;
+`OPENCLAW_CI_K3D_CREATE_TIMEOUT_MS` sets both). The timeout stops k3d's whole
+process group. A preparation command still running 5 seconds after its
+timeout's SIGTERM gets SIGKILL, and 5 seconds later preparation stops waiting
+for output that escaped descendants hold open
+(`OPENCLAW_CI_COMMAND_KILL_GRACE_MS` overrides both). Preparation then writes the
+lane's cluster diagnostics (10 seconds per command;
+`OPENCLAW_CI_K3D_DIAGNOSTICS_TIMEOUT_MS` overrides it), deletes the partial
+cluster and retries once; a second timeout fails preparation and leaves the
+cluster to lane cleanup. The node Ready wait starts only after every owned node
+has registered (up to two minutes).
+
+A timed-out create's diagnostics also keep k3d's own output (the step it stopped
+in), each node's process list, and the load balancer's state. k3d starts the load
+balancer only after K3s reports ready, and its node entrypoint keeps a server
+running after K3s exits. A load balancer still `created` beside a running server
+whose log ends in `connection refused` API retries therefore means K3s exited.
+Node log excerpts replace those retries with one line per target and outcome,
+with first and last times, so K3s's last lines stay visible.
 
 Preparation reuses a supplied immutable workload image in the local Docker daemon
 only when `docker image inspect` records the requested digest in `RepoDigests`;
@@ -59,13 +73,13 @@ cleanup removes the owned cluster and partial imports.
 
 ## Reuse an image the engine already holds
 
-Hosted image lanes that only restore the BuildKit cache first resolve each image
+Hosted image lanes restore the BuildKit cache and first resolve each image
 from it without its layers (`reuseEngineImage` in `scripts/ci/prepare.mjs`). If
 the runner's Docker engine already holds that image ID, as hosted runners often
 do from their shared image cache, preparation tags it instead of downloading
 and loading every layer (about 20 s for the runtime image). The ID is the
 digest of a config that names each layer's content digest. Any other result,
-or a lane that exports the cache, builds and loads as before.
+or main's cache workflow, which exports, builds and loads as before.
 
 The shared image cache keeps images a job leaves tagged, and lane cleanup
 removes every owned tag. So main's never-cancelled cache workflow also tags its
