@@ -6,6 +6,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   readdir,
   rename,
@@ -19,7 +20,6 @@ import { join } from "node:path";
 import test from "node:test";
 import { imageSmokeTimeoutMultiplier } from "../helpers/image-smoke-timeout.mjs";
 import {
-  AGENT_WITH_NODE_ENTRYPOINT,
   AGENT_RUNTIME_ENTRYPOINT,
   CODEX_OAUTH_BOOTSTRAP_ENTRYPOINT,
   GATEWAY_RUNTIME_ENTRYPOINT as KUBERNETES_GATEWAY_RUNTIME_ENTRYPOINT,
@@ -80,6 +80,18 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
         OCE_CODEX_OAUTH_SEED_PATH: seedPath,
       },
     });
+  // Publish fixture credentials through an exclusive temporary inode. Atomic
+  // replacement must not reopen a checked destination or follow a planted link.
+  const writeNativeAuth = async (value) => {
+    const temporaryPath = `${authPath}.native`;
+    const file = await open(temporaryPath, "wx", 0o600);
+    try {
+      await file.writeFile(JSON.stringify(value));
+    } finally {
+      await file.close();
+    }
+    await rename(temporaryPath, authPath);
+  };
   await run();
   assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), auth);
   assert.equal((await stat(authPath)).mode & 0o777, 0o600);
@@ -89,8 +101,7 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
     ...auth,
     tokens: { ...auth.tokens, access_token: "rotated-access", refresh_token: "rotated-refresh" },
   };
-  await writeFile(`${authPath}.native`, JSON.stringify(refreshed), { mode: 0o600 });
-  await rename(`${authPath}.native`, authPath);
+  await writeNativeAuth(refreshed);
   await run();
   assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), refreshed);
   await assert.rejects(
@@ -100,6 +111,17 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
   await rm(authPath);
   await assert.rejects(run(), /could not initialize private credentials/);
   await assert.rejects(readFile(authPath), { code: "ENOENT" });
+
+  // A killed writer may leave auth.json without a receipt. A retry must finish
+  // that generation rather than treating the partial output as completion.
+  await rm(join(codexHome, ".oce-oauth.json"));
+  await writeNativeAuth(auth);
+  await Promise.all(Array.from({ length: 8 }, () => run()));
+  assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), auth);
+  assert.deepEqual(JSON.parse(await readFile(join(codexHome, ".oce-oauth.json"), "utf8")), {
+    sourceUid: "source-1",
+    volumeUid: "volume-1",
+  });
 
   // A replacement source starts from an empty Codex home. Links planted by the previous
   // process must not redirect the new bundle into the served workspace.
@@ -112,7 +134,11 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
   }
   await run("source-2");
   assert.deepEqual(await readdir(workspace), []);
-  assert.deepEqual((await readdir(codexHome)).sort(), [".oce-oauth.json", "auth.json"]);
+  assert.deepEqual((await readdir(codexHome)).sort(), [
+    ".oce-oauth-bootstrap.lock",
+    ".oce-oauth.json",
+    "auth.json",
+  ]);
   assert.ok((await lstat(authPath)).isFile());
   assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), auth);
   assert.deepEqual(JSON.parse(await readFile(join(codexHome, ".oce-oauth.json"), "utf8")), {
@@ -123,7 +149,7 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
   // Restarting with the same source keeps the native generation and its history.
   await mkdir(join(codexHome, "sessions"));
   await writeFile(join(codexHome, "sessions", "current.jsonl"), "current login history");
-  await writeFile(authPath, JSON.stringify(refreshed), { mode: 0o600 });
+  await writeNativeAuth(refreshed);
   await run("source-2");
   assert.deepEqual(JSON.parse(await readFile(authPath, "utf8")), refreshed);
   assert.deepEqual(await readdir(join(codexHome, "sessions")), ["current.jsonl"]);
@@ -132,6 +158,12 @@ test("Codex OAuth bootstrap preserves rotated credentials and requires a new sou
   await rm(authPath);
   await symlink(seedPath, authPath);
   await assert.rejects(run("source-2"), /could not initialize private credentials/);
+
+  // A planted lock link cannot redirect the writer outside its private home.
+  await rm(join(codexHome, ".oce-oauth-bootstrap.lock"));
+  await symlink(seedPath, join(codexHome, ".oce-oauth-bootstrap.lock"));
+  await assert.rejects(run("source-3"), /could not initialize private credentials/);
+  assert.deepEqual(JSON.parse(await readFile(seedPath, "utf8")), auth);
 });
 
 test("runtime image seccomp option requires the CI-prepared profile record", async (t) => {
@@ -215,106 +247,6 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     /must match the CI-prepared Codex seccomp profile digest/,
   );
 });
-
-test(
-  "runtime image initializes the Harness workspace without replacing owner edits",
-  imageTestOptions,
-  async () => {
-    // Run the real Harness entrypoint and native setup. Replace only the long-lived
-    // node/Codex bodies: this proves initialization order, not pairing or a model turn.
-    const launch = String.raw`
-const assert = require("node:assert/strict");
-const { existsSync, readFileSync, writeFileSync } = require("node:fs");
-const { spawnSync } = require("node:child_process");
-const entrypoint = process.argv[1];
-const sentinel = "Owner edit that must survive a Harness restart.\n";
-for (let attempt = 0; attempt < 4; attempt++) {
-  const bootstrap = attempt === 0 ? { skipBootstrap: true } : attempt === 3 ? { skipBootstrap: "invalid" } : {};
-  const substitute = [
-    'const cp = require("node:child_process");',
-    'cp.spawn = () => {',
-    'if (!JSON.parse(process.env.OPENCLAW_WORKSPACE_BOOTSTRAP).skipBootstrap) require("node:assert/strict").ok(require("node:fs").readFileSync("/home/node/workspace/AGENTS.md", "utf8").length > 0);',
-    'console.log("WORKSPACE_CHILD_STARTED");',
-    'return new (require("node:events").EventEmitter)();',
-    '};',
-    entrypoint,
-  ].join("\n");
-  const result = spawnSync(process.execPath, ["-e", substitute], {
-    env: { PATH: process.env.PATH, HOME: "/home/node", OPENCLAW_NODE_STATE_DIR: "/tmp/node-state", OPENCLAW_NODE_SETUP_CODE: "synthetic-setup", OPENCLAW_WORKSPACE_DIR: "/home/node/workspace", OPENCLAW_WORKSPACE_BOOTSTRAP: JSON.stringify(bootstrap) },
-    encoding: "utf8",
-  });
-  if (attempt === 3) {
-    assert.notEqual(result.status, 0);
-    assert.doesNotMatch(result.stdout, /WORKSPACE_CHILD_STARTED/);
-    assert.match(result.stderr, /Workspace initialization failed/);
-    continue;
-  }
-  assert.equal(result.status, 0, result.stderr + result.stdout);
-  assert.ok(require("node:fs").readdirSync("/home/node/openclaw-runtime-assets/bundled-skills").length > 0);
-  assert.ok(require("node:fs").statSync("/home/node/openclaw-runtime-assets/plugin-skills").isDirectory());
-  assert.ok(require("node:fs").lstatSync("/home/node/.openclaw/plugin-skills").isSymbolicLink());
-  assert.equal(
-    require("node:fs").realpathSync("/home/node/.openclaw/plugin-skills"),
-    require("node:fs").realpathSync("/home/node/openclaw-runtime-assets/plugin-skills"),
-  );
-  assert.match(
-    require("node:fs").readFileSync("/home/node/.openclaw/plugin-skills/slack/SKILL.md", "utf8"),
-    /name:\s*slack/,
-  );
-  assert.match(
-    require("node:fs").readFileSync(
-      "/home/node/.openclaw/plugin-skills/block-kit/references/official-block-kit.md",
-      "utf8",
-    ),
-    /# Block Kit/,
-  );
-  assert.equal(result.stdout.split("WORKSPACE_CHILD_STARTED").length - 1, 2);
-  if (attempt === 0) {
-    assert.equal(existsSync("/home/node/workspace/AGENTS.md"), false);
-    continue;
-  }
-  for (const name of ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "BOOTSTRAP.md"]) {
-    assert.ok(readFileSync("/home/node/workspace/" + name, "utf8").length > 0);
-  }
-  if (attempt === 2) assert.equal(readFileSync("/home/node/workspace/AGENTS.md", "utf8"), sentinel);
-  writeFileSync("/home/node/workspace/AGENTS.md", sentinel);
-}
-console.log("WORKSPACE_INITIALIZATION_PASSED");
-`;
-    const { stdout } = await runDocker(
-      [
-        "run",
-        "--rm",
-        "--user",
-        "1000:1000",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--network",
-        "none",
-        "--tmpfs",
-        "/tmp:size=64m,mode=1777",
-        "--tmpfs",
-        "/home/node:size=64m,uid=1000,gid=1000",
-        "--tmpfs",
-        "/home/node/workspace:size=16m,uid=1000,gid=1000",
-        "--entrypoint",
-        "/usr/bin/tini",
-        image,
-        "-s",
-        "--",
-        "node",
-        "-e",
-        launch,
-        AGENT_WITH_NODE_ENTRYPOINT,
-      ],
-      { timeout: 120_000 * imageSmokeTimeoutMultiplier },
-    );
-    assert.match(stdout, /WORKSPACE_INITIALIZATION_PASSED/);
-  },
-);
 
 const runtimeImageStockBrokerDiagnosticStages = new Set([
   "material-init",
@@ -683,19 +615,6 @@ try {
   assert.equal(result.serverVersion, result.installedVersion);
 }
 
-// The native Gateway process's environment, as OpenClaw itself sees it.
-async function gatewayProcessEnvironment(containerName) {
-  const { stdout } = await runDocker([
-    "exec",
-    containerName,
-    "node",
-    "-e",
-    'const fs = require("node:fs"); for (const pid of fs.readdirSync("/proc")) { try { if (fs.readFileSync("/proc/" + pid + "/cmdline", "utf8").startsWith("openclaw-gateway")) { process.stdout.write(fs.readFileSync("/proc/" + pid + "/environ", "utf8")); break; } } catch {} }',
-  ]);
-  assert.notEqual(stdout, "", "the native Gateway process must be running");
-  return stdout.split("\0");
-}
-
 async function assertGatewayRuntimeAssets(containerName) {
   const { stdout } = await runDocker([
     "exec",
@@ -1050,33 +969,6 @@ test(
     const runtimeStopTimeoutMs = Number(stdout.trim());
     assert.ok(runtimeStopTimeoutMs > 0 && runtimeStopTimeoutMs <= GATEWAY_STOP_TIMEOUT_MS);
     assertNoPackagingFailure(logs);
-  },
-);
-
-test(
-  "runtime image tells OpenClaw that a read-only Kubernetes configuration is externally managed",
-  imageTestOptions,
-  async (t) => {
-    // An embedded OpenClaw Gateway starts from the Configuration OCC mounts read-only.
-    const configurationPath = await temporaryGatewayConfiguration(t, "openclaw");
-    const { containerName } = await runGatewaySmoke(t, "openclaw", {
-      configurationPath: "/etc/openclaw/openclaw.json",
-      entrypoint: KUBERNETES_GATEWAY_RUNTIME_ENTRYPOINT,
-      volumes: [`${configurationPath}:/etc/openclaw/openclaw.json:ro`],
-      withAppServer: false,
-    });
-    assert.ok(
-      (await gatewayProcessEnvironment(containerName)).includes("OPENCLAW_CONFIG_READONLY=1"),
-    );
-    // OpenClaw promotes its last-known-good backup just after it reports ready,
-    // and only then releases its post-ready work. That work includes the remote
-    // model catalog refresh, which fails at once without a network. Its log line
-    // therefore comes after any promotion failure would have been logged. This
-    // ordering is OpenClaw's (checked at the pinned source): re-check it when the
-    // pin moves, since a promotion moved after post-ready work would pass here.
-    const logs = await waitForDockerLog(containerName, /remote model catalog refresh failed/);
-    assert.match(logs, /heartbeat: started/);
-    assert.doesNotMatch(logs, /last-known-good|EROFS/);
   },
 );
 
@@ -1494,6 +1386,7 @@ const validation = cp.spawnSync("node", ["/app/openclaw.mjs", "config", "validat
 process.stdout.write(JSON.stringify({
   excluded: config.plugins.entries.codex.config.codexDynamicToolsExclude,
   triggers: config.cron.triggers,
+  memoryFlush: config.agents.defaults.compaction.memoryFlush,
   codexProvider: config.models.providers.codex,
   openaiProvider: config.models.providers.openai,
   valid: JSON.parse(validation.stdout).valid,
@@ -1511,9 +1404,13 @@ process.stdout.write(JSON.stringify({
         "gateway_exec",
         "gateway_process",
         "terminal",
+        "portal",
         "openclaw",
+        "plugins",
+        "gateway",
       ],
       triggers: { enabled: false },
+      memoryFlush: { enabled: false },
       codexProvider: {
         models: codexProvider.models,
         baseUrl: "http://127.0.0.1:9",

@@ -267,8 +267,8 @@ test("console browser flow keeps Namespace URL state across global pages and log
   await fixture.bootstrap();
   const alpha = await fixture.createNamespace("Alpha", { ready: true });
   const beta = await fixture.createNamespace("Beta", { ready: true });
-  await fixture.createAgent(alpha.id, "Alpha <script>alert(1)</script>");
-  await fixture.createAgent(beta.id, "Beta agent");
+  const alphaAgent = await fixture.createAgent(alpha.id, "Alpha <script>alert(1)</script>");
+  const betaAgent = await fixture.createAgent(beta.id, "Beta agent");
   const { page } = await newPage(t, fixture);
   const requests = apiRequests(page, fixture.origin);
   page.on("dialog", (dialog) => assert.fail(`Unexpected browser dialog: ${dialog.message()}`));
@@ -342,9 +342,15 @@ test("console browser flow keeps Namespace URL state across global pages and log
     (request) => request.method !== "GET" && !request.path.startsWith("/api/auth/sign-"),
   );
   assert.deepEqual(writeRequests, []);
-  assert.equal(
-    requests.some((request) => /\/deploy|\/agents\/agt_/.test(request.path)),
-    false,
+  // List rows read revision history for Latest deployment. Browsing these draft
+  // Agents must not read their detail or invoke any deployment operation.
+  const agentRequests = requests.filter(({ path }) => /\/deploy|\/agents\/agt_/.test(path));
+  assert.deepEqual(
+    [...new Set(agentRequests.map(({ method, path }) => `${method} ${path}`))].sort(),
+    [
+      `GET /namespaces/${alpha.id}/agents/${alphaAgent.id}/revisions`,
+      `GET /namespaces/${beta.id}/agents/${betaAgent.id}/revisions`,
+    ].sort(),
   );
 });
 
@@ -1170,6 +1176,71 @@ test("a disabled account's provider sign-in says the account is disabled", async
   await page.goto(`${fixture.origin}/console/?authReason=account-disabled`);
   await page.getByRole("button", { name: "Login" }).waitFor();
   await expectNoText(page, /disabled/);
+});
+
+test("a provider outage says sign-in is unavailable, not to get attached", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
+  const { page } = await newPage(t, fixture);
+  let password = true;
+  await page.route("**/api/auth/providers", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          github: true,
+          google: true,
+          oidc: true,
+          oidcSignIn: {
+            label: "Acme SSO",
+            authorizationUrl: "https://sso.example.test/realms/acme/protocol/openid-connect/auth",
+          },
+          password,
+          sessionBinding: true,
+        },
+        meta: { requestId: "browser-provider-unavailable" },
+      }),
+    }),
+  );
+  // Discovery remembers the OIDC label for the message after the callback redirect.
+  await page.goto(`${fixture.origin}/console/login`);
+  await page.getByRole("button", { name: "Continue with Acme SSO" }).waitFor();
+  for (const [provider, label] of [
+    ["github", "GitHub"],
+    ["google", "Google"],
+    ["oidc", "Acme SSO"],
+  ]) {
+    for (const [available, outage] of [
+      [true, `${label} sign-in is unavailable right now. Try again later or use your password.`],
+      [
+        false,
+        `${label} sign-in is unavailable right now. Try again later. If you are an administrator, use Recovery sign-in.`,
+      ],
+    ]) {
+      password = available;
+      // The provider could not answer, or refused this Installation's client.
+      await page.goto(
+        `${fixture.origin}/console/?authError=${provider}&authReason=provider-unavailable`,
+      );
+      await page.getByText(outage, { exact: true }).waitFor();
+      await expectNoText(page, /attach your/);
+      // The callback failed inside OCE: no fallback finishes a sign-in either.
+      await page.goto(`${fixture.origin}/console/?authError=${provider}&authReason=unavailable`);
+      await page
+        .getByText(
+          `Could not finish signing in with ${label}. Sign-in is unavailable right now; try again later.`,
+          { exact: true },
+        )
+        .waitFor();
+      await expectNoText(page, /attach your|use your password/);
+    }
+  }
+  // Without a provider error the reason means nothing.
+  password = true;
+  await page.goto(`${fixture.origin}/console/?authReason=provider-unavailable`);
+  await page.getByRole("button", { name: "Login" }).waitFor();
+  await expectNoText(page, /unavailable/);
 });
 
 test("recovery-only password sign-in keeps the form behind Recovery sign-in", async (t) => {

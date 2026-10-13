@@ -136,7 +136,8 @@ their pinned `x-occ-session-key`, so a replaced cookie yields login.
 `authReason` of `membership` or `membership-unavailable` explains a GitHub
 [allowlist](../reference/authentication/external-sign-in.md#organization-and-team-allowlist)
 refusal instead. With any provider, `account-disabled` says the account is disabled and to ask
-an administrator to enable it. The
+an administrator to enable it; `provider-unavailable` and `unavailable` say to try again
+later. The
 [authentication flow](local-password-authentication.md#3-construct-session-authentication)
 owns the server side.
 
@@ -350,6 +351,8 @@ refresh and inspection.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-13 12:00: Explain outage sign-in reasons. (kc-guide-fix)
 
 - 2026-10-12 16:26: Reconcile upstream behavior and condense the combined flow. (authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb - 8579ab708615e4cf7214704eae3894231d1a3412)
 
