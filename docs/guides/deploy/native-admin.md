@@ -1,20 +1,30 @@
 # Deploy native admin UI access
 
-Enable Agent native admin UI access only for a trusted-operator pilot. The feature lets exact Agent administrators open the stock native UI through OCC on an isolated per-Agent browser host using their ordinary OCE console session. For a local installation, use [local development](#local-development) below. For an existing cluster, start with [production installation](production-installation.md) and [private Agent workspace routing](workspace-routing.md).
+Enable OpenClaw access through OCC with an explicit runtime assignment for each person. The selected native role determines their permissions. Configured roles require a runtime built from the [patched image recipe](../../../deploy/runtime/README.md). The built-in `platform-administrator` role can retain the existing administrator transport without named roles. For a local installation, use [local development](#local-development) below. For an existing cluster, start with [production installation](production-installation.md) and [private Agent workspace routing](workspace-routing.md).
+
+## Existing Agents
+
+Existing eligible human native administrators receive explicit `platform-administrator` assignments on upgrade, preserving entry without named `gateway.roles`. An Installation administrator can downgrade or remove these assignments in **Share Agent**, independently of OCE management permissions. See [Who can open it](../../reference/agent-native-admin.md#who-can-open-it) for the authorization rules.
+
+To introduce restricted roles on an existing Agent:
+
+1. Use the patched runtime image and [configure the Agent](#configure-each-agent) with named `gateway.roles.definitions` and a `gateway.roles.default` naming one of them. Deploy the new version and wait for it to become active. The Kubernetes Driver configures the trusted-proxy role headers.
+2. Open **Share Agent**, enter the person's Principal ID, and select their OpenClaw role.
+3. Sign in as that person and open **Open OpenClaw**. An `administer` grant alone no longer grants entry; each person needs exact Agent `use` permission and a runtime assignment.
 
 ## Local development
 
 Local setup prepares private routing and the browser endpoint. With native admin
 enabled for the Installation:
 
-1. [Create and deploy an Agent](../../reference/console/create-and-deploy.md), for
-   example from Standard OpenClaw or Standard Codex. Their UI-enabled
-   Configurations receive native admin policy in the first admitted revision.
-2. Wait for the Agent to run, then open **Native admin UI** → **Open native admin UI**.
-   The account needs exact Agent `administer` permission.
-3. For a custom Configuration or an existing Agent, follow
-   [Deploy each Agent](#configure-each-agent). Explicit opt-outs remain effective;
-   existing Agents adopt prepared policy on their next explicit deployment.
+1. [Create and deploy an Agent](../../reference/console/create-and-deploy.md)
+   from Standard OpenClaw or Standard Codex. Kubernetes prepares native policy
+   in its first admitted revision.
+2. Use **Share Agent** to assign your Principal ID `platform-administrator`,
+   or a configured OpenClaw role. Named `gateway.roles` enable individual native
+   profiles and restricted roles; save and deploy them before using those roles.
+3. Once running, open **OpenClaw** → **Open OpenClaw**. Explicit opt-outs remain
+   effective; existing Agents adopt prepared policy on their next deployment.
 
 The [first-Agent command](../first-agent.md) creates a separate Agent with native UI
 disabled and refuses to reuse it after outside Configuration edits. Create a
@@ -29,7 +39,7 @@ console-managed Agent for this native admin walkthrough.
 - The configured Agent domain is separate from the console host and does not include a wildcard, scheme, port, or path.
 - The configured `agentNativeAdmin.sharedCookieDomain` is the shared OCE session cookie parent domain. The console host and Agent domain must both be inside it on DNS-label boundaries, for example `console.oce.example.com`, `agents.oce.example.com`, and cookie domain `oce.example.com`. All matching subdomains that can receive the OCE session cookie must be trusted OCE ingress endpoints.
 - Each pilot Agent uses native trusted-proxy authentication with `occ-workspace-files` granted `operator.admin`, native `controlUi.enabled: true`, the derived Agent origin in `controlUi.allowedOrigins`, and trusted-proxy admin device auto-approval.
-- Operators who use the console have exact Agent `administer` permission.
+- Operators who use the console have exact Agent `use` permission with an explicit runtime-role assignment.
 
 <a id="steps"></a>
 
@@ -138,8 +148,8 @@ ignores the shared cookie-domain value and keeps the legacy host-only
 Create an Agent from Standard OpenClaw or Standard Codex in the console and
 complete its ordinary deployment. With the Installation feature configured above,
 Kubernetes Compute prepares native admin policy in the first admitted revision.
-Open the Agent's **Native admin UI** tab after deployment reports running, then
-choose **Open native admin UI**. Expect the isolated Agent host, including any
+Assign your Principal ID an OpenClaw role in **Share Agent**. Open the Agent’s
+**OpenClaw** tab after deployment reports running, then choose **Open OpenClaw**. Expect the isolated Agent host, including any
 port configured on the public OCC origin.
 
 For a custom Configuration, select `gateway.controlUi.enabled: true`. Leave
@@ -167,6 +177,30 @@ GET /namespaces/<namespaceId>/agents/<agentId>/native-admin
 Expect `data.status: "available"` once the compatible revision is active.
 For `stopped`, `unavailable` or `unsupported`, follow the
 [troubleshooting checks](#troubleshooting).
+
+For restricted roles and individual profiles, save and deploy named definitions:
+
+```json
+{
+  "gateway": {
+    "roles": {
+      "default": "reviewer",
+      "definitions": {
+        "reviewer": {
+          "sessions": { "others": "view" },
+          "agents": ["main"],
+          "scopes": ["operator.read"]
+        }
+      }
+    }
+  }
+}
+```
+
+Preserve other Configuration values and Secret bindings. Device auto-approval
+must cover the selected role’s scopes; the role still limits the person’s
+permissions. Without named roles, explicit `platform-administrator` assignments
+retain the shared native profile. See [Agent sharing](../console/agent-sharing.md).
 
 Keep durable configuration changes in OCE. For compatible Kubernetes gateways,
 native edits affect a Pod-local copy and are discarded when the Pod is replaced
@@ -254,7 +288,7 @@ Full runtime proof still requires a real browser test that loads native assets t
 | API startup fails with `AUTH_BASE_URL_INVALID`      | `auth.baseUrl` is an HTTPS origin whose host is inside `agentNativeAdmin.sharedCookieDomain`, which must not be a public suffix. Better Auth checks these first.                      |
 | API startup fails with `AUTH_SECRET_INVALID`        | The `auth.secretKey` value in the `auth.secretName` Secret has at least 32 characters.                                                                                                |
 | API startup fails with `AGENT_NATIVE_ADMIN_INVALID` | `agentNativeAdmin.domain`, `agentNativeAdmin.sharedCookieDomain`, `OCC_AUTH_BASE_URL`, cookie-scope compatibility, auth secret length, and gateway routing.                           |
-| Console panel is hidden                             | Feature enablement and exact Agent `administer` permission.                                                                                                                           |
+| Console panel is hidden                             | Feature enablement and exact Agent `use` permission with an explicit runtime-role assignment.                                                                                         |
 | Panel or status API reports `stopped`               | A stopped Agent with no active revision returns only `data.status: "stopped"`, without an origin. Deploy the Agent if native admin access is intended.                                |
 | Panel or status API reports `unavailable`           | No version is serving: there is no active revision yet, or a newer dedicated deployment stopped it and is starting or failed. Check Deployment activity, fix a failure, and redeploy. |
 | Panel reports unsupported                           | Compute gateway routing, `getGatewayEndpoint` support, and native trusted-proxy/control UI configuration for the active revision.                                                     |

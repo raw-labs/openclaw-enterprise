@@ -1194,7 +1194,7 @@ export class PostgresPlatformState implements PlatformStateStore {
           '[]'::jsonb) AS memberships,
         COALESCE((SELECT jsonb_agg(v ORDER BY id) FROM
           (SELECT id, namespace_id, identity_subject_id, group_subject_id, role_id,
-            resource_kind, resource_id FROM occ.iam_access_bindings) v),
+            resource_kind, resource_id, runtime_role FROM occ.iam_access_bindings) v),
           '[]'::jsonb) AS bindings,
         COALESCE((SELECT jsonb_agg(v ORDER BY id) FROM
           (SELECT id, namespace_id, action, resource_kind, resource_id, effect
@@ -1292,6 +1292,9 @@ export class PostgresPlatformState implements PlatformStateStore {
         subjectKind: identitySubjectId === undefined ? "group" : "identity",
         subjectId: identitySubjectId ?? groupSubjectId!,
         roleId: text(row, "role_id"),
+        ...(optionalText(row, "runtime_role") === undefined
+          ? {}
+          : { runtimeRole: optionalText(row, "runtime_role")! }),
         ...(resourceKind === undefined
           ? {}
           : { resourceKind: resourceKind as NonNullable<AccessBinding["resourceKind"]> }),
@@ -1379,8 +1382,8 @@ export class PostgresPlatformState implements PlatformStateStore {
       await context.client.query(
         `INSERT INTO occ.iam_access_bindings
          (id, namespace_id, identity_subject_id, group_subject_id, role_id,
-          resource_kind, resource_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          resource_kind, resource_id, runtime_role)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           binding.id,
           null,
@@ -1389,6 +1392,7 @@ export class PostgresPlatformState implements PlatformStateStore {
           binding.roleId,
           binding.resourceKind,
           binding.resourceId,
+          binding.runtimeRole ?? null,
         ],
       );
     }
@@ -3573,6 +3577,9 @@ export class PostgresPlatformState implements PlatformStateStore {
         subjectKind: identitySubjectId === undefined ? "group" : "identity",
         subjectId: identitySubjectId ?? groupSubjectId!,
         roleId: text(row, "role_id"),
+        ...(optionalText(row, "runtime_role") === undefined
+          ? {}
+          : { runtimeRole: optionalText(row, "runtime_role")! }),
         ...(resourceKind === undefined
           ? {}
           : { resourceKind: resourceKind as NonNullable<AccessBinding["resourceKind"]> }),
@@ -3680,7 +3687,7 @@ export class PostgresPlatformState implements PlatformStateStore {
             (
               await client.query(
                 `SELECT id, namespace_id, identity_subject_id, group_subject_id, role_id,
-                        resource_kind, resource_id
+                        resource_kind, resource_id, runtime_role
                  FROM occ.iam_access_bindings
                  WHERE namespace_id = $1 ORDER BY id`,
                 [namespaceId],
@@ -3710,7 +3717,7 @@ export class PostgresPlatformState implements PlatformStateStore {
           (
             await client.query(
               `SELECT id, namespace_id, identity_subject_id, group_subject_id, role_id,
-                      resource_kind, resource_id
+                      resource_kind, resource_id, runtime_role
                FROM occ.iam_access_bindings
                WHERE namespace_id = $1 AND id = $2`,
               [namespaceId, bindingId],
@@ -3785,21 +3792,44 @@ export class PostgresPlatformState implements PlatformStateStore {
             "The IAM AccessBinding target does not exist in this Namespace or is being deleted.",
           );
         }
-        await client.query(
-          `INSERT INTO occ.iam_access_bindings
+        try {
+          await client.query(
+            `INSERT INTO occ.iam_access_bindings
            (id, namespace_id, identity_subject_id, group_subject_id, role_id,
-            resource_kind, resource_id)
-           VALUES ($1, $2, $3, NULL, $4, $5, $6)`,
-          [
-            binding.id,
-            namespace.id,
-            binding.subjectId,
-            binding.roleId,
-            binding.resourceKind,
-            binding.resourceId,
-          ],
-        );
+            resource_kind, resource_id, runtime_role)
+           VALUES ($1, $2, $3, NULL, $4, $5, $6, $7)`,
+            [
+              binding.id,
+              namespace.id,
+              binding.subjectId,
+              binding.roleId,
+              binding.resourceKind,
+              binding.resourceId,
+              binding.runtimeRole ?? null,
+            ],
+          );
+        } catch (error) {
+          // Preserve known assignment conflicts before the IAM boundary wraps unknown failures.
+          if (
+            error instanceof DatabaseError &&
+            error.code === "23505" &&
+            error.constraint === "iam_access_bindings_runtime_assignment"
+          ) {
+            throw databaseError(error);
+          }
+          throw error;
+        }
         return immutableCopy(binding);
+      },
+      updateRuntimeRole: async (namespaceId, bindingId, runtimeRole) => {
+        const updated = await client.query(
+          `UPDATE occ.iam_access_bindings SET runtime_role = $3
+           WHERE namespace_id = $1 AND id = $2 AND runtime_role IS NOT NULL
+           RETURNING id, namespace_id, identity_subject_id, group_subject_id, role_id, resource_kind, resource_id, runtime_role`,
+          [namespaceId, bindingId, runtimeRole],
+        );
+        const row = rows(updated.rows)[0];
+        return row === undefined ? undefined : accessBindingFromRow(row);
       },
       deleteAccessBinding: async (namespaceId, bindingId) => {
         const deleted = await client.query(
@@ -4951,8 +4981,8 @@ export class PostgresPlatformState implements PlatformStateStore {
       await context.client.query(
         `INSERT INTO occ.iam_access_bindings
          (id, namespace_id, identity_subject_id, group_subject_id, role_id,
-          resource_kind, resource_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          resource_kind, resource_id, runtime_role)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           binding.id,
           binding.namespaceId ?? null,
@@ -4961,6 +4991,7 @@ export class PostgresPlatformState implements PlatformStateStore {
           binding.roleId,
           binding.resourceKind ?? null,
           binding.resourceId ?? null,
+          binding.runtimeRole ?? null,
         ],
       );
     }

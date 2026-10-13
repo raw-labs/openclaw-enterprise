@@ -145,9 +145,9 @@ owns the server side.
 before sign-in/out, even for SDK calls bypassing Better Auth middleware; headerless
 CLI requests remain supported. The browser stores no credentials.
 
-After authentication, `loadPage` reads `GET /namespaces`, preserving URL
-selection or choosing the first ready/readable Namespace. Unreadable IDs stay
-unavailable; selection never becomes an API query selector.
+Authenticated `loadPage` reads `GET /namespaces`, retaining URL selection or the
+first ready/readable Namespace. Unreadable IDs stay unavailable; selection never
+selects API query scope.
 
 `shell.mjs:namespaceSelector` disables and hides choices through session and
 Namespace checks for loads, Refresh, and admission-starting navigation;
@@ -371,6 +371,8 @@ refresh and inspection.
 - 2026-10-03 22:38: Trace switching between listed and manual model entry, preserving listed models and one submitted model. (01a10328-9de5-7081-ada2-d88ff80161e4 - 340feea42)
 - 2026-10-03 20:00: Rebuild a view retained without a Namespace selection once one is readable, so the header selector shows the default.
 - 2026-10-03 18:00: Re-enable the header selector during retained-view reads once Namespace access is checked.
+- 2026-10-03 09:42: Track completed GET failures centrally and revalidate their outcomes before restoring a view. (authoring-run/59d7541c-66d2-414c-8139-174fca84fe33 - f7af67dd9a7b6e5571e7d4d7c384966ba7fb31fd)
+
 - 2026-09-30 19:00: Remember denied Agent detail snapshot reads per tab so reloads do not add an audited denial per view.
 - 2026-09-29 20:00: Trace repository descriptions and inherited access. (public-pr/374)
 
