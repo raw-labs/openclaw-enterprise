@@ -166,9 +166,8 @@ to Agents; global pages remain open; recovered warnings disappear.
 Agents use the selected Namespace's route. OCC authorizes Namespace reads and
 filters Agents by exact read permission; Namespace listing filters its
 Installation-wide collection. No readable selection means no Agent request.
-`GET /backends` ignores selection and requires Installation `administer` before
-returning safe startup summaries. Empty configuration returns an empty list;
-missing wiring or failed dependencies return errors.
+`GET /backends` requires Installation `administer` independently of selection.
+It returns safe summaries, an empty list for empty configuration, or dependency errors.
 
 `apps/controller/src/console/agents/create.mjs:renderCreateAgent` composes Provider,
 Harness, Preset, Configuration, and workspace inputs. Provider/Harness changes
@@ -179,15 +178,14 @@ Codex's entry and allowlist ID; other native settings remain. The
 [creation reference](../reference/console/create-and-deploy.md) owns combinations,
 Preset constraints, token handling, permissions, and recovery.
 
-`agents/plugin-fields.mjs:createPluginFields` edits Agent `plugins` separately
-from Configuration. Invalid JSON and untouched fields survive; clearing overrides
-restores inheritance. Submission, uncertain outcomes, or invalid JSON lock editing.
-`capabilities.pluginPolicies` gates policy edits; unsupported reviewers remain clearable.
-The picker has a compact credential/access reminder, expandable **Access and
-credential setup**, and bounded scrolling with reachable search/pagination.
-Available and Configured retain separate selections, queries, filters, and expanded
-rows without requests or draft edits. Removal clears details; discovery resets
-clear both tabs.
+`agents/plugin-fields.mjs:createPluginFields` edits Agent `plugins` independently.
+Invalid/untouched fields survive; clearing restores inheritance. Submission,
+uncertainty or invalid JSON locks edits. `capabilities.pluginPolicies` gates writes;
+unsupported reviewers remain clearable.
+The picker offers credential guidance, expandable **Access and credential setup**,
+and bounded scrolling/search/pagination. Available and Configured retain separate
+selections, filters and expanded rows without requests or draft edits. Removal
+clears details; discovery resets clear both tabs.
 
 `create.mjs:loadPluginCatalog` and `loadPluginTools` implement
 [PAT discovery](agent-plugins.md#credential-scoped-discovery): the selected or
@@ -195,7 +193,7 @@ Preset Secret takes precedence over an entered token. OCC reads the
 Secret server-side. Pagination is upstream; filtering is local. Selecting a plugin loads tools.
 Credential, provider, and Harness changes clear results and invalidate pending reads.
 
-`create.mjs:MODEL_CHOICES` supplies unauthenticated lists and manual entry. `renderAgentForm` toggles `manualModel`, updates Configuration and controls, and focuses the required input. Manual mode keeps `model.value`, clearing the dropdown. `resetModelChoices` rebuilds provider choices after JSON edits, retaining listed models or clearing both inputs. Provider/authentication changes clear the model. Submission requires the primary model to match `model.value`. Both modes retain credentials, unrelated Configuration, and saved/pending locks.
+`create.mjs:MODEL_CHOICES` supplies unauthenticated lists and manual entry. `renderAgentForm` switches `manualModel`, updates Configuration/controls and focuses the input. Manual mode retains `model.value`; `resetModelChoices` retains listed models after JSON edits and clears others. Provider/auth changes clear selection. Submission requires `model.value` to match the primary model. Credentials, unrelated JSON and saved/pending locks survive switches.
 
 `configurationTemplate` enables Control UI with loopback origins on port 18789.
 Compute supplies gateway authentication; Presets replace the starter unchanged.
@@ -256,10 +254,9 @@ read is an audited denial, so `console.mjs:deniedReadsFor` remembers that path i
 `sessionStorage` for the session owner; later views show **Configuration unavailable**
 without asking again, and **Retry** forgets the path and rereads. Logout clears it.
 
-`agents/detail.mjs:renderTab` brings a clipped selected tab into the horizontal
-strip without moving page focus or vertical scroll. A strip ResizeObserver repeats
-this on viewport changes, disconnects for inactive or detached views, and re-arms
-through the retained view's resume hook.
+`agents/detail.mjs:renderTab` reveals clipped tabs without changing focus or
+vertical scroll. ResizeObserver repeats this on viewport changes, disconnects
+while inactive/detached, and re-arms on resume.
 Completed tabs retain their DOM and draft capture callbacks within the detail view.
 Returning restores loaded controls and expanded disclosures. Pending or failed
 reads, password values, and mutations invalidate tab reuse. Each tab checks it

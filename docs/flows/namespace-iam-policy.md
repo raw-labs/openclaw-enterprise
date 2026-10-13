@@ -1,7 +1,7 @@
 ---
 created: "2026-09-20"
-updated: 2026-10-12
-last_updated_session: "authoring-run/3dab5ffe-1c2c-4b63-9899-8f98cacf0b43"
+updated: "2026-10-13"
+last_updated_session: "authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e"
 ---
 
 # Namespace IAM Policy Flow
@@ -62,7 +62,7 @@ policy delegation.
 `apps/controller/src/http/iam.ts:iamHandlers`
 
 List and read operations call the corresponding `OpenClawController` IAM method
-and return policy metadata. Create and delete operations use the handler's `transactIAM` callback, append an attributable mutation audit event, and return
+and return policy metadata. Create, runtime-role change and delete operations use the handler's `transactIAM` callback, append an attributable mutation audit event, and return
 only after the transaction commits. For human sessions, authentication wraps
 `controller.transact` and retains the admitted session before the IAM command and
 checks its expiry again after the command and audit append. PostgreSQL locks the
@@ -192,6 +192,8 @@ selected account, session, and policy writers join the same protocol.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-13 13:33: Apply assigning-session protection to native role changes as well as create and delete commands. (authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e - 378cf70fb08c44ee8ac4855ba073224fa5ea02cc)
 
 - 2026-10-12 13:25: Retain human sessions through Namespace policy commits and coordinate revocation. (authoring-run/3dab5ffe-1c2c-4b63-9899-8f98cacf0b43 - b195e54e9b0ce98ead2b2306015a5209325e837b)
 

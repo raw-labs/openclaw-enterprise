@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
+import { request as httpRequest } from "node:http";
 import { createServer } from "node:https";
 import { createConnection } from "node:net";
 import { once } from "node:events";
@@ -260,6 +261,13 @@ async function createApi(t, label, upstreamPort, options = {}) {
     nativeAdminGatewayApiKey: async () => nativeGatewayApiKey,
     nativeAdminWebSocketLeaseIntervalMs: leaseIntervalMs,
   });
+  if (options.onAdmittedBody !== undefined) {
+    // Observe completed admission without replacing authentication or the payload.
+    app.addHook("preParsing", async (request, _reply, payload) => {
+      options.onAdmittedBody(request);
+      return payload;
+    });
+  }
   app.addHook("onClose", async () => {
     if (!closed) {
       closed = true;
@@ -1309,5 +1317,103 @@ test(
       [scenario.runtimeBinding.id],
     );
     assert.equal(persisted.rows[0].runtime_role, "administrator");
+  },
+);
+
+test(
+  "PostgreSQL assigning-session revocation denies an admitted native role change",
+  { ...requiresPostgres, timeout: 45_000 },
+  async (t) => {
+    await ensureBootstrap(t);
+    const upstream = await startNativeHttpsUpstream(t);
+    const configurationRoot = await privateBootstrapDirectory(
+      t,
+      "openclaw-role-write-configurations-",
+    );
+    const marker = randomUUID();
+    const admitted = Promise.withResolvers();
+    const apiA = await createApi(t, "role-write-owner", upstream.port, { configurationRoot });
+    const apiB = await createApi(t, "role-write-assigner", upstream.port, {
+      configurationRoot,
+      onAdmittedBody(request) {
+        if (request.headers["x-test-admission"] === marker) {
+          admitted.resolve(request.id);
+        }
+      },
+    });
+    t.after(async () => {
+      await apiB.app.close();
+      await apiA.app.close();
+    });
+    const owner = await signIn(apiA.app);
+    const assigning = await signIn(apiB.app);
+    const context = await createNativeAgent(apiA, owner, upstream);
+    const path = `/namespaces/${context.namespace.id}/iam/access-bindings/${context.runtimeBinding.id}`;
+    const catalog = await inject(
+      apiA.app,
+      "GET",
+      `/namespaces/${context.namespace.id}/agents/${context.agent.id}/runtime-roles`,
+      { session: owner },
+    );
+    assert.equal(catalog.statusCode, 200, catalog.body);
+    const change = {
+      runtimeRole: "reviewer",
+      runtimeRoleConfiguration: catalog.json().data.configuration,
+    };
+    const encoded = JSON.stringify(change);
+    const response = Promise.withResolvers();
+    const port = await listen(apiB.app);
+    const upload = httpRequest(
+      `http://127.0.0.1:${port}${path}/runtime-role`,
+      {
+        method: "PATCH",
+        headers: authenticatedHeaders(assigning, {
+          origin: authBaseURL,
+          "x-test-admission": marker,
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(encoded),
+        }),
+      },
+      (received) => {
+        let body = "";
+        received.setEncoding("utf8");
+        received.on("data", (chunk) => {
+          body += chunk;
+        });
+        received.on("end", () => response.resolve({ status: received.statusCode, body }));
+      },
+    );
+    upload.on("error", response.reject);
+    response.promise.catch(() => {});
+    try {
+      // Hold only the HTTP body. Real admission has completed, but no policy write has begun.
+      upload.write(encoded.slice(0, 1));
+      const requestId = await admitted.promise;
+      const logout = await inject(apiA.app, "POST", "/api/auth/sign-out", { session: assigning });
+      assert.equal(logout.statusCode, 200, logout.body);
+      upload.end(encoded.slice(1));
+      const denied = await response.promise;
+      assert.equal(denied.status, 403, denied.body);
+      const unchanged = await inject(apiA.app, "GET", path, { session: owner });
+      assert.equal(unchanged.statusCode, 200, unchanged.body);
+      assert.equal(unchanged.json().data.runtimeRole, "administrator");
+      const events = (await apiA.state.transact((unit) => unit.audit.list())).filter(
+        (event) => event.requestId === requestId,
+      );
+      assert.ok(events.some(({ kind }) => kind === "authorization_denial"));
+      assert.equal(
+        events.some(({ kind }) => kind === "mutation"),
+        false,
+      );
+      // A different live session can complete the same supported change after the denial.
+      const following = await inject(apiA.app, "PATCH", `${path}/runtime-role`, {
+        session: owner,
+        body: change,
+      });
+      assert.equal(following.statusCode, 200, following.body);
+      assert.equal(following.json().data.runtimeRole, "reviewer");
+    } finally {
+      upload.destroy();
+    }
   },
 );

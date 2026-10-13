@@ -8,8 +8,8 @@ last_updated_session: authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb
 
 ## Overview
 
-The Console renders a Namespace Preset and saves an independent Configuration
-and Agent through existing APIs. This flow stops at the draft; deployment follows
+Console renders a Namespace Preset into an independent Configuration and Agent.
+Deployment follows
 [revision admission](configuration-driver/persistence-and-revisions.md).
 
 ## Entry Points
@@ -139,7 +139,7 @@ path records mutations and denials without template or variable contents.
 
 `apps/controller/src/console/agents/presets.mjs:createPresetFields`
 
-[`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs) lists readable Presets after Namespace-read authorization, sorts by case-insensitive locale order then exact name, and reads the selected resource once. **Start with default Preset** prefers `default-codex`, otherwise the first listed ID, through that exact read. Variable-free templates apply immediately; others retain the chooser and shortcut origin on restoration. Empty lists and failed list/read requests never open a hardcoded starter. **Start without Preset** opens the ordinary form without a Preset read or replacing a denied selection. Creation authorization still applies.
+[`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs) lists readable Presets with Namespace read, sorts by case-insensitive locale order then exact name, and reads the selection once. **Start with default Preset** prefers `default-codex`, otherwise the first listed ID, through that exact read. Variable-free templates apply immediately; others retain the chooser and shortcut origin on restoration. Empty lists and failed list/read requests never open a hardcoded starter. **Start without Preset** opens the ordinary form without a Preset read or replacing a denied selection. Creation authorization still applies.
 
 `console-assets.ts:readConsoleAsset` serves the public
 [`default-codex`](../../deploy/presets/default-codex.json) as

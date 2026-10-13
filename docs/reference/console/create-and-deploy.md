@@ -11,13 +11,12 @@ The [local walkthrough](../../guides/first-agent.md) creates a separate Agent.
 
 ## Create an Agent
 
-Starters enable native Control UI at `http://127.0.0.1:18789` and
-`http://localhost:18789`. Compute renders gateway authentication from Installation
-trust; starters supply no token and reference only the generated
-`OPENCLAW_GATEWAY_PASSWORD`. Do not expose the gateway publicly.
-**Open native admin UI** requires [native admin setup](../../guides/deploy/native-admin.md):
-trusted-proxy authentication and the exact Agent HTTPS origin. Loopback origins alone
-are insufficient. Presets and edited Configuration JSON retain their settings.
+Starters allow Control UI at `http://127.0.0.1:18789` and
+`http://localhost:18789`. Compute renders authentication from Installation trust;
+starters reference generated `OPENCLAW_GATEWAY_PASSWORD` without supplying tokens.
+Keep Gateways private. **Open OpenClaw** requires [native access setup](../../guides/deploy/native-admin.md)
+and an explicit person/role assignment. Kubernetes prepares the exact HTTPS origin
+at deployment; saved Presets and Configuration remain unchanged.
 
 Experimental Dedicated OpenClaw requires [native worker support](../harness-execution.md#native-worker-support)
 and full-facet Sandbox provisioning. The pinned runtime lacks this support;
@@ -45,11 +44,9 @@ still block initial workspace files and Secret-backed environment projection.
    to create a token with Codex scope.
    Choose a model Secret or **Create new Secret...**.
    New Secrets persist after cancellation.
-   Choose a model from the starter list or select **Enter model ID manually**.
-   **Choose a model from the list** returns. Switching modes keeps a model
-   available in the current provider's list; a custom ID outside that list requires
-   a new selection when returning. Other settings are preserved.
-   No model is preselected.
+   Choose a listed model or **Enter model ID manually**; **Choose a model from the list** returns.
+   Switching modes retains listed models; returning from an unlisted custom ID
+   requires selection. Other settings survive; no model is preselected.
 4. Confirm the Installation, credential, and runtime support the chosen model. Primary and fallback
    models must use the same supported provider and Harness. For custom settings,
    open **Advanced settings**. Selection changes preserve unrelated JSON edits;
@@ -246,14 +243,12 @@ approval policy; review both before demonstrating edits.
 
 ## Initial runtime credentials
 
-Select model authentication and bind Slack tokens as Namespace Secrets. When
-Compute requires them, OCC creates missing transport credentials before first
-revision admission; supported Dedicated provisioning does so during creation.
-Neither path creates the selected `harnessAuth` model credential or channel tokens.
-
-The Kubernetes Driver generates an app-server token and local gateway password,
-which the API never returns; gateway authentication is trusted-proxy only. Generation checks for Agent runtime Deployments before writing
-so it cannot change values after startup.
+Bind model and channel credentials as Namespace Secrets. OCC creates required
+transport credentials before revision admission, or during supported Dedicated
+creation. It never creates the selected model credential or channel tokens.
+Kubernetes generates app-server tokens and loopback passwords before runtime
+Deployments exist, preventing later changes. API responses omit their values;
+gateway authentication remains trusted-proxy only.
 
 The credential API retains `GET` and explicit initial `POST {}` on
 `/namespaces/:namespaceId/agents/:agentId/runtime-credentials` for API clients.

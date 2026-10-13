@@ -5545,8 +5545,12 @@ test("Secret summaries retain revision bindings and distinguish unreadable metad
     .waitFor();
   await page.getByRole("button", { name: "Create new version", exact: true }).last().click();
   await page.getByRole("button", { name: "Channels", exact: true }).click();
-  await page.getByText("No Secret bound", { exact: true }).first().waitFor();
-  assert.equal(await page.getByText("No Secret bound", { exact: true }).count(), 2);
+  // Both Slack token bindings are absent, independently of other channel providers.
+  const slackCard = page.locator(".channel-card").filter({
+    has: page.getByRole("heading", { name: /^Slack\b/ }),
+  });
+  await slackCard.getByText("No Secret bound", { exact: true }).first().waitFor();
+  assert.equal(await slackCard.getByText("No Secret bound", { exact: true }).count(), 2);
   await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("link", { name: "Draft model", exact: true }).waitFor();
 });

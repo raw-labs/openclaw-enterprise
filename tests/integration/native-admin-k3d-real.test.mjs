@@ -28,7 +28,6 @@ import {
   waitForReadyGatewayPod,
 } from "../helpers/harness-topology-k3d-real.mjs";
 import { ADMINISTRATOR_RUNTIME_ROLE } from "../../packages/contracts/src/index.ts";
-import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 
 const executeFile = promisify(execFile);
 
@@ -292,79 +291,6 @@ async function assignNativeRuntimeRole(topology) {
     });
     assert.equal(assignment.status, 201, JSON.stringify(assignment.error));
   }
-}
-
-async function redeployWithNativeAdminAccess(
-  topology,
-  publicOrigin,
-  nativeDomain,
-  { configuredRoles = true } = {},
-) {
-  const targetForStableOrigin = expectedNativeAdminTarget(topology, publicOrigin, nativeDomain);
-  const current = await topology.request(
-    "GET",
-    `/namespaces/${topology.agent.namespaceId}/configurations/${topology.agent.configurationId}`,
-  );
-  assert.equal(current.status, 200, JSON.stringify(current.error));
-  const values = nativeRolesGateway(current.data.values, targetForStableOrigin.origin);
-  if (!configuredRoles) {
-    delete values.gateway.roles;
-    const proxy = values.gateway.auth.trustedProxy;
-    delete proxy.roleHeader;
-    delete proxy.rolePolicyHashHeader;
-    delete proxy.managedIdentityPrefixes;
-    delete proxy.managedIdentities;
-    proxy.allowUsers = ["occ-workspace-files"];
-  }
-  const patched = await topology.request(
-    "PATCH",
-    `/namespaces/${topology.agent.namespaceId}/configurations/${topology.agent.configurationId}`,
-    {
-      values,
-      ...(current.data.secretBindings === undefined
-        ? {}
-        : { secretBindings: current.data.secretBindings }),
-    },
-  );
-  assert.equal(patched.status, 200, JSON.stringify(patched.error));
-  await assignNativeRuntimeRole(topology);
-  const previousGatewayUid = topology.gatewayPod.metadata.uid;
-  const deployed = await topology.request(
-    "POST",
-    `/namespaces/${topology.agent.namespaceId}/agents/${topology.agent.id}/deploy`,
-  );
-  assert.equal(deployed.status, 202, JSON.stringify(deployed.error));
-  await waitFor(`native-admin revision ${deployed.data.id} activation`, async () => {
-    const observed = await topology.request(
-      "GET",
-      `/namespaces/${topology.agent.namespaceId}/agents/${topology.agent.id}`,
-    );
-    assert.equal(observed.status, 200);
-    return observed.data.activeRevisionId === deployed.data.id ? observed.data : undefined;
-  });
-  try {
-    await waitFor(`worker completion of native-admin revision ${deployed.data.id}`, () =>
-      topology.events.find(
-        (event) =>
-          event.event === "worker.completed" &&
-          event.revisionId === deployed.data.id &&
-          event.outcome === "success",
-      ),
-    );
-  } catch (cause) {
-    const events = topology.events
-      .filter((event) => event.revisionId === deployed.data.id)
-      .slice(-8)
-      .map(({ event, code, outcome, revisionId }) => ({ event, code, outcome, revisionId }));
-    throw new Error(`Native admin revision did not finish: ${JSON.stringify(events)}`, { cause });
-  }
-  topology.revision = deployed.data;
-  topology.gatewayPod = await waitForReadyGatewayPod(
-    topology,
-    topology.revision.id,
-    previousGatewayUid,
-  );
-  return expectedNativeAdminTarget(topology, publicOrigin, nativeDomain);
 }
 
 async function assertNoNativeCredentialLeak(page, protectedValues) {

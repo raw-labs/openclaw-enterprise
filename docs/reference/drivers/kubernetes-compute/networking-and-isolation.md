@@ -70,11 +70,10 @@ worker's `worker.compute-prepare-failed` line. `trustedProxy.allowLoopback` must
 loopback access uses the separate password, not proxy identity headers. Native
 required-header and device auto-approval settings retain their separate purposes.
 
-Compute renders `gateway.bind: lan` when it is omitted or `auto`, as native
-container detection misses containerd on cgroup v2. Deployment/provisioning
-refuse any other bind, `custom` unless `customBindHost` is `0.0.0.0`, and any
-`gateway.tailscale.mode` but `off`. Accepted `lan` and `custom` binds listen on
-IPv4 `0.0.0.0`, so Gateways need an IPv4 Pod address.
+Compute renders omitted/`auto` binds as `lan`: native detection misses containerd
+on cgroup v2. Admission rejects other binds except `custom` with
+`customBindHost: 0.0.0.0`, and rejects Tailscale modes other than `off`. Gateways
+listen on IPv4 `0.0.0.0` and require IPv4 Pod addresses.
 
 An optional [loopback password](storage-and-credentials.md#runtime-credentials)
 supports operator verification.
@@ -83,11 +82,9 @@ readiness gates; Gateway probes HTTP. `gateway.tls.enabled: true` is refused
 before revision creation. Envoy terminates TLS. Docker/SSH
 retain managed-password defaults and explicit trusted-proxy HTTP.
 
-Configured CIDRs must contain the proxy's
-source addresses and exclude untrusted sources. CIDRs do not authenticate a
-proxy: retain the exact Envoy NetworkPolicy peer, TLS verification, service-key
-authentication, and identity/header sanitization.
-Direct access still requires a trusted proxy or the operator loopback password.
+Trust only proxy source CIDRs. Retain exact Envoy NetworkPolicy peers, TLS
+verification, service-key authentication and header sanitization: CIDRs alone
+do not authenticate proxies. Direct entry requires a trusted proxy or loopback password.
 
 For repository-bearing revisions, Compute grants credential-service egress to
 the embedded gateway/Harness or dedicated Codex Pod. The separate dedicated

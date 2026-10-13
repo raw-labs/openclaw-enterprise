@@ -11,9 +11,8 @@ Use a [Preset](presets.md) to copy launch settings into an Agent draft.
 [revisions](../guides/topics/agent-revisions.md), or
 [troubleshoot deployment](../guides/topics/agent-troubleshoot.md).
 
-Creation saves identity and exact Namespace-owned Configuration with `active`
-status and `stopped` desired runtime state. No revision is
-created and no workload or model starts until an authorized caller requests
+Creation saves identity and Namespace-owned Configuration as `active`, with desired
+state `stopped`. Revisions, workloads and models start only after authorized
 [deployment](#identity-and-deployment).
 
 ## Supported operations

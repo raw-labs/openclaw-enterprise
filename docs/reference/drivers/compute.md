@@ -16,13 +16,11 @@ and [placement status](../../design.md#implementation-status).
 `implementation`, and `capability: "compute"`.
 
 Optional `configureAgent(configuration, {nativeAdminOrigin?})` transforms a frozen
-deployment copy before validation and immutable admission. OCC supplies the
-Installation-owned origin; Compute owns native policy and conflicts. Preserve the
-Harness, opt-outs, unrelated settings and SecretRefs without source mutation or
-infrastructure effects. Kubernetes uses it for
-[first-deployment native admin](../agent-native-admin.md#first-deployment-configuration).
-See [deployment configuration](compute-admission.md#deployment-configuration) for
-call order and absence behavior.
+deployment copy before validation/admission. OCC supplies the Installation-owned
+origin; Compute owns native policy/conflicts. Preserve Harness, opt-outs, settings
+and SecretRefs without source mutation or infrastructure effects. See
+[first-deployment access](../agent-native-admin.md#first-deployment-configuration)
+and [call order](compute-admission.md#deployment-configuration).
 
 Optional `getRuntimeImages(revision)` returns
 `{workload, container, image, imageId, commit, openclawCommit}` entries for
@@ -74,13 +72,12 @@ Restart resumes cleanup, not preparation; codes exclude credentials.
 
 ### Human runtime access
 
-Kubernetes browser access requires `listAgentRuntimeRoles(configuration)` and
-`getAgentRuntimeAccess(revision, principalId, runtimeRole)`; Docker/SSH omit both.
-Saved Configuration supplies assignable roles; active Configuration supplies
-deployed summaries. Admission returns a private endpoint and server-owned person/role headers or an
-unavailable reason.
-Unknown roles, unsupported transport and service endpoints are refused. See
-[Runtime access](../agent-native-admin.md).
+Kubernetes uses `listAgentRuntimeRoles(configuration)` and
+`getAgentRuntimeAccess(revision, principalId, runtimeRole)` for browser entry;
+Docker/SSH omit both. Saved and active Configurations supply assignable and
+deployed roles. Descriptors contain private endpoints, verified person/role
+headers or unavailable reasons. Unknown roles, unsupported transport and service
+endpoints are refused. See [Runtime access](../agent-native-admin.md).
 
 ### Optional additions
 

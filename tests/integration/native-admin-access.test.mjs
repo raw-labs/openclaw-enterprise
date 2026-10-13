@@ -10,7 +10,10 @@ import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
-import { ADMINISTRATOR_RUNTIME_ROLE, renderPresetTemplate } from "../../packages/contracts/src/index.ts";
+import {
+  ADMINISTRATOR_RUNTIME_ROLE,
+  renderPresetTemplate,
+} from "../../packages/contracts/src/index.ts";
 import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
 import { deriveNativeAdminHost } from "../../apps/controller/src/gateway/native-admin.ts";
 import { InMemoryAuditSink } from "../../packages/audit/src/index.ts";
@@ -654,10 +657,7 @@ test("native admin shared session configuration validates cookie scope and rejec
 });
 
 test("native admin proxy strips browser credentials and preserves the Agent gateway base path", async (t) => {
-  const context = await createNativeAdminFixture(t, {
-    automatic: true,
-    configuration: standardConfiguration("openclaw"),
-  });
+  const context = await createNativeAdminFixture(t);
   const status = await nativeStatus(context);
   const administerOnlySession = await createExactAgentUseSession(
     context,

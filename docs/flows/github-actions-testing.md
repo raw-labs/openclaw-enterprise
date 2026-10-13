@@ -1,14 +1,14 @@
 ---
 created: 2026-09-04
-updated: 2026-10-12
-last_updated_session: authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb
+updated: "2026-10-13"
+last_updated_session: "authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e"
 ---
 
 # GitHub Actions testing flow
 
 ## Overview
 
-GitHub Actions selects coverage for each event and ends at `CI Required` and resource cleanup. Full CI runs twenty-one noncredentialed test lanes, prepares disposable resources, and rejects missing or skipped required coverage. A verified documentation-only PR runs Suite Audit and documentation checks without product tests. Neither route establishes protected model or service integrations.
+GitHub Actions qualifies selected source through twenty-one noncredentialed lanes or documentation-only checks. `CI Required` rejects missing or skipped required proof. Cleanup follows; protected model/service integrations require separate coverage.
 
 ## Entry Points
 
@@ -195,6 +195,8 @@ Per-file cleanup releases its disposable database; job cleanup removes only stat
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-13 13:33: Retain downstream runners with the refreshed upstream lane inventory. (authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e - 378cf70fb08c44ee8ac4855ba073224fa5ea02cc)
 
 - 2026-10-12 16:26: Reconcile upstream behavior and condense the combined flow. (authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb - 8579ab708615e4cf7214704eae3894231d1a3412)
 

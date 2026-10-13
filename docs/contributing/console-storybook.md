@@ -30,18 +30,14 @@ without publishing the documentation site.
 ## Appearance review
 
 Review **Pages/Agents → Populated** at desktop (1440 × 1000), tablet
-(768 × 1024), and mobile (390 × 844).
-Check keyboard focus, search, navigation, an open dialog, and empty, loading,
-error, permission-denied, and missing-credential stories. The console stays light
-under either system appearance.
+(768 × 1024) and mobile (390 × 844). Check focus, search, navigation, dialogs
+and empty/loading/error/denied/missing-credential states. Console stays light.
 
-The Claw palette, type scale, and surface geometry reference
-[OpenClaw `6e8d06876fd166064abbec4928fb3bb109ebe999`](https://github.com/openclaw/openclaw/tree/6e8d06876fd166064abbec4928fb3bb109ebe999/ui),
-particularly `src/styles/base.css`, `layout.css`, and `components.css`.
-OCE keeps its own navigation and workflows. Inputs have stronger borders than
-the reference's decorative dividers so controls stay distinguishable. The
-self-hosted Instrument Sans subset ships its SIL Open Font License beside it;
-unsupported glyphs use the system fallback.
+Palette, typography and geometry follow
+[OpenClaw `6e8d06876fd166064abbec4928fb3bb109ebe999`](https://github.com/openclaw/openclaw/tree/6e8d06876fd166064abbec4928fb3bb109ebe999/ui)
+`src/styles/{base,layout,components}.css`. OCE retains its navigation/workflows
+and stronger input borders. Self-hosted Instrument Sans includes its SIL Open
+Font License; unsupported glyphs use the system font.
 
 Compare [before](../assets/console-style/agents-before.png),
 [after](../assets/console-style/agents-1440-light.png),
@@ -67,7 +63,7 @@ Stories reach error states through real controls after loading fixture data.
 | Navigation components   | Account menu, Namespace switcher, mobile drawer, admin link and denial, OCE branding, simulated OCC revision, missing development metadata, debug runtime image identities and unavailable metadata.                                                                                                                                                                                                              |
 | Channels                | Unconfigured cards, Slack editor with pairing/open/disabled policies, everyone and restricted channel sender access, incomplete sender access, unsupported mixed sender lists, unsupported wildcard channel maps, read-only snapshot, save conflict.                                                                                                                                                              |
 | Credentials             | Named Secret selection and creation, API-key and Slack Secret switching, denied metadata and grants, partially missing tokens, missing authentication, operator-managed credentials, issued ChatGPT account, model Secret replacement, pending grants, and unknown authentication saves.                                                                                                                          |
-| Native admin            | Available launch, stopped, UI configuration required, assigned role missing, insufficient pairing permissions, unsupported Compute transport, administrator self-assignment and explicit Refresh recovery, disabled panel hidden, and ordinary-user denial hidden. The launch target is an explanatory fixture page.                                                                                              |
+| Native admin            | Launch, stopped, UI setup, missing role, pairing permissions, unsupported transport, administrator self-assignment/Refresh, disabled and ordinary-user denial. Launch opens an explanatory fixture.                                                                                                                                                                                                               |
 | Workspace               | Four editable deployed files, undeployed Agent, denied reads, missing file, unknown write outcome.                                                                                                                                                                                                                                                                                                                |
 | Stop Agent              | Confirmation, stopped requested state, permission denial, unknown outcome requiring refresh.                                                                                                                                                                                                                                                                                                                      |
 | Deletion                | Confirmation, pending cleanup, permission denial, conflict, unknown outcome.                                                                                                                                                                                                                                                                                                                                      |
@@ -75,11 +71,9 @@ Stories reach error states through real controls after loading fixture data.
 Pending-read stories use the real client's 15-second timeout; reset them to replay
 loading.
 
-In **Components/Native admin → Administrator Needs Assignment**, follow the
-hint, assign the fixture Principal `platform-administrator` in Share Agent, then
-select **Refresh access**. The launch link appears in the same tab. Compare
-**Disabled and hidden** and **Denied and hidden**; neither shows the assignment
-hint.
+In **Components/Native admin → Administrator Needs Assignment**, assign the
+fixture Principal `platform-administrator` through Sharing, then **Refresh access**.
+**Disabled and hidden** and **Denied and hidden** show no assignment hint.
 
 ## Return navigation
 
@@ -161,13 +155,11 @@ Slack tokens (Credentials tab and Channels drawer). See
 [Create and deploy in the console](../reference/console/create-and-deploy.md)
 for the supported installation workflow, prerequisites, and Teams deployment limits.
 
-Repository previews cover access levels, empty or pending discovery, unavailable
-choices, denied or unverified authorization, and reselection after a rejected save.
-In **Repository choices unavailable**, follow the setup link or retry; creation
-without repository access stays available. The recovery story keeps its saved
-Configuration and needs a current nonempty repository selection to retry.
-The fixture does not verify operator prerequisites: GitHub App setup, Namespace
-approvals, runtime images, and credential-service networking.
+Repository previews cover access levels, discovery failures, authorization and
+reselection after rejected saves. **Repository choices unavailable** offers setup,
+retry or creation without bindings. Recovery retains Configuration and requires
+nonempty repository selection. Fixtures do not verify GitHub App setup, Namespace
+approvals, images or credential-service networking.
 
 ### Sharing
 

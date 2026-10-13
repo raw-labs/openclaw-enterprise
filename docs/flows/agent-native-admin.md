@@ -1,7 +1,7 @@
 ---
 created: "2026-09-19"
-updated: "2026-10-12"
-last_updated_session: "authoring-run/522f2037-41de-4f2e-ae7b-8b26a769aa47"
+updated: "2026-10-13"
+last_updated_session: "authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e"
 ---
 
 # Agent Native Admin UI Flow
@@ -245,19 +245,12 @@ The init container cannot write through the gateway's later mount path.
 
 ## Debugging and Verification
 
-- `AGENT_NATIVE_ADMIN_INVALID` at startup points to native admin enablement, the Agent domain, or a missing shared cookie domain. A bad shared cookie domain or public origin reports `AUTH_BASE_URL_INVALID`, short auth secret material `AUTH_SECRET_INVALID`, and a missing gateway API key path `GATEWAY_API_KEY_UNAVAILABLE`.
-- `disabled` means the Installation has not enabled the feature.
-- `stopped` means the exact Agent is not desired running. Its response has no origin or revision after stop reconciliation clears the active revision, or before the first deployment.
-- `unavailable` means a desired-running Agent has no active revision or an exclusive Compute Driver is replacing the active workload. Check Deployment activity, including failed replacements, then refresh access. Other dependency outages return `503`.
-- `unsupported` means the selected Compute Driver, gateway endpoint, or native trusted-proxy/control UI configuration cannot support the active revision.
-- Wrong or unknown Agent hosts fail before gateway proxying. Check the derived host calculation, Agent lifecycle state, and `agentNativeAdmin.domain`.
-- Browser requests should not contain native-admin exchange, bootstrap, callback, launch-code, state, verifier, or Agent-specific session-cookie traffic.
-- The native gateway should never observe the OCE session cookie; inspect sanitized proxy inputs when testing this boundary.
-- IAM denial audits should appear for attributable denied status checks, proxy admission, and WebSocket lease renewal, with the human principal and exact Agent target preserved.
-- A TCP reset during admission must not crash the API, suppress a denial audit or open an upstream connection for the disconnected client.
-- `openclaw.agents.native_admin.websocket.connect` audits should include `connectionId`; matching `openclaw.agents.native_admin.websocket.close` audits should reuse `connectionId` and include `closeReason` with one of the expected categories: lifecycle, revocation, dependency, client, upstream, or shutdown.
-- Service-worker registration failure is expected: the HTTP proxy rejects `Service-Worker: script` requests and adds `worker-src 'none'` to proxied responses.
-- Browser tests cover visibility, warnings and launch. Integration covers shared-cookie admission, service-key and unknown-host denial, assets, WebSocket reconnect, lease renewal (PostgreSQL shortens the 25-second interval), revision-change closure and a reversible native edit on a disposable Agent.
+- Startup reports `AGENT_NATIVE_ADMIN_INVALID`, `AUTH_BASE_URL_INVALID`, `AUTH_SECRET_INVALID` or `GATEWAY_API_KEY_UNAVAILABLE` for invalid feature, origin/cookie, auth-secret or gateway-key settings.
+- For `disabled`, `stopped`, `unavailable` and `unsupported`, follow [availability semantics](../reference/agent-native-admin.md#authorization-and-availability). Check exact-host derivation, Agent lifecycle, serving revision and runtime support before changing policy.
+- Gateway requests must contain no browser cookie or native exchange/bootstrap credentials. IAM denials retain the human principal and exact Agent; disconnected callers must not open upstream connections.
+- WebSocket connect/close audits share `connectionId`; `closeReason` identifies lifecycle, revocation, dependency, client, upstream or shutdown closure.
+- Service-worker registration is intentionally refused with `worker-src 'none'` and rejection of `Service-Worker: script` requests.
+- Browser tests cover launch and visibility. Integration covers HTTP admission, assets, PostgreSQL session/role revocation, reconnect, leases, revision changes and reversible edits on disposable Agents.
 
 ## Related docs
 
@@ -272,6 +265,8 @@ The init container cannot write through the gateway's later mount path.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-13 13:33: Combine first-deployment admission with explicit native runtime assignments. (authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e - 378cf70fb08c44ee8ac4855ba073224fa5ea02cc)
 
 - 2026-10-12 15:30: Refreshed first-deployment admission for the shared configuration helper on latest inspected upstream; Agent save remains unchanged. (authoring-run/522f2037-41de-4f2e-ae7b-8b26a769aa47 - b195e54e9b0ce98ead2b2306015a5209325e837b)
 

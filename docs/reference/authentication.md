@@ -1,12 +1,10 @@
 # Authentication
 
-OpenClaw Control Plane (OCC) authenticates human controller API clients with
-user sessions established through email/password sign-in or an administrator-enrolled
-GitHub, Google or OIDC identity. Programmatic non-Agent automation authenticates with service
-API keys. Better Auth owns
-password verification, revocable session cookies, and hashed API-key storage.
-The selected IAM Driver resolves the authenticated account or service identity
-to an explicitly provisioned Principal or ServicePrincipal and owns
+OpenClaw Control Plane (OCC) authenticates people through email/password or
+administrator-enrolled GitHub, Google or OIDC sessions. Non-Agent automation uses
+service API keys. Better Auth verifies passwords and manages revocable session
+cookies and hashed keys. The IAM Driver maps authenticated accounts and service
+identities to provisioned Principals/ServicePrincipals and owns
 [authorization](authorization.md).
 
 For a sign-in procedure, see
