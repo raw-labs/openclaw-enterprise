@@ -90,6 +90,9 @@ See the [source-backed flow](../../docs/flows/agent-channel-runtime.md).
 
 ## Delivery, verification and removal
 
+The [implementation plan](../plans/0020-temporary-embedded-channel-trial.md)
+records separate shared prerequisites, source delivery and qualification holds.
+
 The evaluation implementation and regular API/worker Kubernetes fixture exercise
 trusted opt-in, default refusal, Secret scope, credential projection, revision
 replacement and stop/delete. Proxy tests exercise the real CONNECT process and
