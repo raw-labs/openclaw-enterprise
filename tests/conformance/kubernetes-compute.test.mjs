@@ -13987,7 +13987,10 @@ for (const cutover of ["already deployed", "during Deployment deletion", "during
         async listNamespacedPod() {
           return { items: [] };
         },
-        async readNamespacedService() {
+        async readNamespacedService({ name }) {
+          if (resources.get("Service")?.metadata.name !== name) {
+            throw missing();
+          }
           return read("Service");
         },
         async readNamespacedServiceAccount() {
@@ -15637,7 +15640,7 @@ test("retirement preserves active storage and node routing and deletes exact own
         if (name === agentName) {
           return structuredClone(agentService);
         }
-        if (observedService === undefined) {
+        if (observedService === undefined || observedService.metadata.name !== name) {
           return missing();
         }
         return structuredClone(observedService);
