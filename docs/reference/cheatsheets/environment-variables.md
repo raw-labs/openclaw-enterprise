@@ -161,3 +161,8 @@ Collector or local Docker log forwarding. See [Observability](../../guides/obser
 - `OTEL_COLLECTOR_PORT` — Local Collector Fluent Forward port; default: `24224`.
 - `OTEL_COLLECTOR_METRICS_PORT` — Local Collector metrics port; default: `8888`.
 - `OCC_DOCKER_LOGGING_ADDRESS` — Docker Compute log destination; local override default: `127.0.0.1:24224`.
+
+## Channel proxy
+
+- `OCC_SLACK_PROXY_PORT` — Bundled channel CONNECT listener port, default 3128.
+- `OCC_CHANNEL_PROXY_TEAMS` — Explicit `true` adds the bounded Microsoft Public cloud destinations; default remains Slack only. See [Teams trial setup](../../guides/integrations/teams.md).

@@ -102,6 +102,82 @@ export function requireChannelTopology(
   }
 }
 
+/** The packaged Teams trial uses Microsoft Public cloud and one native SDK callback. */
+export function requireTeamsConfiguration(
+  configuration: Readonly<OpenClawConfigurationDocument>,
+  createError: SettingError,
+): void {
+  const teams = asRecord(asRecord(configuration.channels)?.msteams);
+  if (teams === undefined || teams.enabled === false) {
+    return;
+  }
+  for (const field of ["appId", "tenantId"] as const) {
+    if (
+      typeof teams[field] !== "string" ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(teams[field])
+    ) {
+      throw createError(
+        `channels.msteams.${field}`,
+        "must be an explicit Microsoft application or tenant UUID",
+      );
+    }
+  }
+  const password = asRecord(teams.appPassword);
+  if (
+    password?.source !== "env" ||
+    (password.provider !== undefined && password.provider !== "default") ||
+    typeof password.id !== "string" ||
+    !/^[A-Za-z_][A-Za-z0-9_]{0,252}$/.test(password.id)
+  ) {
+    throw createError(
+      "channels.msteams.appPassword",
+      "must reference an environment Secret binding",
+    );
+  }
+  if (teams.cloud !== undefined && teams.cloud !== "Public") {
+    throw createError("channels.msteams.cloud", "must be Public for this channel runtime");
+  }
+  if (
+    asRecord(teams.webhook)?.path !== undefined &&
+    asRecord(teams.webhook)?.path !== "/api/messages"
+  ) {
+    throw createError("channels.msteams.webhook.path", "must be /api/messages");
+  }
+  if (teams.legacyWebhook !== undefined && teams.legacyWebhook !== false) {
+    throw createError(
+      "channels.msteams.legacyWebhook",
+      "must be false: callbacks use the Gateway listener",
+    );
+  }
+  for (const field of [
+    "certificatePath",
+    "certificateThumbprint",
+    "managedIdentityClientId",
+    "useManagedIdentity",
+    "serviceUrl",
+    "delegatedAuth",
+    "sso",
+  ] as const) {
+    if (teams[field] !== undefined) {
+      throw createError(
+        `channels.msteams.${field}`,
+        "is outside the supported app-password callback trial",
+      );
+    }
+  }
+  if (teams.authType !== undefined && teams.authType !== "secret") {
+    throw createError("channels.msteams.authType", "must be secret");
+  }
+  const plugins = asRecord(configuration.plugins);
+  if (
+    (Array.isArray(plugins?.deny) && plugins.deny.includes("msteams")) ||
+    asRecord(asRecord(plugins?.entries)?.msteams)?.enabled === false ||
+    (Array.isArray(plugins?.allow) && !plugins.allow.includes("msteams"))
+  ) {
+    throw createError("plugins", "must allow the msteams channel plugin");
+  }
+}
+
 const IGNORED_CHANNEL_KEYS: readonly string[] = ["defaults", "modelByChannel"];
 
 /**

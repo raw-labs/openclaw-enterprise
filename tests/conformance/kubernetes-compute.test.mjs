@@ -3667,6 +3667,72 @@ test("sandbox routing keeps generated HTML off the administrative origin and bac
   );
 });
 
+test("Teams callback manifests preserve native authentication and cannot publish a candidate", async () => {
+  const driver = createKubernetesComputeDriver(
+    routedOptions({
+      gatewayRouting: { ...gatewayRouting, channels: { hostname: "channels.example.test" } },
+    }),
+  );
+  const revision = routedRevision(driver, {
+    configuration: { channels: { msteams: { enabled: true } } },
+  });
+  const namespace = { name: kubernetesNamespaceName(tenant.id), plane: "execution" };
+  const ownership = { namespaceId: revision.namespaceId, agentId: revision.agentId };
+  const service = driver.service(
+    driver.gatewayRouteName(revision.agentId),
+    ownership,
+    namespace,
+    {},
+  );
+  let serving = "predecessor";
+  const objects = [];
+  // Only Kubernetes transport is simulated here. Assertions protect generated routing
+  // contracts; real cluster and native SDK enforcement require separate integration.
+  driver.getOwned = async () => ({
+    metadata: { annotations: { "openclaw.dev/agent-revision-id": serving } },
+    spec: {
+      template: { metadata: { labels: { "openclaw.dev/network-profile": "broad-egress-v1" } } },
+    },
+  });
+  driver.reconcile = async (object) => {
+    objects.push(object);
+  };
+  await driver.reconcileTeamsCallback(revision, ownership, namespace, service);
+  assert.equal(objects.length, 0, "candidate preparation cannot publish a predecessor's callback");
+  serving = revision.id;
+  await driver.reconcileTeamsCallback(revision, ownership, namespace, service);
+  const route = objects.find(({ kind }) => kind === "HTTPRoute");
+  assert.ok(route);
+  assert.equal(route.metadata.annotations["openclaw.dev/agent-revision-id"], revision.id);
+  assert.deepEqual(route.spec.hostnames, ["channels.example.test"]);
+  assert.equal(route.spec.parentRefs[0].sectionName, "channels");
+  const rule = route.spec.rules[0];
+  assert.deepEqual(rule.matches, [
+    {
+      method: "POST",
+      path: {
+        type: "Exact",
+        value: `/namespaces/${revision.namespaceId}/agents/${revision.agentId}/channels/msteams`,
+      },
+    },
+  ]);
+  assert.equal(rule.filters[0].urlRewrite.path.replaceFullPath, "/api/messages");
+  assert.equal(rule.filters[1].requestHeaderModifier.set, undefined);
+  assert.ok(rule.filters[1].requestHeaderModifier.remove.includes("x-occ-identity"));
+  assert.equal(rule.filters[1].requestHeaderModifier.remove.includes("authorization"), false);
+  assert.equal(rule.backendRefs[0].name, service.metadata.name);
+  const security = objects.find(({ kind }) => kind === "SecurityPolicy");
+  assert.deepEqual(Object.keys(security.spec), ["targetRefs"]);
+  const network = objects.find(({ kind }) => kind === "NetworkPolicy");
+  assert.deepEqual(network.spec.ingress[0].ports, [{ protocol: "TCP", port: 8080 }]);
+  assert.equal(
+    network.spec.ingress[0].from[0].podSelector.matchLabels[
+      "gateway.envoyproxy.io/owning-gateway-name"
+    ],
+    gatewayRouting.gatewayName,
+  );
+});
+
 test("sandbox routing caps the domain length and requires two labels", () => {
   const label = "a".repeat(63);
   const sandboxDriver = (domain) =>
@@ -7588,7 +7654,8 @@ test("account-token authentication grants only the exact Codex revision outbound
 
 test("native channel providers require Secret bindings and project them only to the gateway", async () => {
   const driver = createKubernetesComputeDriver(
-    options({
+    routedOptions({
+      gatewayRouting: { ...gatewayRouting, channels: { hostname: "channels.example.test" } },
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
@@ -7656,11 +7723,17 @@ test("native channel providers require Secret bindings and project them only to 
     },
   });
 
+  const teams = {
+    enabled: true,
+    appId: "00000000-0000-4000-8000-000000000001",
+    tenantId: "00000000-0000-4000-8000-000000000002",
+    appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+  };
   for (const [channels, expectedSecrets] of [
     [{ slack: {} }, ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]],
-    [{ msteams: { enabled: true } }, ["MSTEAMS_APP_PASSWORD"]],
+    [{ msteams: teams }, ["MSTEAMS_APP_PASSWORD"]],
     [
-      { slack: { enabled: true }, msteams: { enabled: true } },
+      { slack: { enabled: true }, msteams: teams },
       ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN", "MSTEAMS_APP_PASSWORD"],
     ],
     [
@@ -12400,7 +12473,19 @@ test("revision lifecycle rejects another driver or missing identity before clust
   };
 
   for (const provider of ["slack", "msteams"]) {
-    for (const configuration of [{ enabled: true }, { accounts: { support: { enabled: true } } }]) {
+    for (const configuration of [
+      { enabled: true },
+      { accounts: { support: { enabled: true } } },
+    ].map((value) =>
+      provider === "msteams"
+        ? {
+            ...value,
+            appId: "00000000-0000-4000-8000-000000000001",
+            tenantId: "00000000-0000-4000-8000-000000000002",
+            appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+          }
+        : value,
+    )) {
       await assert.rejects(
         driver.prepareRevision({
           ...revision,
@@ -12740,7 +12825,17 @@ test("revision lifecycle rejects another driver or missing identity before clust
         ...embeddedRevision,
         configuration: {
           ...embeddedRevision.configuration,
-          channels: { [provider]: { enabled: true } },
+          channels: {
+            [provider]:
+              provider === "msteams"
+                ? {
+                    enabled: true,
+                    appId: "00000000-0000-4000-8000-000000000001",
+                    tenantId: "00000000-0000-4000-8000-000000000002",
+                    appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+                  }
+                : { enabled: true },
+          },
         },
       }),
       /channels require a dedicated Agent workload\./i,

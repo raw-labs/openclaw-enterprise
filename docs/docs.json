@@ -409,7 +409,8 @@
                   {
                     "page": "guides/integrations/slack",
                     "label": "Slack"
-                  }
+                  },
+                  { "page": "guides/integrations/teams", "label": "Teams Trial" }
                 ]
               }
             ],
@@ -971,6 +972,7 @@
               "flows/driver-plugin-loading",
               "flows/agent-plugins",
               "flows/agent-channel-directory",
+              "flows/agent-channel-runtime",
               "flows/agent-plugin-approvals",
               "flows/agent-provisioning",
               "flows/agent-native-admin",
