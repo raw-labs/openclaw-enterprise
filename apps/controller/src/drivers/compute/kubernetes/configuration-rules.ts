@@ -107,9 +107,13 @@ export function requireTeamsConfiguration(
   configuration: Readonly<OpenClawConfigurationDocument>,
   createError: SettingError,
 ): void {
-  const teams = asRecord(asRecord(configuration.channels)?.msteams);
-  if (teams === undefined || teams.enabled === false) {
+  const value = asRecord(configuration.channels)?.msteams;
+  const teams = asRecord(value);
+  if (value === undefined || teams?.enabled === false) {
     return;
+  }
+  if (teams === undefined) {
+    throw createError("channels.msteams", "must be an object");
   }
   for (const field of ["appId", "tenantId"] as const) {
     if (
@@ -136,6 +140,9 @@ export function requireTeamsConfiguration(
   }
   if (teams.cloud !== undefined && teams.cloud !== "Public") {
     throw createError("channels.msteams.cloud", "must be Public for this channel runtime");
+  }
+  if (teams.webhook !== undefined && asRecord(teams.webhook) === undefined) {
+    throw createError("channels.msteams.webhook", "must be an object");
   }
   if (
     asRecord(teams.webhook)?.path !== undefined &&

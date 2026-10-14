@@ -3676,6 +3676,12 @@ test("Teams callback manifests preserve native authentication and cannot publish
   const revision = routedRevision(driver, {
     configuration: { channels: { msteams: { enabled: true } } },
   });
+  for (const msteams of [null, true, "enabled"]) {
+    assert.throws(
+      () => driver.validateConfiguration({ channels: { msteams } }),
+      /channels.msteams must be an object/,
+    );
+  }
   const namespace = { name: kubernetesNamespaceName(tenant.id), plane: "execution" };
   const ownership = { namespaceId: revision.namespaceId, agentId: revision.agentId };
   const service = driver.service(
