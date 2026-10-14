@@ -503,6 +503,8 @@ export interface KubernetesComputeDriverOptions {
     readonly codexModelBaseUrl?: string;
     readonly channels?: {
       readonly proxyUrl: string;
+      /** TODO(dedicated native parity): remove this temporary shared-credential evaluation option. */
+      readonly experimentalEmbeddedChannels?: boolean;
       readonly managedProxy?: KubernetesWorkloadPeer & {
         readonly hostname: string;
         readonly port: number;
@@ -2882,6 +2884,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
             additionalProperties: false,
             properties: {
               proxyUrl: { type: "string" },
+              experimentalEmbeddedChannels: { type: "boolean", default: false },
               managedProxy: {
                 type: "object",
                 required: ["hostname", "namespace", "podLabels", "port"],
@@ -2933,9 +2936,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
   readonly implementation: string;
   readonly supportsWorkspaceSetup = true as const;
   readonly requiresAgentRuntimeCredentials?: true;
-  readonly agentProvisioning = Object.freeze({
-    executionModes: Object.freeze(["dedicated"] as const),
-  });
+  readonly agentProvisioning: {
+    readonly executionModes: readonly ("dedicated" | "embedded")[];
+  };
   private readonly options: KubernetesComputeDriverOptions;
   private readonly sandboxDriver: SandboxDriver | undefined;
   private readonly credentialGatewayDriver: CredentialGatewayDriver | undefined;
@@ -3193,6 +3196,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
           throw new ConfigurationFailure("Channel runtime proxy must be explicitly configured.");
         }
         channelProxy(channels.proxyUrl, channels.managedProxy);
+        if (
+          channels.experimentalEmbeddedChannels !== undefined &&
+          typeof channels.experimentalEmbeddedChannels !== "boolean"
+        ) {
+          throw new ConfigurationFailure(
+            "Experimental embedded channels must be an Installation boolean.",
+          );
+        }
       }
     }
     if (options.executionCluster !== undefined) {
@@ -3322,6 +3333,15 @@ export class KubernetesComputeDriver implements ComputeDriver {
       "Kubernetes Compute Driver implementation",
     );
     this.options = options;
+    // TODO(dedicated native parity): remove embedded provisioning with the temporary
+    // channel exception; the default Installation still admits dedicated provisioning.
+    this.agentProvisioning = Object.freeze({
+      executionModes: Object.freeze(
+        options.runtime?.channels?.experimentalEmbeddedChannels === true
+          ? (["dedicated", "embedded"] as const)
+          : (["dedicated"] as const),
+      ),
+    });
     if (options.runtime !== undefined) {
       this.requiresAgentRuntimeCredentials = true;
     }
@@ -3607,14 +3627,18 @@ export class KubernetesComputeDriver implements ComputeDriver {
   }
 
   validateAgentProvisioning(input: ComputeAgentProvisioningInput): void {
-    if (input.executionMode !== "dedicated") {
+    if (!this.agentProvisioning.executionModes.includes(input.executionMode)) {
       throw new ConfigurationFailure(
         "Kubernetes Agent provisioning supports only dedicated execution mode.",
       );
     }
     this.verifyGatewayRoutingConfiguration({
       configuration: this.namedGatewayConfigurationDocument(input.configuration),
-      harness: { id: "codex", version: "provisioning", mode: "dedicated" },
+      harness: {
+        id: input.executionMode === "embedded" ? "openclaw" : "codex",
+        version: "provisioning",
+        mode: input.executionMode,
+      },
     });
   }
 
@@ -3786,6 +3810,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
       {
         embedded: harness.mode === "embedded",
         channelRuntime: agentSave || this.options.runtime?.channels !== undefined,
+        experimentalEmbeddedChannels:
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       callerSettingError,
     );
@@ -12286,6 +12312,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       {
         embedded: revision.harness.mode === "embedded",
         channelRuntime: this.options.runtime?.channels !== undefined,
+        experimentalEmbeddedChannels:
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       preparationSettingError,
     );

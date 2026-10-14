@@ -75,20 +75,27 @@ export function requireWorkspaceNodePlugins(
 }
 
 /**
- * Enabled channels need a dedicated Agent workload and an Installation channel runtime
- * (`runtime.channels`: isolated credentials and a reviewed proxy). `providers` lists the
+ * Enabled channels need a dedicated workload (unless the trusted evaluation option is
+ * enabled) and an Installation channel runtime
+ * (`runtime.channels`: credential delivery and a reviewed proxy). `providers` lists the
  * enabled channel providers, in Configuration order.
  */
 export function requireChannelTopology(
   providers: readonly string[],
-  topology: { readonly embedded: boolean; readonly channelRuntime: boolean },
+  topology: {
+    readonly embedded: boolean;
+    readonly channelRuntime: boolean;
+    readonly experimentalEmbeddedChannels?: boolean;
+  },
   createError: SettingError,
 ): void {
   const [provider] = providers;
   if (provider === undefined) {
     return;
   }
-  if (topology.embedded) {
+  // TODO(dedicated native parity): remove this evaluation exception once dedicated
+  // OpenClaw supplies the required models and native integrations.
+  if (topology.embedded && topology.experimentalEmbeddedChannels !== true) {
     throw createError(
       `channels.${provider}`,
       "is enabled, but channels require a dedicated Agent workload",

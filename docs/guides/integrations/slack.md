@@ -24,6 +24,8 @@ go to the Agent's gateway; model credentials are configured separately.
   Embedded OpenClaw execution cannot isolate channel credentials from the
   Harness, and Kubernetes Compute rejects embedded revisions with external
   channels enabled. The Standard OpenClaw preset must leave channels disabled.
+  The separate [embedded evaluation exception](embedded-channel-trial.md) requires
+  an Installation administrator's explicit opt-in and a weaker credential boundary.
 - First deployment generates required connection credentials. It requires Agent
   `deploy`, plus Agent `read` and `operate` when generation is needed.
   Selecting Secrets requires [readable Secret metadata](../../reference/drivers/secret.md#iam)

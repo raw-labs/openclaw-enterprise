@@ -26,7 +26,7 @@ describes evaluation-branch source, not production or live-provider qualificatio
 
 ```mermaid
 graph TD
-  REQUEST[Authorized Agent deployment] --> ADMIT[Compute checks topology and channel settings]
+  REQUEST[Authorized Agent deployment] --> ADMIT[Compute checks trusted topology and channel settings]
   ADMIT -->|Refused| DENIED[No revision or credential delivery]
   ADMIT -->|Admitted| FREEZE[OCC freezes revision and Secret references]
   FREEZE --> PREPARE[Compute prepares exact Agent Secrets and proxy policy]
@@ -51,15 +51,26 @@ a revision can stop predecessors. `requireTeamsConfiguration` requires explicit
 Public-cloud IDs, an environment Secret reference, the native `/api/messages` path
 and the packaged plugin. Teams also requires an Installation public callback
 hostname. Native JSON cannot provision a listener or change trusted Compute options.
+The temporary `runtime.channels.experimentalEmbeddedChannels` option permits
+embedded OpenClaw only when the Installation administrator explicitly enables it.
+The same option advertises embedded provisioning to the regular API; its default
+remains dedicated provisioning and embedded-channel refusal.
 
 ### 2. Prepare owned credentials and networking
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:prepareRevision` receives
 the immutable revision and resolved Secret locators through the regular worker.
 `deliverGatewaySecrets` verifies source ownership and projects credentials only
-into the owning Gateway. Dedicated Harnesses receive model authentication separately.
+into the owning Gateway. Dedicated Harnesses receive model authentication separately. Opted-in embedded
+OpenClaw instead receives both channel and model credentials in its combined
+Gateway/execution Pod. This preserves exact resource ownership but weakens
+credential separation within that Agent.
 `reconcileChannelNetworkPolicy` permits the configured exact proxy endpoint; its
 hostname policy belongs to the external proxy or opt-in chart-managed process.
+`deployment` applies `HTTPS_PROXY`, `NODE_USE_ENV_PROXY` and internal `NO_PROXY`
+settings to the whole channel-enabled Gateway. Native integrations using that
+proxy need its destination authorization too. Embedded processes retain their
+existing direct public egress and can bypass these environment settings.
 
 The runtime image selects upstream `msteams` in
 `deploy/runtime/Dockerfile` and `scripts/build-runtime-assets.mjs`. No independent
@@ -73,7 +84,7 @@ that Deployment cannot claim or delete its predecessor's callback.
 `activateRevisionWorkloads` rejects stale activation before publishing the new route.
 
 The `channels` HTTPS listener accepts an exact Agent path and POST method, rewrites
-to `/api/messages` on that Agent's Gateway Service and strips OCE identity, cookie,
+to `/api/messages` through a Service selecting that exact Gateway revision and strips OCE identity, cookie,
 API-key and forwarded identity headers. Authorization remains intact for the native
 Microsoft SDK. A route-scoped SecurityPolicy replaces inherited OCE administration
 authentication only for this route. Its NetworkPolicy admits the exact owning
@@ -83,10 +94,12 @@ Envoy Gateway peer to the native Gateway port; other tenants gain no ingress gra
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback` removes obsolete callback resources when the activated
 revision disables Teams. `stopRevision` removes the serving route first.
-`deleteGatewayUnauthenticatedRoutes` deletes HTTPRoute before its SecurityPolicy,
+`deleteGatewayUnauthenticatedRoutes` deletes HTTPRoute before its revision-selecting Service and SecurityPolicy,
 then its NetworkPolicy, using the exact revision, observed UID and resourceVersion.
 Retiring an older revision cannot delete a newer callback. Existing Agent deletion
 uses the same owned Gateway cleanup and removes retained credential artifacts.
+Stop/delete do not consult the opt-in topology gate: disabling the trusted option
+must not prevent credential withdrawal from an existing trial workload.
 
 ## Debugging and Verification
 
@@ -107,5 +120,7 @@ it does not establish native plugin support or execution containment.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-14 11:41: Trace trusted opt-in, shared credential execution and exact callback Service fencing. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
 
 - 2026-10-14 10:36: Trace fresh Teams callback admission, activation and cleanup. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - d7595b9ce392c0558cf84c268bc31f093aba36bf)

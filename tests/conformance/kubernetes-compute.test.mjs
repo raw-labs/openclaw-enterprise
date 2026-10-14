@@ -7660,6 +7660,66 @@ test("account-token authentication grants only the exact Codex revision outbound
   ]);
 });
 
+test("embedded channels require a trusted boolean and retain native provider selection", () => {
+  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
+  const channels = { proxyUrl: "http://10.42.0.15:3128" };
+  const embedded = { id: "openclaw", version: "1.0.0", mode: "embedded" };
+  const configuration = {
+    agents: { defaults: { model: "anthropic/claude-sonnet-4-5" } },
+    channels: { slack: { enabled: true } },
+  };
+  for (const flag of [undefined, false]) {
+    const driver = createKubernetesComputeDriver(
+      options({
+        runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: flag } },
+      }),
+    );
+    assert.throws(
+      () =>
+        driver.validateHarnessAuth(embedded, apiKeyAuth, {
+          ...configuration,
+          runtime: { channels: { experimentalEmbeddedChannels: true } },
+        }),
+      /channels require a dedicated Agent workload/,
+    );
+    assert.deepEqual(driver.agentProvisioning.executionModes, ["dedicated"]);
+  }
+  for (const flag of ["true", 1, null]) {
+    assert.throws(
+      () =>
+        createKubernetesComputeDriver(
+          options({
+            runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: flag } },
+          }),
+        ),
+      /Installation boolean/,
+    );
+  }
+  const trial = createKubernetesComputeDriver(
+    options({
+      runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: true } },
+    }),
+  );
+  assert.doesNotThrow(() => trial.validateHarnessAuth(embedded, apiKeyAuth, configuration));
+  assert.deepEqual(trial.agentProvisioning.executionModes, ["dedicated", "embedded"]);
+  assert.throws(
+    () =>
+      trial.validateHarnessAuth(embedded, apiKeyAuth, {
+        ...configuration,
+        agents: { defaults: { model: "codex/gpt-6-astra" } },
+      }),
+    /compatible model provider/,
+  );
+  assert.throws(
+    () =>
+      trial.validateHarnessAuth(embedded, apiKeyAuth, {
+        ...configuration,
+        agents: { defaults: { model: "openrouter/model" } },
+      }),
+    /compatible model provider/,
+  );
+});
+
 test("native channel providers require Secret bindings and project them only to the gateway", async () => {
   const driver = createKubernetesComputeDriver(
     routedOptions({

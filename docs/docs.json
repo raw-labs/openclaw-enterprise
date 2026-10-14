@@ -410,7 +410,8 @@
                     "page": "guides/integrations/slack",
                     "label": "Slack"
                   },
-                  { "page": "guides/integrations/teams", "label": "Teams Trial" }
+                  { "page": "guides/integrations/teams", "label": "Teams Trial" },
+                  { "page": "guides/integrations/embedded-channel-trial", "label": "Embedded Trial" }
                 ]
               }
             ],
@@ -993,6 +994,7 @@
               "testing/docker",
               "testing/ssh",
               "testing/kubernetes",
+              "testing/channel-runtime",
               "testing/production-network-access",
               "testing/two-cluster-local",
               "testing/gateway-routing",

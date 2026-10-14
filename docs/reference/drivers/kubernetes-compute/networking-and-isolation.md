@@ -142,11 +142,12 @@ endpoint, Pod and Service CIDRs, and metadata endpoint fall inside them. A
 dedicated Agent has one authentication-only egress policy, pinned to its latest
 prepared revision. Stop leaves it and the Agent's runtime and plugin-status
 policies, selecting no Pod, until the next preparation or Agent deletion.
-Channels require `runtime.channels.proxyUrl`: an approved literal-IP HTTP(S)
-proxy or the Helm Service paired with `runtime.channels.managedProxy`. Dedicated
-Gateways have no direct public channel access. The [Teams trial](../../../guides/integrations/teams.md)
-also requires `gatewayRouting.channels.hostname` and a separate public HTTPS
-listener; Compute owns its exact Agent POST route and revision lifecycle.
+Channels use an approved `runtime.channels.proxyUrl`: literal-IP HTTP(S), or a
+Helm Service with `runtime.channels.managedProxy`. Dedicated Gateways deny direct
+provider access. The [Teams trial](../../../guides/integrations/teams.md) requires
+`gatewayRouting.channels.hostname` and public HTTPS; Compute owns its exact Agent
+POST route and revision lifecycle. `runtime.channels.experimentalEmbeddedChannels`
+defaults to false; true permits the [unsupported embedded trial](../../../guides/integrations/embedded-channel-trial.md).
 
 ## Explicit network profiles
 

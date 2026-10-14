@@ -1,7 +1,7 @@
 ---
 created: 2026-08-19
-updated: 2026-10-13
-last_updated_session: fix-1276-1278
+updated: 2026-10-14
+last_updated_session: authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c
 ---
 
 # Configuration Driver and Agent Revision Flow
@@ -165,6 +165,7 @@ and cleanup failures propagate to the caller; this does not add automatic retrie
 or alter OCC's metadata transaction and compensation boundary.
 
 [Configuration persistence and revision snapshots](configuration-driver/persistence-and-revisions.md) traces metadata locking, Driver effects, Agent reference resolution, and snapshot validation after request authorization.
+The [channel flow](agent-channel-runtime.md) explains trusted embedded evaluation admission.
 
 ## Debugging and Verification
 
@@ -212,6 +213,8 @@ its optional integration is skipped.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-14 11:41: Document the Installation-controlled embedded channel admission exception in the revision companion. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
 
 - 2026-10-14 10:30: Writes refuse literals in the other slots OpenClaw marks sensitive ([rules](configuration-driver/persistence-and-revisions.md)). (fix-1309, finding 1309)
 - 2026-10-14 09:30: Writes and deployment require references in the other key and header slots the Gateway sends ([list](../reference/configuration/secrets.md#secret-boundaries)); those header slots and MCP headers refuse invalid header names. Stored documents still read. (fix-1307, finding 1307)
