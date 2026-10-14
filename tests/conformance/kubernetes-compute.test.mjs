@@ -3726,7 +3726,9 @@ test("Teams callback manifests preserve native authentication and cannot publish
   assert.equal(rule.filters[1].requestHeaderModifier.set, undefined);
   assert.ok(rule.filters[1].requestHeaderModifier.remove.includes("x-occ-identity"));
   assert.equal(rule.filters[1].requestHeaderModifier.remove.includes("authorization"), false);
-  assert.equal(rule.backendRefs[0].name, service.metadata.name);
+  const callbackService = objects.find(({ kind }) => kind === "Service");
+  assert.equal(rule.backendRefs[0].name, callbackService.metadata.name);
+  assert.equal(callbackService.spec.selector["openclaw.dev/revision"], revision.id);
   const security = objects.find(({ kind }) => kind === "SecurityPolicy");
   assert.deepEqual(Object.keys(security.spec), ["targetRefs"]);
   const network = objects.find(({ kind }) => kind === "NetworkPolicy");

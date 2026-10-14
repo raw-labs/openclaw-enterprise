@@ -61,7 +61,7 @@ API-plus-worker reconciliation. See [channel cases](channel-runtime.md).
 The files share
 `tests/helpers/kubernetes-compute-real.mjs`. No model key needed. Missing all
 cluster selectors skips the suite; partial selectors fail, and a missing
-database skips PostgreSQL-backed cases. Those files share one database here; run them one at a time
+database skips PostgreSQL-backed cases. Run these files sequentially against the shared database
 (`--test-concurrency=1`); CI gives each file its own database.
 
 The OAuth Job case uses authenticated device-login, Agent-create, and Deploy

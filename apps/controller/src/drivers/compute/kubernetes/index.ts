@@ -7277,6 +7277,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
     for (const suffix of ["node", "sandbox", "msteams"]) {
       const name = `${gatewayName}-${suffix}`;
       await this.deleteGatewayRoutingResource("HTTPRoute", name, ownership, namespace, revisionId);
+      if (suffix === "msteams") {
+        await this.deleteGatewayRoutingResource("Service", name, ownership, namespace, revisionId);
+      }
       await this.deleteGatewayRoutingResource(
         "SecurityPolicy",
         name,
@@ -7302,7 +7305,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   }
 
   private async deleteGatewayRoutingResource(
-    kind: "HTTPRoute" | "SecurityPolicy" | "NetworkPolicy",
+    kind: "HTTPRoute" | "SecurityPolicy" | "NetworkPolicy" | "Service",
     name: string,
     ownership: Ownership,
     namespace: KubernetesNamespaceAddress,
@@ -7335,6 +7338,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
               HTTPRoute: GATEWAY_API_VERSION,
               SecurityPolicy: GATEWAY_SECURITY_POLICY_API_VERSION,
               NetworkPolicy: "networking.k8s.io/v1",
+              Service: "v1",
             }[kind],
             kind,
             metadata: { name, namespace: namespace.name },
@@ -11644,7 +11648,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         preparationSettingError,
       ).includes("msteams")
     ) {
-      for (const kind of ["HTTPRoute", "SecurityPolicy", "NetworkPolicy"] as const) {
+      for (const kind of ["HTTPRoute", "Service", "SecurityPolicy", "NetworkPolicy"] as const) {
         const previous = await this.getOwned(kind, name, namespace, ownership);
         const previousRevision = previous?.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION];
         if (previousRevision !== undefined) {
@@ -11668,6 +11672,13 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         [AGENT_REVISION_ID_ANNOTATION]: revision.id,
       },
     };
+    const callbackService = this.service(name, ownership, namespace, {
+      "app.kubernetes.io/name": service.metadata.name,
+      "openclaw.dev/workload-role": "gateway",
+      "openclaw.dev/agent": revision.agentId,
+      "openclaw.dev/revision": revision.id,
+    });
+    callbackService.metadata.annotations = metadata.annotations;
     const route: ManagedKubernetesObject<"HTTPRoute"> = {
       ...base,
       metadata,
@@ -11718,7 +11729,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
                 },
               },
             ],
-            backendRefs: [this.gatewayRouteBackendRef(service)],
+            backendRefs: [this.gatewayRouteBackendRef(callbackService)],
           },
         ],
       },
@@ -11746,6 +11757,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       },
     ];
     await this.reconcile(network, ownership, namespace);
+    await this.reconcile(callbackService, ownership, namespace);
     await this.reconcile(policy, ownership, namespace);
     await this.reconcile(route, ownership, namespace);
   }

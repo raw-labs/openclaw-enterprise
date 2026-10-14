@@ -82,7 +82,7 @@ user-session IAM. OCE still authorizes configuration, Secrets and lifecycle oper
 
 ## Verify and recover
 
-Check the exact serving Deployment revision, its `-msteams` HTTPRoute,
+Check the exact serving Deployment revision, its `-msteams` revision-selecting Service, HTTPRoute,
 SecurityPolicy and NetworkPolicy. Candidate preparation must retain the serving
 revision's callback. Redeployment updates it; disabling Teams removes it after
 activation. Stop/delete remove the serving callback before workload teardown.
