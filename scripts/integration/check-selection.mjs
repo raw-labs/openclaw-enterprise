@@ -16,6 +16,14 @@ assert.equal(selection.repository, "raw-labs/openclaw-enterprise");
 assert.equal(selection.integrationBranch, "codex/raw-integration");
 ancestor(selection.upstream.commit);
 ancestor(selection.batch.startingIntegration);
+let previous = selection.batch.startingIntegration;
+for (const step of selection.batch.steps) {
+  ancestor(step.commit);
+  ancestor(step.input);
+  git("merge-base", "--is-ancestor", previous, step.commit);
+  git("merge-base", "--is-ancestor", step.input, step.commit);
+  previous = step.commit;
+}
 const selected = new Set();
 for (const feature of selection.features) {
   assert.ok(!selected.has(feature.number), `Duplicate PR #${feature.number}`);
