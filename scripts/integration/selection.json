@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "repository": "raw-labs/openclaw-enterprise",
+  "integrationBranch": "codex/raw-integration",
+  "upstream": {
+    "repository": "openclaw/openclaw-enterprise",
+    "commit": "93ced2a7167757d2d2d663bf252769f1d8ef7c54"
+  },
+  "batch": {
+    "startingIntegration": "eb2726082d5e71c969a1dcd6ef94f6a37285f2d4",
+    "steps": []
+  },
+  "features": [
+    {
+      "number": 1,
+      "title": "Per-person native roles",
+      "author": "miguelbranco80",
+      "headRef": "codex/per-person-gateway-roles",
+      "commit": "266fa165b34febeddcc9759b350948d0edba33ab",
+      "status": "included"
+    },
+    {
+      "number": 2,
+      "title": "Microsoft Teams channels",
+      "author": "miguelbranco80",
+      "headRef": "codex/teams-support",
+      "commit": "339aa5d26f4c6b87c410455da5c7fc8eeac5431f",
+      "status": "included"
+    },
+    {
+      "number": 11,
+      "title": "Installation profiles and Preset starters",
+      "author": "miguelbranco80",
+      "headRef": "codex/installation-customization",
+      "commit": "79ca12faec94069fc3a2f1e07f1a57bc3e313e1c",
+      "status": "included"
+    },
+    {
+      "number": 12,
+      "title": "First-deployment native administration",
+      "author": "miguelbranco80",
+      "headRef": "codex/native-admin-first-deploy",
+      "commit": "eee339c22ceea4fa5213dd785047a810402e1675",
+      "status": "included"
+    },
+    {
+      "number": 13,
+      "title": "Configuration Secret grants",
+      "author": "miguelbranco80",
+      "headRef": "codex/configuration-secret-access",
+      "commit": "1d7772d11b2874ae7fb1f5253a998bd0463395b2",
+      "status": "included"
+    },
+    {
+      "number": 15,
+      "title": "Native plugin permission preservation",
+      "author": "miguelbranco80",
+      "headRef": "codex/console-native-plugin-allowlist",
+      "commit": "ad5f8cb9018079d1367e8be14f612cd5a8cb962b",
+      "status": "included"
+    },
+    {
+      "number": 16,
+      "title": "Assigning-session protection",
+      "author": "miguelbranco80",
+      "headRef": "codex/sharing-session-authority",
+      "commit": "60fa5b64370cdcecb74aa3360f029f00b01529e1",
+      "status": "included"
+    }
+  ],
+  "excluded": [
+    {
+      "number": 17,
+      "reason": "Evaluation branch; not selected for integration."
+    }
+  ],
+  "compatibility": [
+    {
+      "id": "native-role-session-authority",
+      "pullRequests": [1, 16],
+      "commits": ["b1353d3174f1d4ea6ce5d480d72a0a89f9e966fc"],
+      "paths": [
+        "apps/controller/src/http/iam.ts",
+        "tests/integration/native-admin-session-postgres.test.mjs"
+      ]
+    },
+    {
+      "id": "native-admin-first-admission",
+      "pullRequests": [1, 12],
+      "commits": ["b1353d3174f1d4ea6ce5d480d72a0a89f9e966fc"],
+      "paths": [
+        "tests/integration/native-admin-access.test.mjs",
+        "tests/integration/native-admin-k3d-real.test.mjs"
+      ]
+    }
+  ],
+  "migrationMappings": [
+    {
+      "pullRequest": 1,
+      "source": "migrations/0052_agent_runtime_roles.sql",
+      "integrated": "migrations/0054_agent_runtime_roles.sql",
+      "sha256": "4bfb764c6f1a73bc67f31e993ce05d2b9d97c8b44e92ce436c84884c24f999f0"
+    }
+  ],
+  "qualification": {
+    "policy": "Qualify the final integration commit; CI run receipts identify the tested SHA. Source PR checks do not qualify this composition.",
+    "previousTestedCommit": "eb2726082d5e71c969a1dcd6ef94f6a37285f2d4",
+    "previousRuns": {
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38396948309",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38396948280",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38397013772"
+    }
+  }
+}

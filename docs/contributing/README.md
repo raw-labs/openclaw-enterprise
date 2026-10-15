@@ -40,3 +40,5 @@ assign existing issues to a two-week iteration in the project.
 Read the [contribution policy](../../CONTRIBUTING.md) before opening a pull
 request. It covers repository access, verification, review, and private security
 reporting.
+
+For the fork-only combined build, follow [Downstream integration](downstream-integration.md).
