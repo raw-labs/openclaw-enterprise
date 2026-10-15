@@ -1,7 +1,7 @@
 ---
 created: 2026-08-21
-updated: 2026-10-13 15:58
-last_updated_session: authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de
+updated: 2026-10-15
+last_updated_session: authoring-run/5b16e286-0433-48fc-bd50-db5195cf9c98
 ---
 
 # Harness Execution Topology Flow
@@ -67,9 +67,10 @@ Compute, and Agent ServicePrincipal. Production supports embedded OpenClaw and
 dedicated Codex; dedicated OpenClaw requires a SandboxDriver providing network,
 filesystem, and process containment. Access tokens require dedicated Codex;
 account snapshots retain OCC identity, credential kind, and opaque Secret reference.
-`apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts:requireCodexPluginPolicy`
-rejects policies blocking Codex before Agent save, provisioning, or deployment.
-It preserves the source policy.
+`apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts:requireHarnessPluginPolicy`
+rejects policies blocking Codex or OpenClaw’s selected provider during Harness
+admission, including provisioning replay, retry and worker checks before effects. Required-plugin aliases must be unique.
+Gateway validation and policy stay unchanged.
 
 ### 2. Claim work and realize the approved topology
 
@@ -93,12 +94,9 @@ validation. See the [SSH flow](pr-24-ssh-compute.md).
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:KubernetesComputeDriver.prepareRevision`
 
-Kubernetes calls `prepareHarnessAuth` once per resolved source. From canonical
-tenant storage, it delivers selected fields, including ChatGPT account tokens,
+Kubernetes calls `prepareHarnessAuth` once per resolved source. From tenant storage, it delivers selected fields, including account tokens,
 into exact revision-owned Harness Secrets. Only embedded OpenClaw or dedicated
-Harnesses receive model keys, never dedicated Gateways. Fixture images use the
-same namespace-local delivery; only native dedicated transport tokens depend on
-runtime configuration.
+Harnesses receive model keys, never dedicated Gateways. Fixture images use the same delivery; native dedicated transport tokens depend on runtime configuration.
 See the [harness authentication flow](native-service-account-credential-delivery.md)
 for admission, immutable source snapshots, and worker reauthorization.
 
@@ -130,7 +128,7 @@ After Harness readiness, preparation starts a candidate Gateway if its predecess
 Dedicated Harnesses have separate ServiceAccounts. Compute owns the Gateway;
 SandboxDriver owns the native Harness. Its node owns identity, workspace and
 model key, enrolling with a private one-use target and restarting with its device
-token. Compute pins it in `dedicated-native` with `inference: "worker"`:
+token. Compute pins `dedicated-native` with `inference: "worker"`:
 missing/disconnected Harnesses fail without Gateway inference. Callbacks and session-bound
 admission scope transport to the Agent.
 `apps/controller/src/drivers/compute/kubernetes/index.ts:nativeRuntimeConfiguration`
@@ -315,8 +313,9 @@ owns claim sizes, mount paths, StorageClass requirements, and final teardown.
 
 ## Changelog
 
-- 2026-10-13 15:58: Reject Codex policy conflicts. (authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de - 438103e91)
+- 2026-10-15 13:32: Check provider policy at Harness admission. (authoring-run/5b16e286-0433-48fc-bd50-db5195cf9c98 - 1a5de45c2)
 
+- 2026-10-13 15:58: Reject Codex policy conflicts. (authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de - 438103e91)
 - 2026-10-10 04:41: Reconcile endpoint validation and routing with credential refresh, native approval and readiness contracts. (agent:roboclaw:dashboard:9d0532e1-befb-4fc3-935e-7cd2a0c72110 - 90268463bbd255c3c13a0e0bdeb437728189eb1a)
 
 - 2026-10-10 02:49: Refuse native listener TLS before deployment work. (authoring-run/8446b4d7-87ac-43ab-9323-5fc7f6953628 - 5d303757fb488fe34c8cbb9e7b6b975921fc1061)

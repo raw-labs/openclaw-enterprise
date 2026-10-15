@@ -1,7 +1,7 @@
 ---
 created: 2026-09-01
-updated: "2026-10-15"
-last_updated_session: "authoring-run/f64d2a52-ee3c-4e67-9d22-30f2e4d89aa3"
+updated: 2026-10-15
+last_updated_session: authoring-run/5b16e286-0433-48fc-bd50-db5195cf9c98
 ---
 
 # Platform console request flow
@@ -172,7 +172,7 @@ It returns safe summaries, an empty list for empty configuration, or dependency 
 `apps/controller/src/console/agents/create.mjs:renderCreateAgent` composes the form.
 Provider/Harness changes reset incompatible credentials and models.
 `updateModelConfiguration` preserves allow/deny policy, changing only
-Codex's runtime entry. The form rejects conflicts before writes;
+Codex's runtime entry. `harnessPluginPolicyConflict` rejects blocked runtime/provider plugins before writes;
 Kubernetes Compute's `validateHarnessAuth` enforces this for API callers.
 See [creation](../reference/console/create-and-deploy.md) for supported combinations.
 
@@ -194,7 +194,7 @@ Credential, provider, and Harness changes clear results and invalidate pending r
 `create.mjs:MODEL_CHOICES` supplies unauthenticated lists and manual entry. `renderAgentForm` switches `manualModel`, updates Configuration/controls and focuses the input. Manual mode retains `model.value`; `resetModelChoices` retains listed models after JSON edits and clears others. Provider/auth changes clear selection. Submission requires `model.value` to match the primary model. Credentials, unrelated JSON and saved/pending locks survive switches.
 
 `configurationTemplate` enables Control UI with loopback origins on port 18789.
-Compute supplies gateway authentication; Presets replace the starter unchanged.
+Compute supplies authentication; Presets replace the starter.
 [Native admin access](agent-native-admin.md) owns HTTPS isolation.
 
 `createRepositoryFields` loads `GET /namespaces/:namespaceId/agents/repository-options`,
@@ -213,7 +213,7 @@ Ordinary drafts post `{kind: "agent", values, secretBindings}` to
 `POST /namespaces/:namespaceId/configurations`, then submit its ID, plugins,
 `initialWorkspaceFiles`, and `workspaceDefaultsId` to
 `POST /namespaces/:namespaceId/agents`. Success opens `revision=draft`.
-OCC stages all four workspace textareas, including unchanged/empty values, outside
+OCC stages all four workspace textareas, including empty values, outside
 Agent/Configuration for [workspace setup](workspace-files.md).
 
 `create.mjs:grantConfigurationSecretAccess` deduplicates saved same-Namespace
@@ -346,6 +346,8 @@ refresh and inspection.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-15 13:32: Reject blocked OpenClaw providers. (authoring-run/5b16e286-0433-48fc-bd50-db5195cf9c98 - 1a5de45c2)
 
 - 2026-10-13 15:53: Preserve plugin permissions; reject conflicts. (authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de - 438103e91)
 

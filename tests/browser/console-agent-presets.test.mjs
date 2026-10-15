@@ -1360,6 +1360,22 @@ test("Harness switches preserve unrestricted and explicit native plugin allowlis
     await harness.selectOption("openclaw");
     assert.deepEqual(JSON.parse(await configuration.inputValue()).plugins, values.plugins);
 
+    if (allow?.length && !allow.includes("openai")) {
+      const requests = apiRequests(page, fixture.origin);
+      await page.getByRole("button", { name: "Create Agent", exact: true }).click();
+      await page
+        .getByRole("alert")
+        .filter({ hasText: /plugins.allow must include openai/ })
+        .waitFor();
+      assert.deepEqual(nonAuthWriteRequests(requests), []);
+      assert.deepEqual(JSON.parse(await configuration.inputValue()).plugins, values.plugins);
+      // The preserved policy must be repaired explicitly before OpenClaw can use its provider.
+      values.plugins.allow = [...allow, "openai"];
+      const repaired = JSON.parse(await configuration.inputValue());
+      repaired.plugins.allow = values.plugins.allow;
+      await configuration.fill(JSON.stringify(repaired));
+    }
+
     // Save through the ordinary Agent form and read its owned Configuration back from the API.
     const createdResponse = page.waitForResponse(
       (response) =>
@@ -1416,7 +1432,12 @@ test("Default Codex policy survives Harness switches, explicit edits and restore
 });
 
 test("Codex policy conflicts stop Console creation before writes and allow an explicit repair", async (t) => {
-  for (const policy of [{ allow: ["knowledge"] }, { deny: ["codex"] }, { enabled: false }]) {
+  for (const policy of [
+    { allow: ["knowledge"] },
+    { deny: ["codex"] },
+    { enabled: false },
+    { entries: { codex: { enabled: true }, " CODEX ": { enabled: false } } },
+  ]) {
     const fixture = await createConsoleAppFixture(t);
     await fixture.bootstrap();
     const namespace = await fixture.createNamespace("Codex policy conflict", { ready: true });
@@ -1448,17 +1469,25 @@ test("Codex policy conflicts stop Console creation before writes and allow an ex
     await page.getByRole("button", { name: "Create Agent", exact: true }).click();
     await page
       .getByRole("alert")
-      .filter({ hasText: /Configuration setting plugins\..*Codex Harness/ })
+      .filter({ hasText: /Configuration setting plugins\./ })
       .waitFor();
     assert.deepEqual(nonAuthWriteRequests(requests), []);
     const blocked = JSON.parse(await configuration.inputValue());
     for (const [key, value] of Object.entries(policy)) {
-      assert.deepEqual(blocked.plugins[key], value);
+      if (key === "entries") {
+        // Harness selection adds runtime wiring but must retain each authored enablement.
+        for (const [id, entry] of Object.entries(value)) {
+          assert.equal(blocked.plugins.entries[id].enabled, entry.enabled);
+        }
+      } else {
+        assert.deepEqual(blocked.plugins[key], value);
+      }
     }
     // Permission is changed only by the explicit JSON edit, after which the ordinary API save succeeds.
     blocked.plugins.allow = ["knowledge", "codex"];
     blocked.plugins.deny = [];
     blocked.plugins.enabled = true;
+    delete blocked.plugins.entries[" CODEX "];
     await configuration.fill(JSON.stringify(blocked));
     const createdResponse = page.waitForResponse(
       (response) =>
