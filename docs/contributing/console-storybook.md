@@ -57,9 +57,10 @@ for available states. The walkthroughs below identify the checks for each task.
 Pending-read stories use the real client's 15-second timeout; reset them to replay
 loading.
 
-In **Components/Native admin → Administrator Needs Assignment**, assign the
-fixture Principal `platform-administrator` through Sharing, then **Refresh access**.
-**Disabled and hidden** and **Denied and hidden** show no assignment hint.
+In **Components/Native admin → Administrator Needs Assignment**, assign
+`platform-administrator` in Share Agent, then **Refresh access**. The launch link
+appears. Compare **Disabled and hidden** and **Denied and hidden**; neither shows
+the hint.
 
 ## Return navigation
 

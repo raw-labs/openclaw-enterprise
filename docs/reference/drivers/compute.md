@@ -70,12 +70,13 @@ Restart resumes cleanup, not preparation; codes exclude credentials.
 
 ### Human runtime access
 
-Kubernetes uses `listAgentRuntimeRoles(configuration)` and
-`getAgentRuntimeAccess(revision, principalId, runtimeRole)` for browser entry;
-Docker/SSH omit both. Saved and active Configurations supply assignable and
-deployed roles. Descriptors contain private endpoints, verified person/role
-headers or unavailable reasons. Unknown roles, unsupported transport and service
-endpoints are refused. See [Runtime access](../agent-native-admin.md).
+Kubernetes browser access requires `listAgentRuntimeRoles(configuration)` and
+`getAgentRuntimeAccess(revision, principalId, runtimeRole)`; Docker/SSH omit both.
+Saved Configuration supplies assignable roles; active Configuration supplies
+deployed summaries. Admission returns a private endpoint and server-owned person/role headers or an
+unavailable reason.
+Unknown roles, unsupported transport and service endpoints are refused. See
+[Runtime access](../agent-native-admin.md).
 
 ### Optional additions
 

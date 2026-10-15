@@ -1,3 +1,5 @@
+import { nativeAdminComputeDriver } from "./console-agents-test-support.mjs";
+import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -558,7 +560,7 @@ test("Agent sharing shows a rejected write's reason, but generic text after an a
     "Sharing Agent",
     nativeRolesGateway(nativeValues("sharing"), fixture.origin),
   );
-  // Sharing needs the role catalog from an active, admitted revision.
+  // Keep deployed policy available alongside the saved Configuration catalog.
   await fixture.seedActiveAgentRevision(namespace.id, agent.id);
   const { page } = await newPage(t, fixture);
   const detail = detailUrl(fixture, namespace.id, agent.id, "draft", "configuration");

@@ -1,7 +1,7 @@
 ---
 created: "2026-09-20"
-updated: 2026-10-15
-last_updated_session: "authoring-run/ec3b3e9d-0724-4b9e-a41d-4eb8a44d4851"
+updated: "2026-10-15"
+last_updated_session: "authoring-run/f64d2a52-ee3c-4e67-9d22-30f2e4d89aa3"
 ---
 
 # Namespace IAM Policy Flow
@@ -158,8 +158,7 @@ unit: the next request reads the policy again.
 `packages/occ/src/state/postgres-state.ts:PostgresPlatformState`
 
 The PostgreSQL state implementation writes Roles and AccessBindings through the
-same unit of work used by the API audit append. A duplicate person/Agent runtime assignment becomes the existing `ResourceConflictError` before the IAM wrapper handles unknown failures. The transaction rolls back without a success audit, and the API returns `409`.
-Holding a session issues an
+same unit of work used by the API audit append. Holding a session issues an
 unchanged-row UPDATE that locks it without extending its lifetime or changing
 authentication metadata. This queues the deferred
 `occ.require_held_authentication_session` constraint for server-side COMMIT
@@ -168,7 +167,7 @@ COMMIT request was delayed after the last authentication check. An expired
 session raises the named `held_authentication_session_is_current` constraint;
 State maps that rejection to an authorization denial (`403`). The policy and
 success audit roll back together; the API records the denial separately.
-If commit outcome is unknown,
+A duplicate runtime assignment returns `409` without a success audit. If commit outcome is unknown,
 State discards the connection without another query. OCC reports dependency
 failure; a caller must not infer rollback or replay the mutation from that
 result. Later authorization requests read the current policy through the IAM
@@ -232,6 +231,10 @@ selected account, session, and policy writers join the same protocol.
 
 ## Changelog
 
+- 2026-10-15 13:36: Protect runtime-role PATCH with assigning-session authority through COMMIT. (authoring-run/f64d2a52-ee3c-4e67-9d22-30f2e4d89aa3 - b0fdd771426669636fc97b59c651a383b5d64984)
+
+- 2026-10-15 13:28: Retain assigning sessions through policy COMMIT, require transactional IAM writes, and preserve caller limits with shared guarded-session holds. (authoring-run/ec3b3e9d-0724-4b9e-a41d-4eb8a44d4851 - a302a3e2061575b64dcc37e212c55075d5c74b9a)
+- 2026-10-14 11:00: Read, validate and index native policy once per State unit of work instead of once per decision. (fix-1322)
 - 2026-10-15 13:28: Retain assigning sessions through policy COMMIT, require transactional IAM writes, and preserve caller limits with shared guarded-session holds. (authoring-run/ec3b3e9d-0724-4b9e-a41d-4eb8a44d4851 - a302a3e2061575b64dcc37e212c55075d5c74b9a)
 - 2026-10-13 13:33: Apply assigning-session protection to native role changes as well as create and delete commands. (authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e - 378cf70fb08c44ee8ac4855ba073224fa5ea02cc)
 

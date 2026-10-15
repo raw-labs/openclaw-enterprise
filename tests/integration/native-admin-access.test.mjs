@@ -22,7 +22,6 @@ import { InMemoryAuditSink } from "../../packages/audit/src/index.ts";
 import { resolveApprovedHarness } from "../../apps/controller/src/composition/production-harness.ts";
 import { createOccLogger } from "../../apps/controller/src/logging.ts";
 import {
-  InMemoryPlatformState,
   NoActiveAgentRevisionError,
   OpenClawController,
   ResourceConflictError,
@@ -858,6 +857,7 @@ test("native admin proxy resolves a host only to the live Agent it names", async
     recordOperations: true,
   });
   const { fixture, namespace, agent, upstream } = context;
+  const state = fixture.state;
   trustLocalUpstreamCertificate(t, upstream.cert);
   const installationId = fixture.controller.installation.id;
   // The installation administrator's session administers every Agent, so each refusal below
@@ -1595,6 +1595,7 @@ for (const changedField of [undefined, "id", "implementation"]) {
       stateFactory: (options) => (state = new InMemoryPlatformState(options)),
     });
     const { fixture, upstream, namespace, agent, revision } = context;
+    const state = fixture.state;
     trustLocalUpstreamCertificate(t, upstream.cert);
     const originalCompute = fixture.controller.selectedDriver("compute");
     assert.deepEqual(revision.compute, {
