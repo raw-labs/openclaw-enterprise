@@ -1057,7 +1057,7 @@ test("Preset save refuses a Codex approval policy every Gateway refuses, as Conf
   assert.equal(launched.body.error.message, retired);
 });
 
-test("Configuration save and Kubernetes deployment refuse caller-owned credentials and channels with one named message", async () => {
+test("Configuration save and Kubernetes deployment refuse caller-owned credentials, proxy transport and channels with one named message", async () => {
   // Finding 1116: deployment refused these with an unnamed 409; Configuration save accepted them.
   // Both now run the Kubernetes Compute rule module and name the setting.
   const configurationDriver = createConfigurationBackend();
@@ -1080,10 +1080,6 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
 
   for (const [values, message] of [
     [
-      { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
-      setting("env proxy transport", "is owned by Kubernetes Compute; use Agent gatewayOutbound"),
-    ],
-    [
       { ...valid, channels: { discord: { enabled: true } } },
       setting(
         "channels.discord",
@@ -1103,6 +1099,10 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
         "env.vars.OPENAI_BASE_URL",
         `must not be set: the Agent's Harness authentication binding owns model provider environment`,
       ),
+    ],
+    [
+      { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
+      setting("env", "proxy transport is owned by Kubernetes Compute; use Agent gatewayOutbound"),
     ],
     [
       {
@@ -1241,11 +1241,10 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
   const revisions = await request(context.app, "GET", `${agentPath}/revisions`);
   assert.deepEqual(revisions.body.data, []);
 
-  // Disabled unsupported channels and ordinary non-credential environment values save.
-  // Proxy transport is Compute-owned and is checked in the refusal matrix above.
+  // A disabled unsupported channel and a non-credential env name still save.
   for (const values of [
     { ...valid, channels: { discord: { enabled: false } } },
-    { ...valid, env: { vars: { APP_LABEL: "sample" } } },
+    { ...valid, env: { vars: { APP_REGION: "eu-west-1" } } },
   ]) {
     const accepted = await request(context.app, "PATCH", item, { body: { values } });
     assert.equal(

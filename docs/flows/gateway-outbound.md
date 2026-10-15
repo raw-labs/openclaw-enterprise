@@ -81,10 +81,15 @@ selected Channel Driver for `gatewayNetworkRequirements`.
 `apps/controller/src/drivers/channel/index.ts:BundledChannelDriver` concatenates
 Slack and Teams declarations. Slack supplies its supported enabled-account
 requirements; Teams supplies exact Public cloud endpoints only when enabled.
-Installation composition supplies the same declarations to the provisioning
-worker, without API-only provider credential calls during transactional handoff.
 Either provider, both, or neither can contribute. Caller-authored
 native settings cannot supply this trusted declaration.
+
+For provisioning, `apps/controller/src/worker.ts:ControllerWorker.start` injects
+only the pure declaration from
+`apps/controller/src/composition/channel.ts:createBundledChannelNetworkRequirements`.
+The worker freezes these requirements during transactional revision admission;
+it receives no provider validation or directory methods. API credential validation
+still runs before enqueueing provisioning, outside the write transaction.
 
 `KubernetesComputeDriver.admitGatewayOutbound` enforces the Installation ceiling
 and produces the snapshot. OCC validates it and `freezeAgentRevision` copies
@@ -173,6 +178,8 @@ compatibility with every native plugin transport or provider.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-15 11:02: Adopt the source PR's pure worker requirement declaration and remove duplicate integration wiring. (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - b0c299f7e8a9cdb992500fa39d32dddea9271ed0)
 
 - 2026-10-15 08:54: Link embedded channel-only admission and model transport. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - f0473090e63c6738d800cfea244675f970736e3d)
 

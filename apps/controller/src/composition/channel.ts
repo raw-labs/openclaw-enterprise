@@ -4,12 +4,16 @@ import { BundledChannelDriver } from "../drivers/channel/index.ts";
 export function createBundledChannelDriver(
   options: {
     readonly proxyUrl?: string;
-    readonly purpose?: "management" | "revisionAdmission";
     readonly managedProxyHost?: string;
   } = {},
 ) {
   return new BundledChannelDriver(globalThis.fetch, options.proxyUrl, {
-    purpose: options.purpose ?? "management",
     managedProxyHosts: options.managedProxyHost === undefined ? [] : [options.managedProxyHost],
   });
+}
+
+/** Worker admission receives only the side-effect-free declaration, never provider validation. */
+export function createBundledChannelNetworkRequirements() {
+  const driver = createBundledChannelDriver();
+  return driver.gatewayNetworkRequirements.bind(driver);
 }

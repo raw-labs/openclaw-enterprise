@@ -68,10 +68,10 @@ OpenClaw instead receives both channel and model credentials in its combined
 Gateway/execution Pod. This preserves exact resource ownership but weakens
 credential separation within that Agent.
 The selected `BundledChannelDriver.gatewayNetworkRequirements` aggregates Slack and
-Teams destinations. Installation composition also supplies this Driver to the
-worker's provisioning controller in `revisionAdmission` mode. The API owns provider
-credential validation before enqueue; worker handoff freezes the same declarations
-without provider I/O inside its transaction. `admitGatewayOutbound` permits embedded `channelsOnly` snapshots
+Teams destinations. Worker composition injects only the pure declaration through
+`createBundledChannelNetworkRequirements`; it receives no provider validation or
+directory methods. The API owns credential validation before enqueue; worker
+handoff freezes the same declarations without provider I/O inside its transaction. `admitGatewayOutbound` permits embedded `channelsOnly` snapshots
 only with the trusted option and managed outbound enabled; additional modes remain
 dedicated-only. See [Gateway outbound lifecycle](gateway-outbound.md) for immutable
 proxy policy, readiness, current-ceiling checks and withdrawal.
@@ -130,6 +130,8 @@ it does not establish native plugin support or execution containment.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-15 11:02: Adopt the source PR's pure worker requirement declaration and remove duplicate integration wiring. (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - b0c299f7e8a9cdb992500fa39d32dddea9271ed0)
 
 - 2026-10-15 09:30: Correct Teams admission source pointers for the combined implementation. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - ef947b01ff8b14fc522a7c1974731228d4900b57)
 

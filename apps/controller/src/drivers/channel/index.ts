@@ -14,7 +14,6 @@ export class BundledChannelDriver implements ChannelDriver {
   readonly capability = "channel" as const;
   readonly id = "bundled-channel";
   readonly implementation = "occ/bundled-channel";
-  readonly validateCredentials?: NonNullable<ChannelDriver["validateCredentials"]>;
   private readonly slack: SlackChannelDriver;
   private readonly teams: TeamsChannelDriver;
 
@@ -23,18 +22,15 @@ export class BundledChannelDriver implements ChannelDriver {
     proxyUrl?: string,
     options: {
       readonly managedProxyHosts?: readonly string[];
-      readonly purpose?: "management" | "revisionAdmission";
     } = {},
   ) {
     const transport = channelRequest(request, proxyUrl, options);
     this.slack = new SlackChannelDriver(transport);
     this.teams = new TeamsChannelDriver(transport);
-    // The API validates provider credentials before queuing provisioning. Worker
-    // handoff freezes requirements inside a transaction and must perform no provider I/O.
-    if (options.purpose !== "revisionAdmission") {
-      this.validateCredentials = (values, withSecret) =>
-        this.slack.validateCredentials(values, withSecret);
-    }
+  }
+
+  validateCredentials(...args: Parameters<NonNullable<ChannelDriver["validateCredentials"]>>) {
+    return this.slack.validateCredentials(...args);
   }
 
   gatewayNetworkRequirements(

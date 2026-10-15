@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import pg from "pg";
-import { createBundledChannelDriver } from "../../apps/controller/src/composition/channel.ts";
 import { NativeIAMDriver } from "../../packages/iam/src/index.ts";
 import { PostgresPlatformState } from "../../packages/occ/src/index.ts";
 import { composePostgresDevelopment } from "../../apps/controller/src/composition/development-postgres.ts";
@@ -223,7 +222,6 @@ function runtimeDrivers({ computeDriver, configurationDriver, secretDriver }) {
       },
     },
     computeDriver,
-    channelDriver: createBundledChannelDriver({ purpose: "revisionAdmission" }),
     configurationDriver,
     secretDriver,
     createIAMDriver: (state) =>

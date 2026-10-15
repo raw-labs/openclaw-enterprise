@@ -76,6 +76,7 @@ import type {
   PluginCatalogPage,
   PluginDriver,
   ChannelDriver,
+  GatewayOutboundRequirement,
   ChannelDirectoryResult,
   ChannelDirectoryLookupInput,
   PluginRevisionState,
@@ -577,6 +578,8 @@ export interface ControllerOptions {
   readonly configuredServiceAccountDriverId?: string;
   /** Installation startup `runtime.nativeWorkerSupport`; never set from the API. */
   readonly nativeWorkerSupport?: NativeWorkerSupport;
+  /** Pure Channel Driver declaration for worker admission; exposes no provider operations. */
+  readonly channelNetworkRequirements?: ChannelDriver["gatewayNetworkRequirements"];
 }
 
 /** The result of a ServiceAccount deletion. */
@@ -1501,6 +1504,7 @@ export class OpenClawController {
   private readonly nativeAdminOrigin: ControllerOptions["nativeAdminOrigin"];
   private readonly backendMap: ReadonlyMap<string, BackendDefinition>;
   private readonly configuredServiceAccountDriverId: string | undefined;
+  private readonly channelNetworkRequirements: ControllerOptions["channelNetworkRequirements"];
 
   constructor(installation: Installation, options: ControllerOptions = {}) {
     if (!isNonEmptyString(installation.id)) {
@@ -1523,6 +1527,7 @@ export class OpenClawController {
       createdAt: installation.createdAt,
     });
     this.authorization = options.authorize;
+    this.channelNetworkRequirements = options.channelNetworkRequirements;
     this.clock = options.now ?? (() => new Date());
     this.identifier = options.createId;
     this.state = options.state ?? new InMemoryPlatformState();
@@ -6821,11 +6826,10 @@ export class OpenClawController {
     const configuration = readable
       ? await this.getConfiguration(principalId, namespaceId, agent.configurationId)
       : undefined;
-    const channel = this.selections.get("channel")?.driver as ChannelDriver | undefined;
     return {
       ...(configuration === undefined
         ? {}
-        : { requirements: channel?.gatewayNetworkRequirements?.(configuration.values) ?? [] }),
+        : { requirements: this.gatewayNetworkRequirements(configuration.values) }),
       restricted: capabilities?.restricted === true,
       publicHttps: capabilities?.publicHttps === true,
       canConfigure:
@@ -7002,6 +7006,17 @@ export class OpenClawController {
     resolveHarness: HarnessResolver,
   ): Promise<Readonly<AgentRevision>> {
     return (await this.deployAgentWithAuthorization(principalId, input, resolveHarness)).revision;
+  }
+
+  private gatewayNetworkRequirements(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly GatewayOutboundRequirement[] {
+    const driver = this.selections.get("channel")?.driver as ChannelDriver | undefined;
+    return (
+      this.channelNetworkRequirements?.(configuration) ??
+      driver?.gatewayNetworkRequirements?.(configuration) ??
+      []
+    );
   }
 
   private async validateChannelCredentials(
@@ -7302,8 +7317,7 @@ export class OpenClawController {
       // Agent saves check the plugins against the Configuration they name, but a later
       // Configuration save does not know which Agents use it: check the admitted pair again.
       this.validatePluginConfiguration(pluginState?.plugins, admittedConfiguration);
-      const channelDriver = this.selections.get("channel")?.driver as ChannelDriver | undefined;
-      const requirements = channelDriver?.gatewayNetworkRequirements?.(admittedConfiguration) ?? [];
+      const requirements = this.gatewayNetworkRequirements(admittedConfiguration);
       const selection = lockedAgent.gatewayOutbound ?? { mode: "channelsOnly" as const };
       const gatewayOutbound = compute.admitGatewayOutbound?.({
         selection,
