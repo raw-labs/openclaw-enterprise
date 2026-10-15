@@ -7,15 +7,15 @@
     "commit": "d3ccc54781d0d50b40e9aeb814f0573d38c0a585"
   },
   "batch": {
-    "startingIntegration": "f0473090e63c6738d800cfea244675f970736e3d",
+    "startingIntegration": "5a05053ffe5a540bbbe0e2294944a2a91b188e97",
     "steps": [
       {
-        "operation": "PR #17 and embedded Slack/Teams outbound compatibility",
-        "commit": "3ecc6dec0d6e04645fbd9a4450c39425b676fde2",
-        "input": "b0fa2a6a177be60ee7f62dede78a7578f8198785"
+        "operation": "PR #18 standalone corrections; retire duplicate integration fixes",
+        "commit": "6c29d697ce609c3788dff747354ed55c522d4f52",
+        "input": "b0c299f7e8a9cdb992500fa39d32dddea9271ed0"
       }
     ],
-    "retainedUnchanged": [1, 2, 11, 12, 13, 15, 16, 18]
+    "retainedUnchanged": [1, 2, 11, 12, 13, 15, 16, 17]
   },
   "features": [
     {
@@ -103,7 +103,7 @@
       "title": "Gateway outbound access",
       "author": "miguelbranco80",
       "headRef": "codex/gateway-outbound",
-      "commit": "313a70262e432192306a2db431bf0b6f0459a957",
+      "commit": "b0c299f7e8a9cdb992500fa39d32dddea9271ed0",
       "status": "included",
       "comparisonBase": "d3ccc54781d0d50b40e9aeb814f0573d38c0a585",
       "headRepository": "raw-labs/openclaw-enterprise"
@@ -152,24 +152,17 @@
       "pullRequests": [18],
       "commits": ["ebbf3c4a42e4353091e5c8d4929bccfc3bf585e9"],
       "paths": [
-        "scripts/upgrade-production-images",
-        "tests/integration/production-image-upgrade-recovery.test.mjs",
-        "tests/integration/configuration-controller.test.mjs",
         "tests/integration/occ-api.test.mjs",
         "tests/integration/postgres-platform-state-kubernetes.test.mjs",
-        "tests/integration/logging-collector.test.mjs",
         "scripts/ci/test-suites/checks-baseline-2.json"
-      ]
+      ],
+      "notes": "Retain combined Harness fixtures, exact admission work-row selection, and selected public proxy proof. Upgrade guarding, proxy log accounting and Configuration proxy validation regressions are supplied by PR #18 at b0c299f7e."
     },
     {
       "id": "embedded-slack-teams-outbound",
       "pullRequests": [2, 17, 18],
       "commits": ["3ecc6dec0d6e04645fbd9a4450c39425b676fde2"],
       "paths": [
-        "apps/controller/src/composition/channel.ts",
-        "apps/controller/src/composition/installation-config.ts",
-        "apps/controller/src/drivers/channel/index.ts",
-        "apps/controller/src/worker.ts",
         "apps/controller/src/drivers/compute/kubernetes/index.ts",
         "apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts",
         "packages/occ/src/state/platform-state.ts",
@@ -177,7 +170,7 @@
         "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
         "docs/flows/agent-channel-runtime.md"
       ],
-      "notes": "Retain current per-revision outbound and Teams header/serving ownership handling. Add default-off embedded provisioning, model endpoint bypass, worker destination declarations, and exact callback Service/network cleanup. Renumber the incoming trial RFC and linked plan to 0021 because Gateway outbound owns 0020; source PR files stay untouched."
+      "notes": "Retain per-revision outbound and Teams serving ownership, default-off embedded provisioning, model endpoint bypass, exact callback Service/network cleanup, and trial RFC/plan 0021. Source PR #18 now supplies pure worker admission requirements; its factory aggregates the integration BundledChannelDriver for both providers."
     }
   ],
   "migrationMappings": [
@@ -202,11 +195,11 @@
   ],
   "qualification": {
     "policy": "Qualify the final integration commit; CI run receipts identify the tested SHA. Source PR checks do not qualify this composition.",
-    "previousTestedCommit": "f0473090e63c6738d800cfea244675f970736e3d",
+    "previousTestedCommit": "5a05053ffe5a540bbbe0e2294944a2a91b188e97",
     "previousRuns": {
-      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38692070499",
-      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38692070493",
-      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38692100838"
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38699223224",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38699223031",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38699271762"
     },
     "requiredChecks": [
       "CI Required on the published SHA",
@@ -226,6 +219,24 @@
       "pullRequests": [17, 18],
       "sha256": "c3b47c6e8496b6bbdaafe6e9fe4bbf5a89ff5fa4155afc679da872ea37a2248a",
       "reason": "Allow embedded channelsOnly revision snapshots while retaining dedicated-only additional outbound authority. Existing source migration bytes and integration identities remain unchanged."
+    }
+  ],
+  "absorbedCompatibility": [
+    {
+      "sourcePullRequest": 18,
+      "sourceCommit": "b0c299f7e8a9cdb992500fa39d32dddea9271ed0",
+      "integrationCommit": "6c29d697ce609c3788dff747354ed55c522d4f52",
+      "previousFixCommits": [
+        "ebbf3c4a42e4353091e5c8d4929bccfc3bf585e9",
+        "3ecc6dec0d6e04645fbd9a4450c39425b676fde2"
+      ],
+      "fixes": [
+        "Worker provisioning now injects the source pure requirements declaration; remove integration-only channelDriver plumbing and revisionAdmission mode.",
+        "Retain one canonical production upgrade guard from source.",
+        "Adopt source Configuration refusal/ordinary environment acceptance coverage.",
+        "Adopt source standalone proxy process accounting in Collector coverage."
+      ],
+      "history": "Published commits remain ancestors. Reconcile current code and ownership without reverting required behavior or rewriting history."
     }
   ]
 }
