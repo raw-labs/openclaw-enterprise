@@ -57,6 +57,13 @@ This enables the existing full native administrator surface, including its
 native terminal where supported. It adds no OCE grants and does not change
 native tool restrictions or support external-sign-in profiles.
 
+The local Compose-control-plane profile enables this capability only when both
+Kubernetes Compute and OpenShell are selected. Its development proxy terminates
+HTTPS on host loopback for the installation's console and wildcard Agent hosts;
+the private Envoy route in k3d still carries OCC-to-gateway traffic. The
+first-Agent helper's `--control-ui` option supplies the exact per-Agent native
+configuration. Other Compose profiles do not expose this browser endpoint.
+
 ## Authorization and availability
 
 `GET /namespaces/:namespaceId/agents/:agentId/native-admin` is the console-facing availability check. It requires a human session and exact Agent existence. When the feature is disabled, exact Agent `administer` permission is sufficient; no runtime assignment is required. When enabled, the route requires exact Agent `use` permission and one explicit runtime assignment. Agent `read`, Agent `operate`, native device credentials, native tokens, service API keys, and possession of a derived Agent host do not grant this API route.
@@ -188,6 +195,9 @@ device state, plugins, or other persistent gateway data.
 - 2026-10-13 23:57: Documented native-admin refusal when selected Compute ownership differs from the active revision. (01a13783-3cb5-7f53-8668-b2e3affa2b12 - e64d04f12cb80eb438a4c442180e56c2a2adae38)
 
 - 2026-10-10 09:20: Documented that native listener edits are not re-checked and how to recover. (docs-1014)
+
+- 2026-10-06 12:00: Documented the Compose/OpenShell development endpoint and first-Agent Control UI option.
+
 - 2026-09-21 21:20: Documented status-only stopped results before deployment and after stop reconciliation. (01a0c750-0c10-7492-97eb-f4124cded820 - 156dd67b7bd280a380d96b5c34a64e402fe3b96b)
 - 2026-09-20 08:21: Linked Kubernetes configuration-copy details to the implementation reference after the Driver documentation refactor. (01a0b7fd-13fa-7dc2-8653-5c5814b59305 - f4e22e48)
 - 2026-09-20 08:53: Replaced the temporary exchange launch description with the shared OCE session cookie model, cookie-domain trust boundary, host-to-Agent admission, and current-revision reconnect behavior. (cody/01a0b7fd-13fa-7dc2-8653-5c5814b59305 - 5e5f12f37842ae7239d73432e00609547627ded8)

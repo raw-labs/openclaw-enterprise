@@ -1643,6 +1643,7 @@ test(
       [54, "preHeldAuthenticationSession"],
       [55, "preGatewayOutbound"],
       [56, "preEmbeddedChannelOutbound"],
+      [57, "preCredentialSourcePat"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
@@ -1921,6 +1922,7 @@ test(
       [54, "preHeldAuthenticationSession"],
       [55, "preGatewayOutbound"],
       [56, "preEmbeddedChannelOutbound"],
+      [57, "preCredentialSourcePat"],
     ]) {
       void context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -2006,6 +2008,7 @@ test(
       [54, "preHeldAuthenticationSession"],
       [55, "preGatewayOutbound"],
       [56, "preEmbeddedChannelOutbound"],
+      [57, "preCredentialSourcePat"],
     ]) {
       void context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });
@@ -2019,6 +2022,7 @@ test(
         // 0051's final GRANT runs after it dropped both withdrawal triggers.
         // Abort 0054 after its function was created, before the deferred trigger exists.
         const rollbackTag = [
+          [57, "CREATE FUNCTION"],
           [55, "ALTER TABLE"],
           [54, "CREATE TRIGGER"],
           [53, "GRANT"],

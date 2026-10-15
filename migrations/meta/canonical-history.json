@@ -457,6 +457,14 @@
       "tag": "0057_embedded_channel_outbound",
       "breakpoints": true,
       "sha256": "c3b47c6e8496b6bbdaafe6e9fe4bbf5a89ff5fa4155afc679da872ea37a2248a"
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1787000000058,
+      "tag": "0058_credential_source_pat",
+      "breakpoints": true,
+      "sha256": "02ef4ffbdd21bb1c5e66c84c1c3dfe04c48f1936e18bab9c2de81c8ffe3c8d9d"
     }
   ],
   "initialSchemaStates": {
@@ -494,7 +502,7 @@
     "main": "bd490d16dd23ec1ea722bb370155e9454fb52187bd2b16cd8a0fe277e3e41bde",
     "repositoryCredentials": "5f9359057412199ea7a5659bdedbef664fb6da7bcd99d7a552f01a5782b904ea",
     "workspaceSetup": "3d7801c345eea875fb79adba4e04a4e2b24bad49ffe6ada62cc58117c5cce134",
-    "completed": "21215a502a06304661ea33897f38fe66ef92d35a7a39b464ffbd5b1c739f2410",
+    "completed": "06d47d8adaa9f0d6340af6813097144b98e94825990b0bedb65a16d53f83365f",
     "repositoryRetention": "a66448129d9ae2adf076f1d7887d3c7151cdc68f635c6fac7984d4254604d074",
     "agentProvisioning": "baac9e369ace8610f96948c1a930e6387431b1d0a33cefa3893765e52f8f7a52",
     "backendCompleted": "a2ba6fc82fbf0047cea491efad4a9e58eacaed7c29ce8528accff331569c51dd",
@@ -523,7 +531,8 @@
     "preRuntimeRoles": "5aa1681236a41d763405d596daeed3921a2b8932090534f6dacf85c488279f34",
     "preHeldAuthenticationSession": "edb33a9589120fe790330bb931ab1abb6dafea4d6fb93769678317b33223db18",
     "preGatewayOutbound": "4adecbe08d7bf8221a5fb047ab5d2d7fc741ecd7c78f4e70056e87864783d1d5",
-    "preEmbeddedChannelOutbound": "e77455c678262e4f58e8a12e8c28ce59680f35812c7aeab063502108e5fbe768"
+    "preEmbeddedChannelOutbound": "e77455c678262e4f58e8a12e8c28ce59680f35812c7aeab063502108e5fbe768",
+    "preCredentialSourcePat": "21215a502a06304661ea33897f38fe66ef92d35a7a39b464ffbd5b1c739f2410"
   },
   "ledgerCatalogs": {
     "initialized": "62946da6b1fc2b06df09e97dda4cf1831f170a2f3d5ff35a9f107af206c425dc",

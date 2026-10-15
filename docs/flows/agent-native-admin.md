@@ -1,7 +1,7 @@
 ---
 created: "2026-09-19"
 updated: "2026-10-14"
-last_updated_session: "01a13783-3cb5-7f53-8668-b2e3affa2b12"
+last_updated_session: "authoring-run/fba0a85c-ba37-4764-871e-9fdf80ee1083"
 ---
 
 # Agent Native Admin UI Flow
@@ -23,6 +23,8 @@ HTTP/WebSocket proxying. Deployment preserves reusable Configuration.
 
 ```mermaid
 graph TD
+  L["Local first-Agent selects Control UI"] --> L2["Create Agent, derive exact origin,<br/>and save Configuration generation 2"]
+  L2 --> A
   DEP["Deploy or provision Agent"] --> OPT{"Installation routing and Agent UI enabled?"}
   OPT -->|yes| PREP["Compute prepares exact origin and native policy"]
   OPT -->|no| COPY["Preserve explicit opt-out"]
@@ -71,6 +73,19 @@ graph TD
 ```
 
 ## Execution Trace
+
+### 0. Local first-Agent opts into native admin
+
+`scripts/first-agent.mjs:loadLocalInstallation`
+`scripts/first-agent.mjs:nativeConfiguration`
+`scripts/first-agent.mjs:ensureManagedConfiguration`
+
+The option requires launcher-owned Compose/OpenShell browser state. Because OCC
+assigns the Agent ID, the helper saves disabled Configuration generation 1,
+creates the Agent, derives its origin, and patches generation 2 before
+deployment. Generation 2 enables `controlUi`, pins its origins, and grants the
+`occ-workspace-files` trusted-proxy identity `operator.admin` with device
+auto-approval. An existing helper-owned name cannot change this selection.
 
 ### 1. Deployment admission prepares the Agent copy
 
@@ -146,14 +161,15 @@ private `gatewayBase`, omitted from browser responses.
 ### 5. OCC derives the isolated Agent host
 
 `apps/controller/src/gateway/native-admin.ts:nativeAdminTarget`
+`apps/controller/src/gateway/native-admin-host.mjs:deriveNativeAdminHost`
 
-`deriveNativeAdminHost` hashes Installation, Namespace and Agent IDs beneath the
-configured domain. `nativeAdminTarget` substitutes that host in `publicOrigin`,
-preserves its scheme and port, and selects `/`.
+`deriveNativeAdminHost` hashes Installation, Namespace, and Agent IDs into an opaque hostname under the configured domain. `nativeAdminTarget` substitutes it in `publicOrigin` and returns `/` as the entrypoint.
 
-Native-host admission resolves the irreversible hash against existing platform state. Unknown hosts, wrong suffixes, deleted Agents and non-unique matches fail closed. No persistent host registry is added.
+The first-Agent script imports this Node-only helper without requiring workspace dependencies.
 
-`nativeAdminGatewayHttpBase` accepts a `wss:` endpoint without credentials, query or hash, then converts it to `https:` while preserving authority and Agent base path. Workspace-file WSS routing remains unchanged.
+Native-host admission resolves the irreversible hash by checking existing Installation, Namespace, and Agent state without a persistent host registry. Unknown hosts, wrong suffixes, deleted Agents, and non-unique matches fail closed.
+
+`nativeAdminGatewayHttpBase` requires a `wss:` endpoint without userinfo, query, or hash, then converts it to `https:` preserving authority and the Agent base path. Workspace-file WSS behavior stays unchanged.
 
 ### 6. Shared cookie admits the Agent host
 
@@ -268,6 +284,8 @@ The init container cannot write through the gateway's later mount path.
 
 ## Changelog
 
+- 2026-10-14 11:53: Extracted shared hostname derivation so the first-Agent script starts without installed workspace dependencies. (authoring-run/fba0a85c-ba37-4764-871e-9fdf80ee1083 - 5511d28d1)
+
 - 2026-10-13 13:33: Combine first-deployment admission with explicit native runtime assignments. (authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e - 378cf70fb08c44ee8ac4855ba073224fa5ea02cc)
 
 - 2026-10-12 15:30: Refreshed first-deployment admission for the shared configuration helper on latest inspected upstream; Agent save remains unchanged. (authoring-run/522f2037-41de-4f2e-ae7b-8b26a769aa47 - b195e54e9b0ce98ead2b2306015a5209325e837b)
@@ -284,6 +302,8 @@ The init container cannot write through the gateway's later mount path.
 - 2026-10-05 17:34: Trace Namespace-scoped entry Roles and consistent human-route selection for runtime assignments. (authoring-run/593fb00e-b94d-46a0-a339-f3a8973764cb - aecffb24a16b5252c55ddf47bed2c66e622f1813)
 
 - 2026-10-05: Preserve explicit administrator entry during upgrade explain access configuration failures, and retain serving-route ownership during preparation. (authoring-run/fabe27b6-d360-4a29-8a8c-17547858f84a - 379dc56084c92d7847849f2b3f96ddc0eccc17d8)
+
+- 2026-10-06 12:00: Traced the optional first-Agent Configuration generation that derives and allows the exact local native-admin origin before deployment. (authoring-run/0e6b1c8a-1723-4b20-ae51-08fa9457204a - 99641a7ab)
 
 - 2026-10-04 07:30: Only a missing active revision reports `unavailable`; IAM and other dependency outages return `503`, and close or refuse proxied requests as `dependency_failure`. (bh11-native-status)
 

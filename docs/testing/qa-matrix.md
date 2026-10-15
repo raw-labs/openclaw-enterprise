@@ -186,7 +186,8 @@ without `OCC_TEST_QA_MATRIX=1` is not a matrix pass.
 
 [QA Matrix Advisory](../../.github/workflows/qa-advisory.yml) runs `model-ui`
 and `calendar` in both Codex cells on every trusted
-same-repository PR. Compose and Kubernetes run in separate jobs. Failures remain
+same-repository PR. Compose and Kubernetes run in separate jobs. The same workflow also runs the
+[full OpenShell lane](#automatic-openshell-coverage) in a third job. Failures remain
 visible, but these jobs are outside `CI Required` and must not be configured as
 required branch checks. New pushes cancel superseded runs. Fork and Dependabot
 PRs report that a trusted run is needed; they do not receive model credentials.
@@ -194,7 +195,7 @@ The same workflow runs the `dev-up-k3d` local installation lane as a separate
 advisory job without a protected environment or provider credentials. Its six
 cases and result artifact are described in the [hosted local installation guide](README.md#run-the-hosted-local-installation-lane).
 
-The QA matrix jobs use `integration-qa-pr`: no required reviewers, deployment
+The QA matrix and OpenShell jobs use `integration-qa-pr`: no required reviewers, deployment
 branch policies allowing `refs/pull/*/merge` and `main`, and only the
 `CODEX_ACCESS_TOKEN` secret. Set the Codex model and Calendar
 variables from the table above; the Codex account must have Calendar connected.
@@ -207,7 +208,8 @@ selection requires an OpenAI API key accepted from hosted runners; a successful
 devbox request alone does not prove that access.
 
 **Full Integration**, dispatched with `lane: qa-matrix`, retains the complete
-selection and protected `integration-qa` approval. The `all` dispatch and `full`
+selection and branch-restricted `integration-qa` credentials without per-run
+approval. The `all` dispatch and `full`
 group exclude this lane. Its job runs after the focused Slack job to avoid
 competing Socket Mode consumers. Both workflows materialize only selected
 credentials and upload outcome JSON, not private state or raw command logs. Failed commands include bounded, redacted stderr for diagnosis.
@@ -223,7 +225,7 @@ fixture. Configure `QA_ISOLATED_REPOSITORY_REGISTRY_JSON` and
 `QA_ISOLATED_REPOSITORY_APP_KEY` as environment secrets in the protected
 `integration-qa` environment, never as repository-level secrets. Configure
 `QA_ISOLATED_REPOSITORY_FULL_NAME` as an `integration-qa` environment variable
-so it is protected by the same independent reviewer gate. That variable must
+under the same branch restrictions. That variable must
 name the one approved isolated fixture repository as lowercase
 `owner/repository`. The isolated path checks the registry's repository target
 before materializing credential files: the registry must contain exactly one
@@ -296,3 +298,17 @@ specific run's outcome and evidence files.
 The direct installed repository suite retains its pre-existing safety guard
 pending qualification of that entry point's remote cleanup; its retained cases
 are not claimed as runnable acceptance coverage.
+
+## Automatic OpenShell coverage
+
+The advisory `openshell` job uses GitHub Ubuntu with an early Landlock ABI check;
+the Blacksmith kernel cannot enforce its sandbox filesystem policy. Its result
+artifact is `qa-advisory-openshell`. The [CI rules above](#ci-evidence-and-recovery)
+cover trusted execution and advisory status.
+
+The [lane manifest](../../scripts/ci/test-suites/openshell.json) runs five
+real-runtime scenarios in four files: both installation modes, sandbox policy
+and credential enforcement, and first-Agent deployment/reuse in both modes.
+The job rejects skips, cleans up its clusters and databases, and builds runtime
+images from the tested revision. `integration-qa-pr` supplies `CODEX_ACCESS_TOKEN`
+and `OCC_TEST_OPENAI_MODEL`. Protected manual dispatch remains available.

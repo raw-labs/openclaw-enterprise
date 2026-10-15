@@ -190,6 +190,9 @@ function classifyReceipts(receipts, manifest) {
       if (receipts.length === 56) {
         return "preEmbeddedChannelOutbound";
       }
+      if (receipts.length === 57) {
+        return "preCredentialSourcePat";
+      }
       return "providerCompleted";
     }
     if (!receiptsMatchEntries(receipts, manifest.entries)) {
@@ -299,6 +302,9 @@ function classifyReceipts(receipts, manifest) {
   }
   if (receipts.length === 56) {
     return "preEmbeddedChannelOutbound";
+  }
+  if (receipts.length === 57) {
+    return "preCredentialSourcePat";
   }
   refuse("an incomplete or unsupported development history is installed");
 }
