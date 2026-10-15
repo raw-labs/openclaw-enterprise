@@ -1,7 +1,7 @@
 ---
 created: 2026-09-01
-updated: 2026-10-12
-last_updated_session: authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb
+updated: 2026-10-13
+last_updated_session: authoring-run/de7ed7a0-de53-4712-b6bd-1baf0d296d55
 ---
 
 # Platform console request flow
@@ -359,6 +359,7 @@ refresh and inspection.
 
 - 2026-10-10 22:27: Preserve native plugin allowlists across Harness switches. (authoring-run/73ca79b6-4687-4e93-a98f-d46b194ee2ed - 80725162a946f80652b939a32a57ee4e922eeb5c)
 - 2026-10-10 22:15: Trace saved Configuration Secret enumeration and existing IAM delegation checks. (01a11ac0-ab87-7d21-8df5-a306d8563a19 - 80725162a946f80652b939a32a57ee4e922eeb5c)
+- 2026-10-13 14:40: Trace Configuration Secret grants. (authoring-run/de7ed7a0-de53-4712-b6bd-1baf0d296d55 - 1d7772d11b2874ae7fb1f5253a998bd0463395b2)
 - 2026-10-09 21:10: Preserve cancellation, deadline and transport failures during response body reads (authoring-run/2e195d67-c77d-43d0-8c32-2179523eb3a2 - 013bcf5f76819ca280a164745d470855fc5b74cd)
 
 - 2026-10-08 15:59: Trace responsive drawer and tab visibility, destination focus, scoped authentication feedback, and compact plugin setup. (01a11d68-d6e8-7033-ab93-03767bced2da - 58daaa5a3ac4c64bc5fb3af00759b59b365b20ca)

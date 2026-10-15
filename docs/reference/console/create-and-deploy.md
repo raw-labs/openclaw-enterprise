@@ -147,14 +147,14 @@ provider acceptance or runtime readiness. See
 
 Successful draft-save steps retain IDs and freeze inputs, including authentication.
 Correct conflicting names or permissions, then retry those resources.
-For an ordinary draft, the Console grants its ServicePrincipal exact `operate`
-access to the model Secret and every unique same-Namespace Secret in the saved
-Configuration's environment bindings, including Preset bindings. These IAM writes
-require [Installation administration](../authorization.md#manage-namespace-policy);
-permission to use a Secret does not authorize delegation.
-If a grant fails after Agent creation, select **Retry credential access** or ask
-an administrator to check its grants. The saved Agent and Configuration remain;
-the retry rereads existing grants instead of duplicating them.
+Ordinary draft creation grants the Agent's service principal exact `operate`
+access to the model Secret and each unique same-Namespace Secret in the saved
+Configuration's environment bindings, including Preset bindings. Delegation
+requires [Installation administration](../authorization.md#manage-namespace-policy);
+Secret-use permission is insufficient.
+If a grant fails after creation, **Retry credential access** reuses the saved
+Agent and Configuration without duplicating grants. An administrator can check
+its grants.
 Uncertain responses block another attempt: check displayed IDs and the Agents list;
 give the request ID to your operator if the outcome remains unknown.
 
