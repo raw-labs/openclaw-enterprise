@@ -16,6 +16,50 @@ import { connectThroughProxy, startSlackProxy } from "../helpers/slack-proxy.mjs
 const WAIT_MS = 10_000;
 const testOptions = { timeout: 60_000 };
 
+test(
+  "Microsoft Public channel proxy access is explicit and keeps plugin/model destinations denied",
+  testOptions,
+  async (t) => {
+    const microsoft = [
+      "login.microsoftonline.com",
+      "login.botframework.com",
+      "api.botframework.com",
+      "graph.microsoft.com",
+      "smba.trafficmanager.net",
+    ];
+    const upstream = await listen(t, () => {});
+    const upstreamPort = upstream.address().port;
+    const stock = await startSlackProxy(t);
+    for (const host of microsoft) {
+      assert.match(
+        await connectThroughProxy(stock.port, `${host}:443`),
+        /^HTTP\/1\.1 403 Forbidden/,
+      );
+    }
+    // The loopback upstream proves the real CONNECT decision and tunnel handshake,
+    // without contacting Microsoft or claiming provider authentication/delivery.
+    const optedIn = await startSlackProxy(t, {
+      teamsEnabled: true,
+      upstreamPort,
+      upstreamHosts: microsoft,
+    });
+    for (const host of microsoft) {
+      assert.match(await connectThroughProxy(optedIn.port, `${host}:443`), /^HTTP\/1\.1 200/);
+    }
+    for (const target of [
+      "backend.composio.dev:443",
+      "clawhub.ai:443",
+      "api.openai.com:443",
+      "login.microsoftonline.com.evil.test:443",
+      "login.microsoftonline.com:80",
+      "127.0.0.1:443",
+      "169.254.169.254:443",
+    ]) {
+      assert.match(await connectThroughProxy(optedIn.port, target), /^HTTP\/1\.1 403 Forbidden/);
+    }
+  },
+);
+
 function bound(promise, what, ms = WAIT_MS) {
   let timer;
   return Promise.race([

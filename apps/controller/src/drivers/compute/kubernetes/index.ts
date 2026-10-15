@@ -143,6 +143,7 @@ import {
   enabledChannelProviders,
   OPENCLAW_GATEWAY_PASSWORD,
   requireChannelTopology,
+  requireTeamsConfiguration,
   type KubernetesHarnessTopology,
   kubernetesHarnessAuthMethods,
   providerWaitsOnVariable,
@@ -328,6 +329,8 @@ export interface KubernetesGatewayRoutingOptions {
   readonly gatewayNamespace: string;
   readonly envoyNamespace: string;
   readonly envoyHttpsTargetPort?: number;
+  /** Public callbacks use an independently provisioned HTTPS listener. */
+  readonly channels?: { readonly hostname: string };
   readonly sandbox?: {
     readonly domain: string;
     readonly publicPort?: number;
@@ -500,6 +503,8 @@ export interface KubernetesComputeDriverOptions {
     readonly codexModelBaseUrl?: string;
     readonly channels?: {
       readonly proxyUrl: string;
+      /** TODO(dedicated native parity): remove this temporary shared-credential evaluation option. */
+      readonly experimentalEmbeddedChannels?: boolean;
       readonly managedProxy?: KubernetesWorkloadPeer & {
         readonly hostname: string;
         readonly port: number;
@@ -2879,6 +2884,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
             additionalProperties: false,
             properties: {
               proxyUrl: { type: "string" },
+              experimentalEmbeddedChannels: { type: "boolean", default: false },
               managedProxy: {
                 type: "object",
                 required: ["hostname", "namespace", "podLabels", "port"],
@@ -2905,6 +2911,12 @@ export class KubernetesComputeDriver implements ComputeDriver {
           gatewayNamespace: { type: "string" },
           envoyNamespace: { type: "string" },
           envoyHttpsTargetPort: { type: "integer", minimum: 1, maximum: 65535 },
+          channels: {
+            type: "object",
+            required: ["hostname"],
+            additionalProperties: false,
+            properties: { hostname: { type: "string", minLength: 1 } },
+          },
           sandbox: {
             type: "object",
             required: ["domain"],
@@ -2924,9 +2936,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
   readonly implementation: string;
   readonly supportsWorkspaceSetup = true as const;
   readonly requiresAgentRuntimeCredentials?: true;
-  readonly agentProvisioning = Object.freeze({
-    executionModes: Object.freeze(["dedicated"] as const),
-  });
+  readonly agentProvisioning: {
+    readonly executionModes: readonly ("dedicated" | "embedded")[];
+  };
   private readonly options: KubernetesComputeDriverOptions;
   private readonly sandboxDriver: SandboxDriver | undefined;
   private readonly credentialGatewayDriver: CredentialGatewayDriver | undefined;
@@ -3184,6 +3196,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
           throw new ConfigurationFailure("Channel runtime proxy must be explicitly configured.");
         }
         channelProxy(channels.proxyUrl, channels.managedProxy);
+        if (
+          channels.experimentalEmbeddedChannels !== undefined &&
+          typeof channels.experimentalEmbeddedChannels !== "boolean"
+        ) {
+          throw new ConfigurationFailure(
+            "Experimental embedded channels must be an Installation boolean.",
+          );
+        }
       }
     }
     if (options.executionCluster !== undefined) {
@@ -3267,6 +3287,17 @@ export class KubernetesComputeDriver implements ComputeDriver {
         "Gateway routing Envoy namespace",
       );
       validatePort(routing.envoyHttpsTargetPort ?? 10443, "Envoy HTTPS target port");
+      if (routing.channels !== undefined) {
+        validateDnsHostname(
+          required(routing.channels.hostname, "Channel callback hostname"),
+          "Channel callback hostname",
+        );
+        if (routing.channels.hostname === routing.hostname) {
+          throw new ConfigurationFailure(
+            "Channel callbacks require a hostname separate from Gateway administration.",
+          );
+        }
+      }
       if (routing.sandbox !== undefined) {
         validateSandboxDomain(required(routing.sandbox.domain, "Sandbox domain"));
         validatePort(routing.sandbox.publicPort ?? 443, "Public sandbox port");
@@ -3302,6 +3333,15 @@ export class KubernetesComputeDriver implements ComputeDriver {
       "Kubernetes Compute Driver implementation",
     );
     this.options = options;
+    // TODO(dedicated native parity): remove embedded provisioning with the temporary
+    // channel exception; the default Installation still admits dedicated provisioning.
+    this.agentProvisioning = Object.freeze({
+      executionModes: Object.freeze(
+        options.runtime?.channels?.experimentalEmbeddedChannels === true
+          ? (["dedicated", "embedded"] as const)
+          : (["dedicated"] as const),
+      ),
+    });
     if (options.runtime !== undefined) {
       this.requiresAgentRuntimeCredentials = true;
     }
@@ -3587,14 +3627,18 @@ export class KubernetesComputeDriver implements ComputeDriver {
   }
 
   validateAgentProvisioning(input: ComputeAgentProvisioningInput): void {
-    if (input.executionMode !== "dedicated") {
+    if (!this.agentProvisioning.executionModes.includes(input.executionMode)) {
       throw new ConfigurationFailure(
         "Kubernetes Agent provisioning supports only dedicated execution mode.",
       );
     }
     this.verifyGatewayRoutingConfiguration({
       configuration: this.namedGatewayConfigurationDocument(input.configuration),
-      harness: { id: "codex", version: "provisioning", mode: "dedicated" },
+      harness: {
+        id: input.executionMode === "embedded" ? "openclaw" : "codex",
+        version: "provisioning",
+        mode: input.executionMode,
+      },
     });
   }
 
@@ -3766,10 +3810,23 @@ export class KubernetesComputeDriver implements ComputeDriver {
       {
         embedded: harness.mode === "embedded",
         channelRuntime: agentSave || this.options.runtime?.channels !== undefined,
+        experimentalEmbeddedChannels:
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       callerSettingError,
     );
     requireProviderApiKeys(configuration, openclaw, authentication);
+    if (
+      enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError).includes(
+        "msteams",
+      ) &&
+      this.options.gatewayRouting?.channels === undefined
+    ) {
+      throw callerSettingError(
+        "channels.msteams",
+        "requires an Installation public HTTPS channel callback listener",
+      );
+    }
     if (!agentSave) {
       this.validateChannelSecretBindings(configuration, secretBindings);
     }
@@ -3812,6 +3869,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     options?: ConfigurationValidationOptions,
   ): void {
     enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError);
+    requireTeamsConfiguration(configuration, callerSettingError);
     requireHarnessCredentialBinding(configuration, callerSettingError, options);
   }
 
@@ -7242,9 +7300,12 @@ export class KubernetesComputeDriver implements ComputeDriver {
     revisionId: string,
   ): Promise<void> {
     // Remove the endpoint before deleting its route-specific authentication policy.
-    for (const suffix of ["node", "sandbox"]) {
+    for (const suffix of ["node", "sandbox", "msteams"]) {
       const name = `${gatewayName}-${suffix}`;
       await this.deleteGatewayRoutingResource("HTTPRoute", name, ownership, namespace, revisionId);
+      if (suffix === "msteams") {
+        await this.deleteGatewayRoutingResource("Service", name, ownership, namespace, revisionId);
+      }
       await this.deleteGatewayRoutingResource(
         "SecurityPolicy",
         name,
@@ -7255,6 +7316,13 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     await this.deleteGatewayRoutingResource(
       "NetworkPolicy",
+      `${gatewayName}-msteams`,
+      ownership,
+      namespace,
+      revisionId,
+    );
+    await this.deleteGatewayRoutingResource(
+      "NetworkPolicy",
       `${gatewayName}-sandbox`,
       ownership,
       namespace,
@@ -7263,7 +7331,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   }
 
   private async deleteGatewayRoutingResource(
-    kind: "HTTPRoute" | "SecurityPolicy" | "NetworkPolicy",
+    kind: "HTTPRoute" | "SecurityPolicy" | "NetworkPolicy" | "Service",
     name: string,
     ownership: Ownership,
     namespace: KubernetesNamespaceAddress,
@@ -7296,6 +7364,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
               HTTPRoute: GATEWAY_API_VERSION,
               SecurityPolicy: GATEWAY_SECURITY_POLICY_API_VERSION,
               NetworkPolicy: "networking.k8s.io/v1",
+              Service: "v1",
             }[kind],
             kind,
             metadata: { name, namespace: namespace.name },
@@ -11517,6 +11586,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     if (route !== undefined) {
       await this.reconcile(route, ownership, namespace);
     }
+    await this.reconcileTeamsCallback(revision, ownership, namespace, service);
     if (this.options.runtime === undefined || revision.harness.mode !== "dedicated") {
       return;
     }
@@ -11575,6 +11645,147 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       await this.reconcile(policy, ownership, namespace);
       await this.reconcile(publicRoute, ownership, namespace);
     }
+  }
+
+  private async reconcileTeamsCallback(
+    revision: AgentRevision,
+    ownership: Ownership,
+    namespace: KubernetesNamespaceAddress,
+    service: ManagedKubernetesObject<"Service">,
+  ): Promise<void> {
+    const routing = this.options.gatewayRouting;
+    const name = `${this.gatewayRouteName(revision.agentId)}-msteams`;
+    const gateway = await this.getOwned(
+      "Deployment",
+      this.gatewayRouteName(revision.agentId),
+      namespace,
+      ownership,
+    );
+    // Preparing a candidate must leave its serving predecessor's callback intact.
+    // Activation fences and replaces the Deployment before publishing this revision.
+    if (gateway?.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION] !== revision.id) {
+      return;
+    }
+    if (
+      routing?.channels === undefined ||
+      !enabledChannelProviders(
+        revision.configuration,
+        CHANNEL_PROVIDERS,
+        preparationSettingError,
+      ).includes("msteams")
+    ) {
+      for (const kind of ["HTTPRoute", "Service", "SecurityPolicy", "NetworkPolicy"] as const) {
+        const previous = await this.getOwned(kind, name, namespace, ownership);
+        const previousRevision = previous?.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION];
+        if (previousRevision !== undefined) {
+          await this.deleteGatewayRoutingResource(
+            kind,
+            name,
+            ownership,
+            namespace,
+            previousRevision,
+          );
+        }
+      }
+      return;
+    }
+    const base = this.manifest(GATEWAY_API_VERSION, "HTTPRoute", name, ownership, namespace);
+    const metadata = {
+      ...base.metadata,
+      annotations: {
+        ...base.metadata.annotations,
+        [AGENT_REVISION_ANNOTATION]: String(revision.revision),
+        [AGENT_REVISION_ID_ANNOTATION]: revision.id,
+      },
+    };
+    const callbackService = this.service(name, ownership, namespace, {
+      "app.kubernetes.io/name": service.metadata.name,
+      "openclaw.dev/workload-role": "gateway",
+      "openclaw.dev/agent": revision.agentId,
+      "openclaw.dev/revision": revision.id,
+    });
+    callbackService.metadata.annotations = metadata.annotations;
+    const route: ManagedKubernetesObject<"HTTPRoute"> = {
+      ...base,
+      metadata,
+      spec: {
+        hostnames: [routing.channels.hostname],
+        parentRefs: [
+          {
+            group: "gateway.networking.k8s.io",
+            kind: "Gateway",
+            namespace: routing.gatewayNamespace,
+            name: routing.gatewayName,
+            sectionName: "channels",
+          },
+        ],
+        rules: [
+          {
+            matches: [
+              {
+                method: "POST",
+                path: {
+                  type: "Exact",
+                  value: `${this.gatewayRoutePath(revision)}/channels/msteams`,
+                },
+              },
+            ],
+            filters: [
+              {
+                type: "URLRewrite",
+                urlRewrite: { path: { type: "ReplaceFullPath", replaceFullPath: "/api/messages" } },
+              },
+              // Microsoft JWT authentication remains native; callbacks gain no OCE identity.
+              {
+                type: "RequestHeaderModifier",
+                requestHeaderModifier: {
+                  remove: [
+                    "cookie",
+                    "x-api-key",
+                    "x-occ-identity",
+                    "x-openclaw-scopes",
+                    "forwarded",
+                    "x-forwarded-for",
+                    "x-real-ip",
+                    "tailscale-user-login",
+                    "tailscale-user-name",
+                    "tailscale-user-profile-pic",
+                    "tailscale-funnel-request",
+                  ],
+                },
+              },
+            ],
+            backendRefs: [this.gatewayRouteBackendRef(callbackService)],
+          },
+        ],
+      },
+    };
+    const policy: ManagedKubernetesObject<"SecurityPolicy"> = {
+      apiVersion: GATEWAY_SECURITY_POLICY_API_VERSION,
+      kind: "SecurityPolicy",
+      metadata,
+      // A route policy replaces inherited OCE auth; the native SDK validates JWTs.
+      spec: { targetRefs: [{ group: "gateway.networking.k8s.io", kind: "HTTPRoute", name }] },
+    };
+    const network = this.gatewaySandboxNetworkPolicy(revision, metadata, routing, gateway);
+    network.spec!.ingress = [
+      {
+        from: [
+          this.peer({
+            namespace: routing.envoyNamespace,
+            podLabels: {
+              "gateway.envoyproxy.io/owning-gateway-namespace": routing.gatewayNamespace,
+              "gateway.envoyproxy.io/owning-gateway-name": routing.gatewayName,
+            },
+          }),
+        ],
+        ports: [{ protocol: "TCP", port: this.options.network.gatewayPort }],
+      },
+    ];
+    await this.reconcile(network, ownership, namespace);
+    await this.reconcile(callbackService, ownership, namespace);
+    await this.reconcile(policy, ownership, namespace);
+    await this.reconcile(route, ownership, namespace);
   }
 
   /** Admits public preview traffic to the serving Gateway's sandbox listener.
@@ -12101,6 +12312,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       {
         embedded: revision.harness.mode === "embedded",
         channelRuntime: this.options.runtime?.channels !== undefined,
+        experimentalEmbeddedChannels:
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       preparationSettingError,
     );
@@ -14098,6 +14311,11 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             throw new ConfigurationFailure("Gateway channel credentials are not configured.");
           }
           variables.push({ name: "HTTPS_PROXY", value: channels.proxyUrl });
+          variables.push({ name: "NODE_USE_ENV_PROXY", value: "1" });
+          variables.push({
+            name: "NO_PROXY",
+            value: "localhost,127.0.0.1,::1,.svc,.svc.cluster.local",
+          });
         }
       } else {
         variables.push(
