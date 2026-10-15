@@ -1,7 +1,7 @@
 ---
 created: "2026-09-20"
-updated: 2026-10-14
-last_updated_session: "fix-1322"
+updated: 2026-10-15
+last_updated_session: "authoring-run/ec3b3e9d-0724-4b9e-a41d-4eb8a44d4851"
 ---
 
 # Namespace IAM Policy Flow
@@ -232,6 +232,7 @@ selected account, session, and policy writers join the same protocol.
 
 ## Changelog
 
+- 2026-10-15 13:28: Retain assigning sessions through policy COMMIT, require transactional IAM writes, and preserve caller limits with shared guarded-session holds. (authoring-run/ec3b3e9d-0724-4b9e-a41d-4eb8a44d4851 - a302a3e2061575b64dcc37e212c55075d5c74b9a)
 - 2026-10-13 13:33: Apply assigning-session protection to native role changes as well as create and delete commands. (authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e - 378cf70fb08c44ee8ac4855ba073224fa5ea02cc)
 
 - 2026-10-12 13:25: Retain human sessions through Namespace policy commits and coordinate revocation. (authoring-run/3dab5ffe-1c2c-4b63-9899-8f98cacf0b43 - b195e54e9b0ce98ead2b2306015a5209325e837b)
