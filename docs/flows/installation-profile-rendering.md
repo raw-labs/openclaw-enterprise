@@ -83,6 +83,8 @@ family; curated discovery does not. Runtime credentials remain per Agent.
 
 Closed sections reject unknown fields, including unused readiness flags;
 OpenClaw rejects Codex-only inputs.
+`channels.experimentalEmbeddedChannels` must be boolean; true requires a managed
+or external runtime proxy. Directory-only proxy wiring cannot enable the trial.
 
 Catalog and model credentials belong to later Agent setup. Optional
 `codex.managedServiceAccounts` inputs render managed ServiceAccount provisioning;
@@ -149,11 +151,8 @@ Profiles do not enable execution-cluster mounts. No CA configuration adds no
 restriction; an omitted path keeps `/etc/openclaw/database-ca`. A collision adds
 a field-specific preflight error and prevents both deployable files.
 
-The Helm values select the control-plane image, Better Auth base URL,
-bootstrap administrator, database and cluster egress CIDRs, API client
-selectors, DNS peer, metrics, native admin, private gateway routing, optional
-ChatGPT Backend mounting, optional logging collector, and optional repository
-credential sidecar. Gateway routing is always enabled. Native admin is enabled
+Helm values wire images, bootstrap, authentication, selected peers, metrics and
+optional integrations. Gateway routing is always enabled. Native admin is enabled
 unless `controlPlane.github`, `controlPlane.google` or `controlPlane.oidc` renders external sign-in
 with `auth.recoveryUserId`, which Helm requires with native admin off. An
 optional `controlPlane.trustedProxy` renders `api.trustedProxy`. Its CIDRs were
@@ -189,16 +188,20 @@ before writing `installation.yaml`. Optional `runtime.codexModelBaseUrl` gets
 Compute's endpoint rule. When optional
 managed ServiceAccount inputs are supplied, it emits the ChatGPT Backend and a
 matching ServiceAccount Driver. Without those inputs it renders no managed
-issuance; each Agent still selects its own runtime credential binding. If the chart-managed Slack
-proxy is enabled, Compute receives the generated Service DNS URL and selector
-for gateway-to-proxy egress; the chart grants API-to-proxy egress. Repository
+issuance; each Agent still selects its own runtime credential binding. Managed Gateway outbound is reconciled per revision by Compute. The separate
+chart-managed control-plane proxy serves API credential validation and discovery. Repository
 opt-in adds the GitHub Backend, Repo Driver,
 and worker peer expected by the broker sidecar.
 
-The renderer derives the Compute Gateway name the same way Helm does: it
-truncates `<releaseName>-agent-gateways` to 63 characters and removes a trailing
-hyphen. HTTPRoute parent references therefore match the Gateway the chart
-renders.
+An explicit `channels.experimentalEmbeddedChannels` value reaches Compute's
+`runtime.experimentalEmbeddedChannels` with managed Gateway outbound required.
+Omission leaves the default refusal;
+true adds a shared-credential, unsupported-production preflight warning. Agent
+native JSON cannot set this Installation option. Its bytes enter the paired checksum.
+
+Compute's Gateway name matches Helm: `<releaseName>-agent-gateways`, truncated
+to 63 characters with a trailing hyphen removed. HTTPRoute parent references
+therefore select the rendered Gateway.
 
 `presets.includeDefaults` defaults to `true`; `presets.files` adds Preset JSON
 paths independently. Disabling defaults with no files seeds nothing. The
@@ -288,6 +291,8 @@ activation, and repository registry creation need separate evidence.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-15 14:08: Carry the trusted embedded-channel trial through managed and external runtime proxy rendering. (authoring-run/9cd1aeed-6fc1-4268-a37e-df389201d4db - b0fa2a6a177be60ee7f62dede78a7578f8198785)
 
 - 2026-10-15 13:26: Integrate upstream hosted discovery DNS handling with trusted profiles. (authoring-run/4863651f-24de-427e-ac6f-152c65948af3 - 775a7cff0890d646ed433df45b9233ea58b553e6)
 

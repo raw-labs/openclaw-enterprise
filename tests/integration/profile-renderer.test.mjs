@@ -467,6 +467,61 @@ test("an invalid explicit profile revokes prior outputs without falling back to 
   }
 });
 
+test(
+  "installation profiles carry the trusted embedded channel opt-in into paired controller rollouts",
+  { skip: helmSkip },
+  (t) => {
+    for (const profile of ["openclaw", "codex"]) {
+      const checksums = [];
+      for (const enabled of [undefined, false, true]) {
+        const input = profile === "codex" ? codexInput() : baseInput();
+        input.gatewayOutbound = { enabled: true, denyCidrs: ["10.0.0.0/8"] };
+        input.channels = enabled === undefined ? {} : { experimentalEmbeddedChannels: enabled };
+        const output = render(profile, input);
+        t.after(() => rmSync(output.directory, { recursive: true, force: true }));
+        const compute = loadYaml(output.installation).drivers.compute.configuration;
+        assert.equal(compute.runtime.experimentalEmbeddedChannels, enabled);
+        assert.equal(compute.runtime.channels, undefined, "retired shared proxy configuration stays absent");
+        assert.equal(output.preflight.warnings.some((warning) =>
+          warning.includes("Experimental embedded channels")), enabled === true);
+        KubernetesComputeDriver.validateConfiguration(compute);
+        assert.equal(compute.runtime.gatewayOutbound.enabled, true);
+        // API and worker must roll with exactly the same trusted Installation bytes.
+        const checksum = createHash("sha256").update(output.installation).digest("hex");
+        assert.equal(loadYaml(output.values).controlPlane.installationChecksum, checksum);
+        const manifests = helmTemplate(output);
+        for (const component of ["api", "worker"]) {
+          assert.equal(deploymentChecksum(manifests, component), checksum);
+        }
+        checksums.push(checksum);
+      }
+      assert.notEqual(checksums[2], checksums[0]);
+      assert.notEqual(checksums[2], checksums[1]);
+    }
+  },
+);
+
+test("embedded channel profile inputs reject malformed authority and missing managed outbound", () => {
+  for (const profile of ["openclaw", "codex"]) {
+    const input = profile === "codex" ? codexInput() : baseInput();
+    assertFieldRefusals(profile, input, "channels.experimentalEmbeddedChannels",
+      ["true", "false", 0, 1, null, {}, []], "must be a boolean.");
+    assertPreflightFailure(profile,
+      { ...input, channels: { experimentalEmbeddedChannel: true } },
+      /channels\.experimentalEmbeddedChannel is not supported/);
+    for (const gatewayOutbound of [undefined, { enabled: false }]) {
+      assertPreflightFailure(profile,
+        { ...input, gatewayOutbound, channels: { experimentalEmbeddedChannels: true } },
+        /channels\.experimentalEmbeddedChannels requires gatewayOutbound\.enabled: true/);
+    }
+    const disabled = render(profile, { ...input, channels: { experimentalEmbeddedChannels: false } });
+    const runtime = loadYaml(disabled.installation).drivers.compute.configuration.runtime;
+    assert.equal(runtime.experimentalEmbeddedChannels, false);
+    assert.equal(runtime.gatewayOutbound, undefined);
+    rmSync(disabled.directory, { recursive: true, force: true });
+  }
+});
+
 // Tenant runtimes may burst to four cores; 100m requests keep the scheduling
 // reservation unchanged. The production example carries the same values.
 const containerDefaultResources = {

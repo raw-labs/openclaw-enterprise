@@ -1137,6 +1137,7 @@ function buildInput(rawInput, diagnostics) {
     [
       "controlPlane",
       "runtime",
+      "channels",
       "gatewayOutbound",
       "controlPlaneOutbound",
       "codex",
@@ -1147,6 +1148,8 @@ function buildInput(rawInput, diagnostics) {
   );
   const controlPlane = section(input, "controlPlane", diagnostics);
   const runtime = section(input, "runtime", diagnostics);
+  const channels = section(input, "channels", diagnostics, false);
+  closed(channels, "channels", ["experimentalEmbeddedChannels"], diagnostics);
   const gatewayOutbound = section(input, "gatewayOutbound", diagnostics, false);
   const controlPlaneOutbound = section(input, "controlPlaneOutbound", diagnostics, false);
   const codex = section(input, "codex", diagnostics, false);
@@ -1297,6 +1300,7 @@ function buildInput(rawInput, diagnostics) {
   return {
     controlPlane,
     runtime,
+    channels,
     gatewayOutbound,
     controlPlaneOutbound,
     codex,
@@ -1460,6 +1464,7 @@ function buildRendered(profile, parsed, diagnostics) {
   const {
     controlPlane,
     runtime,
+    channels,
     gatewayOutbound,
     controlPlaneOutbound,
     codex,
@@ -1567,6 +1572,19 @@ function buildRendered(profile, parsed, diagnostics) {
     diagnostics,
     false,
   );
+  const experimentalEmbeddedChannels = asBoolean(
+    channels, ["channels", "experimentalEmbeddedChannels"], diagnostics,
+  );
+  const embeddedChannelOptions = channels.experimentalEmbeddedChannels === undefined
+    ? {} : { experimentalEmbeddedChannels };
+  if (experimentalEmbeddedChannels) {
+    if (!gatewayOutboundEnabled) {
+      diagnostics.errors.push("channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled: true.");
+    }
+    diagnostics.warnings.push(
+      "Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.",
+    );
+  }
   const managedOutboundProxyEnabled = asBoolean(
     controlPlaneOutbound,
     ["controlPlaneOutbound", "managedProxy"],
@@ -1969,6 +1987,7 @@ function buildRendered(profile, parsed, diagnostics) {
                     : { codexModelBaseUrl: codexModelBaseUrl(runtime, diagnostics) }),
                 }
               : {}),
+            ...embeddedChannelOptions,
             ...(gatewayOutboundEnabled
               ? {
                   gatewayOutbound: {

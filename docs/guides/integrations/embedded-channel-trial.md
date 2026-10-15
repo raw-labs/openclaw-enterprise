@@ -7,7 +7,31 @@ share the Agent's execution workload. Every Agent still owns its own Gateway.
 
 ## Enable the trusted option
 
-Set the selected Kubernetes Compute Driver's Installation configuration:
+For the [installation renderer](../deploy/installation-profiles.md#render-files),
+add the opt-in to the existing trusted site-input JSON:
+
+```json
+{
+  "channels": {
+    "experimentalEmbeddedChannels": true
+  },
+  "gatewayOutbound": {
+    "enabled": true,
+    "denyCidrs": ["10.0.0.0/8"]
+  }
+}
+```
+
+Render with `--profile openclaw`; the option also works with `codex` when selecting
+embedded OpenClaw Agents. It requires managed `gatewayOutbound.enabled: true` and actual infrastructure
+exclusions; replace the example CIDR for your Installation. Omit the option or set it to false to keep the default
+refusal. Preflight warns about the shared-credential risk when enabled. Apply the
+paired startup YAML and Helm values in the guide's order so API and worker load
+the same configuration. The option does not configure Teams ingress or broaden
+the proxy's allowed destinations.
+
+For a directly authored Installation, set the selected Kubernetes Compute Driver's
+configuration:
 
 ```yaml
 runtime:
