@@ -80,12 +80,10 @@ graph TD
 `scripts/first-agent.mjs:nativeConfiguration`
 `scripts/first-agent.mjs:ensureManagedConfiguration`
 
-The option requires launcher-owned Compose/OpenShell browser state. Because OCC
-assigns the Agent ID, the helper saves disabled Configuration generation 1,
-creates the Agent, derives its origin, and patches generation 2 before
-deployment. Generation 2 enables `controlUi`, pins its origins, and grants the
-`occ-workspace-files` trusted-proxy identity `operator.admin` with device
-auto-approval. An existing helper-owned name cannot change this selection.
+With launcher-owned Compose/OpenShell state, the helper saves disabled generation 1,
+creates the Agent, then patches generation 2 with its derived origin, `controlUi`,
+`occ-workspace-files` administrator identity and device auto-approval before deployment.
+Existing helper-owned names cannot change this selection.
 
 ### 1. Deployment admission prepares the Agent copy
 

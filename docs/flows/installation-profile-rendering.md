@@ -142,14 +142,11 @@ follow their rule within 200 UTF-16 code units, as in the chart.
 253 characters; neither `.` nor a `..` prefix. Thus `..ca.pem` and 254-character
 keys fail preflight before Helm. Omission uses `ca.pem`.
 
-`validateDatabaseCaMount` checks the generated values against the chart's active
-database-client mounts. With a database CA Secret, `mountPath` cannot equal the
-Installation, worker runtime, bootstrap, gateway key, or private gateway CA mount.
-Repository mounts are reserved only when repository credentials are enabled;
-the ChatGPT mount is reserved only when managed service accounts are configured.
-Profiles do not enable execution-cluster mounts. No CA configuration adds no
-restriction; an omitted path keeps `/etc/openclaw/database-ca`. A collision adds
-a field-specific preflight error and prevents both deployable files.
+`validateDatabaseCaMount` refuses database CA paths colliding with active
+Installation, worker, bootstrap, Gateway-key or private-CA mounts. Repository and
+ChatGPT mounts are reserved only when enabled; profiles omit execution-cluster
+mounts. No CA adds no restriction; omitted paths use `/etc/openclaw/database-ca`.
+Collisions produce field-specific errors and withhold both deployable files.
 
 Helm values wire images, bootstrap, authentication, selected peers, metrics and
 optional integrations. Gateway routing is always enabled. Native admin is enabled
@@ -194,7 +191,7 @@ opt-in adds the GitHub Backend, Repo Driver,
 and worker peer expected by the broker sidecar.
 
 An explicit `channels.experimentalEmbeddedChannels` value reaches Compute's
-`runtime.experimentalEmbeddedChannels` with managed Gateway outbound required.
+`runtime.channels.experimentalEmbeddedChannels` with managed Gateway outbound required.
 Omission leaves the default refusal;
 true adds a shared-credential, unsupported-production preflight warning. Agent
 native JSON cannot set this Installation option. Its bytes enter the paired checksum.
@@ -208,11 +205,9 @@ paths independently. Disabling defaults with no files seeds nothing. The
 renderer validates the boolean and path list; controller startup reads and
 validates files. Preset changes alter the Installation checksum.
 
-`runtime.transportSecretPrefix` must produce the same DNS-safe name that
-Kubernetes Compute startup requires: `<prefix>-<12 hex characters>`, at most
-253 characters in total. Preflight checks that composed name before writing
-Installation YAML. A trailing hyphen in the prefix remains valid; a trailing
-dot does not, because the suffix would start a new label with a hyphen.
+Preflight validates `runtime.transportSecretPrefix` with Compute's composed-name
+rule: `<prefix>-<12 hex characters>`, DNS-safe and at most 253 characters. A
+trailing hyphen passes; a trailing dot makes the suffix an invalid label.
 
 ### 6. Resolve hosted discovery egress
 

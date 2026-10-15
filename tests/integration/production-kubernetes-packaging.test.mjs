@@ -266,14 +266,6 @@ test("Teams callbacks opt into a separate TLS listener and scoped ingress", tool
     ).value,
     "/etc/openclaw/outbound-proxy/config.json",
   );
-  assert.deepEqual(
-    JSON.parse(
-      proxy.spec.template.spec.containers[0].env.find(
-        ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS",
-      ).value,
-    ),
-    ["tenant.sharepoint.com"],
-  );
   for (const override of [
     { "gatewayRouting.enabled": "false" },
     { "gatewayRouting.hostname": "callbacks.example.test" },

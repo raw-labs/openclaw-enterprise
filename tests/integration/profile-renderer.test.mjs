@@ -480,11 +480,11 @@ test(
         const output = render(profile, input);
         t.after(() => rmSync(output.directory, { recursive: true, force: true }));
         const compute = loadYaml(output.installation).drivers.compute.configuration;
-        assert.equal(compute.runtime.experimentalEmbeddedChannels, enabled);
-        assert.equal(
+        assert.equal(compute.runtime.channels?.experimentalEmbeddedChannels, enabled);
+        assert.deepEqual(
           compute.runtime.channels,
-          undefined,
-          "retired shared proxy configuration stays absent",
+          enabled === undefined ? undefined : { experimentalEmbeddedChannels: enabled },
+          "only the trusted flag is rendered; retired shared proxy settings stay absent",
         );
         assert.equal(
           output.preflight.warnings.some((warning) =>
@@ -533,10 +533,11 @@ test("embedded channel profile inputs reject malformed authority and missing man
     }
     const disabled = render(profile, {
       ...input,
+      gatewayOutbound: { enabled: false },
       channels: { experimentalEmbeddedChannels: false },
     });
     const runtime = loadYaml(disabled.installation).drivers.compute.configuration.runtime;
-    assert.equal(runtime.experimentalEmbeddedChannels, false);
+    assert.equal(runtime.channels.experimentalEmbeddedChannels, false);
     assert.equal(runtime.gatewayOutbound, undefined);
     rmSync(disabled.directory, { recursive: true, force: true });
   }

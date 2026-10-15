@@ -52,6 +52,13 @@ for (const mapping of selection.migrationMappings) {
   assert.deepEqual(integrated, source, `Migration bytes changed: ${mapping.integrated}`);
   assert.equal(createHash("sha256").update(integrated).digest("hex"), mapping.sha256);
 }
+for (const mapping of selection.upstreamMigrationMappings ?? []) {
+  ancestor(mapping.commit);
+  const source = execFileSync("git", ["show", `${selection.upstream.commit}:${mapping.source}`]);
+  const integrated = readFileSync(mapping.integrated);
+  assert.deepEqual(integrated, source, `Upstream migration bytes changed: ${mapping.integrated}`);
+  assert.equal(createHash("sha256").update(integrated).digest("hex"), mapping.sha256);
+}
 for (const migration of selection.integrationMigrations ?? []) {
   ancestor(migration.commit);
   assert.ok(migration.pullRequests.every((number) => selected.has(number)));

@@ -78,9 +78,8 @@ rendering copy the native policy of the [standard Codex artifact](../../deploy/p
 ([build hosts](../guides/topics/standard-codex-preset.md#build-network-allowlist));
 the deployed Codex plugin enforces it. `loadBundledPresetVersions` also loads every shipped version
 listed in `deploy/presets/archive/versions.json`, whether or not defaults are
-enabled, into `ControllerOptions.bundledPresetVersions`. A conformance test in
-`tests/conformance/presets.test.mjs` fails when a bundled file changes without
-its previous version archived there.
+enabled, into `ControllerOptions.bundledPresetVersions`. Bundled replacements
+retain their previous versions in that archive.
 
 `packages/occ/src/index.ts:OpenClawController.initializeDefaultPresets`
 
@@ -242,11 +241,10 @@ another creation attempt. See [creation recovery](../reference/console/create-an
 
 `packages/occ/src/index.ts:OpenClawController.deployAgent`
 
-The saved Agent has a new identity and no Preset reference. Variable inputs are
-not stored as a separate map. Rendered values are ordinary Agent/Configuration
-settings. Credential preparation and [revision admission](configuration-driver/persistence-and-revisions.md)
-read those resources, not the Preset. Later Preset changes cannot change a draft
-or an immutable admitted revision.
+The new Agent has no Preset reference or separate variable map. Credential
+preparation and [revision admission](configuration-driver/persistence-and-revisions.md)
+read its independent Agent/Configuration resources; later Preset edits cannot
+change drafts or admitted revisions.
 
 ## Debugging and Verification
 

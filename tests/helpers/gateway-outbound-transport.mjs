@@ -27,6 +27,7 @@ export async function startControlledOutboundProxy(
     preload,
     `import dns from "node:dns/promises";
 import net from "node:net";
+import { syncBuiltinESMExports } from "node:module";
 const hosts = new Set(${JSON.stringify(upstreamHosts)});
 dns.lookup = async (host, options) => {
   if (!hosts.has(host) || options?.all !== true) throw new Error("Unexpected fixture DNS lookup");
@@ -39,6 +40,7 @@ net.connect = (options, ...args) => {
   }
   return connect({ ...options, host: "127.0.0.1", port: ${upstreamPort} }, ...args);
 };
+syncBuiltinESMExports();
 `,
   );
   const child = spawn(

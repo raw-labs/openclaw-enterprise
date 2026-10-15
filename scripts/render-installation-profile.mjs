@@ -1578,7 +1578,9 @@ function buildRendered(profile, parsed, diagnostics) {
     diagnostics,
   );
   const embeddedChannelOptions =
-    channels.experimentalEmbeddedChannels === undefined ? {} : { experimentalEmbeddedChannels };
+    channels.experimentalEmbeddedChannels === undefined
+      ? {}
+      : { channels: { experimentalEmbeddedChannels } };
   if (experimentalEmbeddedChannels) {
     if (!gatewayOutboundEnabled) {
       diagnostics.errors.push(

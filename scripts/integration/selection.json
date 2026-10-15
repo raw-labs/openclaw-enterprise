@@ -4,18 +4,58 @@
   "integrationBranch": "codex/raw-integration",
   "upstream": {
     "repository": "openclaw/openclaw-enterprise",
-    "commit": "d3ccc54781d0d50b40e9aeb814f0573d38c0a585"
+    "commit": "c7bdbcf31d3d550d76d8a2333a683752d112ea33"
   },
   "batch": {
-    "startingIntegration": "5a05053ffe5a540bbbe0e2294944a2a91b188e97",
+    "startingIntegration": "c0e8f4d97a39fcd160b5924ad50c2c74e8f7d776",
     "steps": [
       {
-        "operation": "PR #18 standalone corrections; retire duplicate integration fixes",
-        "commit": "6c29d697ce609c3788dff747354ed55c522d4f52",
-        "input": "b0c299f7e8a9cdb992500fa39d32dddea9271ed0"
+        "operation": "Updated upstream baseline and appended credential-source migration",
+        "commit": "8948bbc4bc844cf9df6b36e68eb046f1a3b68c51",
+        "input": "c7bdbcf31d3d550d76d8a2333a683752d112ea33"
+      },
+      {
+        "operation": "PR #16 refreshed feature composition",
+        "commit": "5e6e0e855b94b82ee45621c00f8a84d3a1215be6",
+        "input": "1cfbcf02ce798a02f6ba1bc5b5ac5d0e47756d9b"
+      },
+      {
+        "operation": "PR #1 refreshed feature composition",
+        "commit": "8d6abeddd71ccf7ff6cf3e57da4e5f9bb9066b2b",
+        "input": "1ae26c0146b397622f9d65cde72f63c5afbd8282"
+      },
+      {
+        "operation": "PR #2 refreshed feature composition",
+        "commit": "465186352d79adf32814381f2cd510ceab738097",
+        "input": "17445a8c66ef4e303ff88e10a7b453481febf1f8"
+      },
+      {
+        "operation": "PR #11 refreshed feature composition",
+        "commit": "60ce3e08c8e595385a2986254411a0ec71e82dcc",
+        "input": "ba98603943c22e5fb4e40b03b07b95ade9b29db8"
+      },
+      {
+        "operation": "PR #12 refreshed feature composition",
+        "commit": "9114e784b065c642a104d5a3e87a5c343e274c78",
+        "input": "9c309cf67287428bdd762232d542759db7465198"
+      },
+      {
+        "operation": "PR #15 refreshed feature composition",
+        "commit": "b6dddb405431eb4dcd8c75531a5c0d00adb8571e",
+        "input": "b3258415098757c37296989e1e30437b593d31d5"
+      },
+      {
+        "operation": "PR #17 refreshed feature composition",
+        "commit": "51ab90fd93f19e35eb72d5ae2e2e980cff764455",
+        "input": "a490a5b1ba43ac864b1794c630952cf5b9a1059f"
+      },
+      {
+        "operation": "Reconcile current fixture contracts and managed proxy trust",
+        "commit": "54eb71c1f18ebe548006624be1b807c89c9738bd",
+        "input": "c7bdbcf31d3d550d76d8a2333a683752d112ea33"
       }
     ],
-    "retainedUnchanged": [1, 2, 11, 12, 13, 15, 16, 17]
+    "retainedUnchanged": [13, 18]
   },
   "features": [
     {
@@ -23,7 +63,7 @@
       "title": "Per-person native roles",
       "author": "miguelbranco80",
       "headRef": "codex/per-person-gateway-roles",
-      "commit": "266fa165b34febeddcc9759b350948d0edba33ab",
+      "commit": "1ae26c0146b397622f9d65cde72f63c5afbd8282",
       "status": "included",
       "comparisonBase": "80725162a946f80652b939a32a57ee4e922eeb5c",
       "headRepository": "raw-labs/openclaw-enterprise"
@@ -33,7 +73,7 @@
       "title": "Microsoft Teams channels",
       "author": "miguelbranco80",
       "headRef": "codex/teams-support",
-      "commit": "339aa5d26f4c6b87c410455da5c7fc8eeac5431f",
+      "commit": "17445a8c66ef4e303ff88e10a7b453481febf1f8",
       "status": "included",
       "comparisonBase": "80725162a946f80652b939a32a57ee4e922eeb5c",
       "headRepository": "raw-labs/openclaw-enterprise"
@@ -43,9 +83,9 @@
       "title": "Installation profiles and Preset starters",
       "author": "miguelbranco80",
       "headRef": "codex/installation-customization",
-      "commit": "775a7cff0890d646ed433df45b9233ea58b553e6",
+      "commit": "ba98603943c22e5fb4e40b03b07b95ade9b29db8",
       "status": "included",
-      "comparisonBase": "c1bd65749c853104e7d0cd6ff13002ebe7000664",
+      "comparisonBase": "c7bdbcf31d3d550d76d8a2333a683752d112ea33",
       "headRepository": "raw-labs/openclaw-enterprise"
     },
     {
@@ -53,9 +93,9 @@
       "title": "First-deployment native administration",
       "author": "miguelbranco80",
       "headRef": "codex/native-admin-first-deploy",
-      "commit": "128433480bdc186f460312eece38a8ad486ecdeb",
+      "commit": "9c309cf67287428bdd762232d542759db7465198",
       "status": "included",
-      "comparisonBase": "c1bd65749c853104e7d0cd6ff13002ebe7000664",
+      "comparisonBase": "c7bdbcf31d3d550d76d8a2333a683752d112ea33",
       "headRepository": "raw-labs/openclaw-enterprise"
     },
     {
@@ -73,9 +113,9 @@
       "title": "Native plugin permission preservation",
       "author": "miguelbranco80",
       "headRef": "codex/console-native-plugin-allowlist",
-      "commit": "0b4a067fda15d08567546d3c1ed7381477ee309b",
+      "commit": "b3258415098757c37296989e1e30437b593d31d5",
       "status": "included",
-      "comparisonBase": "b13be62aae45f5b8eac9911c6b2bd7a22cadb57a",
+      "comparisonBase": "c7bdbcf31d3d550d76d8a2333a683752d112ea33",
       "headRepository": "raw-labs/openclaw-enterprise"
     },
     {
@@ -83,9 +123,9 @@
       "title": "Assigning-session protection",
       "author": "miguelbranco80",
       "headRef": "codex/sharing-session-authority",
-      "commit": "38ff2099bc509333ad98c2ea0c906890f30d8ce7",
+      "commit": "1cfbcf02ce798a02f6ba1bc5b5ac5d0e47756d9b",
       "status": "included",
-      "comparisonBase": "b6d3a91fd4a25e29204191d0a56c9e1ba7c152fb",
+      "comparisonBase": "c7bdbcf31d3d550d76d8a2333a683752d112ea33",
       "headRepository": "raw-labs/openclaw-enterprise"
     },
     {
@@ -93,7 +133,7 @@
       "title": "Temporary embedded channel evaluation",
       "author": "miguelbranco80",
       "headRef": "codex/eval-embedded-channels",
-      "commit": "b0fa2a6a177be60ee7f62dede78a7578f8198785",
+      "commit": "a490a5b1ba43ac864b1794c630952cf5b9a1059f",
       "status": "included",
       "comparisonBase": "d7595b9ce392c0558cf84c268bc31f093aba36bf",
       "headRepository": "raw-labs/openclaw-enterprise"
@@ -171,18 +211,60 @@
         "docs/flows/agent-channel-runtime.md"
       ],
       "notes": "Retain per-revision outbound and Teams serving ownership, default-off embedded provisioning, model endpoint bypass, exact callback Service/network cleanup, and trial RFC/plan 0021. Source PR #18 now supplies pure worker admission requirements; its factory aggregates the integration BundledChannelDriver for both providers."
+    },
+    {
+      "id": "upstream-credential-source-composition",
+      "pullRequests": [1, 12, 16, 18],
+      "commits": [
+        "8948bbc4bc844cf9df6b36e68eb046f1a3b68c51",
+        "9114e784b065c642a104d5a3e87a5c343e274c78"
+      ],
+      "paths": [
+        "packages/occ/src/index.ts",
+        "scripts/migration-history.mjs",
+        "tests/integration/postgres-migration-compatibility.test.mjs"
+      ],
+      "notes": "Keep native-admin admission alongside credential-source login mode, decode earlier revisions before deployment, and preserve the integration migration ledger."
+    },
+    {
+      "id": "teams-managed-attachment-transport",
+      "pullRequests": [2, 17, 18],
+      "commits": [
+        "465186352d79adf32814381f2cd510ceab738097",
+        "54eb71c1f18ebe548006624be1b807c89c9738bd"
+      ],
+      "paths": [
+        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts",
+        "tests/fixtures/teams-attachment-download.mjs",
+        "tests/helpers/gateway-outbound-transport.mjs",
+        "tests/integration/runtime-image-startup.test.mjs",
+        "docs/guides/integrations/teams.md"
+      ],
+      "notes": "Admitted managed transport supplies guarded-fetch trust. Dedicated Agents approve extra storage hosts through their revision policy. Do not restore shared proxy resources, file-host lists or retired Helm-only tests; retain native TLS/redirect/token-stripping and exact per-Agent proxy coverage."
+    },
+    {
+      "id": "embedded-profile-managed-outbound",
+      "pullRequests": [11, 17, 18],
+      "commits": ["51ab90fd93f19e35eb72d5ae2e2e980cff764455"],
+      "paths": [
+        "scripts/render-installation-profile.mjs",
+        "tests/integration/profile-renderer.test.mjs",
+        "docs/guides/integrations/embedded-channel-trial.md"
+      ],
+      "notes": "Render channels.experimentalEmbeddedChannels into runtime.channels.experimentalEmbeddedChannels. Require managed Gateway outbound when enabled; preserve default refusal, risk warning and paired API/worker checksums. Retired external/shared proxy inputs stay unsupported."
     }
   ],
   "migrationMappings": [
     {
       "pullRequest": 1,
-      "source": "migrations/0052_agent_runtime_roles.sql",
+      "source": "migrations/0056_agent_runtime_roles.sql",
       "integrated": "migrations/0054_agent_runtime_roles.sql",
       "sha256": "4bfb764c6f1a73bc67f31e993ce05d2b9d97c8b44e92ce436c84884c24f999f0"
     },
     {
       "pullRequest": 16,
-      "source": "migrations/0054_held_authentication_session.sql",
+      "source": "migrations/0055_held_authentication_session.sql",
       "integrated": "migrations/0055_held_authentication_session.sql",
       "sha256": "dbdc63b9dd9d750a743b51a7f1cbd199d08a7977a57a73435dda722eb2bfdb36"
     },
@@ -195,11 +277,11 @@
   ],
   "qualification": {
     "policy": "Qualify the final integration commit; CI run receipts identify the tested SHA. Source PR checks do not qualify this composition.",
-    "previousTestedCommit": "5a05053ffe5a540bbbe0e2294944a2a91b188e97",
+    "previousTestedCommit": "c0e8f4d97a39fcd160b5924ad50c2c74e8f7d776",
     "previousRuns": {
-      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38699223224",
-      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38699223031",
-      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38699271762"
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38710182639",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38710182713",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38710183595"
     },
     "requiredChecks": [
       "CI Required on the published SHA",
@@ -237,6 +319,15 @@
         "Adopt source standalone proxy process accounting in Collector coverage."
       ],
       "history": "Published commits remain ancestors. Reconcile current code and ownership without reverting required behavior or rewriting history."
+    }
+  ],
+  "upstreamMigrationMappings": [
+    {
+      "source": "migrations/0054_credential_source_pat.sql",
+      "integrated": "migrations/0058_credential_source_pat.sql",
+      "sha256": "02ef4ffbdd21bb1c5e66c84c1c3dfe04c48f1936e18bab9c2de81c8ffe3c8d9d",
+      "commit": "8948bbc4bc844cf9df6b36e68eb046f1a3b68c51",
+      "reason": "Append unchanged upstream SQL after the published integration migrations; retain their identifiers, receipt order and bytes."
     }
   ]
 }
