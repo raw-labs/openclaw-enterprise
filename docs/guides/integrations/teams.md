@@ -86,6 +86,48 @@ console. Unsupported editor shapes require the Configuration API; the editor
 does not flatten multiple teams or wildcard access rules. Custom webhook paths
 and legacy webhook listeners fail deployment preparation.
 
+## Prepare attachment downloads
+
+Attachments remain unqualified for live Teams use. For a controlled trial,
+review the actual attachment URL and every redirect hostname without copying
+signed URLs into logs. Add only the required exact storage hosts to
+`slackProxy.teamsFileHosts`, with `slackProxy.teamsEnabled: true`, for example:
+
+```yaml
+slackProxy:
+  enabled: true
+  teamsEnabled: true
+  teamsFileHosts:
+    - tenant.sharepoint.com
+    - files.blob.core.windows.net
+```
+
+The list defaults to empty and accepts at most 32 exact lowercase subdomains of
+`sharepoint.com`, `sharepoint-df.com`, `1drv.com`, `onedrive.com` or
+`blob.core.windows.net`. Wildcards and bare parent domains are refused. Add each
+required redirect hostname separately. This policy applies to every client
+admitted to the Installation's proxy, not just this Agent.
+
+The managed proxy validates every resolved IPv4 answer as public and connects
+to the validated numeric address under one DNS/connect deadline. Private or
+reserved answers, mixed public/private answers, IPv6-only destinations and
+resolution timeouts fail closed.
+
+Set `runtime.channels.guardedFetchProxy: true` in trusted Compute configuration
+and redeploy the Agent only after reviewing the selected proxy's destination
+policy. An external proxy must also reject private/reserved addresses, validate
+DNS answers and pin the connected address. The declaration defaults to `false`.
+Compute supplies `OPENCLAW_PROXY_ACTIVE=1` only to Gateways with an enabled
+channel, letting native guarded fetch delegate DNS/IP enforcement to the proxy.
+Native URL, redirect and credential checks remain active. This declaration
+applies throughout that Gateway process; it does not add proxy destinations.
+Agent configuration cannot override proxy environment or this trust marker.
+
+Native `channels.msteams.mediaAllowHosts` may also need an exact destination
+that its defaults do not admit. This is separate from proxy admission and
+`channels.msteams.mediaAuthAllowHosts`: a signed storage URL does not justify forwarding Microsoft's
+bearer token to that host. Preserve the native authentication-host restrictions.
+
 ## Enable Team-scoped name lookup
 
 Update the Teams app package, using manifest v1.12 or later. Set
@@ -136,6 +178,9 @@ prerequisite.
 - Token or reply timeouts can indicate denied proxy egress. Check the proxy
   host policy and the Gateway's NetworkPolicy; do not grant blanket Gateway
   internet access to bypass a missing endpoint.
+- A missing attachment can indicate native media-host rejection, a denied
+  storage or redirect host, or absent guarded-proxy trust. Check the native
+  download error and proxy destination policy before changing either allowlist.
 
 See [credential ownership](../../reference/drivers/kubernetes-compute/storage-and-credentials.md)
 and the [callback flow](../../flows/agent-channel-ingress.md).

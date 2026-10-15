@@ -413,6 +413,15 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- if .Values.api.channelDirectoryProxyUrl -}}{{- fail "api.channelDirectoryProxyUrl must be empty when slackProxy.enabled uses the chart-managed Service" -}}{{- end -}}
 {{- if not (kindIs "bool" $proxy.enabled) -}}{{- fail "slackProxy.enabled must be a boolean" -}}{{- end -}}
 {{- if not (kindIs "bool" $proxy.teamsEnabled) -}}{{- fail "slackProxy.teamsEnabled must be a boolean" -}}{{- end -}}
+{{- if not (kindIs "slice" $proxy.teamsFileHosts) -}}{{- fail "slackProxy.teamsFileHosts must be a list" -}}{{- end -}}
+{{- if gt (len $proxy.teamsFileHosts) 32 -}}{{- fail "slackProxy.teamsFileHosts permits at most 32 exact hosts" -}}{{- end -}}
+{{- if and (not $proxy.teamsEnabled) (gt (len $proxy.teamsFileHosts) 0) -}}{{- fail "slackProxy.teamsFileHosts requires slackProxy.teamsEnabled" -}}{{- end -}}
+{{- range $host := $proxy.teamsFileHosts -}}
+{{- if not (kindIs "string" $host) -}}{{- fail "slackProxy.teamsFileHosts must contain exact Microsoft file-storage hostnames" -}}{{- end -}}
+{{- if or (gt (len $host) 253) (not (regexMatch "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+(sharepoint\\.com|sharepoint-df\\.com|1drv\\.com|onedrive\\.com|blob\\.core\\.windows\\.net)$" $host)) -}}
+{{- fail "slackProxy.teamsFileHosts must contain exact Microsoft file-storage hostnames" -}}
+{{- end -}}
+{{- end -}}
 {{- if or (gt (len $proxy.serviceName) 63) (not (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" $proxy.serviceName)) -}}
 {{- fail "slackProxy.serviceName must be a DNS-1035 Service name" -}}
 {{- end -}}

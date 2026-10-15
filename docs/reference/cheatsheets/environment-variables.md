@@ -164,3 +164,4 @@ Collector or local Docker log forwarding. See [Observability](../../guides/obser
 
 - `OCC_SLACK_PROXY_PORT` — CONNECT proxy TCP port; Helm sets it from `slackProxy.port`.
 - `OCC_CHANNEL_PROXY_TEAMS_ENABLED` — `true` admits the exact Microsoft Public cloud messaging hosts in the existing channel proxy; defaults to disabled. Helm sets it from `slackProxy.teamsEnabled`. See [Teams setup](../../guides/integrations/teams.md).
+- `OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS` — JSON list of at most 32 exact lowercase Microsoft storage hosts; defaults to an empty list and requires Teams to be enabled when nonempty. Helm sets it from `slackProxy.teamsFileHosts`. See [Teams attachment setup](../../guides/integrations/teams.md#prepare-attachment-downloads) for hostname families, address enforcement and shared scope.

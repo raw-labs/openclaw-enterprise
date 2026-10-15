@@ -139,6 +139,7 @@ import {
   enabledChannelProviders,
   OPENCLAW_GATEWAY_PASSWORD,
   requireChannelTopology,
+  requireChannelProxyEnvironment,
   type KubernetesHarnessTopology,
   kubernetesHarnessAuthMethods,
   requireHarnessCredentialBinding,
@@ -497,6 +498,8 @@ export interface KubernetesComputeDriverOptions {
     readonly codexSeccompProfile?: string;
     readonly channels?: {
       readonly proxyUrl: string;
+      /** The operator attests that this proxy validates and pins public destination addresses. */
+      readonly guardedFetchProxy?: boolean;
       readonly managedProxy?: KubernetesWorkloadPeer & {
         readonly hostname: string;
         readonly port: number;
@@ -2613,6 +2616,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
             additionalProperties: false,
             properties: {
               proxyUrl: { type: "string" },
+              guardedFetchProxy: { type: "boolean", default: false },
               managedProxy: {
                 type: "object",
                 required: ["hostname", "namespace", "podLabels", "port"],
@@ -2901,6 +2905,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
           throw new ConfigurationFailure("Channel runtime proxy must be explicitly configured.");
         }
         channelProxy(channels.proxyUrl, channels.managedProxy);
+        if (
+          channels.guardedFetchProxy !== undefined &&
+          typeof channels.guardedFetchProxy !== "boolean"
+        ) {
+          throw new ConfigurationFailure(
+            "Channel guarded-fetch proxy declaration must be a boolean.",
+          );
+        }
       }
     }
     if (options.executionCluster !== undefined) {
@@ -3560,6 +3572,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
    */
   validateConfiguration(configuration: Readonly<OpenClawConfigurationDocument>): void {
     enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError);
+    requireChannelProxyEnvironment(configuration, callerSettingError);
     requireHarnessCredentialBinding(configuration, callerSettingError);
   }
 
@@ -13973,6 +13986,10 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           variables.push({ name: "HTTPS_PROXY", value: channels.proxyUrl });
           variables.push({ name: "NODE_USE_ENV_PROXY", value: "1" });
           variables.push({ name: "NO_PROXY", value: "localhost,127.0.0.1,::1" });
+          if (channels.guardedFetchProxy === true) {
+            // Native guarded downloads delegate destination DNS/IP checks to this reviewed proxy.
+            variables.push({ name: "OPENCLAW_PROXY_ACTIVE", value: "1" });
+          }
         }
       } else {
         variables.push(

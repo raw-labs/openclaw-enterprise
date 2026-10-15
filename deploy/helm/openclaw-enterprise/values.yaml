@@ -265,6 +265,8 @@ api:
 slackProxy:
   # Enable Microsoft Public cloud text-messaging endpoints in the same proxy.
   teamsEnabled: false
+  # Exact Microsoft file-storage hosts approved for downloads and redirects.
+  teamsFileHosts: []
   # Optional chart-managed HTTP CONNECT proxy for Slack channel traffic. It is
   # inert until enabled. HTTPS egress excludes private and reserved IPv4 ranges.
   enabled: false

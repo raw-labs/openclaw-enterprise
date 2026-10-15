@@ -843,6 +843,18 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
   const setting = (path, requirement) => `Configuration setting ${path} ${requirement}.`;
 
   for (const [values, message] of [
+    // Agent-owned JSON cannot delegate native SSRF checks or replace Compute's proxy.
+    ...[
+      ["env", "OPENCLAW_PROXY_ACTIVE", "1"],
+      ["env.vars", "https_proxy", "http://proxy.example.invalid:3128"],
+      ["env.vars", "NO_PROXY", "*"],
+    ].map(([parent, name, value]) => [
+      { ...valid, env: parent === "env" ? { [name]: value } : { vars: { [name]: value } } },
+      setting(
+        `${parent}.${name}`,
+        "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
+      ),
+    ]),
     [
       { ...valid, channels: { discord: { enabled: true } } },
       setting(
@@ -993,10 +1005,10 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
   const revisions = await request(context.app, "GET", `${agentPath}/revisions`);
   assert.deepEqual(revisions.body.data, []);
 
-  // A disabled unsupported channel and a non-credential env name still save.
+  // A disabled unsupported channel and an ordinary application env name still save.
   for (const values of [
     { ...valid, channels: { discord: { enabled: false } } },
-    { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
+    { ...valid, env: { vars: { APPLICATION_REGION: "test" } } },
   ]) {
     const accepted = await request(context.app, "PATCH", item, { body: { values } });
     assert.equal(

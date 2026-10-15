@@ -3235,7 +3235,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.deepEqual(longQuery.body.error.details, [{ path: "/query", code: "TOO_LONG" }]);
   // A string array declared uniqueItems names the rule, not just an unsupported value.
   const repeatedIds = await controller.request("POST", path, {
-    body: { secretId: secret.data.id, kind: "users", ids: ["U123", "U123"] },
+    body: { provider: "slack", secretId: secret.data.id, kind: "users", ids: ["U123", "U123"] },
   });
   assert.equal(repeatedIds.status, 400, JSON.stringify(repeatedIds.body));
   assert.equal(
@@ -5766,6 +5766,10 @@ test("Agent provisioning API validates inline configuration with existing Secret
     await fixture.controller.listAgents(fixture.principal.id, namespace.data.id)
   ).length;
   for (const [values, message] of [
+    [
+      { ...model, env: { vars: { OPENCLAW_PROXY_ACTIVE: "1" } } },
+      "Configuration setting env.vars.OPENCLAW_PROXY_ACTIVE must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust.",
+    ],
     [
       { ...model, channels: { discord: { enabled: true } } },
       "Configuration setting channels.discord is not a supported channel: use slack or msteams, or set its enabled to false.",

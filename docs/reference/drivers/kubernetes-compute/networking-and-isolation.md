@@ -146,6 +146,8 @@ endpoint, or the exact
 Helm-managed proxy Service URL paired with `runtime.channels.managedProxy`.
 Direct public channel-provider access is denied.
 
+Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
+
 ## Explicit network profiles
 
 Ordinary DNS, model, repository-credential, authentication, channel, workspace-node,

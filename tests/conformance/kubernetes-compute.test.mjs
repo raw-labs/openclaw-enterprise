@@ -7166,13 +7166,13 @@ test("account-token authentication grants only the exact Codex revision outbound
   ]);
 });
 
-test("native channel providers require Secret bindings and project them only to the gateway", async () => {
+test("native channel providers require Secret bindings and project guarded proxy trust only to the gateway", async () => {
   const driver = createKubernetesComputeDriver(
     teamsOptions({
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
-        channels: { proxyUrl: "http://10.42.0.15:3128" },
+        channels: { proxyUrl: "http://10.42.0.15:3128", guardedFetchProxy: true },
       },
     }),
   );
@@ -7326,6 +7326,10 @@ test("native channel providers require Secret bindings and project them only to 
         ? []
         : [{ name: "HTTPS_PROXY", value: "http://10.42.0.15:3128" }],
     );
+    assert.deepEqual(
+      environment.filter(({ name }) => name === "OPENCLAW_PROXY_ACTIVE"),
+      expectedSecrets.length === 0 ? [] : [{ name: "OPENCLAW_PROXY_ACTIVE", value: "1" }],
+    );
 
     const policy = driver.channelNetworkPolicy(configuredRevision, enabled, {
       name: namespace,
@@ -7366,7 +7370,7 @@ test("native channel providers require Secret bindings and project them only to 
       [],
     );
     const agentEnvironment = agent.spec.template.spec.containers[0].env;
-    for (const key of [...expectedSecrets, "HTTPS_PROXY"]) {
+    for (const key of [...expectedSecrets, "HTTPS_PROXY", "OPENCLAW_PROXY_ACTIVE"]) {
       assert.equal(
         agentEnvironment.some(({ name }) => name === key),
         false,
@@ -7438,6 +7442,13 @@ test("native channel providers require Secret bindings and project them only to 
     name: namespace,
     plane: "execution",
   });
+  assert.equal(
+    managedGateway.spec.template.spec.containers[0].env.some(
+      ({ name }) => name === "OPENCLAW_PROXY_ACTIVE",
+    ),
+    false,
+    "a proxy URL alone does not delegate native guarded-fetch checks",
+  );
   assert.deepEqual(managedPolicy.spec.egress, [
     {
       to: [

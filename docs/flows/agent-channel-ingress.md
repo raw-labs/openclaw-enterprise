@@ -1,7 +1,7 @@
 ---
 created: "2026-10-06"
-updated: "2026-10-13"
-last_updated_session: "authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9"
+updated: "2026-10-15"
+last_updated_session: "authoring-run/d5112085-b889-44de-a3c9-3fc6420c77cb"
 ---
 
 # Agent channel callback flow
@@ -12,6 +12,8 @@ Microsoft Teams delivers an authenticated activity to an Agent-specific public
 callback. The Kubernetes Compute Driver exposes the serving Gateway's native
 Teams handler through a separate listener; the SDK validates the Microsoft token
 and the native channel policy decides whether the sender may invoke the Agent.
+Remote attachment downloads use the Gateway's reviewed channel proxy; native
+media admission and credential forwarding remain separate checks.
 Slack Socket Mode uses an outbound connection and does not enter this flow.
 
 ## Entry Points
@@ -33,7 +35,13 @@ graph TD
   H --> S["Native Teams SDK validates Microsoft JWT"]
   S -->|"Invalid token"| X["Reject request"]
   S -->|"Authenticated"| P["Native sender and channel policies"]
-  P -->|"Permitted"| A["Agent execution and native Teams reply"]
+  P -->|"Permitted"| F["Native attachment preparation"]
+  F -->|"No remote media"| A["Agent execution and native Teams reply"]
+  F -->|"Remote media admitted"| Q["Native guarded fetch through reviewed proxy"]
+  Q -->|"Allowed"| B["Fetch bytes over TLS"]
+  Q -->|"Denied or timed out"| N["Native attachment failure handling"]
+  B --> A
+  N --> A
   D -->|"Stopped or deleted"| C["Remove callback route and policy"]
 ```
 
@@ -50,6 +58,11 @@ listeners and sovereign clouds are refused.
 `validateChannelSecretBindings` requires matching admitted bindings.
 `deployment` projects channel Secrets only into the Gateway and records whether
 that serving Deployment owns a Teams callback.
+`configuration-rules.ts:requireChannelProxyEnvironment` refuses Agent-authored
+proxy environment overrides. With an enabled channel, `deployment` supplies the
+selected proxy and, only when `runtime.channels.guardedFetchProxy` is true, the
+native `OPENCLAW_PROXY_ACTIVE=1` trust marker. That marker delegates guarded
+fetch DNS/IP enforcement throughout the Gateway to the reviewed proxy.
 
 ### 2. Reconcile the serving revision's callback
 
@@ -70,7 +83,23 @@ Microsoft Teams SDK reject unauthenticated activities before Agent execution.
 Native personal/group policies and mention rules then gate execution. The plugin
 sends the response using its admitted app credentials through provider egress.
 
-### 4. Revoke the endpoint
+### 4. Fetch remote attachment bytes
+
+The [pinned native attachment downloader](https://github.com/openclaw/openclaw/blob/90d30a1178a79dddd92e6190b66b95d89dfb3ca8/extensions/msteams/src/attachments/download.ts)
+`extensions/msteams/src/attachments/download.ts:downloadMSTeamsAttachments` retains its media-host admission,
+redirect and authentication-header policy. Its guarded fetch uses the Gateway's
+proxy transport when Compute supplies the reviewed-proxy declaration.
+`apps/controller/src/slack-proxy.mjs:readTeamsFileHosts` adds only the explicitly
+configured Microsoft storage hosts to the proxy's CONNECT policy when Teams is
+enabled. `createSlackProxyServer` resolves an admitted hostname's IPv4 addresses,
+refuses any nonpublic answer and opens the socket to the validated address.
+One deadline covers DNS and connection; late resolution cannot create a socket
+after cancellation or timeout. TLS remains between the native client and origin.
+Each redirect must pass the proxy policy independently. Proxy access does not
+grant bearer-token forwarding, and the shared proxy's host list is
+Installation-wide.
+
+### 5. Revoke the endpoint
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsRoute` removes stale callback resources when the serving Gateway
 disables Teams. `deleteGatewayUnauthenticatedRoutes` removes the HTTPRoute before
@@ -86,6 +115,9 @@ by the serving revision.
   console persistence, simulated UI evidence, and pending live-provider proof.
 - Check Gateway logs for native channel initialization and policy refusals.
   Saved Secret bindings alone do not establish working Microsoft credentials.
+- For attachment failures, inspect native media/redirect admission and the
+  proxy's exact destination policy separately. Do not log signed download URLs
+  or bearer tokens.
 
 ## Related docs
 
@@ -100,5 +132,6 @@ by the serving revision.
 
 ## Changelog
 
+- 2026-10-15 13:12: Document reviewed proxy delegation and exact Teams storage destinations in the accompanying uncommitted change (authoring-run/d5112085-b889-44de-a3c9-3fc6420c77cb - 339aa5d26f4c)
 - 2026-10-10 22:48: Preserve the native Teams default callback path during deployment admission (authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9 - a2f7ad762117)
 - 2026-10-06 16:42: Documented the source-backed Teams callback path (codex/authoring-run/5ef92e66-9d7a-4101-a43a-59a23d70ef72 - 447c387b63c1)
