@@ -84,25 +84,22 @@ retain their previous versions in that archive.
 `packages/occ/src/index.ts:OpenClawController.initializeDefaultPresets`
 
 Initialization authorizes Installation administration, locks Namespaces in ID
-order in one transaction, and skips failed/deleting Namespaces. Missing names
-require Preset create permission and ordinary template/Driver validation before
-storage and mutation audit. A deny Restriction on a creation leaves the name
-missing with one `presets.default-create-skipped` warning; a missing grant
-still needs another administrator. While `includeDefaults` is enabled, an
-existing copy of a bundled default that still equals a superseded shipped version requires
-Preset update permission; its
-template is replaced in place and audited with `source: installation-defaults-refresh`.
-A refresh the policy refuses keeps the copy and logs one
-`presets.default-refresh-skipped` warning naming it and the reason. Startup
-first skips only refusals from a deny Restriction, which binds every
-administrator; only when no single administrator can then complete
-initialization does it skip every refused refresh. Removing the Restriction, or
-granting `preset:update` to an Installation administrator, lets the next startup
-refresh the copy.
-Other existing copies are untouched. Any other failure rolls back
-the transaction and prevents API startup. Namespace creation uses the same
-helper before queuing provisioning, so denied or invalid defaults also roll back
-the new Namespace. Disabling defaults leaves persisted copies alone.
+order within one transaction, and skips failed/deleting Namespaces. Missing names
+need Preset create permission and template/Driver validation before storage and
+mutation audit. A deny Restriction skips creation with `presets.default-create-skipped`;
+a missing grant requires another administrator.
+
+With defaults enabled, a bundled copy still matching an archived shipped version
+requires Preset update permission to refresh in place. The audit records
+`source: installation-defaults-refresh`. Refused refreshes preserve the copy and
+log `presets.default-refresh-skipped` with its reason. Startup first skips only
+deny Restrictions, which bind every administrator. Only if no administrator can
+complete initialization does it skip other refused refreshes. Removing the
+Restriction or granting `preset:update` permits retry on next startup.
+
+Other copies remain unchanged. Other failures roll back and prevent startup.
+Namespace creation runs the same helper before provisioning: denied or invalid
+defaults also roll back the new Namespace. Disabling defaults preserves stored copies.
 
 ### 2. Admit and store a template
 

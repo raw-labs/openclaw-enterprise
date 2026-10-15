@@ -53,6 +53,11 @@
         "operation": "Reconcile current fixture contracts and managed proxy trust",
         "commit": "54eb71c1f18ebe548006624be1b807c89c9738bd",
         "input": "c7bdbcf31d3d550d76d8a2333a683752d112ea33"
+      },
+      {
+        "operation": "Qualify profile rendering and reconcile current transport regressions",
+        "commit": "03ee4dce46b3530e94f86b4921b02704ab8c31e2",
+        "input": "a490a5b1ba43ac864b1794c630952cf5b9a1059f"
       }
     ],
     "retainedUnchanged": [13, 18]
@@ -231,7 +236,8 @@
       "pullRequests": [2, 17, 18],
       "commits": [
         "465186352d79adf32814381f2cd510ceab738097",
-        "54eb71c1f18ebe548006624be1b807c89c9738bd"
+        "54eb71c1f18ebe548006624be1b807c89c9738bd",
+        "03ee4dce46b3530e94f86b4921b02704ab8c31e2"
       ],
       "paths": [
         "apps/controller/src/drivers/compute/kubernetes/index.ts",
@@ -246,7 +252,10 @@
     {
       "id": "embedded-profile-managed-outbound",
       "pullRequests": [11, 17, 18],
-      "commits": ["51ab90fd93f19e35eb72d5ae2e2e980cff764455"],
+      "commits": [
+        "51ab90fd93f19e35eb72d5ae2e2e980cff764455",
+        "03ee4dce46b3530e94f86b4921b02704ab8c31e2"
+      ],
       "paths": [
         "scripts/render-installation-profile.mjs",
         "tests/integration/profile-renderer.test.mjs",

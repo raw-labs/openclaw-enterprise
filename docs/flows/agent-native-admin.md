@@ -228,11 +228,11 @@ The init container cannot write through the gateway's later mount path.
 ## Debugging and Verification
 
 - Startup reports `AGENT_NATIVE_ADMIN_INVALID`, `AUTH_BASE_URL_INVALID`, `AUTH_SECRET_INVALID` or `GATEWAY_API_KEY_UNAVAILABLE` for invalid feature, origin/cookie, auth-secret or gateway-key settings.
-- For `disabled`, `stopped`, `unavailable` and `unsupported`, follow [availability semantics](../reference/agent-native-admin.md#authorization-and-availability). Check exact-host derivation, Agent lifecycle, serving revision and runtime support before changing policy.
+- For unavailable access, check [status semantics](../reference/agent-native-admin.md#authorization-and-availability), host derivation, lifecycle, serving revision and runtime support.
 - Gateway requests must contain no browser cookie or native exchange/bootstrap credentials. IAM denials retain the human principal and exact Agent; disconnected callers must not open upstream connections.
 - WebSocket connect/close audits share `connectionId`; `closeReason` identifies lifecycle, revocation, dependency, client, upstream or shutdown closure.
 - Service-worker registration is intentionally refused with `worker-src 'none'` and rejection of `Service-Worker: script` requests.
-- Browser tests cover launch and visibility. Integration covers HTTP admission, assets, PostgreSQL session/role revocation, reconnect, leases, revision changes and reversible edits on disposable Agents.
+- Browser proof covers launch/visibility; integration covers HTTP/assets, PostgreSQL session/role revocation, reconnect/leases, revisions and reversible edits.
 
 ## Related docs
 

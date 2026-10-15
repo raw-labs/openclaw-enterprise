@@ -161,7 +161,7 @@ device state, plugins, or other persistent gateway data.
 ## Failure behavior
 
 - Helm rendering fails when `agentNativeAdmin.enabled` is true without `gatewayRouting.enabled`, or with an `auth.baseUrl` that is not HTTPS or whose host is outside `agentNativeAdmin.sharedCookieDomain`.
-- Better Auth setup runs before the native admin checks below and reports its own codes instead: `AUTH_BASE_URL_INVALID` for a malformed or public-suffix shared cookie domain, one that does not contain the public origin's host, or a non-HTTPS public origin with that cookie domain set, and `AUTH_SECRET_INVALID` for an auth secret under 32 characters. A missing `OCC_GATEWAY_API_KEY_PATH` reports `GATEWAY_API_KEY_UNAVAILABLE`.
+- Better Auth validates first: malformed/public-suffix shared domains, a console outside the parent, or non-HTTPS console origins report `AUTH_BASE_URL_INVALID`; secrets under 32 characters report `AUTH_SECRET_INVALID`. Missing `OCC_GATEWAY_API_KEY_PATH` reports `GATEWAY_API_KEY_UNAVAILABLE`.
 - Startup fails with `AGENT_NATIVE_ADMIN_INVALID` when enablement, Agent domain, shared cookie domain, public origin, Better Auth cookie scope, or cookie-secret requirements are invalid.
 - Availability follows the status table above. `unsupported` reasons are
   `ui_configuration`, `role_unavailable`, `device_approval_required` and
@@ -171,7 +171,7 @@ device state, plugins, or other persistent gateway data.
   Sharing and **Refresh access**. Explicit refresh retries; automatic reloads
   retain denial. Other statuses show feedback; available access opens `url`.
 - Attributable IAM denials remain audit events for status checks, native-host proxy admission, and recurring WebSocket lease renewal. Those denial paths preserve the human IAM principal and exact Agent target instead of collapsing into unaudited dependency failures.
-- Proxied HTTP and WebSocket requests strip browser credentials, service keys, forwarded headers, native identity/scope headers, and native `Set-Cookie` before responding through OCC. WebSocket upgrades require a non-null exact Agent `Origin`; accepted `101` connections audit `websocket.connect` with `connectionId` and `websocket.close` with the same `connectionId` plus `closeReason`, refresh authorization every 25 seconds, close when a lease check fails or takes more than 5 seconds, set `closeReason` to distinguish lifecycle, revocation, dependency, client, upstream, and shutdown paths, and are destroyed during API `preClose`.
+- HTTP and WebSocket proxying strips browser credentials, service keys, forwarded authority and native `Set-Cookie`. Upgrades require an exact non-null Agent `Origin`. Accepted `101` connections audit connect/close with matching `connectionId` and `closeReason` (lifecycle, revocation, dependency, client, upstream or shutdown). Authorization renews every 25 seconds; failure or a check exceeding 5 seconds closes the connection. API `preClose` destroys remaining sockets.
 
 ## Related
 
