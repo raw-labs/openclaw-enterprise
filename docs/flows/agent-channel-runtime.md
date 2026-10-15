@@ -47,10 +47,12 @@ graph TD
 `packages/occ/src/index.ts:deployAgentWithAuthorization` authorizes the exact Agent
 and validates same-Namespace resource references. Kubernetes
 `validateHarnessAuth` applies provider settings and `requireChannelTopology` before
-a revision can stop predecessors. `requireTeamsConfiguration` requires explicit
-Public-cloud IDs, an environment Secret reference, the native `/api/messages` path
-and the packaged plugin. Teams also requires an Installation public callback
-hostname. Native JSON cannot provision a listener or change trusted Compute options.
+a revision can stop predecessors. `enabledChannels` restricts Teams to Public cloud,
+the native `/api/messages` path and an Installation public callback hostname.
+`validateChannelSecretBindings` requires a matching binding for every referenced
+credential name. Native registration and plugin inputs follow [Teams setup](../guides/integrations/teams.md);
+the native SDK owns Microsoft JWT authentication. Native JSON cannot provision a
+listener or change trusted Compute options.
 The temporary `runtime.channels.experimentalEmbeddedChannels` option permits
 embedded OpenClaw only when the Installation administrator explicitly enables it.
 The same option advertises embedded provisioning to the regular API; its default
@@ -128,6 +130,8 @@ it does not establish native plugin support or execution containment.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-15 09:30: Correct Teams admission source pointers for the combined implementation. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - ef947b01ff8b14fc522a7c1974731228d4900b57)
 
 - 2026-10-15 08:54: Adapt embedded evaluation to immutable Slack/Teams outbound requirements and preserve model transport. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - f0473090e63c6738d800cfea244675f970736e3d)
 

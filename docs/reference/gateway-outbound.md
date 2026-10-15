@@ -2,7 +2,7 @@
 
 Use the Agent's **Network** tab to approve additional HTTPS destinations for trusted
 native OpenClaw plugins. Kubernetes Compute creates an isolated proxy for each
-admitted dedicated revision that needs external access. Enabled supported channels
+admitted revision that needs external access. Enabled supported channels
 add their required destinations automatically.
 
 ## Agent selection and permissions
@@ -34,8 +34,9 @@ Saving updates the draft. Deployment freezes the selection, channel requirements
 and admitted Installation exclusions into the immutable revision. An existing
 version keeps its selection when the draft or channel settings change. Deploy
 a new version to apply those changes. Admission rechecks the current Installation
-ceiling. Additional modes require dedicated execution; embedded execution is
-unchanged.
+ceiling. Additional modes require dedicated execution. The
+[embedded channel evaluation](#embedded-channel-evaluation) accepts only
+`channelsOnly` behind its trusted opt-in.
 
 ## Installation setup
 
