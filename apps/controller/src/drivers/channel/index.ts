@@ -1,7 +1,6 @@
 import type {
   ChannelDirectoryLookupInput,
   ChannelDriver,
-  ChannelCredentialReader,
   GatewayOutboundRequirement,
   OpenClawConfigurationDocument,
 } from "@openclaw-enterprise/contracts";
@@ -15,17 +14,27 @@ export class BundledChannelDriver implements ChannelDriver {
   readonly capability = "channel" as const;
   readonly id = "bundled-channel";
   readonly implementation = "occ/bundled-channel";
+  readonly validateCredentials?: NonNullable<ChannelDriver["validateCredentials"]>;
   private readonly slack: SlackChannelDriver;
   private readonly teams: TeamsChannelDriver;
 
   constructor(
     request: ChannelRequest = globalThis.fetch,
     proxyUrl?: string,
-    options: { readonly managedProxyHosts?: readonly string[] } = {},
+    options: {
+      readonly managedProxyHosts?: readonly string[];
+      readonly purpose?: "management" | "revisionAdmission";
+    } = {},
   ) {
     const transport = channelRequest(request, proxyUrl, options);
     this.slack = new SlackChannelDriver(transport);
     this.teams = new TeamsChannelDriver(transport);
+    // The API validates provider credentials before queuing provisioning. Worker
+    // handoff freezes requirements inside a transaction and must perform no provider I/O.
+    if (options.purpose !== "revisionAdmission") {
+      this.validateCredentials = (values, withSecret) =>
+        this.slack.validateCredentials(values, withSecret);
+    }
   }
 
   gatewayNetworkRequirements(
@@ -42,14 +51,6 @@ export class BundledChannelDriver implements ChannelDriver {
       ...this.slack.controlPlaneNetworkRequirements(),
       ...this.teams.controlPlaneNetworkRequirements(),
     ];
-  }
-
-  validateCredentials(
-    values: Readonly<Record<string, unknown>>,
-    withSecret: ChannelCredentialReader,
-  ): Promise<void> {
-    // Optional Graph consent is never a prerequisite for deploying the Teams bot.
-    return this.slack.validateCredentials(values, withSecret);
   }
 
   lookupDirectory(input: ChannelDirectoryLookupInput, signal?: AbortSignal) {

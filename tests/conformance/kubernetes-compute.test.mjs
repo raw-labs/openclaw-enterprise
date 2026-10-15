@@ -5445,7 +5445,7 @@ test("the canonical Kubernetes runtime validates managed Gateway outbound author
       createKubernetesComputeDriver(
         options({ runtime: { ...runtime, channels: { proxyUrl: "http://10.42.0.15:3128" } } }),
       ),
-    /unsupported option channels/,
+    /runtime.channels accepts only/,
   );
   const restricted = createKubernetesComputeDriver(
     options({
@@ -6954,7 +6954,7 @@ test("deployment admission refuses Gateway breakers before a dedicated deploymen
     () => unrouted.validateHarnessAuth(codex, apiKeyAuth, { ...base, ...slack }),
     named(
       "channels.slack",
-      "is enabled, but this Installation has no channel runtime: enabled channels require isolated credentials and a reviewed proxy",
+      "is enabled, but this Installation has no channel runtime: enabled channels require an enabled managed outbound proxy",
     ),
   );
   const withChannels = new KubernetesComputeDriver(
@@ -12516,7 +12516,7 @@ test("revision lifecycle rejects another driver or missing identity before clust
           ...revision,
           configuration: { ...revision.configuration, channels: { [provider]: configuration } },
         }),
-        /isolated credentials and a reviewed proxy/i,
+        /an enabled managed outbound proxy/i,
       );
     }
   }
@@ -13994,7 +13994,10 @@ for (const cutover of ["already deployed", "during Deployment deletion", "during
         async listNamespacedPod() {
           return { items: [] };
         },
-        async readNamespacedService() {
+        async readNamespacedService({ name }) {
+          if (resources.get("Service")?.metadata.name !== name) {
+            throw missing();
+          }
           return read("Service");
         },
         async readNamespacedServiceAccount() {
@@ -14022,7 +14025,10 @@ for (const cutover of ["already deployed", "during Deployment deletion", "during
         },
       },
       networking: {
-        async readNamespacedNetworkPolicy() {
+        async readNamespacedNetworkPolicy({ name }) {
+          if (resources.get("NetworkPolicy")?.metadata.name !== name) {
+            throw missing();
+          }
           return read("NetworkPolicy");
         },
       },
@@ -15644,10 +15650,21 @@ test("retirement preserves active storage and node routing and deletes exact own
         if (name === agentName) {
           return structuredClone(agentService);
         }
-        if (observedService === undefined) {
+        if (name === `${gatewayName}-msteams`) {
+          return teamsResources.has("Service")
+            ? structuredClone(teamsResources.get("Service"))
+            : missing();
+        }
+        if (observedService === undefined || observedService.metadata.name !== name) {
           return missing();
         }
         return structuredClone(observedService);
+      },
+      async patchNamespacedService({ body }) {
+        teamsResources.set("Service", {
+          ...structuredClone(body),
+          metadata: { ...body.metadata, uid: "Service-node-uid", resourceVersion: "1" },
+        });
       },
       async deleteNamespacedService(request) {
         deletions.push(["Service", request]);
@@ -15669,7 +15686,17 @@ test("retirement preserves active storage and node routing and deletes exact own
       },
     },
     networking: {
-      readNamespacedNetworkPolicy: missing,
+      async patchNamespacedNetworkPolicy({ body }) {
+        teamsResources.set("NetworkPolicy", {
+          ...structuredClone(body),
+          metadata: { ...body.metadata, uid: "NetworkPolicy-node-uid", resourceVersion: "1" },
+        });
+      },
+      async readNamespacedNetworkPolicy({ name }) {
+        return name === `${gatewayName}-msteams` && teamsResources.has("NetworkPolicy")
+          ? structuredClone(teamsResources.get("NetworkPolicy"))
+          : missing();
+      },
     },
     objects: {
       async read({ kind, metadata }) {
@@ -15976,7 +16003,9 @@ test("retirement preserves active storage and node routing and deletes exact own
     deletions.map(([kind, { spec }]) => [kind, spec.metadata.name]),
     [
       ["HTTPRoute", `${gatewayName}-msteams`],
+      ["Service", `${gatewayName}-msteams`],
       ["SecurityPolicy", `${gatewayName}-msteams`],
+      ["NetworkPolicy", `${gatewayName}-msteams`],
     ],
   );
   deletions.length = 0;
@@ -20228,3 +20257,147 @@ test("Kubernetes embedded setup uses a Main roster entry's workspace", async () 
     false,
   );
 });
+
+test("embedded channels require a trusted boolean and retain native provider selection", () => {
+  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
+  const channels = {};
+  const embedded = { id: "openclaw", version: "1.0.0", mode: "embedded" };
+  const configuration = {
+    agents: { defaults: { model: "anthropic/claude-sonnet-4-5" } },
+    channels: { slack: { enabled: true } },
+  };
+  for (const flag of [undefined, false]) {
+    const driver = createKubernetesComputeDriver(
+      options({
+        runtime: {
+          ...runtime,
+          gatewayOutbound,
+          channels: { ...channels, experimentalEmbeddedChannels: flag },
+        },
+      }),
+    );
+    assert.throws(
+      () =>
+        driver.validateHarnessAuth(embedded, apiKeyAuth, {
+          ...configuration,
+          runtime: { channels: { experimentalEmbeddedChannels: true } },
+        }),
+      /channels require a dedicated Agent workload/,
+    );
+    assert.deepEqual(driver.agentProvisioning.executionModes, ["dedicated"]);
+  }
+  for (const flag of ["true", 1, null]) {
+    assert.throws(
+      () =>
+        createKubernetesComputeDriver(
+          options({
+            runtime: {
+              ...runtime,
+              gatewayOutbound,
+              channels: { ...channels, experimentalEmbeddedChannels: flag },
+            },
+          }),
+        ),
+      /Installation boolean/,
+    );
+  }
+  const trial = createKubernetesComputeDriver(
+    options({
+      runtime: {
+        ...runtime,
+        gatewayOutbound,
+        channels: { ...channels, experimentalEmbeddedChannels: true },
+      },
+    }),
+  );
+  assert.doesNotThrow(() => trial.validateHarnessAuth(embedded, apiKeyAuth, configuration));
+  assert.deepEqual(trial.agentProvisioning.executionModes, ["dedicated", "embedded"]);
+  assert.throws(
+    () =>
+      trial.validateHarnessAuth(embedded, apiKeyAuth, {
+        ...configuration,
+        agents: { defaults: { model: "codex/gpt-6-astra" } },
+      }),
+    /compatible model provider/,
+  );
+  assert.throws(
+    () =>
+      trial.validateHarnessAuth(embedded, apiKeyAuth, {
+        ...configuration,
+        agents: { defaults: { model: "openrouter/model" } },
+      }),
+    /compatible model provider/,
+  );
+});
+
+for (const [provider, baseUrl, expectedHost] of [
+  ["openai", undefined, "api.openai.com"],
+  ["anthropic", undefined, "api.anthropic.com"],
+  ["openai", "https://models.example.test/v1", "models.example.test"],
+]) {
+  test(`embedded ${provider} model transport remains separate from the channel-only proxy (${expectedHost})`, () => {
+    const driver = createKubernetesComputeDriver(
+      options({
+        runtime: {
+          transportSecretPrefix: "transport",
+          gatewayStorageClassName: "local-path",
+          channels: { experimentalEmbeddedChannels: true },
+          gatewayOutbound,
+        },
+      }),
+    );
+    const requirements = [
+      {
+        source: "msteams",
+        destinations: [{ host: "api.botframework.com", includeSubdomains: false }],
+      },
+    ];
+    const snapshot = driver.admitGatewayOutbound({
+      executionMode: "embedded",
+      selection: { mode: "channelsOnly" },
+      requirements,
+    });
+    assert.deepEqual(snapshot.requirements, requirements);
+    for (const selection of [
+      { mode: "restricted", hosts: ["example.com"] },
+      { mode: "publicHttps" },
+    ]) {
+      assert.throws(
+        () => driver.admitGatewayOutbound({ executionMode: "embedded", selection, requirements }),
+        /dedicated execution/,
+      );
+    }
+    const revision = routedRevision(driver, {
+      harness: { id: "openclaw", version: "1.0.0", mode: "embedded" },
+      configuration: {
+        agents: { defaults: { model: `${provider}/fixture` } },
+        ...(baseUrl === undefined ? {} : { models: { providers: { [provider]: { baseUrl } } } }),
+      },
+      gatewayOutbound: snapshot,
+    });
+    const transport = driver.gatewayOutboundTransport(revision, {
+      name: "tenant",
+      plane: "execution",
+    });
+    assert.ok(transport.noProxy.split(",").includes(expectedHost));
+    assert.equal(transport.noProxy.split(",").includes("api.botframework.com"), false);
+    const disabled = createKubernetesComputeDriver(
+      options({
+        runtime: {
+          transportSecretPrefix: "transport",
+          gatewayStorageClassName: "local-path",
+          gatewayOutbound,
+        },
+      }),
+    );
+    assert.throws(
+      () =>
+        disabled.admitGatewayOutbound({
+          executionMode: "embedded",
+          selection: { mode: "channelsOnly" },
+          requirements,
+        }),
+      /trusted embedded channel evaluation/,
+    );
+  });
+}

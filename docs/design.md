@@ -15,6 +15,11 @@ state into infrastructure and runtime operations.
 
 ## Implementation status
 
+The downstream integration also carries a default-off, temporary embedded
+Slack/Teams evaluation. It shares model and channel credentials in one execution
+workload and is unsupported for production; see the
+[evaluation guide](guides/integrations/embedded-channel-trial.md).
+
 This is the authoritative architecture overview. It describes the implemented
 system and identifies [remaining design work](#remaining-design-work) separately.
 The [design chapters](#design-chapters) retain approved requirements; each chapter

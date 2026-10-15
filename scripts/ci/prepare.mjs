@@ -2709,6 +2709,34 @@ async function prepareLane({ lane, statePath }) {
       env.OCC_TEST_KUBERNETES_CONTEXT = cluster.context;
       env.OCC_TEST_KUBERNETES_IMAGE = fixture.image;
       env.OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS = cluster.pluginStatusProxyCidrs;
+      if (name === "k3d-fixture-state") {
+        // Callback lifecycle uses real Gateway API/Envoy schemas; the fixture
+        // does not prove native startup or provider delivery.
+        const helm = process.env.OCC_HELM_BIN ?? "helm";
+        await commandAvailable(helm, ["version", "--short"]);
+        const crds = await execFile(
+          helm,
+          ["show", "crds", "oci://docker.io/envoyproxy/gateway-helm", "--version", "v1.6.7"],
+          { timeoutMs: 180_000 },
+        );
+        const path = join(cluster.directory, "channel-callback-crds.yaml");
+        await writeFile(path, crds.stdout, { mode: 0o600 });
+        const kubectl = process.env.OCC_KUBECTL_BIN ?? "kubectl";
+        const target = ["--kubeconfig", cluster.kubeconfig, "--context", cluster.context];
+        await execFile(kubectl, [...target, "apply", "--server-side", "-f", path], {
+          timeoutMs: 180_000,
+        });
+        for (const resource of [
+          "httproutes.gateway.networking.k8s.io",
+          "securitypolicies.gateway.envoyproxy.io",
+        ]) {
+          await execFile(
+            kubectl,
+            [...target, "wait", "--for=condition=Established", `crd/${resource}`, "--timeout=180s"],
+            { timeoutMs: 190_000 },
+          );
+        }
+      }
       break;
     }
     case "k3d-observability": {

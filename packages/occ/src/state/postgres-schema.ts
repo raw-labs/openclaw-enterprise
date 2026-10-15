@@ -721,7 +721,7 @@ export const agentRevisions = occSchema.table(
           NOT (${table.admittedSpec} ? 'secret_bindings')
           OR occ.secret_bindings_are_valid(${table.admittedSpec}->'secret_bindings', ${table.namespaceId})
         )
-        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound') AND ${table.admittedSpec} #>> '{harness,mode}' = 'dedicated'))
+        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound') AND (${table.admittedSpec} #>> '{harness,mode}' = 'dedicated' OR ${table.admittedSpec} #>> '{gateway_outbound,selection,mode}' = 'channelsOnly')))
         AND occ.harness_auth_is_valid(${table.admittedSpec}->'harness_auth', ${table.namespaceId}, true)
         AND (
           NOT (${table.admittedSpec} ? 'repository_credentials')

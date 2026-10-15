@@ -423,6 +423,10 @@
                   {
                     "page": "guides/integrations/teams",
                     "label": "Microsoft Teams"
+                  },
+                  {
+                    "page": "guides/integrations/embedded-channel-trial",
+                    "label": "Embedded Trial"
                   }
                 ]
               }
@@ -1036,7 +1040,9 @@
               "flows/agent-presets",
               "contributing/downstream-integration",
               "flows/gateway-outbound",
-              "testing/gateway-outbound"
+              "testing/gateway-outbound",
+              "flows/agent-channel-runtime",
+              "testing/channel-runtime"
             ]
           }
         ]

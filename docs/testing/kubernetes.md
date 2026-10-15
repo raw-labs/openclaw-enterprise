@@ -1,7 +1,6 @@
 # Kubernetes tests
 
-Prepare [shared prerequisites](README.md#requirements-and-credentials) for fixture
-and native-runtime Kubernetes tests.
+Prepare [shared prerequisites](README.md#requirements-and-credentials) for Kubernetes tests.
 
 ## Local Kubernetes installation
 
@@ -65,10 +64,13 @@ not live OAuth, native refresh, or model execution.
 
 An imported immutable `OCC_TEST_KUBERNETES_RUNTIME_IMAGE` extends the
 API-plus-worker case through real runtime credential Secret and private-state
-claim deletion. The case uses synthetic, nonfunctional
+claim deletion. The case uses synthetic
 fixture credentials and performs no model turn. Enabled Slack provisioning uses
-the actual controller proxy with simulated provider/runtime responses; it proves
-policy and Secret delivery, not native Slack connectivity. See [CI image preparation](ci-k3d-images.md).
+the controller proxy with simulated provider/runtime responses; it proves
+policy and Secret delivery, not native Slack connectivity. The
+[embedded Slack/Teams case](channel-runtime.md) additionally verifies immutable
+requirements, exact Secret delivery, callbacks, replacement and withdrawal.
+See [CI image preparation](ci-k3d-images.md).
 
 Tests use explicit loopback `k3d-*` contexts, enforcing NetworkPolicies, scoped
 RBAC and resources, and stock local-path RWO Harness storage. The API-plus-worker case
@@ -401,7 +403,7 @@ workspace storage.
 Disposable runtime helpers accept `OCC_TEST_KUBERNETES_GATEWAY_NODE_SELECTOR` as
 a JSON selector and default to Linux nodes. The default tests namespace and
 credential separation, not production node-pool isolation; that proof needs
-separate reviewed node pools. Tests must still pass with the actual supported
+separate reviewed node pools. Tests must still pass with the supported
 gateway/Codex images and authenticated node reconnect; fixture readiness is not
 a substitute for model-backed acceptance.
 

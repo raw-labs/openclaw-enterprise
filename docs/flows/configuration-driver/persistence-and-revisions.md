@@ -168,3 +168,7 @@ Agent-owned gateway only to its own active workload.
 ## Related
 
 - [Return to the parent flow](../configuration-driver.md).
+
+The trusted embedded channel evaluation uses the same immutable revision and exact
+Secret grants. It changes credential placement into the combined workload, not
+Configuration ownership. See [Agent channel runtime](../agent-channel-runtime.md).

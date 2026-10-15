@@ -12,6 +12,7 @@ import type {
   AuthorizationDecision,
   AuthorizationRequest,
   ComputeDriver,
+  ChannelDriver,
   ComputePrepareRevisionFailureDiagnostic,
   CredentialWithdrawal,
   PluginDeploymentWarning,
@@ -910,6 +911,7 @@ export class ControllerWorker {
   private readonly state: PostgresPlatformState;
   private readonly queue: PostgresWorkQueue;
   private readonly compute: ComputeDriver;
+  private readonly channel: ChannelDriver | undefined;
   private readonly configuration: ConfigurationDriver | undefined;
   private readonly queueOptions: PostgresWorkQueueOptions;
   private readonly iamDriverId: string;
@@ -1026,6 +1028,7 @@ export class ControllerWorker {
       throw new Error("A before-commit Compute Driver must implement activateRevision.");
     }
     this.compute = computeDriver;
+    this.channel = drivers?.channelDriver;
     const selectedSecretDriver = drivers?.secretDriver;
     this.secretDriver = selectedSecretDriver;
     const selectedSecretConfiguration = drivers?.installation.drivers.secret;
@@ -1138,6 +1141,7 @@ export class ControllerWorker {
     });
     for (const driver of [
       this.configuration,
+      this.channel,
       this.sandbox,
       this.credentialGateway,
       this.iam,

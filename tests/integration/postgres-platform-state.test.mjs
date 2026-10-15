@@ -2541,6 +2541,45 @@ test(
         { mode: "channelsOnly" },
       ),
     );
+    await state.transact((unit) =>
+      unit.agents.updateConfiguration(
+        fixture.namespace.id,
+        fixture.agent.id,
+        fixture.configuration.id,
+        "embedded",
+      ),
+    );
+    // Embedded revisions may freeze required channel destinations, never additional
+    // Gateway authority, even when a caller bypasses Compute admission.
+    for (const forbidden of [selection, { mode: "publicHttps" }]) {
+      await assert.rejects(
+        state.transact((unit) =>
+          unit.revisions.createRevision({
+            ...fixture.revision,
+            id: `rev_${randomUUID()}`,
+            revision: nextNumber + 1,
+            gatewayOutbound: { ...gatewayOutbound, selection: forbidden },
+          }),
+        ),
+        { name: "ScopeViolationError" },
+      );
+    }
+    const embedded = await state.transact((unit) =>
+      unit.revisions.createRevision({
+        ...fixture.revision,
+        id: `rev_${randomUUID()}`,
+        revision: nextNumber + 1,
+        gatewayOutbound: { ...gatewayOutbound, selection: { mode: "channelsOnly" } },
+      }),
+    );
+    assert.deepEqual(
+      (
+        await state.read((view) =>
+          view.revisions.findRevision(fixture.namespace.id, fixture.agent.id, embedded.id),
+        )
+      ).gatewayOutbound,
+      embedded.gatewayOutbound,
+    );
     const reloaded = await state.read((view) =>
       view.revisions.findRevision(fixture.namespace.id, fixture.agent.id, revision.id),
     );

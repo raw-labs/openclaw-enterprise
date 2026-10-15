@@ -10,7 +10,7 @@ last_updated_session: authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584
 
 An administrator saves an Agent's additional Gateway access. Deployment freezes
 that approval with trusted channel requirements and Installation exclusions.
-Kubernetes Compute reconciles an isolated proxy before starting that dedicated
+Kubernetes Compute reconciles an isolated proxy before starting the
 Gateway. This flow ends when the route is ready, withdrawn, or removed after drain.
 
 ## Entry Points
@@ -19,7 +19,7 @@ Gateway. This flow ends when the route is ready, withdrawn, or removed after dra
 - Sources: `packages/occ/src/index.ts:OpenClawController.updateAgent`,
   `OpenClawController.deployAgent`, and
   `apps/controller/src/drivers/compute/kubernetes/index.ts:KubernetesComputeDriver`.
-- Assumptions: ready Namespace, supported dedicated topology, selected IAM and
+- Assumptions: ready Namespace, dedicated topology or trusted embedded channel evaluation, selected IAM and
   Compute Drivers, approved proxy image, and explicit infrastructure exclusions.
   Changing the Agent field requires exact Agent update and administer.
 
@@ -69,7 +69,9 @@ deployment rechecks it. State persists the selection beside other Agent settings
 
 `packages/occ/src/state/postgres-state.ts:updateConfiguration` writes
 `gateway_outbound`; `migrations/0056_gateway_outbound.sql` constrains its shape,
-DNS names, and dedicated-only extra authority. The memory adapter mirrors those
+DNS names, and dedicated-only extra authority. The integration-only
+`migrations/0057_embedded_channel_outbound.sql` permits embedded revision snapshots
+only for `channelsOnly`; it preserves the dedicated-only boundary for extra authority. The memory adapter mirrors those
 invariants. The normal mutation audit names the actor and exact Agent.
 
 ### 2. Freeze requirements at deployment
@@ -79,6 +81,8 @@ selected Channel Driver for `gatewayNetworkRequirements`.
 `apps/controller/src/drivers/channel/index.ts:BundledChannelDriver` concatenates
 Slack and Teams declarations. Slack supplies its supported enabled-account
 requirements; Teams supplies exact Public cloud endpoints only when enabled.
+Installation composition supplies the same declarations to the provisioning
+worker, without API-only provider credential calls during transactional handoff.
 Either provider, both, or neither can contribute. Caller-authored
 native settings cannot supply this trusted declaration.
 
@@ -105,7 +109,9 @@ The proxy Pod uses its separate network profile, has no Secret or API token, and
 receives public IPv4 TCP/443 plus DNS under exclusions. Its ingress admits only
 its owning Gateway revision. The Gateway receives no new direct public grant.
 Compute checks proxy readiness before preparing the Gateway with HTTP(S) proxy,
-Node proxy opt-in and exact internal bypass hosts. Harness environment and
+Node proxy opt-in and internal bypass hosts. Opted-in embedded channels retain
+model endpoint bypasses and their pre-existing model egress; see
+[Agent channel runtime](agent-channel-runtime.md). Dedicated Harness environment and
 networking retain their existing contract. Older Node versions fail managed
 Gateway startup before plugin execution.
 
@@ -167,6 +173,8 @@ compatibility with every native plugin transport or provider.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-15 08:54: Link embedded channel-only admission and model transport. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - f0473090e63c6738d800cfea244675f970736e3d)
 
 - 2026-10-15: Reconcile Slack and Teams trusted declarations in the combined integration (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - 523d3b623).
 

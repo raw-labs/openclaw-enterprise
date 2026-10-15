@@ -130,3 +130,13 @@ an allowed hostname can mean the plugin transport does not honor the proxy.
 [Runtime flow](../flows/gateway-outbound.md) explains resource ordering.
 [Testing](../testing/gateway-outbound.md) records selected proof and limits.
 [RFC-0020](../../specs/rfcs/0020-gateway-outbound.md) records the architectural proposal.
+
+## Embedded channel evaluation
+
+The default refuses embedded channels. Trusted Kubernetes
+`runtime.channels.experimentalEmbeddedChannels: true` permits embedded
+`channelsOnly` snapshots using the same Slack/Teams requirements and revision proxy.
+Restricted/public additional modes remain dedicated-only. Model endpoints bypass
+the channel proxy and retain existing embedded model egress; this shared workload
+does not isolate channel credentials from execution. See the
+[temporary evaluation guide](../guides/integrations/embedded-channel-trial.md).

@@ -279,7 +279,7 @@ Single-cluster Compute shares one created or adopted tenant namespace, labeled
 require one owned storage target; adopted targets require restricted Pod Security.
 Discovery excludes OCC's namespace.
 
-Only the experimental two-cluster profile creates `oce-gateways-<hash>` in the
+The two-cluster profile creates `oce-gateways-<hash>` in the
 control cluster, with the first 24 hexadecimal characters of `sha256(namespaceId)`.
 That target has the storage-role label and omits the tenant discovery label.
 
@@ -313,8 +313,8 @@ OCC infrastructure. Missing or foreign targets fail preparation.
 Identity labels under `openclaw.dev/` contain full platform IDs for ownership,
 discovery and network selectors; generated resource names use bounded hashes.
 
-An Installation administrator can select an existing, exclusively dedicated
-Kubernetes namespace when creating the OpenClaw Namespace:
+Administrators can select an exclusively dedicated Kubernetes namespace during
+OpenClaw Namespace creation:
 
 ```json
 {
@@ -350,9 +350,14 @@ receive controller credentials.
 
 ## Teams callbacks
 
-Teams requires the reviewed proxy, `gatewayRouting.channels.hostname`, and a
-separate **channels** listener. The serving revision owns the exact Agent POST
-callback: Microsoft Authorization remains, OCE administrative headers are stripped,
-and the native SDK authenticates. Disable/stop/delete removes the route with
-ownership preconditions. [Teams setup](../../../guides/integrations/teams.md)
-covers endpoint, listener, certificate, proxy settings, and verification limits.
+Teams requires managed outbound, `gatewayRouting.channels.hostname` and the public
+**channels** listener. Only the serving revision owns its exact POST callback;
+Microsoft Authorization reaches the native SDK, while OCE administrative headers
+are stripped. [Teams setup](../../../guides/integrations/teams.md) owns callback
+lifecycle, prerequisites and verification limits.
+
+## Embedded channel evaluation
+
+Trusted [embedded evaluation](../../../guides/integrations/embedded-channel-trial.md)
+shares channel/model credentials and existing model egress; additional Gateway
+modes remain dedicated-only.

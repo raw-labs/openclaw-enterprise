@@ -1,3 +1,4 @@
+import { createBundledChannelDriver } from "./channel.ts";
 import { readFile } from "node:fs/promises";
 import { X509Certificate } from "node:crypto";
 import { isAbsolute } from "node:path";
@@ -5,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type {
   Backend,
   ComputeDriver,
+  ChannelDriver,
   ConfigurationDriver,
   CredentialGatewayDriver,
   CredentialRefreshDriver,
@@ -120,6 +122,7 @@ export interface InstallationRuntimeDrivers {
   readonly bundledPresetVersions?: readonly BundledPresetVersion[];
   readonly installation: InstallationStartupConfiguration;
   readonly computeDriver: ComputeDriver;
+  readonly channelDriver?: ChannelDriver;
   readonly configurationDriver: ConfigurationDriver;
   readonly secretDriver: SecretDriver;
   readonly sandboxDriver?: SandboxDriver;
@@ -882,6 +885,7 @@ export async function loadInstallationConfiguration(options: {
     bundledPresetVersions,
     installation,
     computeDriver,
+    channelDriver: createBundledChannelDriver({ purpose: "revisionAdmission" }),
     configurationDriver,
     secretDriver,
     ...(sandboxDriver === undefined ? {} : { sandboxDriver }),

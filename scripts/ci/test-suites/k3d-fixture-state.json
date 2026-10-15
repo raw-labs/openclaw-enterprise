@@ -45,7 +45,8 @@
       "path": "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
       "expectedTests": [
         "real Kubernetes Drivers safely use and preserve an externally managed tenant namespace",
-        "provisioning API retains the first deployment outcome with real Kubernetes fixture storage"
+        "provisioning API retains the first deployment outcome with real Kubernetes fixture storage",
+        "trusted embedded channel opt-in projects exact Secrets through API provisioning, revisions and stop"
       ]
     }
   ]

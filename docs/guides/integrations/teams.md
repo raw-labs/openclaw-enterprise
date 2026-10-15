@@ -146,3 +146,8 @@ prerequisite.
 
 See [credential ownership](../../reference/drivers/kubernetes-compute/storage-and-credentials.md)
 and the [callback flow](../../flows/agent-channel-ingress.md).
+
+Embedded OpenClaw uses the same Teams destination declarations, public callback
+listener and revision ownership checks when the trusted
+[embedded evaluation option](embedded-channel-trial.md) is enabled. Its channel
+and model credentials share the execution workload.

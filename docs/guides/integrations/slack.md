@@ -198,3 +198,7 @@ bot. To enable one-to-one messages:
 - [Console channel editing](../../reference/console.md#inspect-detail-revisions-and-channel-drafts)
 - [Initial Agent credentials](../../reference/console/create-and-deploy.md#initial-runtime-credentials)
 - [Agent deployment](../../reference/agents/deployment.md)
+
+For an embedded OpenClaw trial, follow the
+[trusted embedded evaluation procedure](embedded-channel-trial.md). Dedicated
+execution remains the default and preserves credential separation.
