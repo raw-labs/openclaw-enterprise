@@ -1115,7 +1115,10 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
     ],
     [
       { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
-      setting("env.vars.HTTP_PROXY", "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust"),
+      setting(
+        "env.vars.HTTP_PROXY",
+        "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
+      ),
     ],
     [
       {

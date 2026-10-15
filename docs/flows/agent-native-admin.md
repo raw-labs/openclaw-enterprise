@@ -147,7 +147,6 @@ unclean private `wss:` URLs also return `unsupported`. Only `available` carries
 private `gatewayBase`, omitted from browser responses.
 Then the selected Compute Driver ID and implementation must match `revision.compute`. A mismatch returns `503 DEPENDENCY_UNAVAILABLE` before endpoint, key or transport lookup. Selection changes do not migrate existing revisions.
 
-
 ### 5. OCC derives the isolated Agent host
 
 `apps/controller/src/gateway/native-admin.ts:nativeAdminTarget`

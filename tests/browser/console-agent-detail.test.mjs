@@ -1,4 +1,3 @@
-import { nativeAdminComputeDriver } from "./console-agents-test-support.mjs";
 import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -7,7 +6,6 @@ import test from "node:test";
 import { CodexPluginDriver } from "../../apps/controller/src/drivers/plugin/index.ts";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
-import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 import { createTestSecretDriver } from "../helpers/secret-driver.mjs";
 import {
   accessBindingPostRequests,

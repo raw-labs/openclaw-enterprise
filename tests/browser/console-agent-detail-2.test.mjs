@@ -46,9 +46,6 @@ import {
   waitForLiveControls,
 } from "./console-agents-test-support.mjs";
 
-import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
-import { deriveNativeAdminHost } from "../../apps/controller/src/gateway/native-admin.ts";
-
 test("Agent delete confirmation can be canceled without sending a write request", async (t) => {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();

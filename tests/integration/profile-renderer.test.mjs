@@ -481,9 +481,17 @@ test(
         t.after(() => rmSync(output.directory, { recursive: true, force: true }));
         const compute = loadYaml(output.installation).drivers.compute.configuration;
         assert.equal(compute.runtime.experimentalEmbeddedChannels, enabled);
-        assert.equal(compute.runtime.channels, undefined, "retired shared proxy configuration stays absent");
-        assert.equal(output.preflight.warnings.some((warning) =>
-          warning.includes("Experimental embedded channels")), enabled === true);
+        assert.equal(
+          compute.runtime.channels,
+          undefined,
+          "retired shared proxy configuration stays absent",
+        );
+        assert.equal(
+          output.preflight.warnings.some((warning) =>
+            warning.includes("Experimental embedded channels"),
+          ),
+          enabled === true,
+        );
         KubernetesComputeDriver.validateConfiguration(compute);
         assert.equal(compute.runtime.gatewayOutbound.enabled, true);
         // API and worker must roll with exactly the same trusted Installation bytes.
@@ -504,17 +512,29 @@ test(
 test("embedded channel profile inputs reject malformed authority and missing managed outbound", () => {
   for (const profile of ["openclaw", "codex"]) {
     const input = profile === "codex" ? codexInput() : baseInput();
-    assertFieldRefusals(profile, input, "channels.experimentalEmbeddedChannels",
-      ["true", "false", 0, 1, null, {}, []], "must be a boolean.");
-    assertPreflightFailure(profile,
+    assertFieldRefusals(
+      profile,
+      input,
+      "channels.experimentalEmbeddedChannels",
+      ["true", "false", 0, 1, null, {}, []],
+      "must be a boolean.",
+    );
+    assertPreflightFailure(
+      profile,
       { ...input, channels: { experimentalEmbeddedChannel: true } },
-      /channels\.experimentalEmbeddedChannel is not supported/);
+      /channels\.experimentalEmbeddedChannel is not supported/,
+    );
     for (const gatewayOutbound of [undefined, { enabled: false }]) {
-      assertPreflightFailure(profile,
+      assertPreflightFailure(
+        profile,
         { ...input, gatewayOutbound, channels: { experimentalEmbeddedChannels: true } },
-        /channels\.experimentalEmbeddedChannels requires gatewayOutbound\.enabled: true/);
+        /channels\.experimentalEmbeddedChannels requires gatewayOutbound\.enabled: true/,
+      );
     }
-    const disabled = render(profile, { ...input, channels: { experimentalEmbeddedChannels: false } });
+    const disabled = render(profile, {
+      ...input,
+      channels: { experimentalEmbeddedChannels: false },
+    });
     const runtime = loadYaml(disabled.installation).drivers.compute.configuration.runtime;
     assert.equal(runtime.experimentalEmbeddedChannels, false);
     assert.equal(runtime.gatewayOutbound, undefined);

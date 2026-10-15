@@ -216,8 +216,6 @@ async function createNativeAdminFixture(t, options = {}) {
   const upstream = await startNativeHttpsUpstream(t);
   const fixture = await createConsoleAppFixture(t, {
     provisionedPeople: [],
-    ...(options.state === undefined ? {} : { state: options.state }),
-    ...(options.stateFactory === undefined ? {} : { stateFactory: options.stateFactory }),
     publicOrigin: options.publicOrigin ?? publicOrigin,
     authBaseURL: options.authBaseURL ?? authBaseURL,
     authCookieDomain: options.cookieDomain ?? cookieDomain,
@@ -851,11 +849,7 @@ test("native admin proxy strips browser credentials and preserves the Agent gate
   );
 });
 test("native admin proxy resolves a host only to the live Agent it names", async (t) => {
-  let state;
-  const context = await createNativeAdminFixture(t, {
-    stateFactory: (options) => (state = new InMemoryPlatformState(options)),
-    recordOperations: true,
-  });
+  const context = await createNativeAdminFixture(t, { recordOperations: true });
   const { fixture, namespace, agent, upstream } = context;
   const state = fixture.state;
   trustLocalUpstreamCertificate(t, upstream.cert);
@@ -904,10 +898,8 @@ test("native admin proxy resolves a host only to the live Agent it names", async
 test("native admin status decodes only the revisions it uses", async (t) => {
   // bughunt-69: status and proxy admission decoded every revision of the Agent to find the
   // newest. Seed 64 later revisions of about 0.9 MB each; the newest is the only one read.
-  let state;
-  const context = await createNativeAdminFixture(t, {
-    stateFactory: (options) => (state = new InMemoryPlatformState(options)),
-  });
+  const context = await createNativeAdminFixture(t);
+  const state = context.fixture.state;
   const active = await state.read((view) =>
     view.revisions.findRevision(context.namespace.id, context.agent.id, context.revision.id),
   );
@@ -1590,12 +1582,9 @@ test("native access explains UI, missing-role and pairing failures after deploym
 
 for (const changedField of [undefined, "id", "implementation"]) {
   test(`native admin retains the revision Compute owner after restart: ${changedField ?? "matching"}`, async (t) => {
-    let state;
-    const context = await createNativeAdminFixture(t, {
-      stateFactory: (options) => (state = new InMemoryPlatformState(options)),
-    });
+    const context = await createNativeAdminFixture(t);
+    const state = context.fixture.state;
     const { fixture, upstream, namespace, agent, revision } = context;
-    const state = fixture.state;
     trustLocalUpstreamCertificate(t, upstream.cert);
     const originalCompute = fixture.controller.selectedDriver("compute");
     assert.deepEqual(revision.compute, {

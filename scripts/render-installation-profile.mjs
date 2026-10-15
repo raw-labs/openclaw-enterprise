@@ -1573,13 +1573,17 @@ function buildRendered(profile, parsed, diagnostics) {
     false,
   );
   const experimentalEmbeddedChannels = asBoolean(
-    channels, ["channels", "experimentalEmbeddedChannels"], diagnostics,
+    channels,
+    ["channels", "experimentalEmbeddedChannels"],
+    diagnostics,
   );
-  const embeddedChannelOptions = channels.experimentalEmbeddedChannels === undefined
-    ? {} : { experimentalEmbeddedChannels };
+  const embeddedChannelOptions =
+    channels.experimentalEmbeddedChannels === undefined ? {} : { experimentalEmbeddedChannels };
   if (experimentalEmbeddedChannels) {
     if (!gatewayOutboundEnabled) {
-      diagnostics.errors.push("channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled: true.");
+      diagnostics.errors.push(
+        "channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled: true.",
+      );
     }
     diagnostics.warnings.push(
       "Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.",

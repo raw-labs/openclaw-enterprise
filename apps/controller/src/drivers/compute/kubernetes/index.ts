@@ -176,6 +176,7 @@ import {
   enabledChannelProviders,
   OPENCLAW_GATEWAY_PASSWORD,
   requireChannelTopology,
+  requireChannelProxyEnvironment,
   requireHarnessPluginPolicy,
   type KubernetesHarnessTopology,
   kubernetesHarnessAuthMethods,

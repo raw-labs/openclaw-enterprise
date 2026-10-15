@@ -94,6 +94,11 @@ The stock native Gateway uses the generated `HTTP_PROXY`, `HTTPS_PROXY`,
 24.5 or newer; managed-proxy Gateway startup refuses older versions. Native
 plugins using ordinary global fetch can use the approved route. Libraries with
 their own transports must honor these settings or use an explicit proxy agent.
+Native guarded fetch uses the Compute-owned `OPENCLAW_PROXY_ACTIVE=1` marker
+to delegate destination DNS/IP checks to the managed proxy. Configuration cannot
+set that marker or proxy transport variables. Native media-host and credential
+forwarding checks remain separate.
+
 Approved loopback/internal transports retain their existing access. Other direct
 external connections remain blocked; proxy configuration alone is not proof of
 compatibility with every plugin or provider.

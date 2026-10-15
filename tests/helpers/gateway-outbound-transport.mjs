@@ -8,16 +8,24 @@ import { fileURLToPath } from "node:url";
 
 // Only DNS answers and the numeric upstream connection are redirected. Policy,
 // CONNECT handling, TLS and the native SDK remain real in the selected image.
-export async function startControlledOutboundProxy(t, { upstreamPort, upstreamHosts, approvedHosts }) {
+export async function startControlledOutboundProxy(
+  t,
+  { upstreamPort, upstreamHosts, approvedHosts },
+) {
   const directory = await mkdtemp(join(tmpdir(), "oce-outbound-transport-"));
   const preload = join(directory, "routing.mjs");
   const policy = join(directory, "policy.json");
-  await writeFile(policy, JSON.stringify({
-    mode: "restricted",
-    destinations: approvedHosts.map((host) => ({ host, includeSubdomains: false })),
-    denyCidrs: [],
-  }));
-  await writeFile(preload, `import dns from "node:dns/promises";
+  await writeFile(
+    policy,
+    JSON.stringify({
+      mode: "restricted",
+      destinations: approvedHosts.map((host) => ({ host, includeSubdomains: false })),
+      denyCidrs: [],
+    }),
+  );
+  await writeFile(
+    preload,
+    `import dns from "node:dns/promises";
 import net from "node:net";
 const hosts = new Set(${JSON.stringify(upstreamHosts)});
 dns.lookup = async (host, options) => {
@@ -31,18 +39,32 @@ net.connect = (options, ...args) => {
   }
   return connect({ ...options, host: "127.0.0.1", port: ${upstreamPort} }, ...args);
 };
-`);
-  const child = spawn(process.execPath, [
-    "--import", preload,
-    fileURLToPath(new URL("../../apps/controller/src/gateway/outbound-proxy.mjs", import.meta.url)),
-  ], {
-    env: { ...process.env, OCC_OUTBOUND_PROXY_POLICY_PATH: policy,
-      OCC_OUTBOUND_PROXY_HOST: "127.0.0.1", OCC_OUTBOUND_PROXY_PORT: "0" },
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+`,
+  );
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      preload,
+      fileURLToPath(
+        new URL("../../apps/controller/src/gateway/outbound-proxy.mjs", import.meta.url),
+      ),
+    ],
+    {
+      env: {
+        ...process.env,
+        OCC_OUTBOUND_PROXY_POLICY_PATH: policy,
+        OCC_OUTBOUND_PROXY_HOST: "127.0.0.1",
+        OCC_OUTBOUND_PROXY_PORT: "0",
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
   const closed = once(child, "close");
   t.after(async () => {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+    }
     await closed;
     await rm(directory, { recursive: true, force: true });
   });
@@ -56,7 +78,9 @@ net.connect = (options, ...args) => {
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
       const match = /"event":"outbound_proxy.listening","port":([0-9]+)/.exec(stderr);
-      if (match) resolve(Number(match[1]));
+      if (match) {
+        resolve(Number(match[1]));
+      }
     });
   }).finally(() => clearTimeout(timer));
   assert.ok(port > 0);
