@@ -1,21 +1,19 @@
 # Platform console
 
-Open `/console/` on your OCC address to manage Agents and supported Slack settings,
-workspace files, and credentials. Authorized operators can also open an Agent's
-[native admin UI](#open-the-native-admin-ui). The console has no rollback, live
-runtime health, or browser chat through OCE.
+Open `/console/` on OCC to manage Agents, supported Slack settings, workspace
+files and credentials. Authorized operators can open an Agent’s
+[native admin UI](#open-the-native-admin-ui). Rollback, live runtime health and
+browser chat through OCE are unavailable.
 
-See [Create and deploy Agents](console/create-and-deploy.md) or
-[Understand Agent detail](../guides/console/agent-details.md). Operator setup and
-runtime checks belong to the [deployment guide](../guides/deploy.md).
+See [Create and deploy Agents](console/create-and-deploy.md),
+[Understand Agent detail](../guides/console/agent-details.md), and the
+[deployment guide](../guides/deploy.md) for setup and runtime checks.
 
 ## Start and sign in
 
-Enter your provisioned account email as
-**Username**, then its password, and select **Login**. Public
-signup, single sign-on, and self-service password recovery are unavailable; ask
-your administrator for an account or a password reset. To set up your own
-Installation, see the
+Enter your provisioned email as **Username** and its password; select **Login**.
+Public signup, single sign-on and self-service password recovery are unavailable;
+ask your administrator for accounts or resets. For Installation setup, see the
 [quickstart](../guides/quickstart.md#open-the-platform-console) or
 [deployment guide](../guides/deploy.md#open-the-platform-console).
 

@@ -1102,28 +1102,44 @@ test("full-integration lanes read NODE_BASE_IMAGE from a variable their environm
   }
 });
 
-test("full-integration runs kernel- and sandbox-sensitive same-SHA lanes on ci.yml's runner", () => {
-  // Hosted ubuntu-24.04 refuses Chromium's sandbox, which PostgreSQL Authentication's
-  // sign-in cases turn on (finding 1383), and the k3d lanes need a kernel that enforces
-  // NetworkPolicy. These lanes must run where ci.yml runs them.
+test("full-integration keeps source CI runner selection and overrides", () => {
+  // Authentication needs Chromium's sandbox; cluster lanes need an enforcing
+  // kernel. Manual same-SHA coverage must retain source CI's hosts and overrides.
   const job = loadYaml(".github/workflows/full-integration.yml").jobs["pr-safe-same-sha"];
-  const expression = job["runs-on"].replace(/^\$\{\{\s*|\s*\}\}$/g, "");
-  const runnerFor = (lane) =>
-    runInNewContext(expression, {
-      matrix: { lane },
+  const ciJob = loadYaml(".github/workflows/ci.yml").jobs["pr-safe"];
+  const runnerFor = (expression, matrix, vars) =>
+    runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ""), {
+      matrix,
+      vars,
       startsWith: (value, prefix) => value.startsWith(prefix),
     });
-  const ciRunners = new Map(laneTable().map((row) => [row.lane, row.runner]));
-  const lanes = job.strategy.matrix.include.map((entry) => entry.lane);
-  const pinned = lanes.filter(
-    (lane) =>
-      lane === "postgres-auth" || lane.startsWith("k3d-fixture-") || lane === "k3d-observability",
-  );
-  for (const lane of ["postgres-auth", "k3d-observability"]) {
-    assert.ok(pinned.includes(lane), lane);
-  }
-  for (const lane of pinned) {
-    assert.equal(runnerFor(lane), ciRunners.get(lane), lane);
+  const ciRows = new Map(laneTable().map((row) => [row.lane, row]));
+  const overrides = [
+    {},
+    { CI_COMPAT_RUNNER: "compatible-runner" },
+    { CI_LARGE_RUNNER: "large-runner" },
+    { CI_RUNNER: "general-runner" },
+    {
+      CI_COMPAT_RUNNER: "compatible-runner",
+      CI_LARGE_RUNNER: "large-runner",
+      CI_RUNNER: "general-runner",
+    },
+  ];
+  for (const row of job.strategy.matrix.include) {
+    if (row.lane === "k3d-observability-demo") {
+      assert.equal(runnerFor(job["runs-on"], row, {}), "ubuntu-22.04");
+      assert.equal(runnerFor(job["runs-on"], row, overrides[1]), "compatible-runner");
+      continue;
+    }
+    const ciRow = ciRows.get(row.lane);
+    assert.ok(ciRow, `${row.lane} has source CI coverage`);
+    for (const vars of overrides) {
+      assert.equal(
+        runnerFor(job["runs-on"], row, vars),
+        runnerFor(ciJob["runs-on"], ciRow, vars),
+        `${row.lane}: ${JSON.stringify(vars)}`,
+      );
+    }
   }
 });
 

@@ -884,6 +884,10 @@ test(
       run: execute,
     });
     await rm(join(directory, "ca-key.pem"));
+    // The image runs unprivileged with a different UID from the Linux CI runner.
+    // Only this disposable synthetic leaf key is made readable, in a read-only mount.
+    await chmod(directory, 0o755);
+    await chmod(join(directory, "key.pem"), 0o644);
     const repository = fileURLToPath(new URL("../../", import.meta.url));
     const result = await runDocker([
       "run",
@@ -911,7 +915,9 @@ test(
       "--test",
       "--test-reporter=tap",
       "/checkout/tests/fixtures/teams-attachment-download.mjs",
-    ]);
+    ]).catch((error) => {
+      throw new Error(`Native Teams media fixture failed:\n${failureTail(commandOutput(error))}`);
+    });
     assert.match(result.stdout, /# pass 1/);
     assert.match(result.stdout, /# fail 0/);
   },

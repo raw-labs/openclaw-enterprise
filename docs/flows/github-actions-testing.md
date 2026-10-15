@@ -14,7 +14,7 @@ GitHub Actions qualifies source through twenty-two noncredentialed lanes or docs
 
 - `.github/workflows/ci.yml:jobs`: PR, main and integration-branch push, merge-group and manual checks on ephemeral runners.
 - `.github/workflows/full-integration.yml:jobs`: manual integration from main or an explicitly approved Kubernetes model or OpenShell branch, bound to the dispatched commit.
-- `scripts/ci/run-tests.mjs:main`: local or workflow `audit`, `run` and `aggregate` commands; the suite map is the coverage owner.
+- `scripts/ci/run-tests.mjs:main`: local/workflow `audit`, `run` and `aggregate` commands.
 
 ## Flow
 
@@ -50,21 +50,19 @@ graph TD
 
 ### 1. Select one source revision and coverage group
 
-`scripts/ci/run-tests.mjs:main` audits, runs and aggregates both locally and in CI.
-
 `.github/workflows/ci.yml:jobs`, `.github/workflows/full-integration.yml:jobs`,
 `scripts/ci/full-integration-preflight.mjs:validateFullIntegrationPreflight`, and
 `scripts/ci/test-suites.mjs:loadTestSuites`
 
-`loadTestSuites` assembles `scripts/ci/test-suites.json` and its ordered
-`scripts/ci/test-suites/<lane>.json` references for runners and preparation.
-Each lane owns its tests, environment, required inputs and preparation settings.
+`loadTestSuites` combines `scripts/ci/test-suites.json` with ordered
+`scripts/ci/test-suites/<lane>.json` references defining each lane’s tests,
+environment, required inputs and preparation.
 
 CI uses the event checkout without external credentials. Impact and Suite Audit start independently. `static-checks` verifies checkout identity, workspace, lint, format, OpenAPI and docs. Full mode runs twenty-two lanes; tests mode runs selected lanes. Runner and file-concurrency overrides, including the GitHub-hosted runtime fixture, follow [runner settings](../testing/downstream-ci.md).
 
 For a PR, the selector verifies the tested checkout and that the event head is the merge's second parent, then compares the first parent (the current base) and tested trees. Git path decoding preserves a leading UTF-8 BOM as filename data; paths outside the allowlist select full. API reference outputs and Markdown under `docs/reference/api/` select full for `openapi:check`. Only nonempty changes to allowlisted regular Markdown files select docs mode. Registered test files (with documentation and their own lane manifest entries) select tests mode: their `ci` lanes in either tree (`checks-baseline-1` if only the fixture job would run). Other test-tree, code, configuration, workflow or unknown changes and non-PR events select full. Missing or unverifiable policy or source evidence selects full or fails closed. Policy comes from that first parent; a base without it selects full. `CI Required` re-verifies the mode (and tests mode's lane set) and requires impact, audit and every selected job to succeed and the rest skipped. Full and tests modes aggregate same-source results of their lanes; docs mode does not aggregate or invent test artifacts.
 
-The impact summary contains mode, reason and accepted lanes, excluding paths and arbitrary selector output. Selector failures fail the job; unavailable evidence is reported.
+The impact summary reports mode, reason and accepted lanes, excluding paths and arbitrary selector output. Selector errors fail the job.
 
 For full-mode PRs, `affected-packages` verifies merge identity and checkout
 cleanliness, then reports declared workspace dependents. It is advisory and does

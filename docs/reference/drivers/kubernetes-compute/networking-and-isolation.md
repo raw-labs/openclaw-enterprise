@@ -1,17 +1,16 @@
 # Kubernetes networking and isolation
 
-The [Kubernetes Compute Driver](../kubernetes-compute.md) manages tenant
-networking, private Agent routes, and namespaces.
+[Kubernetes Compute](../kubernetes-compute.md) manages tenant networking, private
+Agent routes and namespaces.
 
 ## Networking
 
-Configure cluster DNS namespace/Pod labels and gateway port. Startup rejects
-peer namespaces violating DNS label syntax or exceeding 63 characters.
-Set `network.gatewayTrustedProxyCidrs` to nonempty, valid CIDRs for the proxy
-socket sources. This trusted Installation setting has no production default and
-rejects all-source ranges, including IPv4-mapped equivalents. Without private
-routing, also configure the namespace and Pod selectors in
-`network.gatewayClients` for your authenticated proxy.
+Configure cluster DNS namespace/Pod labels and gateway port. Peer namespaces
+must satisfy DNS label syntax and the 63-character limit.
+Set `network.gatewayTrustedProxyCidrs` to nonempty, valid proxy socket-source CIDRs.
+This Installation setting has no production default; all-source ranges, including
+IPv4-mapped equivalents, are rejected. Without private routing, configure your
+authenticated proxy’s namespace/Pod selectors in `network.gatewayClients`.
 
 Peer `podLabels` are validated before provisioning against
 [Kubernetes label syntax](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set):
@@ -46,13 +45,12 @@ blocks that traffic. It also restarts the Gateway once on each
 dedicated Codex first deploy. This setting does not expose the native
 gateway or grant workloads Kubernetes API access.
 
-When private Agent routing is enabled, Compute derives the only allowed peer
-from `gatewayRouting`: the Envoy namespace and the Gateway's exact owning name
-and namespace labels. Omit `network.gatewayClients`; startup rejects explicit
-clients in routed mode. The native gateway trusts
-the proxy's source range; NetworkPolicy distinguishes the authenticated proxy
-from other Pods in that range. Remove direct API or tenant-workload access to
-the native gateway port in this mode.
+With private Agent routing, `gatewayRouting` determines the only allowed peer:
+the Envoy namespace and Gateway’s exact owning name/namespace labels. Omit
+`network.gatewayClients`; routed-mode startup rejects explicit clients.
+The native gateway trusts the proxy’s source range; NetworkPolicy distinguishes
+the authenticated proxy from other Pods there. Remove direct API or tenant-workload
+access to the native gateway port.
 
 ### Gateway authentication
 

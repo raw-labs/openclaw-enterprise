@@ -1,22 +1,21 @@
 # Create and deploy Agents in the console
 
-Use the [platform console](../console.md) to create Agents and provision supported
-Dedicated runtimes. Kubernetes requires a
+Create Agents and provision supported Dedicated runtimes in the
+[platform console](../console.md). Kubernetes requires a
 [ready Namespace and Secret storage](../../guides/deploy/production-agents.md#prepare-each-namespace).
-Creating tokens requires Secret creation permission. Provisioning grants accepted
-Secret access; ordinary draft creation also requires permission to grant Agent
-key access. After deployment, [verify the same
-Agent and revision](../../guides/deploy/production-agents.md#verify-production-workloads).
+Token creation requires Secret creation permission. Provisioning grants accepted
+Secret access; draft creation also requires Agent key-access grant permission.
+After deployment, [verify the same Agent and revision](../../guides/deploy/production-agents.md#verify-production-workloads).
 The [local walkthrough](../../guides/first-agent.md) creates a separate Agent.
 
 ## Create an Agent
 
 Starters allow Control UI at `http://127.0.0.1:18789` and
-`http://localhost:18789`. Compute renders authentication from Installation trust;
-starters reference generated `OPENCLAW_GATEWAY_PASSWORD` without supplying tokens.
-Keep Gateways private. **Open OpenClaw** requires [native access setup](../../guides/deploy/native-admin.md)
-and an explicit person/role assignment. Kubernetes prepares the exact HTTPS origin
-at deployment; saved Presets and Configuration remain unchanged.
+`http://localhost:18789`, referencing generated `OPENCLAW_GATEWAY_PASSWORD`
+without tokens. Compute renders authentication from Installation trust. Keep Gateways private.
+**Open OpenClaw** requires [native access setup](../../guides/deploy/native-admin.md)
+and an explicit person/role assignment. Kubernetes prepares the exact deployment
+HTTPS origin without changing saved Presets or Configuration.
 
 Experimental Dedicated OpenClaw requires [native worker support](../harness-execution.md#native-worker-support)
 and full-facet Sandbox provisioning. The pinned runtime lacks this support;
@@ -87,13 +86,12 @@ clear. Leaving a default or no-Preset form discards unsaved state. Saved Agents 
 Reload, page exit, and sign-out clear local drafts. Once saving begins, navigation
 does not retain partial-save or uncertain-outcome state; follow save recovery below.
 
-For Codex plugins, open **Configure plugins**. With the
-[OpenAI curated catalog](../drivers/plugin-bundled.md#selection-and-catalogs),
-you can browse and select supported plugins without a discovery token. Their tool
-inventory and account access are unknown. In hosted mode, select **Service Accounts** with
-**Codex** and choose a PAT Secret, or enter a token under **Plugin discovery token
-(optional)**. **Previous page** and **Next page** fetch hosted pages; **Filter this
-page** filters locally. PAT catalog search is unavailable.
+Open **Configure plugins**. The
+[OpenAI curated catalog](../drivers/plugin-bundled.md#selection-and-catalogs) needs
+no discovery token; tool inventory and account access remain unknown. For hosted
+mode, select **Service Accounts** with **Codex** and a PAT Secret, or enter a
+**Plugin discovery token (optional)**. **Previous page** and **Next page** fetch
+hosted pages; **Filter this page** filters locally. PAT catalog search is unavailable.
 Select a plugin to load tools, then **Add**. Use toggles and **Tool policy** for
 overrides. **Configured plugins** includes selections from other pages. **Done** closes the modal;
 **Create Agent** saves changes.

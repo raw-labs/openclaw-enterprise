@@ -14,7 +14,7 @@ and [placement status](../../design.md#implementation-status).
 [Shared contracts](../../../packages/contracts/src/index.ts) require `id`,
 `implementation`, and `capability: "compute"`.
 
-Optional `configureAgent(configuration, {nativeAdminOrigin?})` transforms a frozen
+`configureAgent(configuration, {nativeAdminOrigin?})` optionally transforms a frozen
 deployment copy before validation/admission. OCC supplies the Installation-owned
 origin; Compute owns native policy/conflicts. Preserve Harness, opt-outs, settings
 and SecretRefs without source mutation or infrastructure effects. See
@@ -36,19 +36,18 @@ from moved tags. Kubernetes
 binds its private metadata read to the Pod UID and running container ID; both
 commits apply only to containers with that image ID.
 
-`discoverHarnessModels({provider, apiKey})` optionally returns native model IDs/names
+`discoverHarnessModels({provider, apiKey})` optionally lists native model IDs/names
 without storing credentials. OCC requires Agent creation authority. Kubernetes
-and Docker call official OpenAI/Anthropic model-list APIs with bounded requests,
-no redirects. Discovery requires
-[OCC API egress](../console/create-and-deploy.md#create-an-agent) to each
-provider; it neither provisions runtime credentials nor proves model
-compatibility. Unsupported or unavailable discovery permits manual model entry.
+and Docker use bounded, redirect-free official OpenAI/Anthropic requests requiring
+[OCC API egress](../console/create-and-deploy.md#create-an-agent). Discovery
+neither provisions credentials nor proves compatibility; manual entry remains
+available when discovery is unsupported or unavailable.
 
-The bundled Codex OAuth device-login implementation is **Experimental**.
-Optional `startHarnessDeviceAuthorization(harnessId)` returns a public challenge
-and opaque private state; `pollHarnessDeviceAuthorization(privateState)` returns
-pending or a native credential bundle. OCC owns authorization, scope, and Secret
-custody. See the [device login flow](../../flows/native-service-account-credential-delivery.md).
+Bundled Codex OAuth device login is **Experimental**. Optional
+`startHarnessDeviceAuthorization(harnessId)` returns a public challenge and opaque
+private state; `pollHarnessDeviceAuthorization(privateState)` returns pending or a
+native credential bundle. OCC owns authorization, scope and Secret custody. See
+the [device login flow](../../flows/native-service-account-credential-delivery.md).
 
 ### Core lifecycle operations
 
@@ -108,12 +107,11 @@ Bundled Kubernetes Compute requires it in production.
 
 ### Optional gateway endpoint resolution
 
-`getGatewayEndpoint(revision)` returns a private WSS address derived from trusted
-Driver settings and approved resource IDs, or `undefined` if gateway access is
-unsupported. OCC calls it after authorizing access to the Agent and selecting
-its active revision. The method does not check readiness, authorize the caller,
-grant backend route permissions, or save a URL in Agent Configuration. Connection
-errors are dependency failures.
+`getGatewayEndpoint(revision)` returns a private WSS address from trusted Driver
+settings and approved resource IDs, or `undefined` when unsupported. OCC first
+authorizes Agent access and selects its active revision. This method neither
+checks readiness nor grants caller/backend authority or persists a Configuration
+URL. Connection errors are dependency failures.
 
 Workspace-file access uses this endpoint;
 [Agent native admin UI](../agent-native-admin.md#agent-host-identity) uses

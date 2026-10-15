@@ -16,8 +16,6 @@ workloads, guards routes and retires predecessors before audit.
 - Trigger: exact-Agent deployment POST and revision reconciliation.
 - Source: `packages/occ/src/index.ts:OpenClawController.deployAgent` and
   `apps/controller/src/worker.ts:ControllerWorker`.
-- Assumptions: authorized actor, ready Namespace, same-Namespace Configuration,
-  supported mode and authorized Secret/API-key or Driver-issued account authentication.
 
 ## Flow
 
@@ -55,22 +53,21 @@ graph TD
 `packages/occ/src/index.ts:OpenClawController.deployAgent`
 
 OCC locks the authorized Agent and Configuration, resolves `agentRuntime.id`,
-and validates primary/fallback routes and Harness modes. Fallbacks preserve native order,
-primary provider and Harness. Only unambiguous built-in configuration defaults
-to embedded OpenClaw. Missing/ambiguous policies, unsupported IDs and incompatible
-modes fail closed.
+and validates routes and Harness modes. Fallbacks preserve native order, provider
+and Harness. Only unambiguous built-in configuration defaults to embedded
+OpenClaw; missing/ambiguous policies, unsupported IDs and incompatible modes fail closed.
 Compute's `apps/controller/src/drivers/compute/native-gateway-transport.ts:validatePlaintextNativeGateway`
 rejects `gateway.tls.enabled: true` before revision creation and preparation:
 Docker, SSH and Kubernetes require native HTTP.
 The revision freezes Configuration, approved Harness identity/version, mode,
-Compute, and Agent ServicePrincipal. Production supports embedded OpenClaw and
-dedicated Codex; dedicated OpenClaw requires a SandboxDriver providing network,
-filesystem, and process containment. Access tokens require dedicated Codex;
-account snapshots retain OCC identity, credential kind, and opaque Secret reference.
+Compute and Agent ServicePrincipal. Production supports embedded OpenClaw and
+dedicated Codex. Dedicated OpenClaw requires SandboxDriver network, filesystem
+and process containment. Access tokens require dedicated Codex; account snapshots
+retain OCC identity, credential kind and opaque Secret reference.
 `apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts:requireHarnessPluginPolicy`
-rejects policies blocking Codex or OpenClaw’s selected provider during Harness
-admission, including provisioning replay, retry and worker checks before effects. Required-plugin aliases must be unique.
-Gateway validation and policy stay unchanged.
+rejects policies blocking Codex or OpenClaw’s selected provider at admission,
+including provisioning replay, retry and worker checks before effects.
+Required-plugin aliases must be unique.
 
 ### 2. Claim work and realize the approved topology
 
@@ -96,7 +93,7 @@ validation. See the [SSH flow](pr-24-ssh-compute.md).
 
 Kubernetes calls `prepareHarnessAuth` once per resolved source. From tenant storage, it delivers selected fields, including account tokens,
 into exact revision-owned Harness Secrets. Only embedded OpenClaw or dedicated
-Harnesses receive model keys, never dedicated Gateways. Fixture images use the same delivery; native dedicated transport tokens depend on runtime configuration.
+Harnesses receive model keys, never dedicated Gateways. Native dedicated transport tokens depend on runtime configuration.
 See the [harness authentication flow](native-service-account-credential-delivery.md)
 for admission, immutable source snapshots, and worker reauthorization.
 
