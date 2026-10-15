@@ -155,12 +155,16 @@ Slack tokens (Credentials tab and Channels drawer). See
 [Create and deploy in the console](../reference/console/create-and-deploy.md)
 for the supported installation workflow, prerequisites, and Teams deployment limits.
 
-Repository previews cover access levels, discovery failures, authorization and
-reselection after rejected saves. **Repository choices unavailable** offers setup,
-retry or creation without bindings. Recovery retains Configuration and requires
-nonempty repository selection. Fixtures do not verify GitHub App setup, Namespace
-approvals, images or credential-service networking.
-
+Repository previews cover access levels, empty or pending discovery, unavailable
+choices, denied or unverified authorization, and reselection after a rejected save.
+In **Locale-stable repository search**, search `ibm`, select `acme/platform`, and
+confirm reference `IBM-platform`. Simulated data does not prove GitHub App access
+or credential delivery.
+In **Repository choices unavailable**, follow the setup link or retry; creation
+without repository access stays available. The recovery story keeps its saved
+Configuration and needs a current nonempty repository selection to retry.
+The fixture does not verify operator prerequisites: GitHub App setup, Namespace
+approvals, runtime images, and credential-service networking.
 ### Sharing
 
 Use **Share before first deployment**, **Share while stopped**, **Configured and

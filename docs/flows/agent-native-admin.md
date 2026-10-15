@@ -1,7 +1,7 @@
 ---
 created: "2026-09-19"
-updated: "2026-10-13"
-last_updated_session: "authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e"
+updated: "2026-10-14"
+last_updated_session: "01a13783-3cb5-7f53-8668-b2e3affa2b12"
 ---
 
 # Agent Native Admin UI Flow
@@ -46,9 +46,13 @@ graph TD
   K -->|no| L["Return stopped with derived origin"]
   K -->|yes| R2{"Newer revision replacing it on an exclusive Compute Driver?"}
   R2 -->|yes| Y
-  R2 -->|no| M{"Native config and endpoint supported?"}
+  R2 -->|no| M{"Native config supported?"}
   M -->|no| N["Return unsupported with derived origin"]
-  M -->|yes| O["Return available Agent URL"]
+  M -->|yes| CO{"Compute ID and implementation match active revision?"}
+  CO -->|no| CF["Return 503 dependency error"]
+  CO -->|yes| EP{"Private gateway endpoint supported?"}
+  EP -->|no| N
+  EP -->|yes| O["Return available Agent URL"]
   O --> P["Browser opens derived Agent host with shared OCE session cookie"]
   P -->|HTTP| Q["OCC resolves host to exact Agent using platform state"]
   P -->|WebSocket| V["OCC guards client socket during admission"]
@@ -274,6 +278,9 @@ The init container cannot write through the gateway's later mount path.
 - 2026-10-12 12:20: Documented first-deployment Compute admission and provisioning origin preparation. (authoring-run/ed71af64-d4b4-45ac-9ad4-6c2d65a97d17 - b195e54e9b0ce98ead2b2306015a5209325e837b)
 
 - 2026-10-08 14:03: Return disabled status without a runtime assignment; keep administrator assignment guidance visible and retry remembered denial on explicit Refresh. (authoring-run/3bee1cb2-aeb2-4700-8ff4-3da9ac7f098c - 346b1fe14)
+- 2026-10-14 00:10: Distinguished HTTP refusal from WebSocket socket closure without a response. (01a13783-3cb5-7f53-8668-b2e3affa2b12 - e64d04f12cb80eb438a4c442180e56c2a2adae38)
+
+- 2026-10-13 23:57: Documented the active revision Compute-owner comparison and status/proxy refusal before gateway effects. (01a13783-3cb5-7f53-8668-b2e3affa2b12 - e64d04f12cb80eb438a4c442180e56c2a2adae38)
 
 - 2026-10-08 03:40: Documented client reset handling during native-admin WebSocket admission and the denial-audit and upstream-connection ordering at inspected revision `002d0f796`. (authoring-run/1e4aaf85-2e38-434d-99c0-75881fe9991c - 002d0f79639a9c814eb1fa2799530516a6c90cde)
 - 2026-10-05 17:34: Trace Namespace-scoped entry Roles and consistent human-route selection for runtime assignments. (authoring-run/593fb00e-b94d-46a0-a339-f3a8973764cb - aecffb24a16b5252c55ddf47bed2c66e622f1813)

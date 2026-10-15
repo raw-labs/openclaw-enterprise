@@ -1265,6 +1265,7 @@ test("Agent reads return the bound credentialSources; revision reads return only
     id: "credential-gateway-api",
     capability: "credential_gateway",
     implementation: "test-recording-gateway",
+    validateSourceConfig() {},
     async listSourceTypes() {
       return [
         {
@@ -1407,6 +1408,7 @@ test("refresh source PATCH and rotate refuse a stale refresh token and audit a f
     id: "credential-gateway-refresh-api",
     capability: "credential_gateway",
     implementation: "test-recording-gateway",
+    validateSourceConfig() {},
     async listSourceTypes() {
       return [
         {
@@ -5507,10 +5509,11 @@ test("Configuration and Agent writes reject invalid Secret bindings as invalid r
 
 test("Agent provisioning API validates inline configuration with existing Secret references", async () => {
   const computeDriver = createProvisioningCapableComputeDriver();
+  const configurationDriver = createProvisioningCapableConfigurationDriver();
   const logLines = [];
   const fixture = await createInjectedFixture({
     computeDriver,
-    configurationDriver: createProvisioningCapableConfigurationDriver(),
+    configurationDriver,
     logger: createOccLogger({
       component: "occ-api",
       level: "info",
@@ -5761,7 +5764,40 @@ test("Agent provisioning API validates inline configuration with existing Secret
   );
   // Topology-independent Kubernetes rules refuse at provisioning with the Configuration save
   // message (finding 1116), before any Agent or Configuration is stored.
-  computeDriver.validateConfiguration = (values) => kubernetes.validateConfiguration(values);
+  computeDriver.validateConfiguration = (...args) => kubernetes.validateConfiguration(...args);
+  // Finding 1207: a Preset header name that waits on a variable without a default saves on
+  // Kubernetes Compute, as on every other Compute; the filled name is checked at provisioning.
+  configurationDriver.validateValues = async () => {};
+  const placeholder = "{{ vars.header }}";
+  const preset = await injectedRequest(
+    fixture.app,
+    "POST",
+    `/namespaces/${namespace.data.id}/presets`,
+    {
+      body: {
+        name: "Header variable",
+        template: {
+          variables: { header: { type: "string" } },
+          configuration: {
+            values: {
+              ...model,
+              models: {
+                providers: {
+                  openai: {
+                    headers: { [placeholder]: "v" },
+                    request: { headers: { [placeholder]: "v" } },
+                    models: [{ id: "m", headers: { [placeholder]: "v" } }],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+  assert.equal(preset.status, 201, JSON.stringify(preset.body));
+  delete configurationDriver.validateValues;
   const agentsBefore = (
     await fixture.controller.listAgents(fixture.principal.id, namespace.data.id)
   ).length;
@@ -5781,7 +5817,17 @@ test("Agent provisioning API validates inline configuration with existing Secret
           providers: { openai: { request: { headers: { Authorization: "Bearer ${TOKEN}" } } } },
         },
       },
-      "Configuration setting models.providers.openai.request.headers must not set a credential header (authorization, any key, token, secret, password or cookie): model credentials come from the Agent's Harness authentication binding.",
+      'Configuration setting models.providers.openai.request.headers must not set the credential header "Authorization" (its name marks a credential): model credentials come from the Agent\'s Harness authentication binding.',
+    ],
+    // Finding 1311: provisioning runs the agents roster rules Configuration save runs, with the
+    // same text, so a roster every deployment refuses is refused before anything is stored.
+    [
+      { agents: { ...model.agents, entries: { "main!": {} } } },
+      'The OpenClaw Gateway rejects the Agent ID in agents.entries["main!"]: use up to 64 letters, digits, _ or -, not starting with -.',
+    ],
+    [
+      { agents: { ...model.agents, entries: { main: {}, helper: {} } } },
+      'The OpenClaw Gateway needs agents.ownership "explicit" for more than one agents.entries entry: set it, or keep one entry.',
     ],
   ]) {
     const refused = await injectedRequest(
@@ -5795,6 +5841,35 @@ test("Agent provisioning API validates inline configuration with existing Secret
       { code: refused.body.error.code, message: refused.body.error.message },
       { code: "INVALID_REQUEST", message },
     );
+  }
+  // The filled Preset is checked at provisioning. Finding 1208: the refusal names the header,
+  // never its value, whatever word the rule matched.
+  const sentinel = `synthetic-filled-header-${randomUUID()}`;
+  for (const name of ["X-Upstream-Pwd", "X-Signature-Sha256"]) {
+    const filled = await injectedRequest(
+      fixture.app,
+      "POST",
+      `/namespaces/${namespace.data.id}/agents/provision`,
+      {
+        body: provisioningRequestBody(namespace.data.id, secrets, {
+          configuration: {
+            values: {
+              ...model,
+              models: { providers: { openai: { headers: { [name]: sentinel } } } },
+            },
+          },
+        }),
+      },
+    );
+    assert.equal(filled.status, 400, JSON.stringify(filled.body));
+    assert.deepEqual(
+      { code: filled.body.error.code, message: filled.body.error.message },
+      {
+        code: "INVALID_REQUEST",
+        message: `Configuration setting models.providers.openai.headers must not set the credential header "${name}" (its name marks a credential): model credentials come from the Agent's Harness authentication binding.`,
+      },
+    );
+    assert.equal(JSON.stringify(filled.body).includes(sentinel), false);
   }
   assert.equal(
     (await fixture.controller.listAgents(fixture.principal.id, namespace.data.id)).length,
@@ -6590,7 +6665,23 @@ test("two Namespaces become independently ready and deletion tombstones only its
     "GET",
     `/namespaces/${namespaceA.data.id}/agents/${agentA.data.id}/revisions`,
   );
-  assert.deepEqual(admittedRevisions.data, [readyDeployment.data, nextDeployment.data]);
+  // The list returns summaries, newest first, on one page.
+  const summary = (revision) => ({
+    id: revision.id,
+    namespaceId: revision.namespaceId,
+    agentId: revision.agentId,
+    revision: revision.revision,
+    backendId: revision.backendId,
+    configurationId: revision.configurationId,
+    configurationGeneration: revision.configurationGeneration,
+    harness: revision.harness,
+    createdAt: revision.createdAt,
+  });
+  assert.deepEqual(admittedRevisions.data, [
+    summary(nextDeployment.data),
+    summary(readyDeployment.data),
+  ]);
+  assert.equal(admittedRevisions.body.meta.nextCursor, null);
   assert.deepEqual(fixture.computeCalls.ensureNamespace, [namespaceA.data.id, namespaceB.data.id]);
 
   const deleting = await injectedRequest(

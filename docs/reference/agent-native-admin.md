@@ -73,6 +73,22 @@ The response reports:
 
 A stopped Agent with no active revision returns only `status: "stopped"`, including before its first deployment and after stop reconciliation clears its active revision. A stopped Agent with a selectable active revision still includes its target fields. If a desired-running Agent has no active revision, OCC returns `unavailable` in the success envelope so the console can show a retryable state. A dependency outage, the IAM Driver included, returns `503 DEPENDENCY_UNAVAILABLE`. Malformed requests, denied IAM access and missing sessions also use the normal protected-route error envelope.
 
+Changing the selected Compute Driver does not migrate existing revisions. After
+lifecycle and native-configuration checks, OCC compares the selected Driver's ID
+and implementation with the active revision's recorded owner. A mismatch returns
+`503 DEPENDENCY_UNAVAILABLE` from the availability API before endpoint resolution,
+private gateway-key lookup or transport. Agent-host HTTP retains its existing
+`403` refusal. WebSocket admission destroys the client socket without an HTTP
+response, before gateway-key lookup or connection; a mismatch during a WebSocket
+lease closes the connection through the existing failed-lease path. Matching ownership retains
+normal access. Earlier stopped, replacing and unsupported-configuration outcomes
+keep their precedence.
+
+The mismatch is not transient, so refreshing does not clear it. Each API process
+logs one `native_admin.compute_owner_mismatch` warning per revision and selected
+Driver, naming both Driver IDs and implementations. To restore access, select the
+revision's Compute Driver again, with the same ID and implementation.
+
 ## Agent host identity
 
 OCC derives a stable browser host from the Installation ID, Namespace ID, Agent ID, and configured `agentNativeAdmin.domain`. The hostname is opaque and must not be reused for another Agent identity. The derived host is separate from the console origin, which gives each Agent UI its own browser origin.
@@ -162,6 +178,12 @@ device state, plugins, or other persistent gateway data.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-14 01:20: Documented the Compute-owner mismatch warning and how to restore access. (fix-1287)
+
+- 2026-10-14 00:10: Distinguished HTTP refusal from WebSocket socket closure without a response. (01a13783-3cb5-7f53-8668-b2e3affa2b12 - e64d04f12cb80eb438a4c442180e56c2a2adae38)
+
+- 2026-10-13 23:57: Documented native-admin refusal when selected Compute ownership differs from the active revision. (01a13783-3cb5-7f53-8668-b2e3affa2b12 - e64d04f12cb80eb438a4c442180e56c2a2adae38)
 
 - 2026-10-10 09:20: Documented that native listener edits are not re-checked and how to recover. (docs-1014)
 - 2026-09-21 21:20: Documented status-only stopped results before deployment and after stop reconciliation. (01a0c750-0c10-7492-97eb-f4124cded820 - 156dd67b7bd280a380d96b5c34a64e402fe3b96b)

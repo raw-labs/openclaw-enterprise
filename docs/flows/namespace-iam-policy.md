@@ -1,7 +1,7 @@
 ---
 created: "2026-09-20"
-updated: "2026-10-13"
-last_updated_session: "authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e"
+updated: 2026-10-14
+last_updated_session: "fix-1322"
 ---
 
 # Namespace IAM Policy Flow
@@ -131,6 +131,19 @@ This transaction binding alone does not fence concurrent policy invalidation.
 Human HTTP policy writers additionally retain their session through the original
 unit's `holdAuthenticationSession` operation, implemented by PostgreSQL State.
 
+A unit reads the policy once, not once per decision. `readNativeIAMState` keeps
+the policy it read on that unit's transaction context. A read-only unit is one
+REPEATABLE READ snapshot that writes nothing, so it reuses the policy for every
+lookup and decision; a list route therefore reads the policy once for all its
+items. A writing unit reuses it only until it issues any other statement, so its
+own IAM writes and any locks it takes come before the next read. Two
+back-to-back decisions in a writing unit do not see a commit another unit makes
+between them, as if it had committed just after; the read was never a fence.
+The policy is an immutable snapshot (`immutableSnapshot`), and the native Driver
+validates and indexes each snapshot once (identities by id, issuer and subject;
+bindings by subject; Restrictions by action and kind). Nothing outlives the
+unit: the next request reads the policy again.
+
 ### 5. Platform state commits policy and audit together
 
 `packages/occ/src/state/postgres-state.ts:PostgresPlatformState`
@@ -201,6 +214,7 @@ selected account, session, and policy writers join the same protocol.
 
 - 2026-10-02 11:55: Trace atomic runtime-role updates, assignment audit fields and duplicate-assignment conflicts. (authoring-run/fd458bb6-fbf9-4c93-ad3f-1e6fc793300f - a946032a14cb2f33a5077c3c0340e8f5f54cf4b7)
 
+- 2026-10-14 11:00: Read, validate and index native policy once per State unit of work instead of once per decision. (fix-1322)
 - 2026-10-01 20:30: Refuse AccessBindings whose Role cannot apply to the target. (fix-d93-d100)
 - 2026-09-29 16:40: Record the Installation authorization and the Role or AccessBinding changed in IAM policy audit events. (fix-5)
 - 2026-09-29 05:28: Bind selected native policy reloads to the original State transaction and reject escaped reads. (codex/01a0eb4c-5933-7752-bddc-f787e8da79e7 - 2a191c74c0079e329db130d0a81a1f0f87869bb9)
