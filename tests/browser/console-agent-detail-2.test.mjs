@@ -1,40 +1,51 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { CodexPluginDriver } from "../../apps/controller/src/drivers/plugin/index.ts";
+import { DEPLOYMENT_POLL_MS } from "../../apps/controller/src/console/agents/detail.mjs";
+import { DELETION_POLL_MS } from "../../apps/controller/src/console/agents/deletion.mjs";
+import { InMemoryAuditSink } from "../../packages/audit/src/index.ts";
+import { WORKSPACE_DEFAULTS } from "../../packages/contracts/src/workspace-defaults.mjs";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
+import { authenticatedHeaders } from "../helpers/auth-session.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
-import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
-import { deriveNativeAdminHost } from "../../apps/controller/src/gateway/native-admin.ts";
-import { createTestSecretDriver } from "../helpers/secret-driver.mjs";
 import {
-  accessBindingPostRequests,
   apiRequests,
   detailUrl,
   expectNoText,
   login,
+  setSlackSelection,
+  slackSelectionValue,
   nativeValues,
   newPage,
   nonAuthWriteRequests,
   pathRequests,
   revealNativeConfiguration,
   secretOptionLabel,
-  secretPostRequests,
   selectSecret,
+  settlePageRequests,
   trackSettledFetches,
+  waitForCondition,
+  waitForIdleFetches,
   waitForInputValue,
   waitForSettledFetches,
 } from "./console-agents-browser-helpers.mjs";
 import { createRuntimeAuthFixture } from "./console-agents-runtime-auth-fixture.mjs";
 import {
-  openAdvancedSettings,
+  expectNativeAdminHidden,
   assertRevisionUrl,
+  agentDeleteRequests,
   agentStopRequests,
-  configurationPatchRequests,
+  nativeAdminComputeDriver,
   nativeAdminValues,
   waitForLiveControls,
 } from "./console-agents-test-support.mjs";
+
+import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
+import { deriveNativeAdminHost } from "../../apps/controller/src/gateway/native-admin.ts";
 
 test("Agent delete confirmation can be canceled without sending a write request", async (t) => {
   const fixture = await createConsoleAppFixture(t);
@@ -3091,15 +3102,7 @@ test("Secret summaries retain revision bindings and distinguish unreadable metad
   });
   // Real admission requires exact Agent access to each projected credential.
   for (const secret of [app, bot, replacement]) {
-    fixture.policy.bindings.push({
-      id: `grant-${secret.id}`,
-      namespaceId: namespace.id,
-      subjectKind: "identity",
-      subjectId: `service-agent-${agent.id}`,
-      roleId: `auth-${agent.id}`,
-      resourceKind: "secret",
-      resourceId: secret.id,
-    });
+    fixture.grantAgentSecretOperate(agent, secret.ref);
   }
   const active = await fixture.seedActiveAgentRevision(namespace.id, agent.id);
   // Mutate both current owners after admission; the read-only view must keep the old references.

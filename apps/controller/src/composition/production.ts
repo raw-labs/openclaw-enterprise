@@ -22,7 +22,7 @@ import {
   type PreparedAuthAccount,
 } from "../auth/index.ts";
 import { createFastifyApp } from "../index.ts";
-import { BundledChannelDriver } from "../drivers/channel/index.ts";
+import { createBundledChannelDriver } from "./channel.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -62,8 +62,8 @@ export interface ProductionConfig {
   readonly serviceAccountDriverFactory?: ServiceAccountDriverFactory;
   readonly workspaceFilesAccess?: ControllerWorkspaceFilesAccess;
   readonly gatewayApiKeyPath?: string;
-  readonly channelDirectoryProxyUrl?: string;
-  readonly channelDirectoryManagedProxyHost?: string;
+  readonly controlPlaneOutboundProxyUrl?: string;
+  readonly controlPlaneOutboundProxyManagedHost?: string;
   readonly nativeAdmin?: NativeAdminAccessConfig;
   /** Default: enabled. `false` makes both runtime routes answer 501. */
   readonly agentRuntimeLogsEnabled?: boolean;
@@ -272,16 +272,14 @@ export async function composeProduction(config: ProductionConfig) {
     controller.registerDriver(secretDriver);
     controller.selectDriver("secret", secretDriver.id);
     {
-      const channelDriver = new BundledChannelDriver(
-        globalThis.fetch,
-        config.channelDirectoryProxyUrl,
-        {
-          managedProxyHosts:
-            config.channelDirectoryManagedProxyHost === undefined
-              ? []
-              : [config.channelDirectoryManagedProxyHost],
-        },
-      );
+      const channelDriver = createBundledChannelDriver({
+        ...(config.controlPlaneOutboundProxyUrl === undefined
+          ? {}
+          : { proxyUrl: config.controlPlaneOutboundProxyUrl }),
+        ...(config.controlPlaneOutboundProxyManagedHost === undefined
+          ? {}
+          : { managedProxyHost: config.controlPlaneOutboundProxyManagedHost }),
+      });
       controller.registerDriver(channelDriver);
       controller.selectDriver("channel", channelDriver.id);
     }

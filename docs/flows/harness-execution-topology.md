@@ -8,20 +8,16 @@ last_updated_session: authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de
 
 ## Overview
 
-Deployment freezes native Harness policy, placement and authentication in an
-AgentRevision. Compute prepares its workloads, publishes guarded routes and
-retires predecessors before exactly-once activation audit.
+Deployment freezes Harness policy, placement and authentication. Compute prepares
+workloads, guards routes and retires predecessors before audit.
 
 ## Entry Points
 
-- Trigger: exact-Agent `POST /namespaces/:namespaceId/agents/:agentId/deploy` and durable revision
-  reconciliation.
+- Trigger: exact-Agent deployment POST and revision reconciliation.
 - Source: `packages/occ/src/index.ts:OpenClawController.deployAgent` and
   `apps/controller/src/worker.ts:ControllerWorker`.
-- Assumptions: authorized actor, ready Namespace, same-Namespace native agent
-  Configuration, explicit execution mode and supported `harnessAuth` binding.
-  Managed methods reference an authorized OCC Secret API key or Driver-issued
-  account-owned access token.
+- Assumptions: authorized actor, ready Namespace, same-Namespace Configuration,
+  supported mode and authorized Secret/API-key or Driver-issued account authentication.
 
 ## Flow
 
@@ -79,8 +75,7 @@ It preserves the source policy.
 
 `apps/controller/src/worker.ts:ControllerWorker`
 
-The worker claims revision work, rechecks actor/ownership and the frozen Harness,
-then calls `ComputeDriver.prepareRevision`.
+The worker reauthorizes claimed revision work before `ComputeDriver.prepareRevision`.
 
 `apps/controller/src/drivers/compute/docker/index.ts:DockerComputeDriver.prepareRevision`
 

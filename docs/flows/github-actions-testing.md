@@ -8,7 +8,7 @@ last_updated_session: authoring-run/ee448fbe-3e0a-40d4-b7d1-3f122d3e5f1b
 
 ## Overview
 
-GitHub Actions qualifies selected source through twenty-one noncredentialed lanes or documentation-only checks. `CI Required` rejects missing or skipped required proof. Cleanup follows; protected model/service integrations require separate coverage.
+GitHub Actions qualifies source through twenty-two noncredentialed lanes or docs checks. `CI Required` rejects missing proof. Protected model/service integrations require separate coverage.
 
 ## Entry Points
 
@@ -58,7 +58,7 @@ graph TD
 `scripts/ci/test-suites/<lane>.json` references for runners and preparation.
 Each lane owns its tests, environment, required inputs and preparation settings.
 
-CI uses the event checkout without external service credentials. Impact and Suite Audit start independently. In every mode, `static-checks` verifies checkout identity and runs workspace, lint, format, OpenAPI and docs checks without product tests. Full mode runs twenty-one lanes; tests mode runs selected lanes. Lane-table runner defaults have compatibility and capacity overrides; the runtime fixture requires GitHub hosting. Configuration fixtures honor the file-concurrency override. See [runner settings](../testing/downstream-ci.md).
+CI uses the event checkout without external credentials. Impact and Suite Audit start independently. `static-checks` verifies checkout identity, workspace, lint, format, OpenAPI and docs. Full mode runs twenty-two lanes; tests mode runs selected lanes. Runner and file-concurrency overrides, including the GitHub-hosted runtime fixture, follow [runner settings](../testing/downstream-ci.md).
 
 For a PR, the selector verifies the tested checkout and that the event head is the merge's second parent, then compares the first parent (the current base) and tested trees. Git path decoding preserves a leading UTF-8 BOM as filename data; paths outside the allowlist select full. API reference outputs and Markdown under `docs/reference/api/` select full for `openapi:check`. Only nonempty changes to allowlisted regular Markdown files select docs mode. Registered test files (with documentation and their own lane manifest entries) select tests mode: their `ci` lanes in either tree (`checks-baseline-1` if only the fixture job would run). Other test-tree, code, configuration, workflow or unknown changes and non-PR events select full. Missing or unverifiable policy or source evidence selects full or fails closed. Policy comes from that first parent; a base without it selects full. `CI Required` re-verifies the mode (and tests mode's lane set) and requires impact, audit and every selected job to succeed and the rest skipped. Full and tests modes aggregate same-source results of their lanes; docs mode does not aggregate or invent test artifacts.
 

@@ -5,6 +5,8 @@ import test from "node:test";
 
 import { KubernetesConfigurationDriver } from "../../apps/controller/src/drivers/configuration/kubernetes/index.ts";
 import { createConsoleAppFixture, backendFixtures } from "../helpers/console-app.mjs";
+import { createBundledChannelDriver } from "../../apps/controller/src/composition/channel.ts";
+import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import {
   authenticatedHeaders,
@@ -594,3 +596,332 @@ test("REST Codex Agent admission rejects blocked native plugin policy without ch
     provisioned.body.error.message,
   );
 });
+
+test("Gateway outbound approval is exact-Agent authority and deployment freezes its selection", async (t) => {
+  const fixture = await createConsoleAppFixture(t, {
+    channelRuntime: true,
+    gatewayOutbound: {
+      enabled: true,
+      allowPublicHttps: true,
+      image: "controller:local",
+      denyCidrs: ["10.0.0.0/8"],
+    },
+  });
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Gateway outbound", { ready: true });
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Native integrations",
+    createHarnessConfiguration("codex", "gpt-5.1"),
+    { executionMode: "dedicated" },
+  );
+  const path = `/namespaces/${namespace.id}/agents/${agent.id}`;
+  const other = await fixture.createAgent(
+    namespace.id,
+    "Other Agent",
+    createHarnessConfiguration("codex", "gpt-5.1"),
+    { executionMode: "dedicated" },
+  );
+  const limited = await fixture.createAccountWithPolicy("outbound-editor", (principal) => {
+    fixture.policy.roles.push({
+      id: "outbound-editor",
+      namespaceId: namespace.id,
+      permissions: [
+        { action: "read", resourceKind: "agent" },
+        { action: "update", resourceKind: "agent" },
+        { action: "read", resourceKind: "configuration" },
+        { action: "operate", resourceKind: "secret" },
+      ],
+    });
+    fixture.policy.bindings.push({
+      id: "outbound-editor",
+      namespaceId: namespace.id,
+      subjectKind: "identity",
+      subjectId: principal.id,
+      roleId: "outbound-editor",
+      resourceKind: "agent",
+      resourceId: agent.id,
+    });
+    fixture.policy.bindings.push({
+      id: "outbound-auth",
+      namespaceId: namespace.id,
+      subjectKind: "identity",
+      subjectId: principal.id,
+      roleId: "outbound-editor",
+      resourceKind: "secret",
+      resourceId: agent.harnessAuth.source.id,
+    });
+    fixture.policy.bindings.push({
+      id: "outbound-config-reader",
+      namespaceId: namespace.id,
+      subjectKind: "identity",
+      subjectId: principal.id,
+      roleId: "outbound-editor",
+      resourceKind: "configuration",
+      resourceId: agent.configurationId,
+    });
+  });
+  const session = await fixture.signIn(limited.credentials);
+  const capabilities = await fixture.request("GET", `${path}/gateway-outbound/capabilities`, {
+    session,
+  });
+  assert.equal(capabilities.status, 200);
+  assert.equal(capabilities.data.canConfigure, false);
+  const denied = await fixture.request("PATCH", path, {
+    session,
+    body: { configurationId: agent.configurationId, gatewayOutbound: { mode: "publicHttps" } },
+  });
+  assert.equal(
+    denied.status,
+    403,
+    "ordinary Configuration editors cannot grant plugin connectivity",
+  );
+  assert.equal((await fixture.request("GET", path)).data.gatewayOutbound.mode, "channelsOnly");
+  fixture.policy.roles.push({
+    id: "outbound-admin",
+    namespaceId: namespace.id,
+    permissions: [{ action: "administer", resourceKind: "agent" }],
+  });
+  fixture.policy.bindings.push({
+    id: "outbound-admin",
+    namespaceId: namespace.id,
+    subjectKind: "identity",
+    subjectId: limited.principal.id,
+    roleId: "outbound-admin",
+    resourceKind: "agent",
+    resourceId: agent.id,
+  });
+  const allowed = await fixture.request("PATCH", path, {
+    session,
+    body: {
+      configurationId: agent.configurationId,
+      gatewayOutbound: { mode: "restricted", hosts: ["backend.composio.dev"] },
+    },
+  });
+  assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
+  assert.equal(
+    (await fixture.request("GET", `${path}/gateway-outbound/capabilities`, { session })).data
+      .canConfigure,
+    true,
+  );
+  const crossAgent = await fixture.request(
+    "PATCH",
+    `/namespaces/${namespace.id}/agents/${other.id}`,
+    {
+      session,
+      body: { configurationId: other.configurationId, gatewayOutbound: { mode: "publicHttps" } },
+    },
+  );
+  assert.equal(crossAgent.status, 403);
+  for (const hosts of [
+    ["127.0.0.1"],
+    ["*.example.com"],
+    ["HTTPS://example.com"],
+    ["example.com", "example.com"],
+  ]) {
+    assert.equal(
+      (
+        await fixture.request("PATCH", path, {
+          body: {
+            configurationId: agent.configurationId,
+            gatewayOutbound: { mode: "restricted", hosts },
+          },
+        })
+      ).status,
+      400,
+    );
+  }
+  const revision = await fixture.deployAgent(namespace.id, agent.id);
+  assert.deepEqual(revision.gatewayOutbound, {
+    selection: { mode: "restricted", hosts: ["backend.composio.dev"] },
+    requirements: [],
+    denyCidrs: ["10.0.0.0/8"],
+  });
+  await fixture.updateAgent(namespace.id, agent.id, {
+    configurationId: agent.configurationId,
+    gatewayOutbound: { mode: "publicHttps" },
+  });
+  const savedRevision = await fixture.request("GET", `${path}/revisions/${revision.id}`);
+  assert.deepEqual(
+    savedRevision.data.gatewayOutbound,
+    revision.gatewayOutbound,
+    "draft approval changes cannot broaden an already admitted revision",
+  );
+  const tightened = createTestKubernetesComputeDriver("tightened-compute", {
+    gatewayOutbound: {
+      enabled: true,
+      allowPublicHttps: false,
+      image: "controller:local",
+      denyCidrs: ["10.0.0.0/8"],
+    },
+  });
+  fixture.controller.registerDriver(tightened);
+  fixture.controller.selectDriver("compute", tightened.id);
+  const ordinarySave = await fixture.request("PATCH", path, {
+    session,
+    body: { configurationId: agent.configurationId },
+  });
+  assert.equal(
+    ordinarySave.status,
+    200,
+    "tightening the Installation does not block ordinary saved-draft edits",
+  );
+  assert.equal(ordinarySave.data.gatewayOutbound.mode, "publicHttps");
+  const refusedRedeploy = await fixture.request("POST", `${path}/deploy`);
+  assert.equal(
+    refusedRedeploy.status,
+    409,
+    "deployment still rechecks the new Installation ceiling",
+  );
+});
+
+test("Installation ceiling and embedded topology reject unsupported Gateway grants", async (t) => {
+  const fixture = await createConsoleAppFixture(t, {
+    channelRuntime: true,
+    gatewayOutbound: {
+      enabled: true,
+      allowPublicHttps: false,
+      image: "controller:local",
+      denyCidrs: ["10.0.0.0/8"],
+    },
+  });
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Restricted Gateway", { ready: true });
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Dedicated",
+    createHarnessConfiguration("codex", "gpt-5.1"),
+    { executionMode: "dedicated" },
+  );
+  const path = `/namespaces/${namespace.id}/agents/${agent.id}`;
+  assert.equal(
+    (
+      await fixture.request("PATCH", path, {
+        body: { configurationId: agent.configurationId, gatewayOutbound: { mode: "publicHttps" } },
+      })
+    ).status,
+    409,
+  );
+  const embedded = await fixture.createAgent(
+    namespace.id,
+    "Embedded",
+    createHarnessConfiguration("openclaw", "gpt-5.1"),
+    { executionMode: "embedded" },
+  );
+  const refused = await fixture.request(
+    "PATCH",
+    `/namespaces/${namespace.id}/agents/${embedded.id}`,
+    {
+      body: {
+        configurationId: embedded.configurationId,
+        gatewayOutbound: { mode: "restricted", hosts: ["example.com"] },
+      },
+    },
+  );
+  assert.equal(refused.status, 409);
+});
+
+for (const enabled of [["slack"], ["msteams"], ["slack", "msteams"], []]) {
+  test(`enabled channels ${enabled.join("+") || "none"} derive immutable requirements without widening approved hosts`, async (t) => {
+    // Credential-provider responses and workloads are outside this admission proof.
+    // Production composition, Channel Drivers, HTTP/OCC/IAM and Configuration remain real.
+    const requirementsDriver = Object.assign(createBundledChannelDriver(), {
+      validateCredentials: undefined,
+    });
+    const fixture = await createConsoleAppFixture(t, {
+      channelRuntime: true,
+      channelDriver: requirementsDriver,
+      gatewayRouting: {
+        hostname: "agents.example.test",
+        gatewayName: "gateways",
+        gatewayNamespace: "gateway-system",
+        envoyNamespace: "envoy-system",
+        channels: { hostname: "callbacks.example.test" },
+      },
+      gatewayOutbound: { enabled: true, image: "controller:local", denyCidrs: ["10.0.0.0/8"] },
+    });
+    await fixture.bootstrap();
+    const namespace = await fixture.createNamespace("Automatic channel access", { ready: true });
+    const bot = await fixture.createSecret(namespace.id, "Channel bot", "synthetic-channel-bot");
+    const app = await fixture.createSecret(namespace.id, "Channel app", "synthetic-channel-app");
+    const teams = await fixture.createSecret(
+      namespace.id,
+      "Teams app password",
+      "synthetic-teams-password",
+    );
+    const secretBindings = {
+      SLACK_BOT_TOKEN: { source: bot.ref },
+      SLACK_APP_TOKEN: { source: app.ref },
+      MSTEAMS_APP_PASSWORD: { source: teams.ref },
+    };
+    const values = createHarnessConfiguration("codex", "gpt-5.1");
+    values.plugins.allow.push(...enabled);
+    for (const provider of enabled) {
+      values.plugins.entries[provider] = { enabled: true };
+    }
+    values.channels = {
+      msteams: {
+        enabled: enabled.includes("msteams"),
+        appId: "00000000-0000-4000-8000-000000000000",
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+      },
+      slack: {
+        enabled: enabled.includes("slack"),
+        mode: "socket",
+        botToken: { source: "env", provider: "default", id: "SLACK_BOT_TOKEN" },
+        appToken: { source: "env", provider: "default", id: "SLACK_APP_TOKEN" },
+      },
+    };
+    const agent = await fixture.createAgent(namespace.id, "Channel integration", values, {
+      executionMode: "dedicated",
+      secretBindings,
+    });
+    fixture.grantAgentSecretOperate(agent, bot.ref);
+    fixture.grantAgentSecretOperate(agent, app.ref);
+    fixture.grantAgentSecretOperate(agent, teams.ref);
+    const selection = { mode: "restricted", hosts: ["backend.composio.dev"] };
+    await fixture.updateAgent(namespace.id, agent.id, {
+      configurationId: agent.configurationId,
+      gatewayOutbound: selection,
+    });
+    const revision = await fixture.deployAgent(namespace.id, agent.id);
+    assert.deepEqual(revision.gatewayOutbound.selection, selection);
+    assert.deepEqual(
+      revision.gatewayOutbound.requirements.map(({ source }) => source).sort(),
+      [...enabled].sort(),
+    );
+    if (enabled.includes("slack")) {
+      assert.ok(
+        revision.gatewayOutbound.requirements
+          .find(({ source }) => source === "slack")
+          .destinations.some(({ host }) => host === "slack.com"),
+      );
+    }
+    if (enabled.includes("msteams")) {
+      const requirement = revision.gatewayOutbound.requirements.find(
+        ({ source }) => source === "msteams",
+      );
+      assert.ok(requirement.destinations.some(({ host }) => host === "smba.trafficmanager.net"));
+      assert.ok(
+        requirement.destinations.every(({ includeSubdomains }) => includeSubdomains === false),
+      );
+    }
+    const frozen = structuredClone(revision.gatewayOutbound);
+    values.channels.slack.enabled = false;
+    values.channels.msteams.enabled = false;
+    await fixture.updateConfiguration(namespace.id, agent.configurationId, values);
+    const later = await fixture.deployAgent(namespace.id, agent.id);
+    assert.deepEqual(later.gatewayOutbound.selection, selection);
+    assert.deepEqual(
+      later.gatewayOutbound.requirements,
+      [],
+      "disabling a channel removes its derived requirement from the next version",
+    );
+    assert.deepEqual(
+      revision.gatewayOutbound,
+      frozen,
+      "the previous immutable version retains its own requirements",
+    );
+  });
+}

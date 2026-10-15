@@ -1,9 +1,7 @@
 # Harness execution
 
-A Harness calls the model and runs tools for an Agent. The bundled deployment
-paths run OpenClaw inside the Agent's gateway or Codex as a dedicated runtime.
-Choose an execution mode on the Agent and a compatible model and Harness in its
-Configuration.
+A Harness calls models and runs Agent tools: embedded OpenClaw or dedicated
+Codex. Select an Agent execution mode and compatible Configuration model/Harness.
 
 ## Supported topology
 
@@ -13,12 +11,10 @@ Configuration.
 | Codex    | `dedicated`          | A gateway connects to a separate Codex Harness; available on Kubernetes.                                                                                                                   |
 | OpenClaw | `dedicated`          | Experimental native worker; requires full-facet Sandbox provisioning. Stock OpenShell has [upstream blockers](#optional-sandbox-provisioning), so this is not a supported production path. |
 
-Agent creation defaults to `embedded`; an update that omits the mode preserves
-it. Deployment rejects a Harness that the Agent's execution mode cannot run with
-`400 INVALID_REQUEST` before work is admitted. A Harness is not a separately
-created resource or Driver. Availability and isolation also depend on the
-installation's Compute and optional Sandbox. In a single Kubernetes cluster, a
-dedicated gateway and its Harness run as separate Pods in the Agent's
+Creation defaults to `embedded`; omitted updates preserve the mode. Incompatible
+Harness/mode deployment fails with `400 INVALID_REQUEST` before admission. Compute
+and optional Sandbox determine availability and isolation. On Kubernetes, a
+dedicated Gateway and Harness occupy separate Pods in the Agent's
 [tenant namespace](drivers/kubernetes-compute.md), each with its own
 ServiceAccount and storage. Embedded OpenClaw remains one untrusted workload
 that cannot move apart from its built-in Harness.

@@ -8,14 +8,12 @@ last_updated_session: "01a13783-3cb5-7f53-8668-b2e3affa2b12"
 
 ## Overview
 
-Deployment prepares enabled Kubernetes native policy in an immutable Agent
-revision without changing its reusable Configuration. OCC checks the person’s
-exact Agent `use` grant and runtime assignment before proxying native HTTP and
-WebSockets through the shared OCE session.
+OCC verifies exact Agent `use` and runtime assignment before session-authenticated
+HTTP/WebSocket proxying. Deployment preserves reusable Configuration.
 
 ## Entry Points
 
-- Trigger: Deployment or provisioning admits a revision; Console opens its native access URL.
+- Trigger: Deployment admission or Console native access.
 - Source: `apps/controller/src/console/agents/runtime-access.mjs:renderRuntimeAccess`
 - Source: `apps/controller/src/http/native-admin.ts:resolveNativeAdminAvailability`
 - Source: `apps/controller/src/http/native-admin.ts:handleNativeAdminUpgrade`

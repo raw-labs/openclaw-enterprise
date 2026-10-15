@@ -2,6 +2,8 @@ import type {
   ChannelDirectoryLookupInput,
   ChannelDirectoryResult,
   ChannelDriver,
+  GatewayOutboundRequirement,
+  OpenClawConfigurationDocument,
 } from "@openclaw-enterprise/contracts";
 import { ChannelDirectoryError } from "@openclaw-enterprise/occ";
 import { asRecord } from "@openclaw-enterprise/utils";
@@ -32,6 +34,39 @@ export class TeamsChannelDriver implements ChannelDriver {
 
   constructor(request: ChannelRequest = globalThis.fetch) {
     this.request = request;
+  }
+
+  gatewayNetworkRequirements(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly GatewayOutboundRequirement[] {
+    const teams = asRecord(asRecord(configuration.channels)?.msteams);
+    if (teams === undefined || teams.enabled === false) {
+      return [];
+    }
+    return [
+      {
+        source: "msteams",
+        destinations: [
+          "login.microsoftonline.com",
+          "login.botframework.com",
+          "api.botframework.com",
+          "smba.trafficmanager.net",
+          "graph.microsoft.com",
+        ].map((host) => ({ host, includeSubdomains: false })),
+      },
+    ];
+  }
+
+  controlPlaneNetworkRequirements(): readonly GatewayOutboundRequirement[] {
+    return [
+      {
+        source: "msteams/management",
+        destinations: ["login.microsoftonline.com", "graph.microsoft.com"].map((host) => ({
+          host,
+          includeSubdomains: false,
+        })),
+      },
+    ];
   }
 
   private async call(

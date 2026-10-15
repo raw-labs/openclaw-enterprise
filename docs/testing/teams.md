@@ -30,16 +30,21 @@ UI evidence, not deployment proof.
 
 Run `node --test tests/integration/production-kubernetes-packaging.test.mjs`
 with Helm and yq installed to verify the opt-in TLS listener, explicit ingress
-peers, proxy flag, and rejected conflicting settings. This checks real rendered
+peers, API-only outbound proxy, and rejected conflicting settings. This checks real rendered
 chart output, not live Envoy policy enforcement.
 
 The existing retirement case in `tests/conformance/kubernetes-compute.test.mjs`
 also exercises serving/candidate callback ownership, exact method/path/header
 rules, cutover, and disable cleanup through the production Driver with a
 substituted Kubernetes transport. Its manifest assertions do not prove public
-requests traverse Envoy. `tests/conformance/slack-proxy-tunnel.test.mjs` runs the
-actual proxy process; test-only DNS redirects provider names to disposable local
-sockets and cannot establish Microsoft connectivity.
+requests traverse Envoy. `tests/integration/console-api.test.mjs` exercises
+Slack-only, Teams-only, combined and disabled channel admission through the real
+API, OCC and bundled Channel Driver. It checks exact Teams destinations,
+unchanged additional host approval and immutable snapshots, with credential
+validation excluded and a workload fixture. It does not prove SDK delivery.
+`tests/integration/gateway-outbound-proxy.test.mjs` exercises the actual generic
+proxy process; see [outbound verification](gateway-outbound.md) for its public
+network selector and limits.
 
 Before accepting production support, use a disposable real Teams bot and tenant
 with the [operator setup](../guides/integrations/teams.md). Verify a permitted

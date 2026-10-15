@@ -64,6 +64,19 @@ does not prove bot installation, message visibility, consent in another Team,
 or successful posting. Incomplete search requires continuation. Hydration fails
 if its page budget ends before determining the requested IDs.
 
+## Outbound requirements
+
+The bundled Driver declares exact HTTPS hosts for enabled Teams configurations:
+`login.microsoftonline.com`, `login.botframework.com`, `api.botframework.com`,
+`smba.trafficmanager.net`, and `graph.microsoft.com`. It permits no subdomains.
+Disabled or absent Teams contributes no Gateway requirement. Slack declarations
+are combined independently when both providers are enabled.
+
+The separate control-plane declaration always includes only
+`login.microsoftonline.com` and `graph.microsoft.com` for management. These
+requirements carry no credential and do not grant extra Agent authority. See
+[Gateway outbound](../gateway-outbound.md) for admission and revision ownership.
+
 ## Troubleshooting
 
 Credential rejection, missing consent, rate limiting, malformed responses and

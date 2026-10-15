@@ -37,20 +37,25 @@ gatewayRouting:
         podSelector:
           matchLabels:
             app: public-ingress
-slackProxy:
+outboundProxy:
   enabled: true
-  teamsEnabled: true
+  denyCidrs:
+    - 203.0.113.0/24 # Replace with reviewed Installation infrastructure CIDRs.
 ```
 
 Keep the existing private gateway settings. In the Installation's selected
 Compute Driver configuration, set `gatewayRouting.channels.hostname` to the
-same hostname and configure `runtime.channels.proxyUrl` and `managedProxy`
-for the chart-managed proxy as described in the [Slack proxy setup](slack.md#configure-both-slack-proxies).
-An external reviewed proxy can replace it. Allow TCP/443 CONNECT to
+same hostname and enable `runtime.gatewayOutbound` with reviewed infrastructure
+exclusions. For profile-based installations, use the `gatewayOutbound` input
+shown in [outbound setup](slack.md#configure-outbound-access).
+
+Enabling Teams automatically declares its exact Microsoft Public cloud hosts:
 `login.microsoftonline.com`, `login.botframework.com`, `api.botframework.com`,
-`smba.trafficmanager.net`, and `graph.microsoft.com`.
-The chart-managed proxy admits those exact Microsoft hosts only when
-`teamsEnabled` is true; it does not allow arbitrary Microsoft domains.
+`smba.trafficmanager.net`, and `graph.microsoft.com`. Deployment freezes these
+requirements in the revision and prepares its isolated Gateway proxy. Slack can
+be enabled alongside Teams; both providers' requirements are retained. The Agent
+needs no additional manually approved hosts for these channel destinations.
+The API-only management proxy uses a separate restricted policy.
 
 ## Configure and deploy the Agent
 
@@ -118,10 +123,12 @@ Team link again when reopening to browse names. See the
 [directory reference](../../reference/drivers/teams-channel.md) for bounds and
 visibility limits.
 
-The production API needs its channel directory proxy to permit
-`login.microsoftonline.com:443` and `graph.microsoft.com:443`. With the managed
-proxy, enable both `slackProxy.enabled` and `slackProxy.teamsEnabled`. This is
-separate from the Agent's runtime proxy. Missing directory consent or egress
+The production API needs its control-plane proxy to permit
+`login.microsoftonline.com:443` and `graph.microsoft.com:443`. Helm
+`outboundProxy.enabled` derives these management destinations from the bundled
+Channel Driver. An approved external endpoint can instead be selected with
+`api.controlPlaneOutboundProxyUrl`. Agent network selections do not broaden
+this API-only route. Missing directory consent or egress
 leaves exact-ID entry available and does not make Graph access a deployment
 prerequisite.
 

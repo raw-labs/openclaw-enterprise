@@ -158,7 +158,7 @@ unit: the next request reads the policy again.
 `packages/occ/src/state/postgres-state.ts:PostgresPlatformState`
 
 The PostgreSQL state implementation writes Roles and AccessBindings through the
-same unit of work used by the API audit append. A duplicate person/Agent runtime assignment becomes the existing `ResourceConflictError` before the IAM wrapper handles unknown failures. The transaction rolls back without a success audit, and the API returns `409`. 
+same unit of work used by the API audit append. A duplicate person/Agent runtime assignment becomes the existing `ResourceConflictError` before the IAM wrapper handles unknown failures. The transaction rolls back without a success audit, and the API returns `409`.
 Holding a session issues an
 unchanged-row UPDATE that locks it without extending its lifetime or changing
 authentication metadata. This queues the deferred

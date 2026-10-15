@@ -3,9 +3,8 @@
 ## Overview
 
 `ComputeDriver` owns Namespace infrastructure, revisions, gateways, workload
-identity, routing, activation and readiness. OCC selects one per Installation,
-authorizes operations and records immutable revisions. Backends own resources;
-[SandboxDriver](sandbox.md) can create a Harness.
+identity, routing and readiness. OCC selects and authorizes it per Installation.
+Backends own resources; [SandboxDriver](sandbox.md) can create a Harness.
 
 See [Driver selection](selection.md), the [feature matrix](compute-matrix.md),
 and [placement status](../../design.md#implementation-status).
@@ -22,7 +21,7 @@ and SecretRefs without source mutation or infrastructure effects. See
 [first-deployment access](../agent-native-admin.md#first-deployment-configuration)
 and [call order](compute-admission.md#deployment-configuration).
 
-Optional `getRuntimeImages(revision)` returns
+`getRuntimeImages(revision)` optionally returns
 `{workload, container, image, imageId, commit, openclawCommit}` entries for
 containers owned by that admitted revision. OCC requires exact Agent read
 authority and calls the Driver pinned by the active revision. The
@@ -30,9 +29,9 @@ authority and calls the Driver pinned by the active revision. The
 without this method.
 
 Commits must be full lowercase Git SHAs; missing IDs or provenance remain `null`.
-Results exclude separate Sandbox Driver workloads. Neither Docker nor Kubernetes
-[derives commits](../console/debug-fields.md#where-the-source-commit-comes-from)
-from a moved tag. Kubernetes
+Results exclude Sandbox workloads. Docker and Kubernetes never
+[derive commits](../console/debug-fields.md#where-the-source-commit-comes-from)
+from moved tags. Kubernetes
 [inspects](../console/debug-fields.md#inspection-scope) revision-owned Pods and
 binds its private metadata read to the Pod UID and running container ID; both
 commits apply only to containers with that image ID.
@@ -61,10 +60,9 @@ custody. See the [device login flow](../../flows/native-service-account-credenti
 | `stopRevision(revision)`              | Removes inbound routing and stops execution for this revision, including applicable hooks and Sandbox cleanup. Safe to repeat; retains snapshots, runtime credentials, workspace data, and other persistent Agent state.                                                                                                                      |
 | `retireRevision(revision)`            | Revokes workload access, then stops the workload and requests applicable Sandbox cleanup. Preserves an Agent gateway already owned by its replacement.                                                                                                                                                                                        |
 
-Namespace results can mark a failure `retryable` or `permanent`; success
-requires a true flag and no failure.
-Methods without a return value must reject if they cannot complete. The revision
-context is optional in TypeScript; the worker supplies it after authorization.
+Namespace success requires a true flag without failure; failures are `retryable`
+or `permanent`. Void methods reject incomplete operations. The worker supplies
+optional revision context after authorization.
 
 `prepareRevision` throws `ComputePreparationFailedError` for terminal initialization.
 OCC atomically fails deployment with durable `stopRevision` cleanup.
@@ -91,6 +89,14 @@ endpoints are refused. See [Runtime access](../agent-native-admin.md).
 | `resolveSandboxNamespace`, `withdrawCredentialSource`                                               | [Credential Gateway](credential-gateway.md#optional-additions) hooks for registration and withdrawal.                                                                               |
 | `activationOrder`, `maintenanceIntervalMs`                                                          | Control [activation timing](#production-revision-stages) and optional [maintenance](#optional-active-runtime-maintenance).                                                          |
 | `requiresStoppedPredecessors(revision)`                                                             | A side-effect-free declaration, derived from the admitted revision, that opts into [exclusive replacement](#production-revision-stages).                                            |
+
+### Optional Gateway outbound admission
+
+Optional `gatewayOutboundCapabilities`, `validateGatewayOutbound`, and
+`admitGatewayOutbound` enforce Installation limits and freeze Agent selection,
+trusted Channel requirements, and exclusions. Snapshots require removal-only
+`withdrawGatewayOutbound` lifecycle support.
+See [Gateway outbound](../gateway-outbound.md).
 
 ### Optional startup preflight
 

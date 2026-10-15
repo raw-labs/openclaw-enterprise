@@ -1553,6 +1553,7 @@ async function canonicalData(db) {
           ? [
               "repository_bindings",
               "repository_access",
+              "gateway_outbound",
               "harness_auth_credential_source_id",
               "plugin_approvers",
               "credential_sources",
@@ -1640,6 +1641,7 @@ test(
       [52, "preComputePreparationFailureEvidence"],
       [53, "preRuntimeRoles"],
       [54, "preHeldAuthenticationSession"],
+      [55, "preGatewayOutbound"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
@@ -1916,6 +1918,7 @@ test(
       [52, "preComputePreparationFailureEvidence"],
       [53, "preRuntimeRoles"],
       [54, "preHeldAuthenticationSession"],
+      [55, "preGatewayOutbound"],
     ]) {
       void context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -1999,6 +2002,7 @@ test(
       [52, "preComputePreparationFailureEvidence"],
       [53, "preRuntimeRoles"],
       [54, "preHeldAuthenticationSession"],
+      [55, "preGatewayOutbound"],
     ]) {
       void context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });
@@ -2012,6 +2016,7 @@ test(
         // 0051's final GRANT runs after it dropped both withdrawal triggers.
         // Abort 0054 after its function was created, before the deferred trigger exists.
         const rollbackTag = [
+          [55, "ALTER TABLE"],
           [54, "CREATE TRIGGER"],
           [53, "GRANT"],
           [50, "GRANT"],

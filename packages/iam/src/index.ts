@@ -1181,13 +1181,13 @@ export class NativeIAMDriver implements IAMDriver {
 
   async authorizeRuntimeAccess(request: AuthorizationRequest): Promise<RuntimeAccessDecision> {
     const state = await this.state.loadNativeIAMState();
-    let roles: ReadonlyMap<string, Role>;
+    let policy: NativeIAMPolicy;
     try {
-      roles = validateAndIndexNativeIAMState(state);
+      policy = nativeIAMPolicy(state);
     } catch {
       return decision(this.id, false, "The native IAM policy is invalid.");
     }
-    const entry = evaluateValidatedAuthorization(request, state, roles, this.id);
+    const entry = evaluateValidatedAuthorization(request, policy, this.id);
     if (!entry.allowed) {
       return entry;
     }

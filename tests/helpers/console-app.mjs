@@ -40,11 +40,15 @@ export const backendFixtures = Object.freeze([
 function computeDriver({
   repositoryCredentials = false,
   channelRuntime = false,
+  gatewayOutbound,
+  gatewayRouting,
   discoverHarnessModels = async () => [],
 } = {}) {
   const driver = createTestKubernetesComputeDriver("console-compute", {
     repositoryCredentials,
     channelRuntime,
+    ...(gatewayOutbound === undefined ? {} : { gatewayOutbound }),
+    ...(gatewayRouting === undefined ? {} : { gatewayRouting }),
   });
 
   return Object.assign(driver, {
@@ -233,20 +237,20 @@ export async function createConsoleAppFixture(t, options = {}) {
   }
   const auditSink = options.auditSink ?? new InMemoryAuditSink();
   const policyUnit = new AsyncLocalStorage();
-  class ConsolePlatformState extends InMemoryPlatformState {
-    transact(work) {
-      // Authorization inside a transaction reads that actual unit, without waiting on itself.
-      return super.transact((unit) => policyUnit.run(unit, () => work(unit)));
-    }
-  }
+  const stateOptions = {
+    auditSink,
+    resolveIAMIdentity: (identityId) =>
+      policy.identities.find((identity) => identity.id === identityId),
+  };
   const platformState =
+    options.stateFactory?.(stateOptions) ??
     options.state ??
-    new ConsolePlatformState({
-      auditSink,
-      // Live lookup, so people enrolled after construction can be bound like in Postgres.
-      resolveIAMIdentity: (identityId) =>
-        policy.identities.find((identity) => identity.id === identityId),
-    });
+    new InMemoryPlatformState(stateOptions);
+  // The real IAM evaluator reads the current transaction's policy, including when
+  // restart/history scenarios supply their own State. Never wait on that same unit.
+  const stateTransact = platformState.transact.bind(platformState);
+  platformState.transact = (work) =>
+    stateTransact((unit) => policyUnit.run(unit, () => work(unit)));
   const iamDriver = new NativeIAMDriver(
     {
       async loadNativeIAMState() {
@@ -324,10 +328,13 @@ export async function createConsoleAppFixture(t, options = {}) {
       computeDriver({
         repositoryCredentials: options.repositoryCredentials === true,
         channelRuntime: options.channelRuntime === true,
+        gatewayOutbound: options.gatewayOutbound,
+        gatewayRouting: options.gatewayRouting,
         discoverHarnessModels: options.discoverHarnessModels,
       }),
     configurationDriver:
       configurationDriver ?? createTestConfigurationDriver({ id: "console-configuration" }),
+    ...(options.channelDriver === undefined ? {} : { channelDriver: options.channelDriver }),
     ...(options.sandboxDriver === undefined ? {} : { sandboxDriver: options.sandboxDriver }),
     ...(secretDriver === undefined || secretDriver === null ? {} : { secretDriver }),
     ...(publicOrigin === undefined ? {} : { publicOrigin }),
@@ -555,13 +562,15 @@ export async function createConsoleAppFixture(t, options = {}) {
   }
 
   function grantAgentSecretOperate(agent, source) {
-    const roleId = `auth-${agent.id}`;
-    policy.identities.push({
-      id: agent.servicePrincipalId,
-      kind: "service_principal",
-      namespaceId: agent.namespaceId,
-      agentId: agent.id,
-    });
+    const roleId = `auth-${agent.id}-${source.id}`;
+    if (!policy.identities.some((identity) => identity.id === agent.servicePrincipalId)) {
+      policy.identities.push({
+        id: agent.servicePrincipalId,
+        kind: "service_principal",
+        namespaceId: agent.namespaceId,
+        agentId: agent.id,
+      });
+    }
     policy.roles.push({
       id: roleId,
       namespaceId: agent.namespaceId,

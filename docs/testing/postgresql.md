@@ -77,9 +77,8 @@ migrated, separate from the general database, and contain no Installation; the
 bootstrap creates its own Installation and administrators, so never rerun it
 against a previous bootstrap database.
 
-This creates three new databases: general tests, production bootstrap,
-and Kubernetes. If any name already exists, choose a new test name and update
-the corresponding URL; do not drop an existing database to make setup pass.
+Create three disposable databases below. If a name exists, choose another and
+update its URL; never drop an existing database for setup.
 
 ```sh
 pnpm db:up

@@ -2,7 +2,7 @@
 
 Installation profiles generate the two trusted files used by a production
 OpenClaw Enterprise install: a Helm values overlay and the Installation startup
-YAML mounted into the controller. Choose OpenClaw or Codex defaults, or a trusted customization.
+YAML mounted into the controller. Choose OpenClaw, Codex, or trusted customization.
 
 Profiles only render configuration for an already prepared environment. They do
 not create clusters, Secrets, databases, DNS, certificates, hosted plugin
@@ -29,13 +29,10 @@ Both profiles enable:
   private metrics, digest-pinned images, DNS policy, trusted proxy CIDRs, and
   plugin-status proxy CIDRs.
 
-Gateway Pods, Harness Pods, and tenant container defaults use a `100m` CPU
-request and four-core (`"4"`) limit. The request reserves scheduling capacity;
-the limit permits bursts without reserving more. An embedded Gateway's startup
-model probe used about 16 CPU-seconds and became ready in 24–30 seconds at one
-core versus 51–72 seconds at `500m`. Additional cores serve later work.
-Concurrent runtimes can each consume four cores; a `limits.cpu` quota counts
-the whole limit.
+Gateway, Harness and tenant defaults request `100m` CPU and permit four-core
+bursts. A `limits.cpu` quota counts each four-core limit. An embedded startup
+probe used about 16 CPU-seconds: 24–30 seconds at one core versus 51–72 seconds
+at `500m`. Additional cores serve later work.
 
 Memory requests cover the use measured between turns, so the scheduler reserves
 what each Agent actually holds; limits cover measured peaks:
@@ -46,38 +43,27 @@ what each Agent actually holds; limits cover measured peaks:
 | Codex Harness                   | `768Mi`  | `6Gi` | 0.45 to 0.57 GiB between turns, 1 GiB running a test suite, 1.9 GiB running `tsc`; lint, `tsc` and tests together were OOM-killed at `2Gi` and reached a `4Gi` limit |
 | Container default               | `128Mi`  | `2Gi` | containers that set no resources                                                                                                                                     |
 
-Plan node memory per Agent: an embedded OpenClaw Agent reserves `1792Mi`, and a
-dedicated Codex Agent reserves `2560Mi`: `1792Mi` for its Gateway on the
-`runtime.gatewayNodeSelector` pool and `768Mi` for its Harness on the
-`runtime.nodeSelector` pool. A Harness runs
-the Agent's shell commands, so builds and test suites in large repositories can
-need more than `6Gi`; raise `resources.agent.limits.memory` in the Installation
-for such workloads. Limits reserve no node memory, so Harnesses building at the
-same time on one node can together exhaust it, and the kubelet then evicts Pods
-using more than their requests first; size agents nodes for the turns
-you expect to run concurrently.
+An embedded Agent reserves `1792Mi`; dedicated Codex reserves `2560Mi` across
+its Gateway (`runtime.gatewayNodeSelector`) and Harness (`runtime.nodeSelector`).
+Concurrent builds can exhaust a node despite these requests; the kubelet evicts
+Pods exceeding requests first. Size for concurrent turns and overlapping old/new
+Harness Pods during rollout. Raise `resources.agent.limits.memory` above `6Gi`
+for larger builds.
 
-Denying the 11 bundled plugins an OpenAI-only Agent does not use
-(`plugins.deny`) saved only about 50 MiB. Profile input cannot change these
-values; for others, write the Installation from the production example (see
-[Images and resources](../../reference/drivers/kubernetes-compute.md#images-and-resources)).
-An existing Installation keeps its values on upgrade; adopted values apply to
-each Agent at its next deployment. Before adopting them, check each agents node's
-free memory: during a rollout the old and new Harness Pods of an Agent can run
-together on one node, because they share its workspace volume.
+Denying 11 unused plugins saved only about 50 MiB. Profile inputs cannot change
+these resource values; use the production Installation example for alternatives
+([Images and resources](../../reference/drivers/kubernetes-compute.md#images-and-resources)).
+Existing Installations keep their values; changed values apply on next deployment.
 
 Seeding both Presets does not change the profile's PluginDriver. An Agent
 created from the other profile's Preset still needs a compatible driver,
 runtime, harness mode, credentials, and channel support.
 
-To seed additional Presets, add `"presets": { "files": ["/app/deploy/presets/swe-preset.json"] }`
-to the input JSON and rerender. This adds **SWE Agent** alongside the bundled
-Presets. Set `presets.includeDefaults` to `false` to seed only the listed files;
-omit `files` as well to seed no Presets. The renderer defaults `includeDefaults`
-to `true`. Both controllers must read the files at startup; the renderer only validates paths. Disabling
-seeding does not delete saved Presets. See
-[Preset initialization](../../reference/presets.md#installation-defaults) for path
-resolution and startup validation.
+Add `"presets": { "files": ["/app/deploy/presets/swe-preset.json"] }` to seed
+**SWE Agent** alongside bundled Presets. `includeDefaults: false` seeds only listed
+files; omit `files` too to seed none. Both controllers must read these paths at
+startup; rendering only validates paths. Disabling seeding preserves saved
+Presets. See [Preset initialization](../../reference/presets.md#installation-defaults).
 
 Repository support is optional. When enabled, the renderer wires the broker
 container, GitHub Backend, Repo Driver, and Compute peer. The repository registry
@@ -87,17 +73,13 @@ then rerender with `repository.enabled: true`.
 
 ## Prepare inputs
 
-Create a JSON file outside the repository or under an ignored local output
-directory. The renderer rejects any field it does not consume: unsupported
-fields fail preflight. `controlPlane.releaseName` must satisfy Helm's lowercase
-release-name syntax and be at most 53 characters. Image references in
-`controlPlane.controllerImage`, `runtime.image`, and enabled `repository.image`
-must use literal `sha256` and 64 lowercase hexadecimal characters. Invalid digest
-casing fails preflight without emitting deployable files. All three must also be
-references Kubernetes can pull, as the chart and Compute check: only the registry
-host and tag may use uppercase, and an IPv6 registry host is allowed. `controlPlane.adminEmail`
-must be an administrator email the bootstrap Job accepts after trim and lowercase:
-one `@` and a dotted domain.
+Create JSON outside the checkout or in an ignored directory. Unknown fields fail
+preflight. `controlPlane.releaseName` follows Helm lowercase syntax (maximum 53
+characters). Controller, runtime and enabled repository images require valid
+Kubernetes references with literal `sha256` and 64 lowercase hexadecimal digits.
+Only registry hosts and tags permit uppercase; IPv6 registry hosts are supported.
+Invalid inputs emit diagnostics without deployment files. Bootstrap trims and
+lowercases `controlPlane.adminEmail`, requiring one `@` and a dotted domain.
 
 ```json
 {
@@ -128,8 +110,13 @@ one `@` and a dotted domain.
     "gatewayNodeSelector": { "oce-role": "control" },
     "transportSecretPrefix": "openclaw-agent-transport"
   },
-  "channels": {
-    "managedSlackProxy": true
+  "gatewayOutbound": {
+    "enabled": true,
+    "denyCidrs": ["10.42.0.0/16", "10.43.0.0/16"]
+  },
+  "controlPlaneOutbound": {
+    "managedProxy": true,
+    "denyCidrs": ["10.42.0.0/16", "10.43.0.0/16"]
   }
 }
 ```
@@ -412,6 +399,17 @@ the install as ready:
 - For hosted `codex-plugin` discovery under either profile family, a PAT supplied
   through a same-Namespace Secret or the Console. Curated discovery needs no
   credential. Configure runtime credentials per Agent.
+- For Slack, enable `gatewayOutbound` with actual infrastructure exclusions;
+  Compute creates the Agent's revision proxy. Enable
+  `controlPlaneOutbound.managedProxy` with its own exclusions for API directory
+  lookup and credential validation, or supply an approved `proxyUrl`. The two
+  instances have separate clients and policy. Enabling network support does not
+  enable Slack itself; Slack-enabled Agents require dedicated execution.
+  See [Gateway outbound](../../reference/gateway-outbound.md) and
+  [Slack setup](../integrations/slack.md#configure-both-slack-proxies).
+- For Codex hosted plugin discovery and runtime authentication, a
+  same-Namespace `codex_pat` token Secret or a PAT entered during Agent creation.
+  See [discovery egress](#hosted-discovery-egress).
 - For optional OCE-managed ChatGPT service-account runtime credentials, the
   admin Secret, workspace authority, and app connections described in
   [Configure the ChatGPT Backend](../integrations/chatgpt.md). Treat managed

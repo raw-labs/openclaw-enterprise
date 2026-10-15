@@ -73,21 +73,16 @@ The response reports:
 
 A stopped Agent with no active revision returns only `status: "stopped"`, including before its first deployment and after stop reconciliation clears its active revision. A stopped Agent with a selectable active revision still includes its target fields. If a desired-running Agent has no active revision, OCC returns `unavailable` in the success envelope so the console can show a retryable state. A dependency outage, the IAM Driver included, returns `503 DEPENDENCY_UNAVAILABLE`. Malformed requests, denied IAM access and missing sessions also use the normal protected-route error envelope.
 
-Changing the selected Compute Driver does not migrate existing revisions. After
-lifecycle and native-configuration checks, OCC compares the selected Driver's ID
-and implementation with the active revision's recorded owner. A mismatch returns
-`503 DEPENDENCY_UNAVAILABLE` from the availability API before endpoint resolution,
-private gateway-key lookup or transport. Agent-host HTTP retains its existing
-`403` refusal. WebSocket admission destroys the client socket without an HTTP
-response, before gateway-key lookup or connection; a mismatch during a WebSocket
-lease closes the connection through the existing failed-lease path. Matching ownership retains
-normal access. Earlier stopped, replacing and unsupported-configuration outcomes
-keep their precedence.
+Changing Compute does not migrate active revisions. After lifecycle and native
+configuration checks, OCC requires the selected Driver ID and implementation to
+match the revision owner. A mismatch returns `503 DEPENDENCY_UNAVAILABLE` before
+endpoint/key lookup. Agent-host HTTP returns `403`; WebSocket admission destroys
+the socket, and lease-time mismatches close existing connections. Earlier stopped,
+replacing and unsupported states retain precedence.
 
-The mismatch is not transient, so refreshing does not clear it. Each API process
-logs one `native_admin.compute_owner_mismatch` warning per revision and selected
-Driver, naming both Driver IDs and implementations. To restore access, select the
-revision's Compute Driver again, with the same ID and implementation.
+Each API process logs one `native_admin.compute_owner_mismatch` warning per
+revision and selected Driver. Restore the original Driver ID and implementation;
+refreshing cannot repair ownership.
 
 ## Agent host identity
 
@@ -99,7 +94,9 @@ An Agent URL uses the derived host directly:
 https://agent-<opaque-hash>.<agentNativeAdmin.domain>/
 ```
 
-The host hash is not reversible, so native-host admission resolves the host to the exact Agent using existing platform state. Unknown hosts, wrong suffixes, deleted Agents, and hosts that do not map to exactly one Agent fail closed. This lookup does not require a persistent registry or cache.
+Native-host admission resolves the opaque host through platform state. Unknown,
+wrong-suffix, deleted or ambiguous Agent hosts fail closed, without a registry
+or cache.
 
 The Kubernetes human route uses a separate `/people` path:
 
@@ -159,8 +156,13 @@ device state, plugins, or other persistent gateway data.
 - Helm rendering fails when `agentNativeAdmin.enabled` is true without `gatewayRouting.enabled`, or with an `auth.baseUrl` that is not HTTPS or whose host is outside `agentNativeAdmin.sharedCookieDomain`.
 - Better Auth setup runs before the native admin checks below and reports its own codes instead: `AUTH_BASE_URL_INVALID` for a malformed or public-suffix shared cookie domain, one that does not contain the public origin's host, or a non-HTTPS public origin with that cookie domain set, and `AUTH_SECRET_INVALID` for an auth secret under 32 characters. A missing `OCC_GATEWAY_API_KEY_PATH` reports `GATEWAY_API_KEY_UNAVAILABLE`.
 - Startup fails with `AGENT_NATIVE_ADMIN_INVALID` when enablement, Agent domain, shared cookie domain, public origin, Better Auth cookie scope, or cookie-secret requirements are invalid.
-- Availability returns `stopped` for a stopped Agent with no active revision; `unavailable` means a desired-running Agent has no active revision yet or a newer revision is replacing it. Dependency outages return `503`. Gateway routing, unsupported native configuration, or a selected Compute Driver without a qualified human-access descriptor or clean endpoint returns `unsupported` after OCC has an active revision and derived Agent origin. Its `reason` distinguishes `ui_configuration`, `role_unavailable`, `device_approval_required` and `transport_unsupported`; these are configuration or Driver limits, not authorization grants.
-- The console hides the panel when disabled or denied to an ordinary user. An Installation administrator denied access sees a Sharing hint and **Refresh access**. Explicit refresh retries the status read; automatic reloads retain the remembered denial. Stopped, unsupported and unavailable states show feedback; available access opens the returned `url` in a new tab.
+- Availability follows the status table above. `unsupported` reasons are
+  `ui_configuration`, `role_unavailable`, `device_approval_required` and
+  `transport_unsupported`; none grants authorization. Dependency outages return
+  `503`.
+- Denied ordinary users see no panel; denied Installation administrators see
+  Sharing and **Refresh access**. Explicit refresh retries; automatic reloads
+  retain denial. Other statuses show feedback; available access opens `url`.
 - Attributable IAM denials remain audit events for status checks, native-host proxy admission, and recurring WebSocket lease renewal. Those denial paths preserve the human IAM principal and exact Agent target instead of collapsing into unaudited dependency failures.
 - Proxied HTTP and WebSocket requests strip browser credentials, service keys, forwarded headers, native identity/scope headers, and native `Set-Cookie` before responding through OCC. WebSocket upgrades require a non-null exact Agent `Origin`; accepted `101` connections audit `websocket.connect` with `connectionId` and `websocket.close` with the same `connectionId` plus `closeReason`, refresh authorization every 25 seconds, close when a lease check fails or takes more than 5 seconds, set `closeReason` to distinguish lifecycle, revocation, dependency, client, upstream, and shutdown paths, and are destroyed during API `preClose`.
 

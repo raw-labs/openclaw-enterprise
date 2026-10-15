@@ -2,6 +2,8 @@ import type {
   ChannelCredentialReader,
   ChannelDirectoryResult,
   ChannelDriver,
+  GatewayOutboundRequirement,
+  OpenClawConfigurationDocument,
 } from "@openclaw-enterprise/contracts";
 import { ChannelCredentialError, ChannelDirectoryError } from "@openclaw-enterprise/occ";
 import { asRecord, readCappedBody } from "@openclaw-enterprise/utils";
@@ -12,12 +14,38 @@ const PAGE_SIZE = 100;
 const SEARCH_PAGES = 3;
 const REQUEST_TIMEOUT_MS = 8_000;
 const INFO_BATCH_SIZE = 5;
+const GATEWAY_DESTINATIONS = ["slack.com", "slack-edge.com", "slack-msgs.com"].map((host) => ({
+  host,
+  includeSubdomains: true,
+}));
 type SlackRecord = Record<string, unknown>;
 
 function configuredValue(value: unknown): boolean {
   return typeof value === "string"
     ? value.trim().length > 0
     : value !== undefined && value !== null;
+}
+
+function enabledAccounts(values: Readonly<Record<string, unknown>>) {
+  const slack = asRecord(asRecord(values.channels)?.slack);
+  if (slack === undefined || slack.enabled === false) {
+    return [];
+  }
+  const accounts = asRecord(slack.accounts);
+  const named = accounts === undefined ? [] : Object.entries(accounts);
+  // Native OpenClaw retains a top-level default unless a named default replaces it.
+  const implicitDefault =
+    named.length === 0 ||
+    (!Object.hasOwn(accounts ?? {}, "default") &&
+      configuredValue(slack.botToken) &&
+      (slack.mode === "http" || configuredValue(slack.appToken)));
+  return [
+    ...(implicitDefault ? [{ config: slack, path: "/channels/slack" }] : []),
+    ...named.map(([id, value]) => ({
+      config: { ...slack, ...asRecord(value) },
+      path: `/channels/slack/accounts/${id.replaceAll("~", "~0").replaceAll("/", "~1")}`,
+    })),
+  ].filter(({ config }) => config.enabled !== false);
 }
 
 function boundedString(value: unknown, maxLength = 200): string | undefined {
@@ -78,35 +106,29 @@ export class SlackChannelDriver implements ChannelDriver {
     this.request = channelRequest(request, proxyUrl, options);
   }
 
+  gatewayNetworkRequirements(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly GatewayOutboundRequirement[] {
+    return enabledAccounts(configuration).length === 0
+      ? []
+      : [{ source: "slack", destinations: structuredClone(GATEWAY_DESTINATIONS) }];
+  }
+
+  controlPlaneNetworkRequirements(): readonly GatewayOutboundRequirement[] {
+    return [
+      {
+        source: "slack/management",
+        destinations: [{ host: new URL(SLACK_API).hostname, includeSubdomains: false }],
+      },
+    ];
+  }
+
   async validateCredentials(
     values: Readonly<Record<string, unknown>>,
     withSecret: ChannelCredentialReader,
   ): Promise<void> {
-    const slack = asRecord(asRecord(values.channels)?.slack);
-    if (slack === undefined || slack.enabled === false) {
-      return;
-    }
     const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-    const accounts = asRecord(slack.accounts);
-    const named = accounts === undefined ? [] : Object.entries(accounts);
-    // OpenClaw still starts an implicit "default" account from the top-level bot and app
-    // tokens when named accounts exist, unless one of them is named "default".
-    const implicitDefault =
-      named.length === 0 ||
-      (!Object.hasOwn(accounts ?? {}, "default") &&
-        configuredValue(slack.botToken) &&
-        (slack.mode === "http" || configuredValue(slack.appToken)));
-    const targets = [
-      ...(implicitDefault ? [{ config: slack, path: "/channels/slack" }] : []),
-      ...named.map(([id, value]) => ({
-        config: { ...slack, ...asRecord(value) },
-        path: `/channels/slack/accounts/${id.replaceAll("~", "~0").replaceAll("/", "~1")}`,
-      })),
-    ];
-    for (const { config, path } of targets) {
-      if (config.enabled === false) {
-        continue;
-      }
+    for (const { config, path } of enabledAccounts(values)) {
       for (const role of ["appToken", "botToken"] as const) {
         if (role === "appToken" && config.mode === "http") {
           continue;

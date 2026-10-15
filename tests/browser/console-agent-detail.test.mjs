@@ -6,7 +6,6 @@ import { CodexPluginDriver } from "../../apps/controller/src/drivers/plugin/inde
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
-import { deriveNativeAdminHost } from "../../apps/controller/src/gateway/native-admin.ts";
 import { createTestSecretDriver } from "../helpers/secret-driver.mjs";
 import {
   accessBindingPostRequests,
@@ -32,6 +31,7 @@ import {
   assertRevisionUrl,
   agentStopRequests,
   configurationPatchRequests,
+  nativeAdminComputeDriver,
   nativeAdminValues,
   waitForLiveControls,
 } from "./console-agents-test-support.mjs";
@@ -933,15 +933,7 @@ test("Agent detail saves plugin changes for the next revision without changing a
     "Plugin Revision Service Accounts token",
     "at-browser-plugin-revision",
   );
-  fixture.policy.bindings.push({
-    id: `grant-plugin-${tokenSecret.id}`,
-    namespaceId: namespace.id,
-    subjectKind: "identity",
-    subjectId: agent.servicePrincipalId,
-    roleId: `auth-${agent.id}`,
-    resourceKind: "secret",
-    resourceId: tokenSecret.id,
-  });
+  fixture.grantAgentSecretOperate(agent, tokenSecret.ref);
   const pluginId = "codex-plugin:linear@openai-curated-remote";
   const originalPlugins = {
     [pluginId]: { enabled: true, toolDefaults: { approval: "all_actions" } },

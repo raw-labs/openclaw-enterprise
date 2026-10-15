@@ -1,17 +1,16 @@
 ---
 created: 2026-09-28
-updated: 2026-10-13
-last_updated_session: authoring-run/1e1d633d-329d-462f-b077-6cb27c43a6e4
+updated: 2026-10-14
+last_updated_session: authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3
 ---
 
 # Installation Profile Rendering Flow
 
 ## Overview
 
-`scripts/render-installation-profile.mjs` validates site inputs and writes Helm
-values, Installation startup YAML, and preflight diagnostics. Operators then
-provision infrastructure, apply Helm, supply Secrets and credentials, and set up
-optional service accounts, repository registries, and Slack consumers.
+`scripts/render-installation-profile.mjs` validates inputs and writes Helm values,
+startup YAML and diagnostics. Operators supply infrastructure, Secrets and
+optional service integrations.
 
 ## Entry Points
 
@@ -19,9 +18,8 @@ optional service accounts, repository registries, and Slack consumers.
 - Source: `scripts/render-installation-profile.mjs:parseArgs`,
   `scripts/render-installation-profile.mjs:buildRendered`, and
   `scripts/render-installation-profile.mjs:resolveHostedDiscoveryCidrs`.
-- Assumptions: The caller runs from the repository root with installed
-  dependencies, a trusted bundled or explicitly selected profile, and site inputs
-  that contain no plaintext credentials.
+- Assumptions: repository root, installed dependencies, trusted profile and
+  inputs without plaintext credentials.
 
 ## Flow
 
@@ -90,29 +88,20 @@ Catalog and model credentials belong to later Agent setup. Optional
 `codex.managedServiceAccounts` inputs render managed ServiceAccount provisioning;
 preflight identifies its prerequisites without claiming issuance works.
 
-Preflight enforces Helm's lowercase release-name syntax and 53-character limit
-for `controlPlane.releaseName`. `controlPlane.namespace`, optional
-`controlPlane.envoyNamespace`, `controlPlane.apiClients[].namespace`, and
-`controlPlane.dns.namespace` are DNS labels of at most 63 characters: no dots,
-slashes, or uppercase. Compute applies the same rule to `gatewayNamespace` and
-`envoyNamespace`; the chart to `gatewayRouting.envoyNamespace`, `api.clients`,
-and `dns`. NetworkPolicies select peers by Namespace-only
-`kubernetes.io/metadata.name`; invalid names fail preflight.
+Preflight enforces Helm release names (lowercase, maximum 53 characters).
+Namespace inputs (`controlPlane.namespace`, `envoyNamespace`, API clients and
+DNS) must be DNS labels of at most 63 characters. Compute and Helm enforce the
+same Namespace rules; NetworkPolicies use `kubernetes.io/metadata.name`.
 
-`buildRendered` requires the literal `sha256` algorithm and 64 lowercase
-hexadecimal characters for `controlPlane.controllerImage`, `runtime.image`, and
-enabled `repository.image`. All three must also pass `imageReferenceProblem`
-(`packages/occ/src/image-reference.ts`), a port of the Kubernetes reference
-parser that Compute, the chart and the image tools share: a reference Kubernetes
-refuses to pull, such as an uppercase repository path, fails, and an IPv6
-registry host passes.
+`buildRendered` requires lowercase `sha256` and 64 hexadecimal characters for
+controller, runtime and enabled repository images. Shared `imageReferenceProblem`
+(`packages/occ/src/image-reference.ts`) enforces Kubernetes reference syntax,
+including lowercase repository paths and valid IPv6 registry hosts. Invalid
+inputs produce field-specific diagnostics in `preflight.json`, without deployable
+artifacts.
 
-Noncanonical digest casing adds a field-specific diagnostic; the final error
-branch writes only `preflight.json`, leaving no deployable artifacts.
-
-`controlPlane.clusterName` uses the chart/bootstrap `installation.name` rule:
-1–200 characters, without edge whitespace, control characters, or line/paragraph
-separators.
+`controlPlane.clusterName` follows `installation.name`: 1–200 characters, no edge
+whitespace, controls or line/paragraph separators.
 
 Preflight applies downstream contracts for IPv4 CIDRs, native-admin hostnames
 and shared cookie parent (not a public suffix under `tldts`), Google hosted
@@ -131,8 +120,7 @@ may share one; collisions fail preflight.
 `scripts/render-installation-profile.mjs:nodeSelector` checks
 `controlPlane.nodeSelector`, `runtime.nodeSelector` and
 `runtime.gatewayNodeSelector` against the chart and bootstrap-volume helper's
-Kubernetes label-key and label-value rules (values may be empty). Compute copies
-the runtime selectors into Pod specs, where Kubernetes applies the same rule.
+Kubernetes label-key/value rules, including empty values.
 Invalid placement labels fail preflight without deployment files; legal YAML
 lookalike values remain strings. `peerSelector` applies Compute's `validatePeer`
 rule to DNS, API client and metrics scraper selectors. Both selector kinds use
@@ -174,10 +162,10 @@ already checked in step 3 with the API's `parseCidr` rules
 IPv4-mapped address, and no range that covers every IPv4 peer. Like the chart,
 preflight also refuses a zone ID, which the API accepts.
 
-When `channels.managedSlackProxy` is true, the values also enable the
-chart-managed Slack proxy Service. The chart allows that proxy public IPv4 HTTPS
-egress, excluding private and reserved ranges, and the proxy authorizes Slack
-hostnames. Repository values render only when the input explicitly sets
+`gatewayOutbound` enables Compute's per-revision proxy using
+`controlPlane.controllerImage` and infrastructure exclusions.
+`controlPlaneOutbound.managedProxy` enables the separately restricted API proxy.
+Selected Drivers supply its management destinations; Agent settings cannot broaden it. Repository values render only when the input explicitly sets
 `repository.enabled: true`. Repository provider CIDRs pass through unchanged,
 so operators can keep their existing GitHub ranges without DNS snapshots. The
 renderer copies `repository.serviceName` only when the input sets it, and only

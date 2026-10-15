@@ -51,22 +51,8 @@ OpenClaw's disconnected gateway screen at the revision above.
 
 Stories reach error states through real controls after loading fixture data.
 
-| Group                   | Coverage                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign in                 | Password and GitHub sign-in, discovery failure, GitHub errors, disabled account, rejected login, expired session, session-read failure, loading, unconfirmed logout.                                                                                                                                                                                                                                              |
-| Agents                  | Populated and empty collections, no search matches, inaccessible Namespace, no readable Namespaces, permission denial, read failure, loading.                                                                                                                                                                                                                                                                     |
-| Backends                | Configured, empty, and discovery failure.                                                                                                                                                                                                                                                                                                                                                                         |
-| Namespaces              | Ready and provisioning, empty, permission denial.                                                                                                                                                                                                                                                                                                                                                                 |
-| Settings and navigation | Signed-in account and unknown route.                                                                                                                                                                                                                                                                                                                                                                              |
-| Create Agent            | Installed default, missing/loading/denied Presets, Preset variables, fixed model choices before credential entry and manual model IDs, OpenAI Codex/OpenClaw and Anthropic OpenClaw harnesses, Service Accounts switching and bound Presets, seeded workspace files, storage/grant denial, repository selection/discovery and rejected-grant recovery, invalid JSON, partial save/conflict, unknown save outcome. |
-| Agent detail            | First and later drafts, version details, native JSON and plugin editors, immutable plugin snapshot, queued/running/succeeded/failed activity, exact-version diagnostics, error and permission states.                                                                                                                                                                                                             |
-| Navigation components   | Account menu, Namespace switcher, mobile drawer, admin link and denial, OCE branding, simulated OCC revision, missing development metadata, debug runtime image identities and unavailable metadata.                                                                                                                                                                                                              |
-| Channels                | Unconfigured cards, Slack editor with pairing/open/disabled policies, everyone and restricted channel sender access, incomplete sender access, unsupported mixed sender lists, unsupported wildcard channel maps, read-only snapshot, save conflict.                                                                                                                                                              |
-| Credentials             | Named Secret selection and creation, API-key and Slack Secret switching, denied metadata and grants, partially missing tokens, missing authentication, operator-managed credentials, issued ChatGPT account, model Secret replacement, pending grants, and unknown authentication saves.                                                                                                                          |
-| Native admin            | Launch, stopped, UI setup, missing role, pairing permissions, unsupported transport, administrator self-assignment/Refresh, disabled and ordinary-user denial. Launch opens an explanatory fixture.                                                                                                                                                                                                               |
-| Workspace               | Four editable deployed files, undeployed Agent, denied reads, missing file, unknown write outcome.                                                                                                                                                                                                                                                                                                                |
-| Stop Agent              | Confirmation, stopped requested state, permission denial, unknown outcome requiring refresh.                                                                                                                                                                                                                                                                                                                      |
-| Deletion                | Confirmation, pending cleanup, permission denial, conflict, unknown outcome.                                                                                                                                                                                                                                                                                                                                      |
+Browse the [scenario inventory](../../scripts/console-storybook/public/scenarios.mjs)
+for available states. The walkthroughs below identify the checks for each task.
 
 Pending-read stories use the real client's 15-second timeout; reset them to replay
 loading.
@@ -166,6 +152,7 @@ without repository access stays available. The recovery story keeps its saved
 Configuration and needs a current nonempty repository selection to retry.
 The fixture does not verify operator prerequisites: GitHub App setup, Namespace
 approvals, runtime images, and credential-service networking.
+
 ### Sharing
 
 Use **Share before first deployment**, **Share while stopped**, **Configured and
@@ -379,3 +366,12 @@ independently; disable channel conversations, reopen and check native JSON and
 Secret controls. Related stories cover missing credentials, advanced settings,
 read-only, loading, denied and pending saves. Backend/live-provider proof:
 [Teams verification](../testing/teams.md).
+
+## Gateway network access
+
+In **Pages/Agent detail → Gateway Network**, review automatic Slack and Teams
+requirements, select additional hosts, save, and reload. Compare **Gateway
+Network Admitted** for the immutable snapshot, then **Gateway Network Read
+Only**, **Loading**, **Error**, **Disabled**, and **Embedded** for access and
+availability limits. These are simulated UI cases; they do not prove provider
+authentication, proxy deployment or channel delivery.
