@@ -143,6 +143,8 @@ policies, selecting no Pod, until the next preparation or Agent deletion.
 Supported channels and approved Gateway HTTPS use a per-revision proxy. Direct
 public access remains denied. See [Gateway outbound](../../gateway-outbound.md).
 
+Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
+
 ## Explicit network profiles
 
 Proxy Pods use `gateway-outbound-v1`; only their exact Gateway revision receives

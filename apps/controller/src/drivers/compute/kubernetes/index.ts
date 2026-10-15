@@ -4070,20 +4070,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     options?: ConfigurationValidationOptions,
   ): void {
     enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError);
-    const env = asRecord(configuration.env);
-    for (const values of [env, asRecord(env?.vars)]) {
-      if (
-        Object.keys(values ?? {}).some((key) =>
-          /^(?:https?_proxy|all_proxy|no_proxy|node_use_env_proxy)$/i.test(key),
-        )
-      ) {
-        throw callerSettingError(
-          "env",
-          "proxy transport is owned by Kubernetes Compute; use Agent gatewayOutbound",
-        );
-      }
-    }
-
+    requireChannelProxyEnvironment(configuration, callerSettingError);
     requireHarnessCredentialBinding(configuration, callerSettingError, options);
   }
 
@@ -15114,6 +15101,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           variables.push(
             { name: "HTTPS_PROXY", value: outboundTransport.proxyUrl },
             { name: "NODE_USE_ENV_PROXY", value: "1" },
+            // The managed proxy validates DNS answers and pins public destination addresses.
+            { name: "OPENCLAW_PROXY_ACTIVE", value: "1" },
             { name: "NO_PROXY", value: noProxy },
           );
         }

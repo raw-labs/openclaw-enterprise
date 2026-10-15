@@ -91,6 +91,41 @@ console. Unsupported editor shapes require the Configuration API; the editor
 does not flatten multiple teams or wildcard access rules. Custom webhook paths
 and legacy webhook listeners fail deployment preparation.
 
+## Prepare attachment downloads
+
+Attachments remain unqualified for live Teams use. For a controlled trial,
+review the actual attachment URL and each redirect hostname without logging
+signed URLs. On a dedicated Agent, an administrator can approve the required
+exact storage hosts through the [Gateway Network setting](../../reference/gateway-outbound.md):
+
+```json
+{
+  "gatewayOutbound": {
+    "mode": "restricted",
+    "hosts": ["tenant.sharepoint.com", "files.blob.core.windows.net"]
+  }
+}
+```
+
+Enabled Teams contributes its messaging destinations automatically. Additional
+storage hosts belong to this Agent's admitted revision, rather than an
+Installation-wide shared proxy. Add each required redirect hostname separately
+and redeploy. Embedded evaluation permits only channel-derived destinations;
+it cannot approve additional storage hosts with this setting.
+
+The managed proxy validates DNS answers and pins the selected public IPv4
+address. Private/reserved addresses, mixed public/private answers, unsupported
+IPv6 routes and timeouts fail closed. Compute projects `OPENCLAW_PROXY_ACTIVE=1`
+only when the Gateway has admitted managed transport, allowing native guarded
+fetch to use that proxy. Native URL, redirect and credential checks remain active.
+The marker applies throughout the Gateway but adds no destinations. Agent
+Configuration cannot override the transport or its trust markers.
+
+Native `channels.msteams.mediaAllowHosts` may also need an exact destination
+that its defaults do not admit. This is separate from proxy admission and
+`channels.msteams.mediaAuthAllowHosts`: a signed storage URL does not justify forwarding Microsoft's
+bearer token to that host. Preserve the native authentication-host restrictions.
+
 ## Enable Team-scoped name lookup
 
 Update the Teams app package, using manifest v1.12 or later. Set
@@ -143,6 +178,9 @@ prerequisite.
 - Token or reply timeouts can indicate denied proxy egress. Check the proxy
   host policy and the Gateway's NetworkPolicy; do not grant blanket Gateway
   internet access to bypass a missing endpoint.
+- A missing attachment can indicate native media-host rejection, a denied
+  storage or redirect host, or absent guarded-proxy trust. Check the native
+  download error and proxy destination policy before changing either allowlist.
 
 See [credential ownership](../../reference/drivers/kubernetes-compute/storage-and-credentials.md)
 and the [callback flow](../../flows/agent-channel-ingress.md).

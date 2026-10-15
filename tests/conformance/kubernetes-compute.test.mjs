@@ -7932,7 +7932,7 @@ test("account-token authentication grants only the exact Codex revision outbound
   ]);
 });
 
-test("native channel providers require Secret bindings and project them only to the gateway", async () => {
+test("native channel providers require Secret bindings and project guarded proxy trust only to the gateway", async () => {
   const driver = createKubernetesComputeDriver(
     teamsOptions({
       runtime: {
@@ -8107,6 +8107,11 @@ test("native channel providers require Secret bindings and project them only to 
       proxy,
       expectedSecrets.length === 0 ? [] : [{ name: "HTTPS_PROXY", value: transport.proxyUrl }],
     );
+    assert.deepEqual(
+      environment.filter(({ name }) => name === "OPENCLAW_PROXY_ACTIVE"),
+      expectedSecrets.length === 0 ? [] : [{ name: "OPENCLAW_PROXY_ACTIVE", value: "1" }],
+      "only a Gateway with admitted managed transport may delegate native guarded-fetch routing",
+    );
 
     // Dedicated Agents never receive gateway-owned channel credentials or their network proxy.
     const agent = driver.deployment(
@@ -8131,7 +8136,7 @@ test("native channel providers require Secret bindings and project them only to 
       [],
     );
     const agentEnvironment = agent.spec.template.spec.containers[0].env;
-    for (const key of [...expectedSecrets, "HTTPS_PROXY"]) {
+    for (const key of [...expectedSecrets, "HTTPS_PROXY", "OPENCLAW_PROXY_ACTIVE"]) {
       assert.equal(
         agentEnvironment.some(({ name }) => name === key),
         false,

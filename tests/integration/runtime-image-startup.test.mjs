@@ -17,7 +17,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { imageSmokeTimeoutMultiplier } from "../helpers/image-smoke-timeout.mjs";
+import { createModelProbeCertificates } from "../helpers/runtime-model-probe-certificates.mjs";
 import {
   AGENT_RUNTIME_ENTRYPOINT,
   CODEX_OAUTH_BOOTSTRAP_ENTRYPOINT,
@@ -866,6 +868,52 @@ await new Promise((resolve, reject) => {
 `;
     await runDocker(["exec", containerName, "node", "--input-type=module", "-e", probe]);
     assertNoPackagingFailure(logs);
+  },
+);
+
+test(
+  "runtime image downloads native guarded Teams media through the channel proxy",
+  imageTestOptions,
+  async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "oce-teams-attachment-certificates-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    await createModelProbeCertificates({
+      directory,
+      caName: "Teams attachment transport test CA",
+      dnsNames: ["graph.microsoft.com", "tenant.sharepoint.com"],
+      run: execute,
+    });
+    await rm(join(directory, "ca-key.pem"));
+    const repository = fileURLToPath(new URL("../../", import.meta.url));
+    const result = await runDocker([
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--tmpfs",
+      "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+      "--mount",
+      `type=bind,source=${repository},target=/checkout,readonly`,
+      "--mount",
+      `type=bind,source=${directory},target=/certificates,readonly`,
+      "--env",
+      "NODE_EXTRA_CA_CERTS=/certificates/ca.pem",
+      "--env",
+      "OPENCLAW_STATE_DIR=/tmp/openclaw",
+      "--entrypoint",
+      "node",
+      image,
+      "--test",
+      "--test-reporter=tap",
+      "/checkout/tests/fixtures/teams-attachment-download.mjs",
+    ]);
+    assert.match(result.stdout, /# pass 1/);
+    assert.match(result.stdout, /# fail 0/);
   },
 );
 

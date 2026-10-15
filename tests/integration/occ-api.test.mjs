@@ -5892,6 +5892,10 @@ test("Agent provisioning API validates inline configuration with existing Secret
   ).length;
   for (const [values, message] of [
     [
+      { ...model, env: { vars: { OPENCLAW_PROXY_ACTIVE: "1" } } },
+      "Configuration setting env.vars.OPENCLAW_PROXY_ACTIVE must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust.",
+    ],
+    [
       { ...model, channels: { discord: { enabled: true } } },
       "Configuration setting channels.discord is not a supported channel: use slack or msteams, or set its enabled to false.",
     ],

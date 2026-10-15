@@ -46,6 +46,25 @@ validation excluded and a workload fixture. It does not prove SDK delivery.
 proxy process; see [outbound verification](gateway-outbound.md) for its public
 network selector and limits.
 
+The runtime case `runtime image downloads native guarded Teams media through the
+channel proxy` invokes the public native `fetchWithSsrFGuard` and
+`saveResponseMedia` SDK functions against `tests/fixtures/teams-attachment-download.mjs` over real TLS through the
+actual proxy process. Run it with the built image above:
+
+```sh
+OCC_TEST_RUNTIME_IMAGE=oce-runtime:teams node --test \
+  --test-name-pattern='native guarded Teams media' tests/integration/runtime-image-startup.test.mjs
+```
+
+Controlled DNS maps approved public addresses to the local fixture. The case
+checks failure without reviewed-proxy trust, a Graph redirect to approved storage,
+saved bytes, removal of the bearer token before storage access, and refusal of
+an unapproved redirect. It proves native guarded-fetch/media-storage integration
+with the proxy, not the private Teams downloader caller, an actual Teams activity,
+Microsoft network access, file permission or model turn.
+The conformance proxy cases separately cover private/mixed/unsupported DNS
+answers, exact storage-host admission and late DNS completion after the deadline.
+
 Before accepting production support, use a disposable real Teams bot and tenant
 with the [operator setup](../guides/integrations/teams.md). Verify a permitted
 personal message, a channel mention and threaded reply, denied senders, a
@@ -55,6 +74,10 @@ administrative paths, and forged OCE identity headers cannot grant access.
 Repeat messaging after revision cutover and ensure stop/delete removes the
 callback and its SecurityPolicy. Confirm the password exists only in the
 Agent-owned Gateway, and direct provider egress remains denied.
+For attachments, send an actual supported Teams file, verify its bytes reach the
+Agent through the approved storage/redirect hosts, and confirm an unapproved
+host is refused. Native live attachment proof remains pending; do not infer
+live-provider qualification from controlled transport coverage.
 
 These live Teams and public-ingress checks remain pending until a test tenant,
 public certificate/endpoint, and authorized model credentials are provided.

@@ -173,4 +173,8 @@ Collector or local Docker log forwarding. See [Observability](../../guides/obser
 - `OTEL_COLLECTOR_METRICS_PORT` — Local Collector metrics port; default: `8888`.
 - `OCC_DOCKER_LOGGING_ADDRESS` — Docker Compute log destination; local override default: `127.0.0.1:24224`.
 
+`OPENCLAW_PROXY_ACTIVE` is projected by Kubernetes Compute for admitted managed
+Gateway transport. Native Configuration cannot set it or `OPENCLAW_PROXY_CA_FILE`;
+see [Teams attachment transport](../../guides/integrations/teams.md#prepare-attachment-downloads).
+
 ## Channel proxy
