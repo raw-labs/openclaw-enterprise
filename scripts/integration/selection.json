@@ -43,6 +43,11 @@
         "operation": "PR #18 and channel compatibility",
         "commit": "a8bf730e9ef081516654731ff107f8d65c244f5d",
         "input": "313a70262e432192306a2db431bf0b6f0459a957"
+      },
+      {
+        "operation": "Reconcile existing workflows and final combined verification",
+        "commit": "ebbf3c4a42e4353091e5c8d4929bccfc3bf585e9",
+        "input": "313a70262e432192306a2db431bf0b6f0459a957"
       }
     ],
     "retainedUnchanged": [1, 2]
@@ -170,6 +175,20 @@
         "deploy/runtime/Dockerfile",
         "tests/integration/console-api.test.mjs",
         "tests/integration/gateway-outbound-proxy.test.mjs"
+      ]
+    },
+    {
+      "id": "gateway-outbound-existing-workflows",
+      "pullRequests": [18],
+      "commits": ["ebbf3c4a42e4353091e5c8d4929bccfc3bf585e9"],
+      "paths": [
+        "scripts/upgrade-production-images",
+        "tests/integration/production-image-upgrade-recovery.test.mjs",
+        "tests/integration/configuration-controller.test.mjs",
+        "tests/integration/occ-api.test.mjs",
+        "tests/integration/postgres-platform-state-kubernetes.test.mjs",
+        "tests/integration/logging-collector.test.mjs",
+        "scripts/ci/test-suites/checks-baseline-2.json"
       ]
     }
   ],
