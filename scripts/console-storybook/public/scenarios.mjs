@@ -924,7 +924,7 @@ export const scenarios = {
     description:
       "Without a readable default-codex, quick-start uses the first readable Preset by name and retains its variable chooser.",
     steps: [
-      "Select Start with default Preset and confirm Research assistant is selected.",
+      "Select Start with Research assistant and confirm Research assistant is selected.",
       "Enter an Agent name, keep the prefilled model, and select Use Preset.",
       "Inspect the editable Agent draft. Leave and return to confirm this shortcut draft is discarded.",
     ],
@@ -938,7 +938,7 @@ export const scenarios = {
     presetNameTie: true,
     description: "Case-insensitive name ties use exact names, independently of API response order.",
     steps: [
-      "Select Start with default Preset and confirm Research assistant is chosen ahead of research assistant.",
+      "Select Start with Research assistant and confirm Research assistant is chosen ahead of research assistant.",
       "Enter an Agent name, select Use Preset and inspect the editable draft.",
     ],
     gap: "Simulated UI proof; actor-readable filtering and actual Agent creation are covered by the Console browser suite.",

@@ -139,14 +139,13 @@ already has an Installation.
 ## Preset preservation across controller upgrades
 
 Run `tests/integration/postgres-preset-upgrade.test.mjs` with an empty, migrated
-application-role `OCC_TEST_DATABASE_URL`, or through `postgres-platform` CI.
-The test saves edited/custom Presets and non-default Configuration through authenticated
-HTTP, then checks IDs, values and generations after stock startup and a restart
-with default seeding disabled. A new Namespace must receive no stock Presets.
+application-role `OCC_TEST_DATABASE_URL` or `postgres-platform` CI.
+Authenticated HTTP saves edited/custom Presets and Configuration. Restarts with
+stock inputs and disabled seeding must preserve IDs, values and generations;
+new Namespaces receive no stock Presets when seeding is disabled.
 
-CI proves current-version restarts. For cross-revision proof, prepare a before
-checkout with matching dependencies and migrate a fresh disposable database
-using that revision. Set `OCC_TEST_PRESET_BEFORE_ROOT` to its absolute path and
+CI proves current-version restarts. Cross-revision proof requires a prepared
+before checkout and a disposable database migrated by that revision. Set `OCC_TEST_PRESET_BEFORE_ROOT` to its absolute path and
 `OCC_TEST_PRESET_MIGRATION_DATABASE_URL` to that database's separate migrator-role
 URL. Run from the candidate:
 
@@ -154,10 +153,9 @@ URL. Run from the candidate:
 node --test tests/integration/postgres-preset-upgrade.test.mjs
 ```
 
-The test stops the before controller, applies candidate migrations, and starts
-the candidate twice. Scope credentials
-to this invocation; clean up its owned database/server. Missing application
-configuration skips; missing cross-revision migrator configuration fails.
+The test stops the before controller, migrates, and starts the candidate twice.
+Scope credentials to this invocation; remove its owned database/server. Missing application
+configuration skips; missing cross-revision migrator fails.
 Compute/Secret Drivers are fixtures: this proves saved-state preservation,
 not images, Kubernetes or model execution.
 

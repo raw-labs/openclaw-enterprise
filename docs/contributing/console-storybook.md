@@ -96,10 +96,9 @@ Compare **New version queued**, **Deployment waiting for runtime**, and
 **Deployment retry after dependency failure**; switch versions and check
 **Since**.
 
-In **Custom Preset quick-start**, fill variables, apply the Preset, and check
-draft discard on return. Compare **No Presets**, **Loading default Preset**, and
-**Default Preset access denied**; manual setup remains available.
-**Preset name tie-break** checks uppercase selection.
+**Custom Preset quick-start** names the starter; check variables and draft discard.
+**Preset name tie-break** checks uppercase selection. Compare **No Presets**,
+**Loading default Preset**, and **Default Preset access denied**.
 
 **First deployment creates credentials** accepts **Deploy new version** without
 a separate credential action. Its initial state is not a Stop request; OCC

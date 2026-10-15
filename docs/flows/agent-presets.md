@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
-updated: 2026-10-12
-last_updated_session: authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb
+updated: 2026-10-15
+last_updated_session: authoring-run/4863651f-24de-427e-ac6f-152c65948af3
 ---
 
 # Agent Presets flow
@@ -139,7 +139,14 @@ path records mutations and denials without template or variable contents.
 
 `apps/controller/src/console/agents/presets.mjs:createPresetFields`
 
-[`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs) lists readable Presets with Namespace read, sorts by case-insensitive locale order then exact name, and reads the selection once. **Start with default Preset** prefers `default-codex`, otherwise the first listed ID, through that exact read. Variable-free templates apply immediately; others retain the chooser and shortcut origin on restoration. Empty lists and failed list/read requests never open a hardcoded starter. **Start without Preset** opens the ordinary form without a Preset read or replacing a denied selection. Creation authorization still applies.
+[`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs)
+lists only readable Presets (the list requires Namespace read and returns summaries
+without templates), then reads the selected resource once. Quick-start prefers
+`default-codex`, otherwise the first readable Preset in case-insensitive locale
+order, with exact name order breaking ties. Custom starters appear by name.
+Variable-free templates apply immediately; others retain their chooser and origin. Empty or failed lists and reads cannot apply hidden templates. **Start without Preset** opens
+the ordinary form without reading a Preset; it does not replace a denied
+selection. Creation authorization still applies.
 
 `console-assets.ts:readConsoleAsset` serves the public
 [`default-codex`](../../deploy/presets/default-codex.json) as
@@ -272,6 +279,9 @@ or an immutable admitted revision.
 
 ## Changelog
 
+- 2026-10-15 13:26: Name the selected custom starter and retain upstream Preset summaries. (authoring-run/4863651f-24de-427e-ac6f-152c65948af3 - 775a7cff0890d646ed433df45b9233ea58b553e6)
+
+- 2026-10-14: The Preset list returns summaries. (fix-1323-lists)
 - 2026-10-12 16:26: Preserve combined flow provenance and condense the unchanged chooser trace. (authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb - 8579ab708615e4cf7214704eae3894231d1a3412)
 
 - 2026-10-12 15:28: Integrate upstream b195e54e9 while retaining the custom profile and readable starter contracts. (authoring-run/df6d4023-3aec-45e7-aa7d-8eca68711247 - 85561c4fc4666805b187d0a554c872938eb9b048)

@@ -85,10 +85,11 @@ Codex `config.toml` or a reasoning-effort override.
 
 ### Plain console default
 
-**Start with default Preset** prefers the readable `default-codex` copy in the
+Quick-start prefers the readable `default-codex` copy in the
 selected Namespace, otherwise the first readable Preset by name using the
 browser's case-insensitive locale order, with exact name order breaking ties.
-Choose manually when a particular template is required.
+Custom starters appear by name; `default-codex` keeps **Start with default Preset**.
+Select specific templates manually.
 It reads that exact resource; a denied read does not open a substitute form.
 The shipped default has no variables, model, name, or credential; the ordinary
 form collects them. Templates with variables open the variable chooser first.

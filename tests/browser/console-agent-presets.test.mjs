@@ -3231,10 +3231,15 @@ test("The console quick-start prefers the readable installed default, then the f
     const { page } = await newPage(t, fixture);
     const requests = apiRequests(page, fixture.origin);
     await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
+    const starterName = installedDefault === "readable" ? "the default Preset" : "Alpha starter";
     await page
-      .getByText("Choose a Preset or start with the default Preset.", { exact: true })
+      .getByText(`Choose a Preset or start with ${starterName}.`, { exact: true })
       .waitFor();
-    const shortcut = page.getByRole("button", { name: "Start with default Preset" });
+    const shortcut = page.getByRole("button", {
+      name:
+        installedDefault === "readable" ? "Start with default Preset" : "Start with Alpha starter",
+      exact: true,
+    });
     assert.equal(await shortcut.isEnabled(), true);
     await shortcut.click();
     assert.equal(

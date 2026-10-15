@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
-updated: 2026-10-14
-last_updated_session: authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3
+updated: 2026-10-15
+last_updated_session: authoring-run/4863651f-24de-427e-ac6f-152c65948af3
 ---
 
 # Installation Profile Rendering Flow
@@ -289,6 +289,9 @@ activation, and repository registry creation need separate evidence.
 
 ## Changelog
 
+- 2026-10-15 13:26: Integrate upstream hosted discovery DNS handling with trusted profiles. (authoring-run/4863651f-24de-427e-ac6f-152c65948af3 - 775a7cff0890d646ed433df45b9233ea58b553e6)
+
+- 2026-10-13 16:26: Merge current profile validation while retaining hosted discovery DNS snapshots and explicit network policy inputs. (authoring-run/1e1d633d-329d-462f-b077-6cb27c43a6e4 - da72ecf45a0989b857fd7f05d8238a38a979eb64)
 - 2026-10-12 23:13: Trim repeated rendering prose after integration. (authoring-run/dcccee96-5080-4cc0-a3fa-96168c7016d7 - 5954985afee60c992d3c8297d8c56cfeabad1521)
 
 - 2026-10-12 22:38: Derive hosted catalog prerequisites from the selected PluginDriver under either profile family. (authoring-run/d5a03f17-87b8-4652-bfd0-e703b8e20eb7 - 2f94a9ef472f4f7a2168f08df0e478ea7a4eb67b)
