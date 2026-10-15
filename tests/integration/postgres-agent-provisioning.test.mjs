@@ -3826,7 +3826,7 @@ test(
 );
 
 test(
-  "guided Codex provisioning freezes native admin policy on its first worker handoff and retry",
+  "guided Codex provisioning freezes native admin policy on its first worker handoff and pending replay",
   { ...requiresPostgres, timeout: 60_000 },
   async (context) => {
     const compute = createRuntimeComputeDriver();
