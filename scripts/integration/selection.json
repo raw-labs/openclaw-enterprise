@@ -7,50 +7,15 @@
     "commit": "d3ccc54781d0d50b40e9aeb814f0573d38c0a585"
   },
   "batch": {
-    "startingIntegration": "eb2726082d5e71c969a1dcd6ef94f6a37285f2d4",
+    "startingIntegration": "f0473090e63c6738d800cfea244675f970736e3d",
     "steps": [
       {
-        "operation": "upstream",
-        "commit": "61adc732317ccce5984b7b1d1ffb92595cf8b82e",
-        "input": "d3ccc54781d0d50b40e9aeb814f0573d38c0a585"
-      },
-      {
-        "operation": "PR #16",
-        "commit": "bd62cb4f0a6179b577aa21503533357adc862655",
-        "input": "38ff2099bc509333ad98c2ea0c906890f30d8ce7"
-      },
-      {
-        "operation": "PR #11",
-        "commit": "289e272385f0e649800775161be12d88f8ec5cb6",
-        "input": "775a7cff0890d646ed433df45b9233ea58b553e6"
-      },
-      {
-        "operation": "PR #12",
-        "commit": "44f04fdcafe4e58247b4b5ab8ab66cc09d60a6e1",
-        "input": "128433480bdc186f460312eece38a8ad486ecdeb"
-      },
-      {
-        "operation": "PR #13",
-        "commit": "4ed03c7797af091100a5f2f089a0b8f6aad9048a",
-        "input": "6690b557210a079a47541289fafd64e31f36a46c"
-      },
-      {
-        "operation": "PR #15",
-        "commit": "523d3b62320a953c8db9a8b398b908824c7edf7c",
-        "input": "0b4a067fda15d08567546d3c1ed7381477ee309b"
-      },
-      {
-        "operation": "PR #18 and channel compatibility",
-        "commit": "a8bf730e9ef081516654731ff107f8d65c244f5d",
-        "input": "313a70262e432192306a2db431bf0b6f0459a957"
-      },
-      {
-        "operation": "Reconcile existing workflows and final combined verification",
-        "commit": "ebbf3c4a42e4353091e5c8d4929bccfc3bf585e9",
-        "input": "313a70262e432192306a2db431bf0b6f0459a957"
+        "operation": "PR #17 and embedded Slack/Teams outbound compatibility",
+        "commit": "3ecc6dec0d6e04645fbd9a4450c39425b676fde2",
+        "input": "b0fa2a6a177be60ee7f62dede78a7578f8198785"
       }
     ],
-    "retainedUnchanged": [1, 2]
+    "retainedUnchanged": [1, 2, 11, 12, 13, 15, 16, 18]
   },
   "features": [
     {
@@ -124,6 +89,16 @@
       "headRepository": "raw-labs/openclaw-enterprise"
     },
     {
+      "number": 17,
+      "title": "Temporary embedded channel evaluation",
+      "author": "miguelbranco80",
+      "headRef": "codex/eval-embedded-channels",
+      "commit": "b0fa2a6a177be60ee7f62dede78a7578f8198785",
+      "status": "included",
+      "comparisonBase": "d7595b9ce392c0558cf84c268bc31f093aba36bf",
+      "headRepository": "raw-labs/openclaw-enterprise"
+    },
+    {
       "number": 18,
       "title": "Gateway outbound access",
       "author": "miguelbranco80",
@@ -134,12 +109,7 @@
       "headRepository": "raw-labs/openclaw-enterprise"
     }
   ],
-  "excluded": [
-    {
-      "number": 17,
-      "reason": "Evaluation branch; not selected for integration."
-    }
-  ],
+  "excluded": [],
   "compatibility": [
     {
       "id": "native-role-session-authority",
@@ -190,6 +160,24 @@
         "tests/integration/logging-collector.test.mjs",
         "scripts/ci/test-suites/checks-baseline-2.json"
       ]
+    },
+    {
+      "id": "embedded-slack-teams-outbound",
+      "pullRequests": [2, 17, 18],
+      "commits": ["3ecc6dec0d6e04645fbd9a4450c39425b676fde2"],
+      "paths": [
+        "apps/controller/src/composition/channel.ts",
+        "apps/controller/src/composition/installation-config.ts",
+        "apps/controller/src/drivers/channel/index.ts",
+        "apps/controller/src/worker.ts",
+        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts",
+        "packages/occ/src/state/platform-state.ts",
+        "packages/occ/src/state/postgres-schema.ts",
+        "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
+        "docs/flows/agent-channel-runtime.md"
+      ],
+      "notes": "Retain current per-revision outbound and Teams header/serving ownership handling. Add default-off embedded provisioning, model endpoint bypass, worker destination declarations, and exact callback Service/network cleanup. Renumber the incoming trial RFC and linked plan to 0021 because Gateway outbound owns 0020; source PR files stay untouched."
     }
   ],
   "migrationMappings": [
@@ -214,11 +202,11 @@
   ],
   "qualification": {
     "policy": "Qualify the final integration commit; CI run receipts identify the tested SHA. Source PR checks do not qualify this composition.",
-    "previousTestedCommit": "eb2726082d5e71c969a1dcd6ef94f6a37285f2d4",
+    "previousTestedCommit": "f0473090e63c6738d800cfea244675f970736e3d",
     "previousRuns": {
-      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38396948309",
-      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38396948280",
-      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38397013772"
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38692070499",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38692070493",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38692100838"
     },
     "requiredChecks": [
       "CI Required on the published SHA",
@@ -226,9 +214,18 @@
       "Native controller and runtime checks on AMD64 and ARM64; no publication"
     ],
     "limits": [
-      "Channel admission uses real API/OCC/IAM/Driver composition with workload fixtures and credential validation excluded.",
+      "Embedded lifecycle uses the authenticated API, PostgreSQL worker and real scoped Kubernetes resources with a protocol runtime fixture and synthetic provider credentials.",
       "Public proxy checks verify actual DNS, CONNECT and certificate-verified TLS, not Slack Socket Mode or Microsoft Teams SDK delivery.",
       "Live provider messaging, consent, public Teams ingress and model execution require their separate authorized integration prerequisites."
     ]
-  }
+  },
+  "integrationMigrations": [
+    {
+      "path": "migrations/0057_embedded_channel_outbound.sql",
+      "commit": "3ecc6dec0d6e04645fbd9a4450c39425b676fde2",
+      "pullRequests": [17, 18],
+      "sha256": "c3b47c6e8496b6bbdaafe6e9fe4bbf5a89ff5fa4155afc679da872ea37a2248a",
+      "reason": "Allow embedded channelsOnly revision snapshots while retaining dedicated-only additional outbound authority. Existing source migration bytes and integration identities remain unchanged."
+    }
+  ]
 }

@@ -16,7 +16,8 @@ node scripts/integration/check-selection.mjs
 ```
 
 The checker verifies selected commits are ancestors, excluded PRs are not selected,
-compatibility references exist, and mapped migration bytes match their source.
+compatibility references exist, mapped migration bytes match their source, and
+integration-only migrations match their recorded commit and checksum.
 It does not establish runtime correctness or detect every semantic change.
 Compare current PR heads separately; newer heads are candidates for a later batch,
 not permission to change an in-progress selection.

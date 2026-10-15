@@ -52,6 +52,20 @@ for (const mapping of selection.migrationMappings) {
   assert.deepEqual(integrated, source, `Migration bytes changed: ${mapping.integrated}`);
   assert.equal(createHash("sha256").update(integrated).digest("hex"), mapping.sha256);
 }
+for (const migration of selection.integrationMigrations ?? []) {
+  ancestor(migration.commit);
+  assert.ok(migration.pullRequests.every((number) => selected.has(number)));
+  git("ls-files", "--error-unmatch", migration.path);
+  assert.deepEqual(
+    readFileSync(migration.path),
+    execFileSync("git", ["show", `${migration.commit}:${migration.path}`]),
+    `Integration migration differs from its recorded commit: ${migration.path}`,
+  );
+  assert.equal(
+    createHash("sha256").update(readFileSync(migration.path)).digest("hex"),
+    migration.sha256,
+  );
+}
 console.log(
   `Integration selection verified at ${git("rev-parse", "HEAD")}: ${selected.size} PR inputs.`,
 );
