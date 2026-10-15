@@ -7333,8 +7333,8 @@ export class OpenClawController {
         revisionHarness,
         compute,
         sandbox,
-        lockedAgent,
         harnessAuth.method === "credential_source" ? harnessAuth.loginMode : undefined,
+        lockedAgent,
       );
       // The Compute rules first, as on Configuration save, so a stored Configuration that
       // predates a rule both refuse gets the message its next save would.
@@ -11072,8 +11072,8 @@ export class OpenClawController {
     harness: RevisionHarnessDescriptor,
     compute: ComputeDriver,
     sandbox: SandboxDriver | undefined,
-    agent?: Pick<Agent, "namespaceId" | "id">,
     credentialSourceLoginMode?: CredentialSourceLoginMode,
+    agent?: Pick<Agent, "namespaceId" | "id">,
   ): OpenClawConfigurationDocument {
     const sandboxConfiguration =
       sandbox?.configureAgent !== undefined

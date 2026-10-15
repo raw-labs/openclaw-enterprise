@@ -27,8 +27,8 @@ graph TD
   DEP["Deploy or provision Agent"] --> OPT{"Installation routing and Agent UI enabled?"}
   OPT -->|yes| PREP["Compute prepares exact origin and native policy"]
   OPT -->|no| COPY["Preserve explicit opt-out"]
-  PREP -->|accepted| SNAP["Validate and freeze revision copy"]
-  PREP -->|setting conflict| REFUSE["Refuse admission without a new revision"]
+  PREP -->|accepted| SNAP["Validate and freeze revision"]
+  PREP -->|setting conflict| REFUSE["Refuse admission"]
   COPY --> SNAP
   SNAP --> A
   A["Console opens Agent detail tab"] --> B["GET exact Agent native-admin status"]
@@ -42,18 +42,18 @@ graph TD
   J -->|yes| X["Return stopped without an origin"]
   J -->|no| Y["Return unavailable"]
   I -->|yes| K{"Agent desired running?"}
-  K -->|no| L["Return stopped with derived origin"]
-  K -->|yes| R2{"Newer revision replacing it on an exclusive Compute Driver?"}
+  K -->|no| L["Stopped; derived origin"]
+  K -->|yes| R2{"Exclusive replacement pending?"}
   R2 -->|yes| Y
   R2 -->|no| M{"Native config supported?"}
-  M -->|no| N["Return unsupported with derived origin"]
-  M -->|yes| CO{"Compute ID and implementation match active revision?"}
-  CO -->|no| CF["Return 503 dependency error"]
-  CO -->|yes| EP{"Private gateway endpoint supported?"}
+  M -->|no| N["Unsupported; derived origin"]
+  M -->|yes| CO{"Compute owner matches revision?"}
+  CO -->|no| CF["503 dependency error"]
+  CO -->|yes| EP{"Private endpoint supported?"}
   EP -->|no| N
-  EP -->|yes| O["Return available Agent URL"]
-  O --> P["Browser opens derived Agent host with shared OCE session cookie"]
-  P -->|HTTP| Q["OCC resolves host to exact Agent using platform state"]
+  EP -->|yes| O["Available; Agent URL"]
+  O --> P["Browser opens Agent host with shared cookie"]
+  P -->|HTTP| Q["Resolve host to exact Agent"]
   P -->|WebSocket| V["OCC guards client socket during admission"]
   V --> Q
   Q --> R{"Shared session and exact Agent use and assigned role still valid?"}
