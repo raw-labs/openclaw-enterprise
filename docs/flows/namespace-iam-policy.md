@@ -37,11 +37,13 @@ graph TD
   L -->|yes, held through transaction| E["Controller validates Role, subject, and exact target"]
   L -->|revoked or expired| X["Roll back and deny"]
   S -->|no| E
-  E --> F["Selected IAM Driver mutates platform IAM policy"]
+  E --> T{"IAM Driver joins transaction?"}
+  T -->|yes| F["Selected IAM Driver mutates platform IAM policy"]
+  T -->|no| U["Reject with 503 before policy write"]
   F --> G["Controller appends audit event in the same transaction"]
   D --> H["API returns policy metadata"]
-  G -->|commit with current session| H
-  G -->|session expired| X
+  G -->|COMMIT validates held session| H
+  G -->|held session expired| X
 ```
 
 ## Execution Trace
@@ -70,9 +72,13 @@ user before the session, then the controller takes its existing Namespace and
 account locks. Guarded profiles first reuse
 `packages/occ/src/state/human-authentication.ts:PostgresHumanAuthentication.holdSession`,
 which validates the bound account and sign-in method through the existing actor guard.
+Session retention takes shared user locks and preserves the policy transaction's
+timeout settings. Account-management operations keep their exclusive locks and
+five-second lock and ten-second statement limits. Independent sessions can write
+different Namespaces concurrently while revocation still waits for both holders.
 Logout or account/method revocation must wait for a protected
 write to finish; revocation that completes first makes the write fail. Expiry
-during the write rolls back policy and its success audit. The memory auth adapter
+during the write or before server-side COMMIT validation rolls back policy and its success audit. The memory auth adapter
 serializes policy writes with local logout and rechecks the session inside the
 transaction. Non-session credentials keep their existing admission behavior.
 The event's authorization records the
@@ -111,7 +117,10 @@ Runtime assignment creation and changes use the saved Agent Configuration throug
 `packages/iam/src/index.ts:NativeIAMDriver`
 
 The native IAM Driver implements Namespace policy methods against the
-platform-provided policy repository. It rejects missing Roles, cross-Namespace
+platform-provided policy repository. Before a policy write, OCC requires the
+selected Driver's `namespacePolicyTransaction: "platform-unit-of-work"`
+declaration. An unsupported Driver returns `503` before its mutation method is
+called; reads do not require that declaration. The native Driver rejects missing Roles, cross-Namespace
 targets, unsupported subjects, duplicate IDs, referenced Role deletion, and
 unknown exact bindings without weakening authorization. Invalid Role or
 binding input (an unsupported Permission, or a subject, Role or target not
@@ -149,7 +158,17 @@ unit: the next request reads the policy again.
 `packages/occ/src/state/postgres-state.ts:PostgresPlatformState`
 
 The PostgreSQL state implementation writes Roles and AccessBindings through the
-same unit of work used by the API audit append. A duplicate person/Agent runtime assignment becomes the existing `ResourceConflictError` before the IAM wrapper handles unknown failures. The transaction rolls back without a success audit, and the API returns `409`. If commit outcome is unknown,
+same unit of work used by the API audit append. A duplicate person/Agent runtime assignment becomes the existing `ResourceConflictError` before the IAM wrapper handles unknown failures. The transaction rolls back without a success audit, and the API returns `409`. 
+Holding a session issues an
+unchanged-row UPDATE that locks it without extending its lifetime or changing
+authentication metadata. This queues the deferred
+`occ.require_held_authentication_session` constraint for server-side COMMIT
+validation. It checks expiry with the database clock, including when the client's
+COMMIT request was delayed after the last authentication check. An expired
+session raises the named `held_authentication_session_is_current` constraint;
+State maps that rejection to an authorization denial (`403`). The policy and
+success audit roll back together; the API records the denial separately.
+If commit outcome is unknown,
 State discards the connection without another query. OCC reports dependency
 failure; a caller must not infer rollback or replay the mutation from that
 result. Later authorization requests read the current policy through the IAM
@@ -177,7 +196,8 @@ selected account, session, and policy writers join the same protocol.
 ## Debugging and Verification
 
 - `node --test tests/integration/occ-api.test.mjs` checks the HTTP contract and
-  API admission behavior for Namespace IAM policy.
+  API admission behavior for Namespace IAM policy, including refusal of all five
+  writes without declared transaction participation.
 - `node --test tests/conformance/occ-api-security.test.mjs` checks that Agent
   responses expose `servicePrincipalId` without accepting caller-supplied values.
 - `node --test tests/integration/postgres-namespace-iam-policy.test.mjs` checks
@@ -186,8 +206,14 @@ selected account, session, and policy writers join the same protocol.
   checks that an unknown commit does not wait for a later rollback query.
 - The production bootstrap Sharing case in
   `tests/integration/postgres-production-wireup.test.mjs` checks revocation after
-  real HTTP admission, cross-replica logout ordering and expiry rollback. It uses
+  real HTTP admission, cross-replica logout ordering, expiry during policy work,
+  and expiry after the final client check with COMMIT paused at the transport. It uses
   real authentication, IAM and PostgreSQL; its passive Compute does not prove a native Gateway.
+- The guarded activation case in
+  `tests/integration/postgres-password-default-activation.test.mjs` checks a
+  Namespace wait beyond five seconds, an independent session's write, and
+  subsequent account revocation. These cases emit credential-free execution
+  diagnostics for review evidence.
 - A `403` can also mean the admitted assigning session was revoked or expired
   before its protected transaction completed. A `403` means the caller lacks Installation administration, exact Namespace
   read, or target read for binding creation. A `400` names the invalid
@@ -209,6 +235,7 @@ selected account, session, and policy writers join the same protocol.
 - 2026-10-13 13:33: Apply assigning-session protection to native role changes as well as create and delete commands. (authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e - 378cf70fb08c44ee8ac4855ba073224fa5ea02cc)
 
 - 2026-10-12 13:25: Retain human sessions through Namespace policy commits and coordinate revocation. (authoring-run/3dab5ffe-1c2c-4b63-9899-8f98cacf0b43 - b195e54e9b0ce98ead2b2306015a5209325e837b)
+- 2026-10-13 15:22: Retain assigning sessions through policy COMMIT, require transactional IAM writes, and preserve caller limits with shared guarded-session holds. (authoring-run/7efed788-313c-4486-b931-770741ceeb29 - 9dabe685d3992abf1126cb37051b15b74b171478)
 
 - 2026-10-05 13:58: Trace saved Configuration role selection, stale-selection rejection and deployed permission previews. (authoring-run/80db88a0-8bf4-401d-b060-01f34cc3af10 - 76f9307b61ccb1c544257081d95b15a0ee893b92)
 

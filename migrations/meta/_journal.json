@@ -379,6 +379,13 @@
       "when": 1787000000054,
       "tag": "0054_agent_runtime_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787000000055,
+      "tag": "0055_held_authentication_session",
+      "breakpoints": true
     }
   ]
 }
