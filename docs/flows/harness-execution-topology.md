@@ -1,7 +1,7 @@
 ---
 created: 2026-08-21
-updated: 2026-10-10
-last_updated_session: agent:roboclaw:dashboard:9d0532e1-befb-4fc3-935e-7cd2a0c72110
+updated: 2026-10-13 15:58
+last_updated_session: authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de
 ---
 
 # Harness Execution Topology Flow
@@ -66,14 +66,14 @@ modes fail closed.
 Compute's `apps/controller/src/drivers/compute/native-gateway-transport.ts:validatePlaintextNativeGateway`
 rejects `gateway.tls.enabled: true` before revision creation and preparation:
 Docker, SSH and Kubernetes require native HTTP.
-The admitted revision immutably
-captures its native configuration, approved harness identity/version, explicit mode, Compute
-selection, and Agent ServicePrincipal. Production admits approved
-`openclaw`/`embedded` and `codex`/`dedicated`, and `openclaw`/`dedicated` only when
-the selected SandboxDriver provisions Harnesses with networking, filesystem, and
-process containment. An associated
-`access_token` additionally requires dedicated Codex; the frozen account
-contains only its OCC identity, credential kind, and opaque Secret reference.
+The revision freezes Configuration, approved Harness identity/version, mode,
+Compute, and Agent ServicePrincipal. Production supports embedded OpenClaw and
+dedicated Codex; dedicated OpenClaw requires a SandboxDriver providing network,
+filesystem, and process containment. Access tokens require dedicated Codex;
+account snapshots retain OCC identity, credential kind, and opaque Secret reference.
+`apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts:requireCodexPluginPolicy`
+rejects policies blocking Codex before Agent save, provisioning, or deployment.
+It preserves the source policy.
 
 ### 2. Claim work and realize the approved topology
 
@@ -319,6 +319,8 @@ owns claim sizes, mount paths, StorageClass requirements, and final teardown.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-13 15:58: Reject Codex policy conflicts. (authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de - 438103e91)
 
 - 2026-10-10 04:41: Reconcile endpoint validation and routing with credential refresh, native approval and readiness contracts. (agent:roboclaw:dashboard:9d0532e1-befb-4fc3-935e-7cd2a0c72110 - 90268463bbd255c3c13a0e0bdeb437728189eb1a)
 

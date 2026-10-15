@@ -1,7 +1,7 @@
 ---
 created: 2026-09-01
 updated: 2026-10-13
-last_updated_session: authoring-run/de7ed7a0-de53-4712-b6bd-1baf0d296d55
+last_updated_session: authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de
 ---
 
 # Platform console request flow
@@ -169,14 +169,12 @@ Installation-wide collection. No readable selection means no Agent request.
 `GET /backends` requires Installation `administer` independently of selection.
 It returns safe summaries, an empty list for empty configuration, or dependency errors.
 
-`apps/controller/src/console/agents/create.mjs:renderCreateAgent` composes Provider,
-Harness, Preset, Configuration, and workspace inputs. Provider/Harness changes
-reset incompatible credentials and model choices while retaining unrelated JSON.
-`updateModelConfiguration` adds Codex only to a non-empty native `plugins.allow`
-array; omitted or empty lists remain unrestricted. Returning to OpenClaw removes
-Codex's entry and allowlist ID; other native settings remain. The
-[creation reference](../reference/console/create-and-deploy.md) owns combinations,
-Preset constraints, token handling, permissions, and recovery.
+`apps/controller/src/console/agents/create.mjs:renderCreateAgent` composes the form.
+Provider/Harness changes reset incompatible credentials and models.
+`updateModelConfiguration` preserves allow/deny policy, changing only
+Codex's runtime entry. The form rejects conflicts before writes;
+Kubernetes Compute's `validateHarnessAuth` enforces this for API callers.
+See [creation](../reference/console/create-and-deploy.md) for supported combinations.
 
 `agents/plugin-fields.mjs:createPluginFields` edits Agent `plugins` independently.
 Invalid/untouched fields survive; clearing restores inheritance. Submission,
@@ -349,15 +347,16 @@ refresh and inspection.
 
 ## Changelog
 
+- 2026-10-13 15:53: Preserve plugin permissions; reject conflicts. (authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de - 438103e91)
+
+- 2026-10-12 15:30: Refresh native plugin preservation against current upstream. (authoring-run/86831b3d-1b20-4d59-8b4f-e814f6bdb488 - 1c722bea21fabefffc112b23bb739c88dbcecf4b)
+- 2026-10-10 22:27: Preserve native plugin allowlists across Harness switches. (authoring-run/73ca79b6-4687-4e93-a98f-d46b194ee2ed - 80725162a946f80652b939a32a57ee4e922eeb5c)
+
 - 2026-10-13 12:00: Explain outage sign-in reasons. (kc-guide-fix)
 
 - 2026-10-12 16:26: Reconcile upstream behavior and condense the combined flow. (authoring-run/31347b6f-9f77-4bdf-9d76-8f57f4a33feb - 8579ab708615e4cf7214704eae3894231d1a3412)
-
-- 2026-10-12 15:30: Refresh native plugin preservation against current upstream. (authoring-run/86831b3d-1b20-4d59-8b4f-e814f6bdb488 - 1c722bea21fabefffc112b23bb739c88dbcecf4b)
 - 2026-10-12 15:31: Refresh upstream. (authoring-run/5d7618e0-3207-4553-a028-5149ef0697e2 - 06bb7d0e6e18ea337ba7dbcac892337e96b206a1)
 - 2026-10-10 22:36: Integrate native plugin preservation with saved Secret delegation. (authoring-run/3ff29db6-adc3-43bf-b3fb-b39e9aad30d9 - a535a417d0fe2bb52c2be0f3c8c9398f85a382e7)
-
-- 2026-10-10 22:27: Preserve native plugin allowlists across Harness switches. (authoring-run/73ca79b6-4687-4e93-a98f-d46b194ee2ed - 80725162a946f80652b939a32a57ee4e922eeb5c)
 - 2026-10-10 22:15: Trace saved Configuration Secret enumeration and existing IAM delegation checks. (01a11ac0-ab87-7d21-8df5-a306d8563a19 - 80725162a946f80652b939a32a57ee4e922eeb5c)
 - 2026-10-13 14:40: Trace Configuration Secret grants. (authoring-run/de7ed7a0-de53-4712-b6bd-1baf0d296d55 - 1d7772d11b2874ae7fb1f5253a998bd0463395b2)
 - 2026-10-09 21:10: Preserve cancellation, deadline and transport failures during response body reads (authoring-run/2e195d67-c77d-43d0-8c32-2179523eb3a2 - 013bcf5f76819ca280a164745d470855fc5b74cd)

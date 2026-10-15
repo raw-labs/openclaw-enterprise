@@ -136,11 +136,12 @@ The [DevDay storyboard](../../scripts/console-storybook/devday-storyboard.md)
 covers creating an Agent from the SWE Agent Preset and opening `oceclaw`'s
 simulated Admin UI, connected to no gateway, Slack, credential, or model.
 
-**Choose provider, harness, and authentication**: models precede credentials;
-execution follows the harness; saved tokens require Codex. Manual entry proves no
-model access. **Experimental Dedicated OpenClaw** shows its runtime-build warning;
-Embedded does not. **Native plugins**: switch to Codex and back; check omitted,
-empty, and selected allowlists and the retained entry.
+**Choose provider, harness, and authentication** covers supported combinations.
+**Enter another model ID** allows unverified models. Harness sets execution;
+tokens require Codex. **Experimental Dedicated OpenClaw** shows the runtime
+warning. **Native plugins** preserve allow/deny policy. **Codex allowlist
+round-trip** preserves preset restrictions; **Native plugins with an allowlist**
+and **Codex denied by native policy** require explicit JSON edits before creation.
 
 In **Enter another model ID**, switch to **Choose a model from the list** and
 back. Listed models and other settings should survive; focus moves to the active
