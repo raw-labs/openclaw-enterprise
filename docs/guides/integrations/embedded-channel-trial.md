@@ -7,7 +7,28 @@ share the Agent's execution workload. Every Agent still owns its own Gateway.
 
 ## Enable the trusted option
 
-Set the selected Kubernetes Compute Driver's Installation configuration:
+For the [installation renderer](../deploy/installation-profiles.md#render-files),
+add the opt-in to the existing trusted site-input JSON:
+
+```json
+{
+  "channels": {
+    "runtimeProxyUrl": "http://192.0.2.10:3128",
+    "experimentalEmbeddedChannels": true
+  }
+}
+```
+
+Render with `--profile openclaw`; the option also works with `codex` when selecting
+embedded OpenClaw Agents. It requires `runtimeProxyUrl` or the existing
+`managedSlackProxy: true` input. Omit the option or set it to false to keep the default
+refusal. Preflight warns about the shared-credential risk when enabled. Apply the
+paired startup YAML and Helm values in the guide's order so API and worker load
+the same configuration. The option does not configure Teams ingress or broaden
+the proxy's allowed destinations.
+
+For a directly authored Installation, set the selected Kubernetes Compute Driver's
+configuration:
 
 ```yaml
 runtime:
