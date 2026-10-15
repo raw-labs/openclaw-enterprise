@@ -5782,7 +5782,7 @@ test("Agent provisioning API validates inline configuration with existing Secret
   // without its value, so the caller can fix it.
   const kubernetes = createTestKubernetesComputeDriver("compute-provisioning-validation");
   computeDriver.validateAgentProvisioning = (input) => kubernetes.validateAgentProvisioning(input);
-  const model = { agents: { defaults: { model: "codex/gpt-6-astra" } } };
+  const model = createHarnessConfiguration("codex", "gpt-6-astra");
   for (const [gateway, message] of [
     [
       { auth: { mode: "token" } },
@@ -5962,7 +5962,11 @@ test("Agent provisioning API validates inline configuration with existing Secret
     fixture.app,
     "POST",
     `/namespaces/${namespace.data.id}/agents/provision`,
-    { body: provisioningRequestBody(namespace.data.id, secrets) },
+    {
+      body: provisioningRequestBody(namespace.data.id, secrets, {
+        configuration: { values: model },
+      }),
+    },
   );
   assert.equal(computeRefused.status, 409, JSON.stringify(computeRefused.body));
   const refusals = logLines.filter((line) => line.event === "agent_provisioning.compute_refused");

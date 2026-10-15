@@ -293,9 +293,14 @@ test("the Collector exports every OCC API and worker event the docs name", async
     ...(await sourceFiles("apps/controller/src", [".ts", ".mjs"])),
     ...(await sourceFiles("packages/occ/src", [".ts"])),
   ]) {
-    // The Kubernetes Compute Driver renders this file's events into Gateway and Codex
-    // Pods; the Collector classifies those runtime wrapper diagnostics separately.
-    if (path.endsWith("drivers/compute/kubernetes/runtime-entrypoints.ts")) {
+    // These sources run in Gateway/Codex or standalone proxy Pods, not OCC API
+    // or worker processes. Their stderr diagnostics are outside this API/worker
+    // export contract; runtime wrapper diagnostics have separate Collector cases.
+    if (
+      path.endsWith("drivers/compute/kubernetes/runtime-entrypoints.ts") ||
+      path === "apps/controller/src/gateway/outbound-proxy.mjs" ||
+      path === "apps/controller/src/gateway/control-plane-outbound-proxy.mjs"
+    ) {
       continue;
     }
     const text = await readFile(join(root, path), "utf8");

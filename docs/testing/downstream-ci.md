@@ -24,8 +24,11 @@ on GitHub-hosted Ubuntu 22.04: its existing host-admission contract requires it.
 Use ephemeral VMs with sudo, Docker and enforcing NetworkPolicies.
 
 The concurrency override applies only to Kubernetes configuration fixture files.
-Native image checks also need `CONTAINER_NODE_BASE_IMAGE`; follow the
-[container operator setup](../../.github/containers.md#operator-setup).
+Native image checks use `CONTAINER_NODE_BASE_IMAGE`; follow the
+[container operator setup](../../.github/containers.md#operator-setup). A manual
+`container-check.yml` dispatch can set `node_base_image` to the reviewed
+source pin instead, without changing repository variables. Integration checks
+build and smoke images without publication.
 
 The startup lane and native runtime-image smoke load the
 [job-owned container policy](../../.github/actions/run-ci-lane/codex-sandbox.apparmor)

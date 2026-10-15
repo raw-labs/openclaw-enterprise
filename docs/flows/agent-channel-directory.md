@@ -180,7 +180,7 @@ Manual IDs remain available after missing-consent or provider errors.
   infrastructure `denyCidrs`, or the approved external endpoint in
   `api.controlPlaneOutboundProxyUrl`. Check the selected provider's exact
   management destinations above.
-- The managed proxy reports `outbound_proxy.listening` after valid policy and
+- The standalone proxy writes `outbound_proxy.listening` to its own stderr after valid policy and
   listener startup; `GET /readyz` returns `200`. A configuration failure emits
   `control_plane_outbound_proxy.startup_failed` and exits before listening.
 - Directory conformance tests cover provider pagination, safe errors, and native

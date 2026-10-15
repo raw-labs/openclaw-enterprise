@@ -1080,6 +1080,10 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
 
   for (const [values, message] of [
     [
+      { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
+      setting("env proxy transport", "is owned by Kubernetes Compute; use Agent gatewayOutbound"),
+    ],
+    [
       { ...valid, channels: { discord: { enabled: true } } },
       setting(
         "channels.discord",
@@ -1237,10 +1241,11 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
   const revisions = await request(context.app, "GET", `${agentPath}/revisions`);
   assert.deepEqual(revisions.body.data, []);
 
-  // A disabled unsupported channel and a non-credential env name still save.
+  // Disabled unsupported channels and ordinary non-credential environment values save.
+  // Proxy transport is Compute-owned and is checked in the refusal matrix above.
   for (const values of [
     { ...valid, channels: { discord: { enabled: false } } },
-    { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
+    { ...valid, env: { vars: { APP_LABEL: "sample" } } },
   ]) {
     const accepted = await request(context.app, "PATCH", item, { body: { values } });
     assert.equal(

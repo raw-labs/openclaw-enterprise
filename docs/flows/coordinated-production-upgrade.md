@@ -1,19 +1,17 @@
 ---
 created: 2026-09-23
-updated: "2026-10-12"
-last_updated_session: "authoring-run/ebb1c629-97b2-4b9a-aa67-a5e750346031"
+updated: "2026-10-15"
+last_updated_session: "authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584"
 ---
 
 # Production image upgrade flow
 
 ## Overview
 
-`scripts/upgrade-production-images` updates the OpenClaw Control Plane (OCC),
-Agent runtimes, or both. The controller-only command ends after the OCC API and
-worker recover; it does not request Agent deployments. A runtime release deploys
-a new revision for every Agent that was running when the command began and ends
-after the selected Pods are ready and each replacement gateway passes read-only
-Doctor lint. Model and external integration checks remain operator tasks.
+`scripts/upgrade-production-images` updates OCC and/or Agent runtimes.
+Controller-only upgrades end after API/worker recovery. Runtime upgrades replace
+Agents running at invocation, then verify selected Pod readiness and read-only
+Gateway Doctor lint. Model and external integration checks remain operator tasks.
 
 ## Entry Points
 
@@ -62,8 +60,8 @@ graph TD
 The script verifies the protected files, cluster, deployed Helm release, and
 matching OCC and Secret Installation IDs. It compares protected and live
 configuration in full, including selected image fields. It captures separate
-reviewed candidate files and accepts changes only to the Slack directory proxy
-and the curated Codex PluginDriver selection. All other Helm and Installation
+reviewed candidate files and accepts changes only to
+`api.controlPlaneOutboundProxyUrl` and the curated Codex PluginDriver selection. All other Helm and Installation
 settings remain protected, including new fields. The guard compares broker
 resource references, not the contents of referenced ConfigMaps or Secrets.
 Image flags select images after this comparison.
@@ -280,6 +278,8 @@ checks the exported inventory before following the recovery procedure. Empty
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-15: Use the canonical API management proxy candidate field (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - 37472188e).
 
 - 2026-10-12 15:14: Record bootstrap Job grants required by the two-cluster upgrade preflight alongside the fixture correction. (authoring-run/ebb1c629-97b2-4b9a-aa67-a5e750346031 - 9578f6f7aaff9b8545346f43043cbc5b9bcf674e)
 
