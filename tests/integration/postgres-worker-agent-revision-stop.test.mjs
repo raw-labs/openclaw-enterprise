@@ -1037,6 +1037,12 @@ test(
       ],
     );
     assert.deepEqual(retainedCounts.rows, [{ attempts: 3, revisions: 0, work: 2 }]);
+    // Deletion can finish while cleanup is claimed. Inventory must not treat
+    // the absence of live owners as evidence that this obligation succeeded.
+    await assert.rejects(fixture.controller.getInstallationDeploymentInventory(fixture.actor.id), {
+      name: "DependencyUnavailableError",
+      message: "Persisted repository cleanup is incomplete.",
+    });
     cleanupBarrier.resolve();
     let missing;
     await waitFor("retained repository cleanup to run after Agent deletion", async () => {
@@ -1062,6 +1068,13 @@ test(
     assert.equal(missing.phase, "invalidated");
     assert.equal(missing.liveRevisionId, null);
     assert.equal(missing.sessionId, undefined);
+    await fixture.stop();
+    // The unknown and invalidated attempts keep real cleanup queued even after
+    // another session is disposed; this is not completed historical work.
+    await assert.rejects(fixture.controller.getInstallationDeploymentInventory(fixture.actor.id), {
+      name: "DependencyUnavailableError",
+      message: "Persisted repository cleanup is incomplete.",
+    });
   },
 );
 
