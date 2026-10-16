@@ -1,7 +1,7 @@
 ---
 created: 2026-09-01
-updated: 2026-10-15
-last_updated_session: authoring-run/05ac6c84-8444-4dc1-8311-13c4e84369a3
+updated: 2026-10-16
+last_updated_session: authoring-run/54b9810e-9496-4cad-a1af-07194309fa03
 ---
 
 # Platform console request flow
@@ -9,7 +9,7 @@ last_updated_session: authoring-run/05ac6c84-8444-4dc1-8311-13c4e84369a3
 ## Overview
 
 `/console/` renders session-authorized resources.
-The [console reference](../reference/console.md) owns user-visible behavior;
+The [console reference](../reference/console.md) owns behavior;
 API and IAM authorize access.
 
 ## Entry Points
@@ -173,27 +173,27 @@ to Agents; global pages remain open; recovered warnings disappear.
 
 Agents use the selected Namespace's route. OCC authorizes Namespace reads and
 filters Agents by exact read permission; Namespace listing filters its
-Installation-wide collection. No readable selection means no Agent request.
+Installation-wide collection. No readable selection skips Agent requests.
 `GET /backends` ignores selection and requires Installation `administer` before
 returning safe startup summaries. Empty configuration returns an empty list;
 missing wiring or failed dependencies return errors.
 
-`apps/controller/src/console/agents/create.mjs:renderCreateAgent` composes Provider,
-Harness, Preset, Configuration, and workspace inputs. Provider/Harness changes
-reset incompatible credentials and model choices while retaining unrelated JSON. The
-[creation reference](../reference/console/create-and-deploy.md) owns combinations,
-Preset constraints, token handling, permissions, and recovery.
+`apps/controller/src/console/agents/create.mjs:renderCreateAgent` composes the form.
+Provider/Harness changes reset incompatible credentials and models.
+`updateModelConfiguration` preserves allow/deny policy, changing only
+Codex's runtime entry. `harnessPluginPolicyConflict` rejects blocked runtime/provider plugins before writes;
+Kubernetes Compute's `validateHarnessAuth` enforces this for API callers.
+See [creation](../reference/console/create-and-deploy.md) for supported combinations.
 
 `agents/plugin-fields.mjs:createPluginFields` edits Agent `plugins` separately
 from Configuration. Invalid JSON and untouched fields survive; clearing overrides
 restores inheritance. Submission, uncertain outcomes, or invalid JSON lock editing.
 `capabilities.pluginPolicies` gates policy edits; unsupported reviewers remain clearable.
-The picker keeps a compact credential/access reminder beside an expandable
-**Access and credential setup** disclosure. Its bounded instructions, list, and
-details scroll within the dialog while search and pagination remain reachable.
-While mounted, Available and Configured retain separate selected plugins, queries,
-tool filters, and expanded rows without fetching pages or changing drafts.
-Removed selections clear their details; discovery resets clear both tabs.
+The picker has a compact credential/access reminder, expandable **Access and
+credential setup**, and bounded scrolling with reachable search/pagination.
+Available and Configured retain separate selections, queries, filters, and expanded
+rows without requests or draft edits. Removal clears details; discovery resets
+clear both tabs.
 
 `create.mjs:loadPluginCatalog` and `loadPluginTools` implement
 [PAT discovery](agent-plugins.md#credential-scoped-discovery): the selected or
@@ -201,18 +201,14 @@ Preset Secret takes precedence over an entered token. OCC reads the
 Secret server-side. Pagination is upstream; filtering is local. Selecting a plugin loads tools.
 Credential, provider, and Harness changes clear results and invalidate pending reads.
 
-`create.mjs:MODEL_CHOICES` supplies unauthenticated static lists and manual entry.
-`renderAgentForm` toggles `manualModel`, invoking `updateModelConfiguration` and
-`updateControls`. Manual mode preserves `model.value` and clears the dropdown.
-`resetModelChoices` restores the current provider's list, including Configuration
-JSON changes, retaining only listed models; otherwise both inputs clear.
-Provider/authentication changes retain no model. Submission matches the primary
-Configuration model to `model.value`. `updateControls` sets the button label,
-visibility, and required input; the toggle moves focus. Returning preserves credentials and unrelated
-Configuration; saved-Configuration and pending-request locks govern both directions.
+`create.mjs:MODEL_CHOICES` supplies static unauthenticated lists and manual entry.
+`renderAgentForm` switches `manualModel`, updates configuration/controls and focuses the input. Manual mode retains `model.value` and clears the dropdown. `resetModelChoices` rebuilds the current provider's
+list after JSON provider edits, retaining listed models or clearing both inputs.
+Provider/authentication changes reset without retention. Submission requires primary
+model equality with `model.value`. Both retain credentials, unrelated Configuration and save/request locks.
 
 `configurationTemplate` enables Control UI with loopback origins on port 18789.
-Compute supplies gateway authentication; Presets replace the starter unchanged.
+Compute supplies authentication; Presets replace the starter.
 [Native admin access](agent-native-admin.md) owns HTTPS isolation.
 
 `createRepositoryFields` loads `GET /namespaces/:namespaceId/agents/repository-options`,
@@ -231,7 +227,7 @@ Ordinary drafts post `{kind: "agent", values, secretBindings}` to
 `POST /namespaces/:namespaceId/configurations`, then submit its ID, plugins,
 `initialWorkspaceFiles`, and `workspaceDefaultsId` to
 `POST /namespaces/:namespaceId/agents`. Success opens `revision=draft`.
-OCC stages all four workspace textareas, including unchanged/empty values, outside
+OCC stages all four workspace textareas, including empty values, outside
 Agent/Configuration for [workspace setup](workspace-files.md).
 
 `create.mjs:grantConfigurationSecretAccess` grants exact Secret `operate` for final
@@ -367,10 +363,20 @@ refresh and inspection.
 
 ## Changelog
 
+- 2026-10-16 12:58: Refresh native plugin policy against main. (authoring-run/54b9810e-9496-4cad-a1af-07194309fa03 - b32584150)
+
 - 2026-10-15 23:00: Keep views across abandoned returns; show slow rechecks. (console-nav-1015)
 - 2026-10-15 20:00: Hold pages until returns revalidate. (public-pr/2523)
 - 2026-10-15 19:40: Compress static console scripts and styles per `Accept-Encoding`. (console-gzip)
 - 2026-10-15 19:03: Preserve scoped destinations across sign-in and resolve Agent recovery after session admission. (authoring-run/05ac6c84-8444-4dc1-8311-13c4e84369a3 - 91ac04d6919860b7d7386444468a3dc0ddc90481)
+
+- 2026-10-15 13:32: Reject blocked OpenClaw providers. (authoring-run/5b16e286-0433-48fc-bd50-db5195cf9c98 - 1a5de45c2)
+
+- 2026-10-13 15:53: Preserve plugin permissions; reject conflicts. (authoring-run/b6795ba9-f6ca-4258-9c2e-e964cd0860de - 438103e91)
+
+- 2026-10-12 15:30: Refresh native plugin preservation against current upstream. (authoring-run/86831b3d-1b20-4d59-8b4f-e814f6bdb488 - 1c722bea21fabefffc112b23bb739c88dbcecf4b)
+- 2026-10-10 22:27: Preserve native plugin allowlists across Harness switches. (authoring-run/73ca79b6-4687-4e93-a98f-d46b194ee2ed - 80725162a946f80652b939a32a57ee4e922eeb5c)
+
 - 2026-10-13 12:00: Explain outage sign-in reasons. (kc-guide-fix)
 - 2026-10-09 21:10: Preserve cancellation, deadline and transport failures during response body reads (authoring-run/2e195d67-c77d-43d0-8c32-2179523eb3a2 - 013bcf5f76819ca280a164745d470855fc5b74cd)
 

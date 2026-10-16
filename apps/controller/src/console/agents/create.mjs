@@ -12,6 +12,43 @@ import { createSlackApproverField } from "./slack-approvers.mjs";
 import { renderChannels } from "../channels.mjs";
 import { GENERIC_CONFLICT, link, message, namespacePath, rejectionMessage } from "./list.mjs";
 
+function harnessPluginPolicyConflict(values, harnessId, providerId) {
+  const pluginId = harnessId === "codex" ? "codex" : providerId;
+  const requirement =
+    harnessId === "codex"
+      ? "for the Codex Harness"
+      : `for the OpenClaw ${providerId} model provider`;
+  const plugins = values.plugins ?? {};
+  if (plugins.enabled === false) {
+    return `Configuration setting plugins.enabled must not be false ${requirement}.`;
+  }
+  for (const key of ["allow", "deny"]) {
+    const list = plugins[key];
+    if (list !== undefined && (!Array.isArray(list) || list.some((id) => typeof id !== "string"))) {
+      return `Configuration setting plugins.${key} must be a list of plugin IDs.`;
+    }
+  }
+  const ids = (list) => (list ?? []).map((id) => id.trim().toLowerCase()).filter(Boolean);
+  if (ids(plugins.deny).includes(pluginId)) {
+    return `Configuration setting plugins.deny must not list ${pluginId} ${requirement}.`;
+  }
+  const allow = ids(plugins.allow);
+  if (allow.length > 0 && !allow.includes(pluginId)) {
+    return `Configuration setting plugins.allow must include ${pluginId} ${requirement}.`;
+  }
+  const entries = Object.entries(plugins.entries ?? {}).filter(
+    ([id]) => id.trim().toLowerCase() === pluginId,
+  );
+  // Persisted JSON and replay fingerprints cannot preserve ordered alias overrides.
+  if (entries.length > 1) {
+    return `Configuration setting plugins.entries must contain at most one entry for ${pluginId} after trimming whitespace and ignoring case; remove duplicate entries.`;
+  }
+  if (entries[0]?.[1]?.enabled === false) {
+    return `Configuration setting plugins.entries.${pluginId}.enabled must not be false ${requirement}.`;
+  }
+  return "";
+}
+
 // The API's duplicate-name sentence. Other Agent conflicts reach the client as generic text,
 // so only this one is shown as sent.
 const AGENT_NAME_CONFLICT =
@@ -770,7 +807,6 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
     if (next.plugins) {
       values.plugins = {
         ...values.plugins,
-        allow: [...new Set([...(values.plugins?.allow ?? []), ...next.plugins.allow])],
         entries: {
           ...values.plugins?.entries,
           codex: resetTransport
@@ -780,13 +816,10 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
       };
     } else if (values.plugins?.entries?.codex) {
       delete values.plugins.entries.codex;
-      if (Array.isArray(values.plugins.allow)) {
-        values.plugins.allow = values.plugins.allow.filter((id) => id !== "codex");
-      }
     }
     configuration.value = JSON.stringify(values, null, 2);
     configuration.setCustomValidity("");
-    feedback.textContent = "";
+    feedback.textContent = harnessPluginPolicyConflict(values, harness.value, nativeProvider.value);
     renderChannelEditor();
   }
   function clearModelCredential() {
@@ -1868,6 +1901,11 @@ function renderAgentForm(context, rendered, presetOptions = {}, draft = {}) {
     if (mode.value === "embedded" && hasEnabledChannel(values)) {
       feedback.textContent =
         "Channels require Dedicated execution. Select Dedicated under Runtime details or disable configured channels before creating the Agent.";
+      return;
+    }
+    const pluginConflict = harnessPluginPolicyConflict(values, harness.value, nativeProvider.value);
+    if (pluginConflict) {
+      feedback.textContent = `${pluginConflict} Update Configuration JSON or choose a compatible Harness and provider.`;
       return;
     }
     const repositoryBindings = repositories.bindings();
