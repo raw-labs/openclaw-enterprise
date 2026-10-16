@@ -4,7 +4,7 @@ import type {
   ChannelDriver,
 } from "@openclaw-enterprise/contracts";
 import { ChannelCredentialError, ChannelDirectoryError } from "@openclaw-enterprise/occ";
-import { asRecord } from "@openclaw-enterprise/utils";
+import { asRecord, readCappedBody } from "@openclaw-enterprise/utils";
 import { channelRequest, type ChannelRequest } from "./transport.ts";
 
 const SLACK_API = "https://slack.com/api/";
@@ -164,13 +164,13 @@ export class SlackChannelDriver implements ChannelDriver {
     if (method !== "auth.test") {
       url.search = parameters.toString();
     }
-    let response: Pick<Response, "status" | "ok" | "text"> & {
-      readonly body: { cancel(): Promise<void> } | null;
-    };
+    let response: Awaited<ReturnType<ChannelRequest>>;
     try {
       const options = {
         method: method === "auth.test" ? "POST" : "GET",
         headers: { authorization: `Bearer ${token}` },
+        // Never send the bot token to a redirect target, even on slack.com (finding 1349).
+        redirect: "error" as const,
         signal:
           signal === undefined
             ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
@@ -186,8 +186,14 @@ export class SlackChannelDriver implements ChannelDriver {
     }
     let body: SlackRecord | undefined;
     try {
-      const content = await response.text();
-      body = content.length <= 2_000_000 ? asRecord(JSON.parse(content)) : undefined;
+      // Each UTF-16 unit decodes from at most three UTF-8 bytes, so a body over 8,000,000
+      // bytes is always over the 2,000,000-character limit: stop reading there.
+      const bytes = await readCappedBody(response.body, 8_000_000);
+      const content = bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+      body =
+        content !== undefined && content.length <= 2_000_000
+          ? asRecord(JSON.parse(content))
+          : undefined;
     } catch {
       throw new ChannelDirectoryError("invalid_response");
     }
