@@ -3,6 +3,7 @@ import { KubernetesObjectApi, type KubernetesObject, PatchStrategy } from "@kube
 import {
   RuntimeLogsForbiddenByClusterError,
   RuntimeLogsSandboxNotFoundError,
+  SandboxNamespaceRefusedError,
   SandboxRevisionUnsupportedError,
 } from "@openclaw-enterprise/occ";
 import { setTimeout as delay } from "node:timers/promises";
@@ -86,7 +87,7 @@ export interface OpenShellSandboxDriverOptions {
     readonly readiness?: {
       readonly serviceName: string;
       readonly podSelector: Readonly<Record<string, string>>;
-      readonly timeoutMs?: number;
+      readonly timeoutMs: number;
       readonly pollIntervalMs?: number;
     };
     readonly operatorWorkspaceResources?: readonly KubernetesNamespacedResource[];
@@ -135,6 +136,31 @@ const GRPC_NOT_FOUND = 5;
 const GRPC_PERMISSION_DENIED = 7;
 const GRPC_UNAUTHENTICATED = 16;
 
+/**
+ * OpenShell's refusal of OCC's own gateway identity during a Namespace step, which the
+ * gateway client passes through as the raw gRPC error: retrying cannot help until an
+ * operator fixes the identity's token or permissions, so Compute fails the step at once
+ * instead of spending attempts on it, and its reason names the gRPC code (finding 1390).
+ * UNAVAILABLE and DEADLINE_EXCEEDED keep their retryable gateway failure.
+ */
+function namespaceRefusal(error: unknown): unknown {
+  const record = asRecord(error);
+  // grpc-js ServiceError: a numeric status code and a string details field.
+  const code = typeof record?.details === "string" ? record.code : undefined;
+  const name =
+    code === GRPC_PERMISSION_DENIED
+      ? "PERMISSION_DENIED"
+      : code === GRPC_UNAUTHENTICATED
+        ? "UNAUTHENTICATED"
+        : undefined;
+  return name === undefined
+    ? error
+    : new SandboxNamespaceRefusedError(
+        `OpenShell refused the controller gateway identity with gRPC ${name}.`,
+        { cause: error },
+      );
+}
+
 const NETWORK_TLS_MODES = Object.freeze({
   skip: "NETWORK_TLS_MODE_SKIP",
   terminate: "NETWORK_TLS_MODE_TERMINATE",
@@ -172,6 +198,10 @@ const OPENSHELL_MANAGED_BY_LABEL = "app.kubernetes.io/managed-by";
 const OPENSHELL_NAMESPACE_LABEL = "openclaw.dev/namespace";
 const OPENSHELL_NAMESPACE_ID_LABEL = "openclaw.dev/namespace-id";
 const OPENSHELL_MANAGED_BY = "openclaw-enterprise";
+/** OpenShell's supervisor Pod labels (pinned `sandbox_runtime.rs` `control_labels`). */
+const OPENSHELL_SANDBOX_ID_LABEL = "openshell.ai/sandbox-id";
+const OPENSHELL_BOUNDARY_ROLE_LABEL = "openshell.ai/boundary-role";
+const KUBERNETES_LABEL_VALUE = /^[A-Za-z0-9](?:[-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
 const OPENSHELL_RUNTIME_ROOT = "/sandbox/.openclaw-runtime";
 const OPENSHELL_HOME = `${OPENSHELL_RUNTIME_ROOT}/home`;
 const OPENSHELL_WORKSPACE_MOUNTS = "/sandbox/.openclaw-mounts";
@@ -179,17 +209,10 @@ const OPENSHELL_WORKSPACE_STATE_DIRECTORY = "state";
 // OpenShell probes TMPDIR before the Harness entrypoint can create a nested directory.
 const OPENSHELL_TEMPORARY = "/tmp";
 /**
- * The Codex app-server policy every OpenShell dedicated Codex revision freezes. OpenShell is
- * the outer containment boundary, and Codex's own sandbox (bwrap) cannot create a user
- * namespace inside it, so every command would fail. The pinned OpenClaw Gateway sends each
- * turn `workspace-write`, whatever `sandbox` says, when it forces a user reviewer: guardian
- * mode without an explicit `user` reviewer, or an explicit model-backed reviewer, on a model
- * it cannot verify for model-backed review (the documented `codex/<model>` Configuration is
- * one). An explicit `user` reviewer keeps the configured sandbox, and approvals still go to a
- * person. OpenClaw `tools.exec` settings other than the default or `mode: full` still make
- * every command fail (Codex's own sandbox, or a refusal).
- * Source: `extensions/codex/src/app-server/config-options.ts` at the `OPENCLAW_COMMIT` in
- * `deploy/runtime/Dockerfile`; recheck when that pin changes.
+ * OpenShell owns the filesystem, network and credential boundary. The Codex bridge selects
+ * the explicit full-access profile, subject to native account policy, to avoid nesting a
+ * bubblewrap sandbox. Keep human approval through the explicit user reviewer.
+ * Recheck against the pinned OpenClaw config-options.ts on upgrades.
  */
 export const OPENSHELL_CODEX_APP_SERVER_POLICY = Object.freeze({
   sandbox: "danger-full-access",
@@ -399,7 +422,8 @@ function environment(
       );
     }
     result[nonempty(entry.name, "Environment variable name")] =
-      workspaceMountPaths.get(entry.value) ?? entry.value.replaceAll("/home/node", OPENSHELL_HOME);
+      workspaceMountPaths.get(entry.value) ??
+      entry.value.replaceAll(/\/home\/node(\/|$)/g, `${OPENSHELL_HOME}$1`);
   }
   result.HOME = OPENSHELL_HOME;
   result.TMPDIR = OPENSHELL_TEMPORARY;
@@ -1079,7 +1103,7 @@ async function waitForGatewayReadiness(
   readiness: NonNullable<OpenShellSandboxDriverOptions["gateway"]["readiness"]>,
 ): Promise<void> {
   const namespace = namespaceName(context.namespace);
-  const deadline = Date.now() + (readiness.timeoutMs ?? 0);
+  const deadline = Date.now() + readiness.timeoutMs;
   const pollIntervalMs = readiness.pollIntervalMs ?? 1_000;
   let unavailable = "OpenShell gateway Service is unavailable.";
   for (;;) {
@@ -1551,15 +1575,22 @@ function validateOptions(options: OpenShellSandboxDriverOptions): void {
   if (options.gateway.readiness !== undefined) {
     nonempty(options.gateway.readiness.serviceName, "OpenShell gateway Service name");
     labels(options.gateway.readiness.podSelector, "OpenShell gateway Pod selector");
-    for (const [value, description] of [
-      [options.gateway.readiness.timeoutMs, "OpenShell gateway readiness timeout"],
-      [options.gateway.readiness.pollIntervalMs, "OpenShell gateway readiness poll interval"],
-    ] as const) {
-      if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
-        throw new OpenShellSandboxConfigurationFailure(
-          `${description} must be a positive safe integer.`,
-        );
-      }
+    if (
+      !Number.isSafeInteger(options.gateway.readiness.timeoutMs) ||
+      options.gateway.readiness.timeoutMs < 1
+    ) {
+      throw new OpenShellSandboxConfigurationFailure(
+        "OpenShell gateway readiness timeout must be a positive safe integer.",
+      );
+    }
+    const pollIntervalMs = options.gateway.readiness.pollIntervalMs;
+    if (
+      pollIntervalMs !== undefined &&
+      (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 1)
+    ) {
+      throw new OpenShellSandboxConfigurationFailure(
+        "OpenShell gateway readiness poll interval must be a positive safe integer.",
+      );
     }
   }
   options.gateway.networkPolicyResources?.forEach((resource, index) =>
@@ -1593,6 +1624,21 @@ function validateOptions(options: OpenShellSandboxDriverOptions): void {
     throw new OpenShellSandboxConfigurationFailure(
       "OpenShell requires at least one sandbox network policy.",
     );
+  }
+  const networkPolicyNames = new Set<string>();
+  for (const policy of options.policy.networkPolicies) {
+    const name = nonempty(policy.name, "OpenShell network policy name");
+    if (name === "workspace-node-enrollment") {
+      throw new OpenShellSandboxConfigurationFailure(
+        "OpenShell network policy name workspace-node-enrollment is reserved.",
+      );
+    }
+    if (networkPolicyNames.has(name)) {
+      throw new OpenShellSandboxConfigurationFailure(
+        `OpenShell network policy name ${name} must be unique.`,
+      );
+    }
+    networkPolicyNames.add(name);
   }
   networkPolicies(options);
   if (
@@ -1973,6 +2019,11 @@ export class OpenShellSandboxDriver implements SandboxDriver {
       codexConfig.appServer,
       "OpenShell Sandbox Codex app-server config",
     );
+    // OpenShell's egress policy is the network boundary. An enabled Codex network proxy wins
+    // over the full-access profile in the bridge and selects a restricted native profile, which
+    // needs the nested namespaces OpenShell blocks, so shell turns fail. Drop it rather than
+    // refuse it, like the sandbox pin: status reads rerun this hook on stored work.
+    const { networkProxy: _networkProxy, ...openShellAppServer } = appServer;
 
     return {
       ...configuration,
@@ -1986,7 +2037,7 @@ export class OpenShellSandboxDriver implements SandboxDriver {
             config: {
               ...codexConfig,
               appServer: {
-                ...appServer,
+                ...openShellAppServer,
                 ...OPENSHELL_CODEX_APP_SERVER_POLICY,
               },
             },
@@ -1997,6 +2048,14 @@ export class OpenShellSandboxDriver implements SandboxDriver {
   }
 
   async ensureNamespace(context: SandboxNamespaceContext): Promise<void> {
+    try {
+      await this.ensureNamespaceWorkspace(context);
+    } catch (error) {
+      throw namespaceRefusal(error);
+    }
+  }
+
+  private async ensureNamespaceWorkspace(context: SandboxNamespaceContext): Promise<void> {
     this.requireOperatorWorkspaceMode("ensure a Namespace");
     const namespace = namespaceName(context.namespace);
     await applyOperatorNamespaceLabels(context, this.options.gateway.operatorNamespaceLabels);
@@ -2212,6 +2271,7 @@ export class OpenShellSandboxDriver implements SandboxDriver {
     return Object.freeze({
       url: harnessWebSocketUrl(service.advertisedUrl),
       workspaceRoot: "/sandbox/enterprise",
+      codexPermissionProfile: ":danger-full-access",
     });
   }
 
@@ -2284,6 +2344,17 @@ export class OpenShellSandboxDriver implements SandboxDriver {
   }
 
   async cleanup(
+    context: SandboxNamespaceContext & { readonly revision?: Readonly<AgentRevision> },
+  ): Promise<void> {
+    try {
+      await this.cleanupResources(context);
+    } catch (error) {
+      // Revision cleanup keeps its errors: only the Namespace steps classify a refusal.
+      throw context.revision === undefined ? namespaceRefusal(error) : error;
+    }
+  }
+
+  private async cleanupResources(
     context: SandboxNamespaceContext & { readonly revision?: Readonly<AgentRevision> },
   ): Promise<void> {
     if (context.revision !== undefined) {
@@ -2444,6 +2515,50 @@ export class OpenShellSandboxDriver implements SandboxDriver {
       );
     }
     return harnessObservation(existing);
+  }
+
+  /**
+   * The revision's supervisor Pod opens its workspace-node connection. OpenShell labels that
+   * Pod with the Sandbox's gateway-minted ID (`sandbox_runtime.rs` `control_labels`), a UUID
+   * distinct from the Sandbox name, so the ID is read from the gateway's own record.
+   */
+  async workspaceNodePeerLabels(
+    context: SandboxNamespaceContext & { readonly revision: Readonly<AgentRevision> },
+  ): Promise<Readonly<Record<string, string>> | undefined> {
+    this.requireOperatorWorkspaceMode("resolve a workspace-node peer");
+    if (
+      context.revision.namespaceId !== context.namespace.id ||
+      context.revision.sandboxDriverId !== this.id ||
+      context.revision.harness.mode !== "dedicated"
+    ) {
+      throw new OpenShellSandboxConfigurationFailure(
+        "Refusing to resolve a workspace-node peer outside its selected dedicated AgentRevision and Namespace.",
+      );
+    }
+    const sandbox = this.sandboxRef(context);
+    const existing = await openShellSandboxObserver(
+      this.gatewayClientForNamespace(sandbox.namespaceName),
+    ).getSandbox(
+      { name: sandbox.resourceName, workspace: workspaceName(context.namespace) },
+      context.signal,
+    );
+    if (existing === undefined) {
+      return undefined;
+    }
+    if (existing.annotations["openclaw.dev/revision-id"] !== context.revision.id) {
+      throw new OpenShellSandboxConfigurationFailure(
+        `Refusing OpenShell Sandbox ${sandbox.resourceName} without exact AgentRevision ownership.`,
+      );
+    }
+    if (existing.id === undefined || !KUBERNETES_LABEL_VALUE.test(existing.id)) {
+      throw new OpenShellSandboxConfigurationFailure(
+        `OpenShell Sandbox ${sandbox.resourceName} has no ID usable as a supervisor Pod label.`,
+      );
+    }
+    return Object.freeze({
+      [OPENSHELL_SANDBOX_ID_LABEL]: existing.id,
+      [OPENSHELL_BOUNDARY_ROLE_LABEL]: "supervisor",
+    });
   }
 
   close(): void {

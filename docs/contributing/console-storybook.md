@@ -1,8 +1,7 @@
 # Console Storybook
 
-Browse production Console pages, components, and Agent workflows against an
-in-memory fixture. Previews contact no services and run no workloads. Use dummy
-credentials.
+Browse production Console pages, components and Agent workflows with in-memory
+fixtures and dummy credentials. Previews contact no services or workloads.
 
 ## Run locally
 
@@ -13,9 +12,8 @@ npm run storybook:install
 npm run storybook
 ```
 
-Open `http://127.0.0.1:6006`. Each story starts an independent fixture, ignoring
-existing Installations and other tabs' sessions; **Reset story** discards its
-changes.
+Open `http://127.0.0.1:6006`. Stories use independent fixtures, ignoring existing
+Installations and other tabs' sessions; **Reset story** discards changes.
 
 To build and serve a static copy:
 
@@ -31,8 +29,8 @@ without publishing the documentation site.
 
 ## Appearance review
 
-Use **Pages/Agents → Populated** to review the shared shell and controls at
-desktop (1440 × 1000), tablet (768 × 1024), and mobile (390 × 844).
+Review **Pages/Agents → Populated** at desktop (1440 × 1000), tablet
+(768 × 1024), and mobile (390 × 844).
 Check keyboard focus, search, navigation, an open dialog, and empty, loading,
 error, permission-denied, and missing-credential stories. The console stays light
 under either system appearance.
@@ -59,9 +57,9 @@ Stories reach error states through real controls after loading fixture data.
 
 | Group                   | Coverage                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign in                 | Password and GitHub sign-in, discovery failure, GitHub errors, disabled account, rejected login, expired session, session-read failure, loading, unconfirmed logout.                                                                                                                                                                                                                                              |
+| Sign in                 | Password and GitHub sign-in, discovery failure, GitHub errors, disabled account, rejected login, expired session, delayed session status, failure and retry, unconfirmed logout.                                                                                                                                                                                                                                  |
 | Agents                  | Populated and empty collections, no search matches, inaccessible Namespace, no readable Namespaces, permission denial, read failure, loading.                                                                                                                                                                                                                                                                     |
-| Backends                | Configured, empty, and discovery failure.                                                                                                                                                                                                                                                                                                                                                                         |
+| Backends                | Configured, empty, discovery failure, and access denied.                                                                                                                                                                                                                                                                                                                                                          |
 | Namespaces              | Ready and provisioning, empty, permission denial.                                                                                                                                                                                                                                                                                                                                                                 |
 | Settings and navigation | Signed-in account and unknown route.                                                                                                                                                                                                                                                                                                                                                                              |
 | Create Agent            | Installed default, missing/loading/denied Presets, Preset variables, fixed model choices before credential entry and manual model IDs, OpenAI Codex/OpenClaw and Anthropic OpenClaw harnesses, Service Accounts switching and bound Presets, seeded workspace files, storage/grant denial, repository selection/discovery and rejected-grant recovery, invalid JSON, partial save/conflict, unknown save outcome. |
@@ -79,9 +77,9 @@ loading.
 
 ## Return navigation
 
-Use **Pages/Navigation → Return to loaded pages** and **Return to Agent panels**.
-Search, expanded configuration, native admin access, and Credentials should survive
-Back/Forward and tab changes. Refresh reloads.
+Use **Pages/Navigation → Return to loaded pages**, **Return to Agent panels**, and
+**Slow rechecks**. Search, expanded configuration, native admin access, and Credentials
+survive Back/Forward and tab changes. Refresh reloads; slow checks say so.
 
 ## Agent flows and UI gaps
 
@@ -147,15 +145,18 @@ selects it. A custom ID outside the list requires a new selection. After a provi
 change through Configuration JSON, the list must match and drop the old
 provider's model.
 
-The fixture supplies a ready Namespace, Preset, and model Secret. Namespace
-provisioning, Preset CRUD, and service-account issuance have no dedicated console
-pages. One Secret picker selects or creates new version model Secrets and Slack
-tokens (Credentials tab and Channels drawer). See
+Fixtures provide a ready Namespace, Preset and model Secret. The console has no
+dedicated pages for Namespace provisioning, Preset CRUD or Service Account
+issuance. One Secret picker selects or creates new version model Secrets and
+Slack tokens (Credentials tab and Channels drawer). See
 [Create and deploy in the console](../reference/console/create-and-deploy.md)
 for the supported installation workflow, prerequisites, and Teams deployment limits.
 
 Repository previews cover access levels, empty or pending discovery, unavailable
 choices, denied or unverified authorization, and reselection after a rejected save.
+In **Locale-stable repository search**, search `ibm`, select `acme/platform`, and
+confirm reference `IBM-platform`. Simulated data does not prove GitHub App access
+or credential delivery.
 In **Repository choices unavailable**, follow the setup link or retry; creation
 without repository access stays available. The recovery story keeps its saved
 Configuration and needs a current nonempty repository selection to retry.
@@ -363,3 +364,12 @@ shows organization-wide policy restrictions. Missing-credential, read-only, and
 save-failure stories cover surrounding states. Capture final interactions and
 native values outside the repository; attach screenshots and video to the task
 and PR.
+
+### Teams editor checks
+
+Follow the [Teams workflow](../../scripts/console-storybook/teams-workflow.md)
+with **Components/Channels → Teams Editor**. Save personal and channel access
+independently; disable channel conversations, reopen and check native JSON and
+Secret controls. Related stories cover missing credentials, advanced settings,
+read-only, loading, denied and pending saves. Backend/live-provider proof:
+[Teams verification](../testing/teams.md).

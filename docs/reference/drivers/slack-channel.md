@@ -47,7 +47,8 @@ startup, which remains a separate connectivity check.
 
 ## Enable lookup in production
 
-The production API selects the Slack Driver. With default-deny egress, Slack
+The production API selects the bundled Channel Driver, which routes Slack
+lookups to this adapter. With default-deny egress, Slack
 lookup and credential validation need a proxy. With the recommended Helm setting
 `slackProxy.enabled: true`, the chart:
 
@@ -57,16 +58,17 @@ lookup and credential validation need a proxy. With the recommended Helm setting
 - allows the proxy public IPv4 egress on TCP 443, excluding private and
   reserved ranges.
 
-The bundled proxy accepts HTTP `CONNECT` only for Slack hostnames on port 443.
+The bundled proxy accepts HTTP `CONNECT` for Slack hostnames on port 443. The optional Teams flag also permits the
+[reviewed Microsoft hosts](../../guides/integrations/teams.md).
 The API accepts a DNS proxy URL only when Helm also sets the matching
 `OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST`; it rejects any other DNS proxy URL.
 
 Operators can instead set Helm `api.channelDirectoryProxyUrl` to an approved
 external HTTP or HTTPS proxy, such as `http://198.51.100.25:3128` with the
 example IP and port replaced. The value must contain one literal IPv4 address
-and an explicit port, without credentials or a path. The chart passes it to the
-API as `OCC_CHANNEL_DIRECTORY_PROXY_URL` and allows API Pod egress only to that
-IP and port. The proxy must permit `CONNECT slack.com:443`; restrict its other
+other than `0.0.0.0` and an explicit port, without credentials or a path. The
+chart passes it to the API as `OCC_CHANNEL_DIRECTORY_PROXY_URL` and allows API
+Pod egress only to that IP and port. The proxy must permit `CONNECT slack.com:443`; restrict its other
 destinations at the proxy. The chart does not grant the worker or Agent Pods this
 egress.
 

@@ -1,22 +1,21 @@
 # Kubernetes networking and isolation
 
-Configure tenant network boundaries, private Agent routes, and existing
-namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
+The [Kubernetes Compute Driver](../kubernetes-compute.md) manages tenant
+networking, private Agent routes, and namespaces.
 
 ## Networking
 
-Configure the cluster DNS namespace and Pod labels and the gateway port.
-Every peer namespace must be a DNS label of at most 63 characters; startup
-refuses others.
+Configure cluster DNS namespace/Pod labels and gateway port. Startup rejects
+peer namespaces violating DNS label syntax or exceeding 63 characters.
 Set `network.gatewayTrustedProxyCidrs` to nonempty, valid CIDRs for the proxy
 socket sources. This trusted Installation setting has no production default and
 rejects all-source ranges, including IPv4-mapped equivalents. Without private
 routing, also configure the namespace and Pod selectors in
 `network.gatewayClients` for your authenticated proxy.
 
-`podLabels` use [Kubernetes label syntax](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set), checked before provisioning.
-Values may be empty; key names and values allow 63 characters, DNS prefixes 253. This covers
-every peer selector setting.
+Peer `podLabels` are validated before provisioning against
+[Kubernetes label syntax](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set):
+values may be empty; keys and values allow 63 characters, DNS prefixes 253.
 
 Each tenant starts with default-deny ingress and egress. Explicit policies allow
 DNS (UDP/TCP ports `53` and `5353` through `allow-dns`), approved gateway clients,
@@ -35,13 +34,14 @@ the endpoint capability retain ordinary Service or private routing.
 
 For Compute-owned startup failure evidence, plugin reporting, and on-demand
 deployment diagnostics, set `network.pluginStatusProxySourceCidrs` to the
-Kubernetes API server's source addresses for Pod proxy requests, preferably
-individual `/32` or `/128` addresses. On overlay networks, the source may be the
-control-plane node's overlay address rather than its node IP; verify it across
+Kubernetes API server's source addresses for Pod proxy requests, as `/32` or
+`/128` addresses: wider ranges warn and all-address ranges fail. On overlay
+networks, the source may be the control-plane node's overlay address rather than
+its node IP; verify it across
 nodes with enforced policies. The policy allows those sources only to the private
 status port, TCP/18791, even when an Agent has no enabled plugins. Worker and API
-ServiceAccounts each need namespace-local `get` on `pods/proxy`. An omitted list
-adds no API-proxy ingress rule and leaves status unavailable where the cluster
+ServiceAccounts each need namespace-local `get` on `pods/proxy`. Omitting the list
+adds no API-proxy ingress and leaves status unavailable where the cluster
 blocks that traffic. It also restarts the Gateway once on each
 dedicated Codex first deploy. This setting does not expose the native
 gateway or grant workloads Kubernetes API access.
@@ -63,8 +63,7 @@ identity `occ-workspace-files` with `operator.admin`, and
 `gateway.allowRealIpFallback: true`. Configuration and Console starters
 can omit these fields. Unsupported auth fields or conflicting trust fields fail
 deployment; matching CIDR lists are accepted regardless of order. Deployment and
-provisioning check the same fields and answer `409 RESOURCE_CONFLICT` naming the setting and requirement, for example `Configuration setting gateway.auth.mode must be
-trusted-proxy: …`, never its value. `trustedProxy.allowUsers` is checked later:
+provisioning check the same fields and answer `409 RESOURCE_CONFLICT` naming the setting and requirement, never its value. `trustedProxy.allowUsers` is checked later:
 provisioning returns fixed `409` text with the reason in the API log; deployment
 is admitted, then fails with `DEPENDENCY_UNAVAILABLE` and the reason in the
 worker's `worker.compute-prepare-failed` line. `trustedProxy.allowLoopback` must be omitted or false:
@@ -84,7 +83,7 @@ readiness gates; Gateway probes HTTP. `gateway.tls.enabled: true` is refused
 before revision creation. Envoy terminates TLS. Docker/SSH
 retain managed-password defaults and explicit trusted-proxy HTTP.
 
-Verify that configured CIDRs contain the proxy's
+Configured CIDRs must contain the proxy's
 source addresses and exclude untrusted sources. CIDRs do not authenticate a
 proxy: retain the exact Envoy NetworkPolicy peer, TLS verification, service-key
 authentication, and identity/header sanitization.
@@ -117,7 +116,9 @@ sets stock Codex `allow_local_binding = true` and `mode = "full"`. An explicit
 deny matching the broker hostname fails closed. The repository-bound filesystem
 profile additionally grants read-only access to the repository client at
 `/opt/oce/repository-credentials` and admitted session material at
-`/run/oce/repository-credentials`. Unbound Agents keep their existing policy.
+`/run/oce/repository-credentials`. Dedicated Codex with an enabled proxy also
+reads `/home/node/.codex/skills/.system`, even without a binding. Embedded
+Codex uses another home; a disabled proxy stays disabled.
 
 These settings apply to the Agent's whole tool proxy: local binding is allowed,
 Codex's additional private-address guard is disabled, and every HTTP method is
@@ -147,6 +148,8 @@ endpoint, or the exact
 Helm-managed proxy Service URL paired with `runtime.channels.managedProxy`.
 Direct public channel-provider access is denied.
 
+Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
+
 ## Explicit network profiles
 
 Ordinary DNS, model, repository-credential, authentication, channel, workspace-node,
@@ -162,11 +165,12 @@ the expected template profile.
 
 Harness Pods provisioned by a SandboxDriver, such as OpenShell, carry
 `provider-fenced-v1` instead. The provider fences their egress, so Compute grants
-them only Gateway transport and plugin-status ingress (`allow-agent-runtime` is
-ingress-only for them): no DNS, workspace-node, model or authentication egress.
+them only Gateway transport and status ingress (`allow-agent-runtime` is
+ingress-only for them) and the workspace-node route: no DNS, model or
+authentication egress.
 Provider Harness readiness and activation reject a Pod with any other profile.
 
-Existing policy names remain stable; upgrading the controller restarts no Pod.
+Policy names stay stable; controller upgrades restart no Pods.
 Compute preserves existing namespace policy selectors until recreation. During
 Agent preparation, it adds missing DNS ports to the tenant and Gateway policies
 with UID/resource-version guards, preserving peers and other rules. Running Pods
@@ -184,10 +188,10 @@ revision: redeploy the Agent revision. For development, follow the
 [development recovery procedure](../../../guides/deploy/local-operations.md#build-images-for-local-kubernetes).
 
 The separately installed OpenShell gateway needs its own scoped DNS/API and
-callback policies. Its caller is the OpenShell supervisor Pod
-(`openshell.ai/managed-by=openshell`, `openshell.ai/boundary-role=supervisor`),
-which carries no `openclaw.dev` labels; supervisor-labelled peers admit it, not
-the ordinary profile. Platform services retain their existing Helm policy selectors.
+callback policies. Its caller, the OpenShell supervisor Pod
+(`openshell.ai/boundary-role=supervisor`), carries no `openclaw.dev` labels, so
+supervisor-labelled peers admit it; an Agent Gateway admits only its Sandbox's.
+Platform services keep their Helm policy selectors.
 
 Profile assignment is a trusted controller decision. The label qualifies a Pod
 for network grants but does not supply workload identity or authorization to
@@ -219,11 +223,10 @@ gatewayRouting:
   envoyNamespace: envoy-gateway-system
 ```
 
-These three settings are required when routing is enabled; `hostname` is
-optional. The Gateway name and namespace must match the Helm-managed Gateway,
-which the chart always creates in its release namespace; `envoyNamespace`
-identifies its Envoy data-plane Pods. `envoyHttpsTargetPort` defaults to
-`10443` and must match Helm. Compute grants Harness egress only to this
+Routing requires all three settings; `hostname` is optional. Gateway name and
+namespace must match the Helm-managed Gateway in its release namespace;
+`envoyNamespace` identifies Envoy data-plane Pods. `envoyHttpsTargetPort`
+defaults to `10443` and must match Helm. Compute grants Harness egress only to this
 installation's Envoy Pods on that port, before waiting for node enrollment.
 `endpointPort` defaults to `443` and changes only the port in generated WSS URLs.
 When set, the external load balancer must forward that port to the HTTPS listener.
@@ -232,7 +235,7 @@ When `hostname` is omitted or empty, Compute and Helm derive the same Envoy
 Service hostname without a lookup; see
 [endpoint and route](../../gateway-routing.md#endpoint-and-route). Set the same
 explicit `hostname` in Compute and Helm for custom DNS or clients outside that
-cluster DNS context. The operator installs Envoy Gateway and cert-manager and configures the
+cluster DNS context. Install Envoy Gateway and cert-manager and configure the
 [private gateway infrastructure](../../../guides/deploy/workspace-routing.md#agent-workspace-files).
 Do not put an Agent endpoint, service key, certificate, or file contents into
 native Configuration or an AgentRevision.
@@ -346,3 +349,12 @@ receive controller credentials.
 
 - [Driver configuration and troubleshooting](../kubernetes-compute.md)
 - [Kubernetes security controls](../../security.md)
+
+## Teams callbacks
+
+Teams requires the reviewed proxy, `gatewayRouting.channels.hostname`, and a
+separate **channels** listener. The serving revision owns the exact Agent POST
+callback: Microsoft Authorization remains, OCE administrative headers are stripped,
+and the native SDK authenticates. Disable/stop/delete removes the route with
+ownership preconditions. [Teams setup](../../../guides/integrations/teams.md)
+covers endpoint, listener, certificate, proxy settings, and verification limits.

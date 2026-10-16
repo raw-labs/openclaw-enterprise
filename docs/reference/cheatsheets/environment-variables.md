@@ -28,7 +28,7 @@ console uses the current origin and has no separate environment settings.
 - `OCC_PORT` — API listener port; no process default.
 - `OCC_CONFIG_PATH` — Absolute path to trusted Installation YAML; required in production and shared with the worker.
 - `OCC_AUTH_SECRET` — Production requires a high-entropy session-signing secret; development has a local-only fallback.
-- `OCC_AUTH_BASE_URL` — Authentication and cookie origin; required in production; default in development: `http://127.0.0.1:3000`.
+- `OCC_AUTH_BASE_URL` — Authentication, cookie, and exact development browser origin; required in production; default in development: `http://127.0.0.1:3000`.
 - `OCC_AUTH_GITHUB_CLIENT_ID` — Optional GitHub App client ID, not App ID; selects the provider instance. Requires PostgreSQL, native IAM, and both GitHub settings below; see [GitHub sign-in](../authentication/external-sign-in.md#github-sign-in-for-existing-accounts).
 - `OCC_AUTH_GITHUB_CLIENT_SECRET` — Protected server-side client secret for the configured GitHub App; its private key stays with the repository credential consumer.
 - `OCC_AUTH_GITHUB_ALLOWED_ORGS` — Optional comma-separated GitHub organization logins; when set (or with the teams), GitHub sign-in requires active membership. See the [allowlist](../authentication/external-sign-in.md#organization-and-team-allowlist).
@@ -52,7 +52,9 @@ console uses the current origin and has no separate environment settings.
 - `OCC_GATEWAY_API_KEY_PATH` — API/worker absolute path to the private gateway service-key file for operator RPCs and dedicated node enrollment.
 - `OCC_CHANNEL_DIRECTORY_PROXY_URL` — Optional API-only HTTP(S) proxy endpoint for production Slack directory lookup and credential validation; set by Helm `slackProxy.enabled` or `api.channelDirectoryProxyUrl`.
 - `OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST` — Exact Kubernetes Service host accepted as a managed Slack directory proxy; set only by Helm `slackProxy.enabled`.
-- `NODE_EXTRA_CA_CERTS` — Additional Node.js PEM trust bundle for a private OCC, gateway or OIDC IdP CA; read at process startup.
+- `NODE_EXTRA_CA_CERTS` — Additional process-wide Node.js PEM trust for private OCC, Gateway or IdP CAs; read at process startup. The chart combines IdP and Gateway roots for the API; see [OIDC CA settings](../settings/oidc.md).
+- `OCC_GATEWAY_CA_PATH` — API-only path to the Gateway-only CA bundle that dedicated Harness nodes trust; empty means none. Unset, node enrollment uses `NODE_EXTRA_CA_CERTS`. Helm sets it with OIDC CA values.
+- `OCC_CA_SOURCES`, `OCC_DATABASE_CA_SOURCE` — Chart-set labels (value, Secret and key) that the OIDC CA startup checks print in their errors instead of mount paths. Helm sets them with OIDC CA values; not operator inputs.
 
 ## PostgreSQL and migrations
 
@@ -108,6 +110,7 @@ for supported engines, images, and security restrictions.
 - `OCC_DEVELOPMENT_CONTAINER_ENGINE` — `auto` (default), `docker`, or `podman`; Kubernetes-only mode uses it for k3d and image operations, while Compose mode also requires its Compose provider.
 - `OPENCLAW_DEV_PORT` — Published API port on host loopback; default: `3000`.
 - `OCC_DEVELOPMENT_BROWSER_PORT` — Published HTTPS browser port on host loopback; default: `8443`.
+- `OCC_DEVELOPMENT_SIGN_IN` — Unset or `keycloak`; Kubernetes-only profile without OpenShell runs a development Keycloak on host `127.0.0.1:443` and signs the administrator in through it as `alice`, with recovery-only passwords. See [Sign in through Keycloak](../../guides/deploy/local-kubernetes-development.md#sign-in-through-keycloak).
 - `OCC_DEVELOPMENT_TRUSTED_BRIDGE_CIDR` — Compose bridge allowed to reach the development API.
 - `OCC_DEVELOPMENT_TRUSTED_FORWARDER_CIDR` — Single private forwarding IP; supplied automatically for rootful macOS Podman.
 - `OCC_DEVELOPMENT_CONFIGURATION_ROOT` — Absolute path to the development filesystem Configuration Driver's root.
@@ -144,6 +147,7 @@ Use only one of the two credential inputs. In production, use
 credential on the controller.
 
 - `OPENAI_API_KEY` — Authorized credential for local real-model use.
+- `CODEX_ACCESS_TOKEN`, `CODEX_ACCESS_TOKEN_FILE` — Personal access token or private token file for the OpenShell dedicated Codex first-Agent helper. Select one credential input.
 - `OPENAI_API_KEY_FILE` — Absolute path to a private credential file for the first-Agent helper.
 - `OPENCLAW_FIRST_AGENT_MODEL` — Plain OpenAI model ID, without a provider prefix; default for a new Agent: `gpt-6-astra`.
 
@@ -158,3 +162,9 @@ Collector or local Docker log forwarding. See [Observability](../../guides/obser
 - `OTEL_COLLECTOR_PORT` — Local Collector Fluent Forward port; default: `24224`.
 - `OTEL_COLLECTOR_METRICS_PORT` — Local Collector metrics port; default: `8888`.
 - `OCC_DOCKER_LOGGING_ADDRESS` — Docker Compute log destination; local override default: `127.0.0.1:24224`.
+
+## Channel proxy
+
+- `OCC_SLACK_PROXY_PORT` — CONNECT proxy TCP port; Helm sets it from `slackProxy.port`.
+- `OCC_CHANNEL_PROXY_TEAMS_ENABLED` — `true` admits the exact Microsoft Public cloud messaging hosts in the existing channel proxy; defaults to disabled. Helm sets it from `slackProxy.teamsEnabled`. See [Teams setup](../../guides/integrations/teams.md).
+- `OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS` — JSON list of at most 32 exact lowercase Microsoft storage hosts; defaults to an empty list and requires Teams to be enabled when nonempty. Helm sets it from `slackProxy.teamsFileHosts`. See [Teams attachment setup](../../guides/integrations/teams.md#prepare-attachment-downloads) for hostname families, address enforcement and shared scope.
