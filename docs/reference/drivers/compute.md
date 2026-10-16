@@ -19,6 +19,13 @@ The [shared contracts](../../../packages/contracts/src/index.ts) define the type
 Every `ComputeDriver` has an `id`, `implementation`, and
 `capability: "compute"`.
 
+Optional `configureAgent(configuration, {nativeAdminOrigin?})` transforms a frozen
+deployment copy before validation and admission; OCC supplies the
+Installation-owned origin. Preserve Harness, opt-outs, unrelated settings and
+SecretRefs without source mutation or infrastructure effects. See
+[Compute policy and conflicts](../agent-native-admin.md#first-deployment-configuration)
+and [admission order](compute-admission.md#deployment-configuration).
+
 Optional `getRuntimeImages(revision)` returns
 `{workload, container, image, imageId, commit, openclawCommit}` entries for
 containers owned by that admitted revision. OCC requires exact Agent read
