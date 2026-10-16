@@ -7,60 +7,15 @@
     "commit": "c7bdbcf31d3d550d76d8a2333a683752d112ea33"
   },
   "batch": {
-    "startingIntegration": "c0e8f4d97a39fcd160b5924ad50c2c74e8f7d776",
+    "startingIntegration": "bbfdfc5c7a40d26e99a025aa1476a5bbe78d98d4",
     "steps": [
       {
-        "operation": "Updated upstream baseline and appended credential-source migration",
-        "commit": "8948bbc4bc844cf9df6b36e68eb046f1a3b68c51",
-        "input": "c7bdbcf31d3d550d76d8a2333a683752d112ea33"
-      },
-      {
-        "operation": "PR #16 refreshed feature composition",
-        "commit": "5e6e0e855b94b82ee45621c00f8a84d3a1215be6",
-        "input": "1cfbcf02ce798a02f6ba1bc5b5ac5d0e47756d9b"
-      },
-      {
-        "operation": "PR #1 refreshed feature composition",
-        "commit": "8d6abeddd71ccf7ff6cf3e57da4e5f9bb9066b2b",
-        "input": "1ae26c0146b397622f9d65cde72f63c5afbd8282"
-      },
-      {
-        "operation": "PR #2 refreshed feature composition",
-        "commit": "465186352d79adf32814381f2cd510ceab738097",
-        "input": "17445a8c66ef4e303ff88e10a7b453481febf1f8"
-      },
-      {
-        "operation": "PR #11 refreshed feature composition",
-        "commit": "60ce3e08c8e595385a2986254411a0ec71e82dcc",
-        "input": "ba98603943c22e5fb4e40b03b07b95ade9b29db8"
-      },
-      {
-        "operation": "PR #12 refreshed feature composition",
-        "commit": "9114e784b065c642a104d5a3e87a5c343e274c78",
-        "input": "9c309cf67287428bdd762232d542759db7465198"
-      },
-      {
-        "operation": "PR #15 refreshed feature composition",
-        "commit": "b6dddb405431eb4dcd8c75531a5c0d00adb8571e",
-        "input": "b3258415098757c37296989e1e30437b593d31d5"
-      },
-      {
-        "operation": "PR #17 refreshed feature composition",
-        "commit": "51ab90fd93f19e35eb72d5ae2e2e980cff764455",
-        "input": "a490a5b1ba43ac864b1794c630952cf5b9a1059f"
-      },
-      {
-        "operation": "Reconcile current fixture contracts and managed proxy trust",
-        "commit": "54eb71c1f18ebe548006624be1b807c89c9738bd",
-        "input": "c7bdbcf31d3d550d76d8a2333a683752d112ea33"
-      },
-      {
-        "operation": "Qualify profile rendering and reconcile current transport regressions",
-        "commit": "03ee4dce46b3530e94f86b4921b02704ab8c31e2",
-        "input": "a490a5b1ba43ac864b1794c630952cf5b9a1059f"
+        "operation": "PR #19 retained cleanup inventory fix with current worker test ownership",
+        "commit": "8c5fd96f72eb416996e52ed129aab959bab6ebd6",
+        "input": "edb197e6976a5737742cf7ee7fad43e3b06d5810"
       }
     ],
-    "retainedUnchanged": [13, 18]
+    "retainedUnchanged": [1, 2, 11, 12, 13, 15, 16, 17, 18]
   },
   "features": [
     {
@@ -151,6 +106,16 @@
       "commit": "b0c299f7e8a9cdb992500fa39d32dddea9271ed0",
       "status": "included",
       "comparisonBase": "d3ccc54781d0d50b40e9aeb814f0573d38c0a585",
+      "headRepository": "raw-labs/openclaw-enterprise"
+    },
+    {
+      "number": 19,
+      "title": "Deployment inventory with retained repository cleanup",
+      "author": "miguelbranco80",
+      "headRef": "codex/retained-cleanup-inventory",
+      "commit": "edb197e6976a5737742cf7ee7fad43e3b06d5810",
+      "status": "included",
+      "comparisonBase": "80725162a946f80652b939a32a57ee4e922eeb5c",
       "headRepository": "raw-labs/openclaw-enterprise"
     }
   ],
@@ -262,6 +227,18 @@
         "docs/guides/integrations/embedded-channel-trial.md"
       ],
       "notes": "Render channels.experimentalEmbeddedChannels into runtime.channels.experimentalEmbeddedChannels. Require managed Gateway outbound when enabled; preserve default refusal, risk warning and paired API/worker checksums. Retired external/shared proxy inputs stay unsupported."
+    },
+    {
+      "id": "retained-cleanup-worker-test-layout",
+      "pullRequests": [19],
+      "commits": ["8c5fd96f72eb416996e52ed129aab959bab6ebd6"],
+      "paths": [
+        "tests/integration/postgres-worker-agent-revision-teardown.test.mjs",
+        "tests/integration/postgres-worker-agent-revision-stop.test.mjs",
+        "scripts/ci/test-suites/postgres-application.json",
+        "docs/flows/coordinated-production-upgrade.md"
+      ],
+      "notes": "Keep the upstream worker test split. Apply cleanup inventory assertions and required CI cases to their current teardown/stop owners, retaining the source production fix and existing integration guards."
     }
   ],
   "migrationMappings": [
@@ -286,11 +263,11 @@
   ],
   "qualification": {
     "policy": "Qualify the final integration commit; CI run receipts identify the tested SHA. Source PR checks do not qualify this composition.",
-    "previousTestedCommit": "c0e8f4d97a39fcd160b5924ad50c2c74e8f7d776",
+    "previousTestedCommit": "bbfdfc5c7a40d26e99a025aa1476a5bbe78d98d4",
     "previousRuns": {
-      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38710182639",
-      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38710182713",
-      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38710183595"
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38737987810",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38737987366",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38738938888"
     },
     "requiredChecks": [
       "CI Required on the published SHA",
