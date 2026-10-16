@@ -3635,9 +3635,13 @@ export const scenarios = {
     name: "Teams editor",
     path: `${draft}&tab=channels`,
     teams: true,
+    teamsConfiguration: {
+      sharePointSiteId:
+        "example.sharepoint.com,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666",
+    },
     actions: [click("Edit Microsoft Teams")],
     description:
-      "App and tenant IDs, app password Secret, channel access and personal-message policies.",
+      "App and tenant IDs, app password Secret, channel access, optional outgoing-file storage with sharing information, and personal-message policies.",
   },
   teamsDirectoryChannels: {
     group: "Components/Channels",

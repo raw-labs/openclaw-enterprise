@@ -35,6 +35,7 @@ function support(values) {
     (config.appPassword === undefined || refsEqual(config.appPassword, PASSWORD_REF)) &&
     (config.cloud === undefined || config.cloud === "Public") &&
     (config.authType === undefined || config.authType === "secret") &&
+    (config.sharePointSiteId === undefined || typeof config.sharePointSiteId === "string") &&
     !config.useManagedIdentity &&
     !config.certificatePath &&
     (config.webhook === undefined ||
@@ -232,6 +233,17 @@ function appendFields(body, config, context) {
         team.requireMention ??
         config.requireMention) !== false,
     ),
+    element("h2", {}, "Files sent by the Agent"),
+    field(
+      "SharePoint site ID",
+      input("msteams-sharepoint-site-id", config.sharePointSiteId),
+      "Optional. Required when the Agent sends documents into channels or group chats. Use the Graph site ID: hostname,site-collection-UUID,site-UUID. Personal-message file consent does not need this setting.",
+    ),
+    element(
+      "p",
+      { className: "hint" },
+      "Files are stored in OpenClawShared in this site's default document library. The Microsoft app needs write access to the site. Channel uploads create view links usable by people in your organization who obtain the link, including people outside the Team. Selecting a site does not grant permissions or configure network access.",
+    ),
     element("h2", {}, "Personal messages"),
     field("Personal-message policy", dmPolicy),
     personalField,
@@ -304,6 +316,12 @@ export const teams = {
     config.enabled = body.querySelector("#msteams-enabled").checked;
     config.appId = body.querySelector("#msteams-app-id").value.trim();
     config.tenantId = body.querySelector("#msteams-tenant-id").value.trim();
+    const siteId = body.querySelector("#msteams-sharepoint-site-id").value.trim();
+    if (siteId) {
+      config.sharePointSiteId = siteId;
+    } else {
+      delete config.sharePointSiteId;
+    }
     config.appPassword = PASSWORD_REF;
     config.legacyWebhook = false;
     const teamId = teamReferences.get(body)?.() ?? "";

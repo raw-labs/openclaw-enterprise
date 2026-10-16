@@ -86,6 +86,37 @@ console. Unsupported editor shapes require the Configuration API; the editor
 does not flatten multiple teams or wildcard access rules. Custom webhook paths
 and legacy webhook listeners fail deployment preparation.
 
+## Configure outgoing channel files
+
+To let the Agent send documents into channels or group chats, enter the optional
+**SharePoint site ID** under **Files sent by the Agent**. Use the canonical Graph
+ID, such as `example.sharepoint.com,site-collection-UUID,site-UUID`, not a Team ID
+or a site URL. OCE saves this as native `channels.msteams.sharePointSiteId`;
+the Configuration API and `occ configuration update` use the same setting.
+Clearing the field removes it. Existing advanced settings remain intact.
+
+The pinned native plugin uploads to `OpenClawShared` in that site's default
+document library, independently of the selected Team/channel. The app needs
+Microsoft Graph permission and a write grant for the destination; prefer
+`Sites.Selected` with a grant to the intended site rather than tenant-wide access.
+A write grant alone does not prove the complete upload and sharing operation
+will succeed. Group-chat sharing also needs a supported chat-member read grant.
+OCE does not grant these permissions, discover a destination automatically, or
+open network destinations when this field is saved.
+
+For channel files, the native plugin creates organization-scoped view links:
+people signed into the organization who obtain the link can access the file,
+including people outside the Team. Group chats use links for the resolved chat
+members; existing site/library permissions still apply. These are native
+[upload and sharing semantics](https://github.com/openclaw/openclaw/blob/90d30a1178a79dddd92e6190b66b95d89dfb3ca8/extensions/msteams/src/graph-upload.ts),
+not additional restrictions enforced by the editor.
+
+Leave the destination empty when channel/group document sending is unnecessary.
+Text messaging and personal-chat file consent do not require it; channel/group
+images can use the native inline path when no site is configured. Incoming
+attachment downloads use message references and have separate permissions and
+network requirements. Live outgoing file delivery remains unqualified.
+
 ## Prepare attachment downloads
 
 Attachments remain unqualified for live Teams use. For a controlled trial,

@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
 updated: 2026-10-16
-last_updated_session: authoring-run/f0d20376-2b63-4a3d-a149-2bf2e44da769
+last_updated_session: 01a1345f-9591-7c21-9306-c235c3bd6ee3
 ---
 
 # Agent Channel Directory Lookup Flow
@@ -159,6 +159,11 @@ Result buttons and Load more retain search focus on pointer-down, so Safari does
 not hide them on blur before their click handlers run. Keyboard activation,
 Escape and focus leaving the field retain their existing behavior.
 The existing channel transaction persists separate channel and personal rules.
+It also saves the optional SharePoint site ID in native
+`channels.msteams.sharePointSiteId`; clearing the field removes that key. The
+editor describes outgoing storage and native organization-scoped channel links.
+Saving this setting performs no provider request or permission grant; see
+[outgoing channel files](../guides/integrations/teams.md#configure-outgoing-channel-files).
 Only native IDs persist, so reopening requires a Team link again for browsing.
 Manual IDs remain available after missing-consent or provider errors.
 
@@ -196,6 +201,8 @@ Manual IDs remain available after missing-consent or provider errors.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-16 18:08: Expose the optional native Teams upload destination and preserve its save/clear semantics. (01a1345f-9591-7c21-9306-c235c3bd6ee3 - d279f3bcb15a)
 
 - 2026-10-16 11:37: Preserve Teams picker results until pointer selection completes; cover WebKit selection and saved IDs in the accompanying change. (authoring-run/f0d20376-2b63-4a3d-a149-2bf2e44da769 - 17445a8c66ef)
 

@@ -998,6 +998,9 @@ test("Teams editor persists separate personal and channel access with an authori
   await dialog
     .getByLabel("Tenant ID", { exact: true })
     .fill("22222222-2222-4222-8222-222222222222");
+  const siteId =
+    "example.sharepoint.com,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666";
+  await dialog.getByLabel("SharePoint site ID", { exact: true }).fill(`  ${siteId}  `);
   await selectSecret(dialog, "Teams app password", password);
   await dialog.getByLabel("Team ID or link", { exact: true }).fill("19:general@thread.tacv2");
   await dialog.getByLabel("Channels — exact IDs", { exact: true }).fill("19:general@thread.tacv2");
@@ -1011,6 +1014,7 @@ test("Teams editor persists separate personal and channel access with an authori
     `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
   );
   assert.equal(saved.status, 200);
+  assert.equal(saved.data.values.channels.msteams.sharePointSiteId, siteId);
   assert.equal(saved.data.values.channels.msteams.dmPolicy, "allowlist");
   assert.deepEqual(saved.data.values.channels.msteams.allowFrom, [
     "44444444-4444-4444-8444-444444444444",
@@ -1037,15 +1041,18 @@ test("Teams editor persists separate personal and channel access with an authori
         binding.subjectId === agent.servicePrincipalId && binding.resourceId === password.id,
     ),
   );
-  // Disabling channel conversations must retain the independent personal allowlist,
-  // even after reopening and saving the unchanged editor.
+  // Disabling channel conversations and clearing file storage must retain
+  // the independent personal allowlist across editor saves.
   await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
   let edit = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+  assert.equal(await edit.getByLabel("SharePoint site ID", { exact: true }).inputValue(), siteId);
   await edit.getByLabel("Enable channel conversations", { exact: true }).uncheck();
   await edit.getByRole("button", { name: "Save configuration", exact: true }).click();
   await edit.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
   edit = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+  assert.equal(await edit.getByLabel("SharePoint site ID", { exact: true }).inputValue(), siteId);
+  await edit.getByLabel("SharePoint site ID", { exact: true }).fill("");
   assert.equal(
     await edit.getByLabel("Enable channel conversations", { exact: true }).isChecked(),
     false,
@@ -1056,6 +1063,7 @@ test("Teams editor persists separate personal and channel access with an authori
     "GET",
     `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
   );
+  assert.equal(Object.hasOwn(personalOnly.data.values.channels.msteams, "sharePointSiteId"), false);
   assert.equal(personalOnly.data.values.channels.msteams.groupPolicy, "disabled");
   assert.equal(personalOnly.data.values.channels.msteams.dmPolicy, "allowlist");
   assert.deepEqual(

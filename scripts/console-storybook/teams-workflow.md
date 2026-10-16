@@ -4,6 +4,10 @@ Use **Components / Channels / Teams Editor** to inspect app and tenant IDs,
 the app-password Secret picker, channel mentions, and personal-message policy.
 Change the personal policy to Allowlist, enter an exact user ID, save, reopen,
 and inspect native Configuration. Channel access must retain its separate rules.
+The optional **SharePoint site ID** starts with a simulated destination. Change
+it, save and reopen to verify persistence; clear it and save to remove the native
+`sharePointSiteId` setting. Read the storage and organization-link explanation.
+An empty value must not block text-only Teams configuration.
 
 Also inspect **Teams**, **Teams Missing Secret**, **Teams Unsupported**, and
 **Teams Read Only**, **Teams Secrets Loading**, **Teams Save Denied**, and

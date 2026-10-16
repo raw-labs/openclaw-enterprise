@@ -17,7 +17,10 @@ tenant access, proxy connectivity, model execution, or replies.
 `tests/browser/console-agent-channels.test.mjs` exercises the regular console
 workflow through the development HTTP API: save separate personal and channel
 access, bind a Namespace Secret, grant Agent access, and retain the native
-plugin selection. Its directory case uses the real API, OCC, IAM, Secret Driver,
+plugin selection. The same case saves the optional SharePoint upload site ID,
+checks it after reopening and an unrelated access edit, then clears it and
+verifies removal from native Configuration. This proves configuration handling,
+not Microsoft upload permissions or file delivery. Its directory case uses the real API, OCC, IAM, Secret Driver,
 and bundled Channel Driver with a local HTTP Microsoft protocol fixture. It
 selects names, saves native IDs, and preserves manual entry after consent denial.
 `tests/integration/teams-directory.test.mjs` additionally checks Team-scoped
@@ -78,6 +81,14 @@ For attachments, send an actual supported Teams file, verify its bytes reach the
 Agent through the approved storage/redirect hosts, and confirm an unapproved
 host is refused. Native live attachment proof remains pending; do not infer
 live-provider qualification from controlled transport coverage.
+
+For outgoing documents, use an explicitly granted disposable SharePoint site.
+Save its ID in the editor and deploy; send a document into a permitted channel
+and verify its bytes, destination folder and organization-scoped sharing behavior.
+Check that a missing destination produces an actionable error while text still
+works. A group-chat send additionally needs chat-member access; verify it fails
+rather than broadening sharing when that access is denied. Do not infer upload
+or sharing success from a read-only destination check.
 
 These live Teams and public-ingress checks remain pending until a test tenant,
 public certificate/endpoint, and authorized model credentials are provided.
