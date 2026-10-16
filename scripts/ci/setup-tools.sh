@@ -245,7 +245,7 @@ install_actionlint() {
 install_browser_dependencies() {
   if [[ -n "${CI:-}" ]]; then
     need_command pnpm
-    pnpm exec playwright install --with-deps chromium
+    pnpm exec playwright install --with-deps chromium webkit
   else
     echo "Skipping local browser installation; browser setup is CI-only." >&2
   fi

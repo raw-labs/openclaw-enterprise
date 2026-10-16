@@ -84,6 +84,7 @@ export function createTeamsDirectoryField({
     className: "button-secondary",
   });
   more.hidden = true;
+  more.addEventListener("pointerdown", (event) => event.preventDefault());
   const field = element(
     "div",
     { className: "channel-field slack-directory-field teams-directory-field" },
@@ -195,6 +196,8 @@ export function createTeamsDirectoryField({
               candidate.name,
               element("small", {}, candidate.id),
             );
+            // Safari blurs the search without focusing buttons; keep results until click.
+            option.addEventListener("pointerdown", (event) => event.preventDefault());
             option.addEventListener("click", () => choose(candidate));
             return option;
           }),

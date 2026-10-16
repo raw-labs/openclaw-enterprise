@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
-updated: 2026-10-10
-last_updated_session: authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9
+updated: 2026-10-16
+last_updated_session: authoring-run/f0d20376-2b63-4a3d-a149-2bf2e44da769
 ---
 
 # Agent Channel Directory Lookup Flow
@@ -153,6 +153,9 @@ the result. Search and saved-name hydration use the selected app-password Secret
 and exact Configuration edit target. Context changes clear names and results,
 abort the browser request and discard stale responses. Selecting a candidate
 adds its exact ID to the editable ID list; names and search text are not saved.
+Result buttons and Load more retain search focus on pointer-down, so Safari does
+not hide them on blur before their click handlers run. Keyboard activation,
+Escape and focus leaving the field retain their existing behavior.
 The existing channel transaction persists separate channel and personal rules.
 Only native IDs persist, so reopening requires a Team link again for browsing.
 Manual IDs remain available after missing-consent or provider errors.
@@ -191,6 +194,8 @@ Manual IDs remain available after missing-consent or provider errors.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-16 11:37: Preserve Teams picker results until pointer selection completes; cover WebKit selection and saved IDs in the accompanying change. (authoring-run/f0d20376-2b63-4a3d-a149-2bf2e44da769 - 17445a8c66ef)
 
 - 2026-10-10 22:48: Keep sender-only native Teams policies outside the limited channel editor (authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9 - a2f7ad762117)
 - 2026-10-07 11:21: Add Team-scoped Graph lookup, native Team ID resolution and name selection alongside Slack in the accompanying implementation. (authoring-run/5acd9a8d-44df-4f9b-8daa-9269c2040340 - 948cb3e61636338be4692bd45114446d6c941890)

@@ -37,13 +37,16 @@ async function artifactDirectory(t) {
 }
 
 async function launchBrowser(options = {}) {
+  const browserType = options.browserType ?? chromium;
   const browserExecutable =
     process.env.OCC_TEST_BROWSER_EXECUTABLE === undefined ||
     process.env.OCC_TEST_BROWSER_EXECUTABLE.length === 0
       ? undefined
       : process.env.OCC_TEST_BROWSER_EXECUTABLE;
-  const browser = await chromium.launch({
-    ...(browserExecutable === undefined ? {} : { executablePath: browserExecutable }),
+  const browser = await browserType.launch({
+    ...(browserType !== chromium || browserExecutable === undefined
+      ? {}
+      : { executablePath: browserExecutable }),
     headless: true,
     ...(options.args === undefined ? {} : { args: options.args }),
   });

@@ -192,16 +192,16 @@ Run the API/static boundary checks without a browser:
 node --test tests/integration/console-api.test.mjs
 ```
 
-On a host approved for browser automation, provision Playwright's Chromium and
+On a host approved for browser automation, provision Playwright's Chromium and WebKit, then
 run the dedicated browser suite:
 
 ```sh
-pnpm exec playwright install chromium
+pnpm exec playwright install chromium webkit
 pnpm test:console-browser
 ```
 
-`OCC_TEST_BROWSER_EXECUTABLE` optionally selects an approved existing browser
-executable. The suite always uses a fresh context. Browser setup is explicit;
+`OCC_TEST_BROWSER_EXECUTABLE` optionally selects an approved existing Chromium
+executable. Teams directory selection also runs in WebKit. The suite always uses a fresh context. Browser setup is explicit;
 the test command does not install software or silently skip a missing browser.
 Do not change managed browser policies to make the suite run. A managed Chrome
 debugging policy can currently block the browser suite on locked-down hosts; use
