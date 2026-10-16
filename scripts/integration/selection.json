@@ -7,15 +7,15 @@
     "commit": "c7bdbcf31d3d550d76d8a2333a683752d112ea33"
   },
   "batch": {
-    "startingIntegration": "bbfdfc5c7a40d26e99a025aa1476a5bbe78d98d4",
+    "startingIntegration": "35602bd9362ed5ec70190ddb84e508f65407a120",
     "steps": [
       {
-        "operation": "PR #19 retained cleanup inventory fix with current worker test ownership",
-        "commit": "8c5fd96f72eb416996e52ed129aab959bab6ebd6",
-        "input": "edb197e6976a5737742cf7ee7fad43e3b06d5810"
+        "operation": "PR #2 Safari Teams directory selection fix and WebKit regression coverage",
+        "commit": "589047a2957451700fb6618eba7c273e99cac5ac",
+        "input": "17daf1c8e4b1a06566dc0d09ddd24be7372dba95"
       }
     ],
-    "retainedUnchanged": [1, 2, 11, 12, 13, 15, 16, 17, 18]
+    "retainedUnchanged": [1, 11, 12, 13, 15, 16, 17, 18, 19]
   },
   "features": [
     {
@@ -33,7 +33,7 @@
       "title": "Microsoft Teams channels",
       "author": "miguelbranco80",
       "headRef": "codex/teams-support",
-      "commit": "17445a8c66ef4e303ff88e10a7b453481febf1f8",
+      "commit": "17daf1c8e4b1a06566dc0d09ddd24be7372dba95",
       "status": "included",
       "comparisonBase": "80725162a946f80652b939a32a57ee4e922eeb5c",
       "headRepository": "raw-labs/openclaw-enterprise"
@@ -239,6 +239,18 @@
         "docs/flows/coordinated-production-upgrade.md"
       ],
       "notes": "Keep the upstream worker test split. Apply cleanup inventory assertions and required CI cases to their current teardown/stop owners, retaining the source production fix and existing integration guards."
+    },
+    {
+      "id": "teams-directory-pointer-focus",
+      "pullRequests": [2],
+      "commits": ["589047a2957451700fb6618eba7c273e99cac5ac"],
+      "paths": [
+        "apps/controller/src/console/agents/teams-directory.mjs",
+        "tests/browser/console-agent-channels.test.mjs",
+        "scripts/ci/setup-tools.sh",
+        "scripts/console-storybook/teams-workflow.md"
+      ],
+      "notes": "Adopt the source Safari pointer-focus fix without changing outbound/runtime behavior. Keep the existing headless Chromium setup optimization while adding pinned WebKit coverage; preserve flow history and both provider compositions."
     }
   ],
   "migrationMappings": [
@@ -263,11 +275,11 @@
   ],
   "qualification": {
     "policy": "Qualify the final integration commit; CI run receipts identify the tested SHA. Source PR checks do not qualify this composition.",
-    "previousTestedCommit": "bbfdfc5c7a40d26e99a025aa1476a5bbe78d98d4",
+    "previousTestedCommit": "35602bd9362ed5ec70190ddb84e508f65407a120",
     "previousRuns": {
-      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38737987810",
-      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38737987366",
-      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38738938888"
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38865162036",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38865162038",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38865476436"
     },
     "requiredChecks": [
       "CI Required on the published SHA",
