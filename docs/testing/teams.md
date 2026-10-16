@@ -65,6 +65,11 @@ Microsoft network access, file permission or model turn.
 The conformance proxy cases separately cover private/mixed/unsupported DNS
 answers, exact storage-host admission and late DNS completion after the deadline.
 
+The Teams directory browser case in `tests/browser/console-agent-channels.test.mjs`
+runs in Chromium and WebKit. It checks mouse selection, selected chips and exact
+IDs, pagination, keyboard activation, dismissal, and saving/reopening through the
+Configuration API with a local Microsoft protocol fixture.
+
 Before accepting production support, use a disposable real Teams bot and tenant
 with the [operator setup](../guides/integrations/teams.md). Verify a permitted
 personal message, a channel mention and threaded reply, denied senders, a

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
+import { chromium, webkit } from "playwright";
 
 import { BundledChannelDriver } from "../../apps/controller/src/drivers/channel/index.ts";
 import {
@@ -1067,9 +1068,28 @@ test("Teams editor persists separate personal and channel access with an authori
 });
 
 // Real Console/Fastify/OCC/Drivers and HTTP Microsoft protocol fixture: not live RSC proof.
-test("Teams directory selects names, saves native IDs and preserves manual entry after consent denial", async (t) => {
+async function teamsDirectorySelection(t, browserType) {
   const { fixture, namespace } = await readyNamespace(t, "Teams directory UI");
   const provider = await teamsDirectoryProvider(t);
+  // More than one bounded lookup is needed to reach Engineering; Load more must stay clickable.
+  const channelPages = [
+    ["general", "General"],
+    ["design", "Design"],
+    ["marketing", "Marketing"],
+    ["engineering", "Engineering"],
+  ];
+  for (const [index, [id, name]] of channelPages.entries()) {
+    provider.routes.set(`${provider.path}/channels${index ? `?page-${index}` : ""}`, {
+      body: {
+        value: [{ id: `19:${id}@thread.tacv2`, displayName: name, membershipType: "standard" }],
+        ...(index + 1 < channelPages.length
+          ? {
+              "@odata.nextLink": `https://graph.microsoft.com${provider.path}/channels?$skiptoken=page-${index + 1}`,
+            }
+          : {}),
+      },
+    });
+  }
   const driver = new BundledChannelDriver(provider.request);
   fixture.controller.registerDriver(driver);
   fixture.controller.selectDriver("channel", driver.id);
@@ -1084,7 +1104,7 @@ test("Teams directory selects names, saves native IDs and preserves manual entry
     nativeValues("teams-directory", { harnessId: "codex" }),
     { executionMode: "dedicated" },
   );
-  const { page } = await newPage(t, fixture);
+  const { page } = await newPage(t, fixture, { browserType });
   await openDraft(page, fixture, agent, "Teams directory Agent");
   await page.getByRole("button", { name: "Configure Microsoft Teams" }).click();
   const dialog = page.getByRole("dialog", { name: "Configure Microsoft Teams" });
@@ -1093,13 +1113,47 @@ test("Teams directory selects names, saves native IDs and preserves manual entry
   await selectSecret(dialog, "Teams app password", password);
   // A group UUID must be resolved to the bot's native Team ID before saving.
   await dialog.getByLabel("Team ID or link", { exact: true }).fill(teamsDirectoryContext.teamId);
+  const channels = dialog.getByLabel("Channels", { exact: true });
+  const channelIds = dialog.locator("#msteams-channel-ids");
+  await channels.fill("general");
+  await dialog.getByRole("option", { name: /General/ }).click();
+  assert.equal(await channelIds.inputValue(), "19:general@thread.tacv2");
+  assert.deepEqual(
+    await channelIds.locator("..").locator(".slack-directory-chip").allTextContents(),
+    ["General"],
+  );
   await dialog.getByLabel("Channels", { exact: true }).fill("engineering");
+  await dialog.getByRole("button", { name: "Load more", exact: true }).click();
   await dialog.getByRole("option", { name: /Engineering/ }).click();
+  const selectedChannels = "19:general@thread.tacv2, 19:engineering@thread.tacv2";
+  assert.equal(await channelIds.inputValue(), selectedChannels);
   await dialog.getByLabel("Allowed people in these channels", { exact: true }).fill("alex");
   await dialog.getByRole("option", { name: /Alex Chen/ }).click();
+  assert.equal(await dialog.locator("#msteams-group-users").inputValue(), teamsMemberId);
   await dialog.locator("#msteams-dm-policy").selectOption("allowlist");
   await dialog.getByLabel("Allowed people in personal messages", { exact: true }).fill("alex");
   await dialog.getByRole("option", { name: /Alex Chen/ }).click();
+  assert.equal(await dialog.locator("#msteams-dm-users").inputValue(), teamsMemberId);
+  // Pointer focus retention must preserve keyboard activation and ordinary dismissal.
+  for (const action of ["Enter", "ArrowDown", "Escape", "outside"]) {
+    await channels.fill("general");
+    await dialog.getByRole("option", { name: /General/ }).waitFor();
+    if (action === "outside") {
+      await dialog.getByLabel("App ID", { exact: true }).click();
+    } else {
+      if (action === "Escape") {
+        await channels.press("ArrowDown");
+        await page.keyboard.press("Escape");
+      } else {
+        await channels.press(action);
+      }
+      if (action === "ArrowDown") {
+        await page.keyboard.press("Enter");
+      }
+    }
+    assert.equal(await dialog.locator("#msteams-channel-ids-results").isHidden(), true);
+    assert.equal(await channelIds.inputValue(), selectedChannels);
+  }
   await dialog.getByRole("button", { name: "Save configuration" }).click();
   await dialog.waitFor({ state: "hidden" }).catch(async (error) => {
     throw new Error(`${error.message} ${await dialog.getByRole("alert").allTextContents()}`);
@@ -1110,7 +1164,10 @@ test("Teams directory selects names, saves native IDs and preserves manual entry
   );
   assert.deepEqual(saved.data.values.channels.msteams.teams, {
     "19:general@thread.tacv2": {
-      channels: { "19:engineering@thread.tacv2": { requireMention: true } },
+      channels: {
+        "19:general@thread.tacv2": { requireMention: true },
+        "19:engineering@thread.tacv2": { requireMention: true },
+      },
     },
   });
   assert.deepEqual(saved.data.values.channels.msteams.groupAllowFrom, [teamsMemberId]);
@@ -1122,6 +1179,9 @@ test("Teams directory selects names, saves native IDs and preserves manual entry
   // A real delayed provider response from the old scope must not survive a Team change.
   await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
   const staleEdit = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+  assert.equal(await staleEdit.locator("#msteams-channel-ids").inputValue(), selectedChannels);
+  assert.equal(await staleEdit.locator("#msteams-group-users").inputValue(), teamsMemberId);
+  assert.equal(await staleEdit.locator("#msteams-dm-users").inputValue(), teamsMemberId);
   await staleEdit.getByLabel("Team ID or link", { exact: true }).fill(teamsLink);
   let release;
   let started;
@@ -1177,4 +1237,9 @@ test("Teams directory selects names, saves native IDs and preserves manual entry
     `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
   );
   assert.deepEqual(manual.data.values.channels.msteams.allowFrom, ["29:manual-external-person"]);
-});
+}
+
+for (const browserType of [chromium, webkit]) {
+  test(`Teams directory selects names, saves native IDs and preserves manual entry after consent denial (${browserType.name()})`, (t) =>
+    teamsDirectorySelection(t, browserType));
+}

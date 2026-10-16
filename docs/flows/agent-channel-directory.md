@@ -1,6 +1,6 @@
 ---
 created: 2026-09-27
-updated: 2026-10-15
+updated: 2026-10-16
 last_updated_session: authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584
 ---
 
@@ -166,6 +166,9 @@ the result. Search and saved-name hydration use the selected app-password Secret
 and exact Configuration edit target. Context changes clear names and results,
 abort the browser request and discard stale responses. Selecting a candidate
 adds its exact ID to the editable ID list; names and search text are not saved.
+Result buttons and Load more retain search focus on pointer-down, so Safari does
+not hide them on blur before their click handlers run. Keyboard activation,
+Escape and focus leaving the field retain their existing behavior.
 The existing channel transaction persists separate channel and personal rules.
 Only native IDs persist, so reopening requires a Team link again for browsing.
 Manual IDs remain available after missing-consent or provider errors.
@@ -209,6 +212,8 @@ Manual IDs remain available after missing-consent or provider errors.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-16 11:37: Preserve Teams picker results until pointer selection completes; cover WebKit selection and saved IDs in the accompanying change. (authoring-run/f0d20376-2b63-4a3d-a149-2bf2e44da769 - 17445a8c66ef)
 
 - 2026-10-15: Reconcile Slack and Teams trusted declarations in the combined integration (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - 523d3b623).
 

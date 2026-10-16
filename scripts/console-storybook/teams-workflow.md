@@ -23,6 +23,11 @@ paste the Team link again to resolve names. Check exact-ID entry after the
 missing-consent error. Check that changing Team, app, tenant or Secret prevents
 old search results from becoming selections.
 
+Check mouse selection in Safari/WebKit as well as Chromium: selecting a result
+must immediately show its chip and populate the exact-ID field for channels and
+both people pickers. Check Load more, Enter, Arrow Down then Enter, Escape and an
+outside click. Save and reopen to confirm exact IDs persist.
+
 These are simulated UI fixtures. They do not prove Microsoft credentials,
 persistence, deployment, callback authentication, or actual Teams replies.
 See [Teams verification](../../docs/testing/teams.md) for integration checks.
