@@ -194,11 +194,18 @@ and storage within one tenant namespace in a single cluster. The Gateway uses sc
 mounting the Harness workspace. Only the model-executing consumer receives its
 model credential; a dedicated Gateway does not.
 
+Dedicated Gateway integration access is an Agent approval enforced by the selected
+Compute Driver. Kubernetes uses a separate proxy for each admitted revision;
+the control plane uses a separate restricted management instance. Proxy policy
+contains no credentials and does not change Harness/Sandbox networking. See
+[Gateway outbound HTTPS](reference/gateway-outbound.md) for supported modes and
+verification limits.
+
 Operators must configure disjoint trusted Gateway and untrusted Harness node
 pools. Sharing a namespace trusts its workload managers with both roles; credential
 mounts and NetworkPolicies do not restrict a namespace administrator. The default
 placement uses one Kubernetes cluster; a second execution cluster is an
-[experimental profile](testing/two-cluster-local.md), with incomplete runtime
+[experimental profile](testing/kubernetes.md#two-cluster-validation), with incomplete runtime
 acceptance. See [Harness execution](reference/harness-execution.md) and
 [Kubernetes Compute](reference/drivers/kubernetes-compute.md).
 

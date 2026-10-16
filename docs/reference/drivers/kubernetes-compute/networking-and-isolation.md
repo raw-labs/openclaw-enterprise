@@ -117,7 +117,9 @@ sets stock Codex `allow_local_binding = true` and `mode = "full"`. An explicit
 deny matching the broker hostname fails closed. The repository-bound filesystem
 profile additionally grants read-only access to the repository client at
 `/opt/oce/repository-credentials` and admitted session material at
-`/run/oce/repository-credentials`. Unbound Agents keep their existing policy.
+`/run/oce/repository-credentials`. Dedicated Codex with an enabled proxy also
+reads `/home/node/.codex/skills/.system`, even without a binding. Embedded
+Codex uses another home; a disabled proxy stays disabled.
 
 These settings apply to the Agent's whole tool proxy: local binding is allowed,
 Codex's additional private-address guard is disabled, and every HTTP method is
@@ -142,12 +144,13 @@ endpoint, Pod and Service CIDRs, and metadata endpoint fall inside them. A
 dedicated Agent has one authentication-only egress policy, pinned to its latest
 prepared revision. Stop leaves it and the Agent's runtime and plugin-status
 policies, selecting no Pod, until the next preparation or Agent deletion.
-Channels require an approved HTTP(S) proxy in `runtime.channels`: a literal IP
-endpoint, or the exact
-Helm-managed proxy Service URL paired with `runtime.channels.managedProxy`.
-Direct public channel-provider access is denied.
+Supported channels and approved Gateway HTTPS use a per-revision proxy. Direct
+public access remains denied. See [Gateway outbound](../../gateway-outbound.md).
 
 ## Explicit network profiles
+
+Proxy Pods use `gateway-outbound-v1`; only their exact Gateway revision receives
+access.
 
 Ordinary DNS, model, repository-credential, authentication, channel, workspace-node,
 plugin-status, sandbox-preview ingress and gateway/Harness allow policies require the reserved Pod label

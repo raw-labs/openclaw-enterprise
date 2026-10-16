@@ -31,6 +31,7 @@ import { prepareGatewayRouting } from "./routing.mjs";
 import { prepareLogging, readDefaultCollectorImage } from "./logging.mjs";
 import { pullImage } from "./image-pull.mjs";
 import { keycloakResourceKind, prepareKeycloak, readKeycloakImage } from "./keycloak.mjs";
+import { imageInventory, laneImagesResourceKind } from "./lane-images.mjs";
 import { metricsMonitoringImages } from "./metrics-monitoring-images.mjs";
 import {
   prepareRepositoryCredentials,
@@ -897,12 +898,13 @@ function imageCache(role) {
 }
 
 // Only main's warm job (ci-image-cache.yml) writes the cache. It runs for every
-// image input change, in order and never cancelled, so the newest commit's export
-// lands last. CI lanes only restore: a lane export on main could land after a
-// newer commit's warm export and replace it, and on a pull request it cost about
-// 40 s and filled only the merge ref's scope. The warm job exports in a second
-// build after the image is built and loaded: the same arguments without --load or
-// the tag, so BuildKit reuses the steps it just ran and only uploads the cache.
+// image input change and on a schedule from main's newest commit, in order and
+// never cancelled, so the newest commit's export lands last. CI lanes only
+// restore: a lane export on main could land after a newer commit's warm export
+// and replace it, and on a pull request it cost about 40 s and filled only the
+// merge ref's scope. The warm job exports in a second build after the image is
+// built and loaded: the same arguments without --load or the tag, so BuildKit
+// reuses the steps it just ran and only uploads the cache.
 function imageCacheExportArgs(role, buildArgs) {
   if (buildArgs.slice(0, 3).join(" ") !== "buildx build --load") {
     throw new Error("Only a hosted cache build can export the image cache.");
@@ -2252,6 +2254,24 @@ async function registerImageInK3d(statePath, state, cluster, image, envName) {
   return resource;
 }
 
+async function prepareK3dControllerImage(statePath, state, cluster, env) {
+  let source =
+    env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE ?? process.env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE;
+  if (source === undefined) {
+    const built = await timedPreparation(state.lane, "controller-proxy-image-build", () =>
+      buildRuntimeImages(statePath, state, {
+        controller: true,
+        nodeBaseImage: effectiveLaneEnv(state.lane, env).NODE_BASE_IMAGE,
+      }),
+    );
+    source = built.env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE;
+  }
+  const imported = await timedPreparation(state.lane, "controller-proxy-image-import", () =>
+    registerImageInK3d(statePath, state, cluster, source, "OCC_TEST_PRODUCTION_CONTROLLER_IMAGE"),
+  );
+  env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE = imported.reference;
+}
+
 async function prepareK3dRuntimeImages(
   statePath,
   state,
@@ -2679,6 +2699,9 @@ async function prepareLane({ lane, statePath }) {
           },
         ]),
       );
+      if (lanePrepare(name).controllerImage) {
+        await prepareK3dControllerImage(resolvedStatePath, state, cluster, env);
+      }
       env.OCC_TEST_KUBERNETES_KUBECONFIG = cluster.kubeconfig;
       env.OCC_TEST_KUBERNETES_CONTEXT = cluster.context;
       env.OCC_TEST_KUBERNETES_IMAGE = fixture.image;
@@ -3011,6 +3034,30 @@ async function prepareLane({ lane, statePath }) {
       );
       break;
     }
+    case "qa-matrix":
+      // On a hosted runner, record the starting images so cleanup can return the
+      // shared image store to them (lane-images.mjs, finding 1345). A workstation's
+      // launcher tags are the developer's own and stay as the run leaves them. A
+      // failed inventory only skips that: the QA run itself does not need it.
+      if (process.env.GITHUB_ACTIONS === "true") {
+        let images;
+        try {
+          images = await imageInventory({
+            execFile: (command, args) =>
+              execFile(command, args, { timeoutMs: imageCommandTimeoutMs }),
+            docker: process.env.OCC_DOCKER_BIN ?? "docker",
+          });
+        } catch (error) {
+          console.log(
+            `::warning::QA image baseline skipped: ${String(error.message).split("\n")[0]}`,
+          );
+        }
+        if (images) {
+          addResource(state, laneImagesResourceKind, { name, images, status: "ready" });
+          await writeState(resolvedStatePath, state);
+        }
+      }
+      break;
     case "helper-timeout":
       break;
   }
@@ -3132,6 +3179,17 @@ async function prepareFileWithState({ name, relativeFile, resolvedStatePath, tem
     return { env: { ...env, ...prepared.env }, cleanup: prepared.cleanup };
   }
 
+  if (prepare.controllerImage) {
+    const cluster = effectiveState.resources.find(
+      (resource) => resource.kind === "k3d-cluster" && resource.status === "ready",
+    );
+    if (cluster === undefined) {
+      throw new Error("Controller image preparation requires the lane's owned ready k3d cluster.");
+    }
+    await prepareK3dControllerImage(resolvedStatePath, effectiveState, cluster, env);
+    await saveLaneEnv(resolvedStatePath, effectiveState, env);
+  }
+
   if (prepare.postgres) {
     const dbKind = prepare.k3d ? "k8s" : "ci";
     const database = await createAndMigrateDatabase(resolvedStatePath, effectiveState, {
@@ -3222,9 +3280,9 @@ const warmRuntimeImageRepository = "localhost/openclaw-ci-main/runtime";
 async function warmImageCache({ statePath }) {
   if (
     process.env.GITHUB_REF !== "refs/heads/main" ||
-    !["push", "workflow_dispatch"].includes(process.env.GITHUB_EVENT_NAME)
+    !["push", "schedule", "workflow_dispatch"].includes(process.env.GITHUB_EVENT_NAME)
   ) {
-    throw new Error("Only a push or dispatch on main may warm the image cache.");
+    throw new Error("Only a push, schedule or dispatch on main may warm the image cache.");
   }
   const lane = "images-packaging";
   await validateLaneInputsBeforeSideEffects(lane);

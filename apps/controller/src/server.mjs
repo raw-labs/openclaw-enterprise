@@ -1,4 +1,9 @@
-import { refuseRewrittenIpv4Host, refuseWrittenUserinfo } from "./auth/configuration.ts";
+import {
+  DEVELOPMENT_BROWSER_ORIGIN_RULE,
+  isDevelopmentBrowserOrigin,
+  refuseRewrittenIpv4Host,
+  refuseWrittenUserinfo,
+} from "./auth/configuration.ts";
 import { clientAddressConfiguration, humanLoginConfiguration } from "./auth/index.ts";
 import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
@@ -15,7 +20,6 @@ import { createOccMetrics } from "./metrics/index.ts";
 import { startupDependencyFailure, startupPolicyNameFailure } from "./startup-failure.ts";
 import { metricsConfiguration, startMetricsListener } from "./metrics/listener.ts";
 
-const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const developmentBindHosts = new Set(["127.0.0.1", "::1", "0.0.0.0"]);
 const DEFAULT_BETTER_AUTH_BASE_URL = "http://127.0.0.1:3000";
 
@@ -56,8 +60,8 @@ function startupFailureCode(error) {
   if (/ChatGPT admin-key Secret/.test(message)) {
     return "CHATGPT_ADMIN_KEY_UNAVAILABLE";
   }
-  if (/Slack directory proxy/i.test(message)) {
-    return "CHANNEL_DIRECTORY_PROXY_INVALID";
+  if (/Control-plane outbound proxy/i.test(message)) {
+    return "CONTROL_PLANE_OUTBOUND_PROXY_INVALID";
   }
   if (
     /observability\.url (?:IPv4 host must be four decimal octets|must not contain user info|must not contain a tab|must be an absolute HTTP)/.test(
@@ -206,8 +210,9 @@ function configuration() {
   }
 
   const gatewayApiKeyPath = process.env.OCC_GATEWAY_API_KEY_PATH;
-  const channelDirectoryProxyUrl = process.env.OCC_CHANNEL_DIRECTORY_PROXY_URL;
-  const channelDirectoryManagedProxyHost = process.env.OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST;
+  const controlPlaneOutboundProxyUrl = process.env.OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL;
+  const controlPlaneOutboundProxyManagedHost =
+    process.env.OCC_CONTROL_PLANE_OUTBOUND_PROXY_MANAGED_HOST;
   if (gatewayApiKeyPath !== undefined) {
     if (gatewayApiKeyPath.trim().length === 0 || !isAbsolute(gatewayApiKeyPath)) {
       throw new Error("OCC_GATEWAY_API_KEY_PATH must identify an absolute mounted-file path.");
@@ -245,8 +250,10 @@ function configuration() {
   refuseWrittenUserinfo("OCC_AUTH_BASE_URL", configuredAuthBaseURL);
   refuseRewrittenIpv4Host("OCC_AUTH_BASE_URL", configuredAuthBaseURL, parsedAuthBaseURL);
   const authBaseURL = parsedAuthBaseURL.toString().replace(/\/$/, "");
-  if (mode === "development" && !loopbackHosts.has(new URL(authBaseURL).hostname)) {
-    throw new Error("Development OCC_AUTH_BASE_URL must identify a loopback host.");
+  // The same rule createFastifyApp applies to the development browser origin, checked here so
+  // startup refuses it as AUTH_BASE_URL_INVALID before loading anything else.
+  if (mode === "development" && !isDevelopmentBrowserOrigin(authBaseURL)) {
+    throw new Error(`Development OCC_AUTH_BASE_URL must be ${DEVELOPMENT_BROWSER_ORIGIN_RULE}.`);
   }
 
   // { github?, google?, oidc? }: each configured provider carries the recovery user ID.
@@ -260,10 +267,10 @@ function configuration() {
       ...humanLogin,
       ...(clientAddress === undefined ? {} : { clientAddress }),
       ...(gatewayApiKeyPath === undefined ? {} : { gatewayApiKeyPath }),
-      ...(channelDirectoryProxyUrl === undefined ? {} : { channelDirectoryProxyUrl }),
-      ...(channelDirectoryManagedProxyHost === undefined
+      ...(controlPlaneOutboundProxyUrl === undefined ? {} : { controlPlaneOutboundProxyUrl }),
+      ...(controlPlaneOutboundProxyManagedHost === undefined
         ? {}
-        : { channelDirectoryManagedProxyHost }),
+        : { controlPlaneOutboundProxyManagedHost }),
       ...(nativeAdmin === undefined ? {} : { nativeAdmin }),
       agentRuntimeLogsEnabled,
     });
@@ -333,6 +340,7 @@ async function start() {
     }
     if (
       typeof drivers.computeDriver.storeServiceAccountCredential !== "function" ||
+      typeof drivers.computeDriver.findServiceAccountCredential !== "function" ||
       typeof drivers.computeDriver.deleteServiceAccountCredential !== "function"
     ) {
       throw new Error("The selected Compute Driver cannot manage ServiceAccount credentials.");

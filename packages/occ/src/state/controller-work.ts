@@ -45,8 +45,12 @@ export interface DeploymentStatusResult {
 export interface ControllerWorkAttempt {
   readonly at: Date;
   readonly code: string;
-  /** The refusal a `REFUSED_CANDIDATE_STOP_PENDING` deferral waits to publish. */
+  /** The refusal whose candidate stop or revision access withdrawal remains pending. */
   readonly refusal?: string;
+  /** Validated terminal failure evidence preserved while the refusal is pending. */
+  readonly refusalData?: Readonly<Record<string, unknown>>;
+  /** Terminal preparation still requires durable runtime retirement after withdrawal. */
+  readonly cleanupFailedPreparation?: true;
 }
 
 const FAILURE_CODE = /^[A-Z0-9_]{1,64}$/u;
@@ -62,6 +66,11 @@ export function deploymentProgressForWork(
   let code = "RECONCILIATION_PENDING";
   let message = "Deployment has not completed. Another reconciliation is pending.";
   switch (attempt?.code) {
+    case "REVISION_ACCESS_WITHDRAWAL_PENDING":
+      code = attempt.code;
+      message =
+        "Revision network access is being withdrawn before recording this version's failure. The controller will retry removal; deploy a new version to restore access.";
+      break;
     case "REVISION_INCOMPLETE":
       code = attempt.code;
       message = "Waiting for the runtime to become ready.";
@@ -284,8 +293,12 @@ export interface RetryableFailure {
 }
 
 export interface DeferredWork extends RetryableFailure {
-  /** A refusal waiting on its candidate's stop; recorded in the deferral's evidence. */
+  /** A refusal waiting on its candidate stop or outbound withdrawal, recorded in evidence. */
   readonly refusal?: string;
+  /** Existing terminal failure evidence, validated against `refusal`. */
+  readonly refusalData?: unknown;
+  /** Preserve the existing terminal preparation retirement obligation. */
+  readonly cleanupFailedPreparation?: true;
   /** That stop yielded to other Work rather than failing; recorded as `stopYielded: true`. */
   readonly stopYielded?: boolean;
 }
@@ -595,26 +608,33 @@ function completedWithoutActivation(work: Readonly<ControllerWork>): boolean {
   );
 }
 
+// Each message names the cause and, where the caller can act, the next step. Every client
+// (console, occ, HTTP API) shows this text as is, so the guidance lives here only; the console
+// adds just a link to the page that holds the setting (finding 1393).
 function deploymentErrorMessage(code: string): string {
   switch (code) {
     case "CONVERGENCE_DEADLINE_EXCEEDED":
-      return "Deployment convergence deadline exceeded.";
+      return "Deployment convergence deadline exceeded: the version did not become ready in time. Check its logs and runtime diagnostics, correct the cause if there is one, then deploy a new version.";
     case "HARNESS_CREDENTIAL_BOOTSTRAP_FAILED":
       return "Harness credential initialization failed. Correct the cause and deploy again.";
     case "HARNESS_CREDENTIAL_BOOTSTRAP_TIMEOUT":
       return "Harness credential initialization exceeded its deadline. Correct the cause and deploy again.";
     case "RUNTIME_AUTHENTICATION_FAILED":
-      return "Deployment runtime credentials were rejected.";
+      return "The model provider rejected this version's credential (HTTP 401 or 403). Check that the key or token is valid and can use the selected model, update or replace the Agent's model credential, then deploy a new version.";
     case "RUNTIME_CPU_STARVED":
-      return "Deployment runtime did not get enough CPU to start.";
+      return "Deployment runtime did not get enough CPU to finish its startup model check, because of a CPU limit below one core or a busy node. Ask an admin to raise the limit or free node capacity, then deploy a new version.";
+    // Model-probe codes come from the runtime wrapper's startup model check
+    // (`runtime-entrypoints.ts`). OpenClaw classifies transport errors (refused connection,
+    // DNS failure, "fetch failed") as a timeout; Codex reports them as
+    // RUNTIME_MODEL_PROBE_FAILED unless the connection hangs until its cap.
     case "RUNTIME_MODEL_PROBE_TIMEOUT":
-      return "Deployment runtime startup model check timed out.";
+      return "The startup model check did not get a reply from the model provider in time. With OpenClaw this includes a provider the runtime cannot reach (refused connection or unknown host). Check that the runtime can reach the provider (network egress, proxy, or a custom baseUrl in the Configuration) and that the provider is responding, then deploy a new version.";
     case "RUNTIME_MODEL_PROBE_FAILED":
-      return "Deployment runtime startup model check failed.";
+      return "The startup model check failed for a reason other than a rejected credential, such as an unknown model, invalid provider settings, a provider or TLS error, a rate limit or quota, or, with Codex, a provider the runtime cannot reach. Check the model and its provider settings (such as baseUrl and api) in the Configuration, the provider account, and that the runtime can reach the provider, then deploy a new version.";
     case "RUNTIME_LOGIN_FAILED":
-      return "Deployment runtime could not sign in to the model provider.";
+      return "Deployment runtime could not sign in to the model provider. Check the Agent's model credential (for an OAuth login, sign in again) and that the runtime can reach the provider, then deploy a new version.";
     case "RUNTIME_STARTUP_FAILED":
-      return "Deployment runtime failed a startup check.";
+      return "Deployment runtime failed a startup check. Check this version's logs for the failed check and correct its cause, then deploy a new version.";
     case "REVISION_SUPERSEDED":
       return "Deployment was superseded by a newer revision.";
     case "REVISION_STOPPED":

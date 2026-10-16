@@ -1,3 +1,21 @@
+import type {
+  GatewayOutboundSelection,
+  GatewayOutboundSnapshot,
+  GatewayOutboundRequirement,
+} from "./gateway-outbound.ts";
+
+export type {
+  GatewayOutboundSelection,
+  GatewayOutboundSnapshot,
+  GatewayOutboundRequirement,
+  GatewayOutboundDestination,
+} from "./gateway-outbound.ts";
+export {
+  validGatewayOutboundSelection,
+  validGatewayOutboundSnapshot,
+  GATEWAY_OUTBOUND_HOST_PATTERN,
+} from "./gateway-outbound.ts";
+
 import type { WorkspaceSetup } from "./workspace-setup.ts";
 
 export type { ComputePreparationFailureEvidence } from "./compute-preparation.ts";
@@ -165,6 +183,7 @@ export interface BackendSummary {
 }
 
 export interface InstallationCapabilities {
+  readonly gatewayOutbound?: { readonly restricted: boolean; readonly publicHttps: boolean };
   readonly agentProvisioning?: ComputeAgentProvisioningCapabilities;
   readonly pluginPolicies?: PluginPolicyCapabilities & { readonly driver: PluginDriverIdentity };
   readonly pluginDiscovery?: { readonly credential: "required" | "none" };
@@ -332,7 +351,7 @@ export interface CredentialSourceReference extends ResourceRef {
 }
 
 /** Login modes a Harness can use when its model credential arrives from a source. */
-export type CredentialSourceLoginMode = "api_key";
+export type CredentialSourceLoginMode = "api_key" | "codex_pat";
 
 export interface CredentialSourceFieldSpec {
   readonly name: string;
@@ -715,6 +734,7 @@ export interface Agent extends Scope {
   readonly harnessAuth: HarnessAuthBinding | null;
   readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode: HarnessExecutionMode;
+  readonly gatewayOutbound?: GatewayOutboundSelection;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingSelection[];
@@ -728,6 +748,7 @@ export interface Agent extends Scope {
 export interface ConfigurationReadError {
   readonly code: "SAVED_CONFIGURATION_UNREADABLE";
   readonly field:
+    | "gatewayOutbound"
     | "plugins"
     | "pluginApprovers"
     | "repositoryBindings"
@@ -741,6 +762,7 @@ export interface ConfigurationReadError {
 
 export type AgentMetadata = Omit<
   Agent,
+  | "gatewayOutbound"
   | "plugins"
   | "pluginApprovers"
   | "repositoryBindings"
@@ -791,10 +813,13 @@ export interface AgentRevision extends Scope {
   readonly configurationKind: ConfigurationKind;
   readonly configurationGeneration: number;
   readonly configuration: OpenClawConfigurationDocument;
+  readonly gatewayOutbound?: GatewayOutboundSnapshot;
   readonly harness: RevisionHarnessDescriptor;
   readonly compute: {
     readonly id: string;
     readonly implementation: string;
+    /** Private, immutable admission state owned by the selected Compute Driver. */
+    readonly admission?: string;
   };
   readonly sandboxDriverId?: string;
   readonly secretDriverId?: string;
@@ -835,6 +860,9 @@ export function freezeAgentRevision(revision: AgentRevision): Readonly<AgentRevi
   return Object.freeze({
     ...revision,
     configuration: immutableCopy(revision.configuration),
+    ...(revision.gatewayOutbound === undefined
+      ? {}
+      : { gatewayOutbound: immutableCopy(revision.gatewayOutbound) }),
     ...(revision.secretBindings === undefined
       ? {}
       : { secretBindings: immutableCopy(revision.secretBindings) }),
@@ -1110,6 +1138,8 @@ export interface SandboxHarnessEndpoint {
   readonly url: string;
   /** Provider-local workspace root served by the Harness workspace node. */
   readonly workspaceRoot?: string;
+  /** Request this native Codex profile when the provider supplies the sandbox boundary. */
+  readonly codexPermissionProfile?: ":danger-full-access";
 }
 
 export interface SandboxNamespaceContext {
@@ -1180,6 +1210,7 @@ export interface DriverImplementation {
 
 export interface IAMDriver extends Driver {
   readonly capability: "iam";
+  /** Namespace writes require participation in the caller's policy-and-audit transaction. */
   readonly namespacePolicyTransaction?: "platform-unit-of-work";
   lookupIdentity(input: IdentityLookup): Promise<Identity | undefined>;
   authorize(request: AuthorizationRequest): Promise<AuthorizationDecision>;
@@ -1603,6 +1634,12 @@ export type ChannelCredentialReader = (
 ) => Promise<void>;
 
 export interface ChannelDriver extends Driver {
+  /** Side-effect-free requirements of supported enabled native channels. */
+  gatewayNetworkRequirements?(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly GatewayOutboundRequirement[];
+  /** Installation-local provider management transport; independent of Agent revisions. */
+  controlPlaneNetworkRequirements?(): readonly GatewayOutboundRequirement[];
   readonly capability: "channel";
   validateCredentials?(
     values: Readonly<Record<string, unknown>>,
@@ -1787,6 +1824,30 @@ export interface ConfigurationValidationOptions {
 }
 
 export interface ComputeDriver extends Driver {
+  readonly gatewayOutboundCapabilities?: {
+    readonly restricted: boolean;
+    readonly publicHttps: boolean;
+  };
+  validateGatewayOutbound?(
+    selection: GatewayOutboundSelection,
+    executionMode: HarnessExecutionMode,
+  ): void;
+  admitGatewayOutbound?(input: {
+    readonly selection: GatewayOutboundSelection;
+    readonly executionMode: HarnessExecutionMode;
+    readonly requirements: readonly GatewayOutboundRequirement[];
+  }): GatewayOutboundSnapshot | undefined;
+  /**
+   * Pure status of immutable access admission against current Installation approval.
+   * `withdrawn` must be observed before effects; restored approval cannot cancel recorded cleanup.
+   */
+  revisionAccessStatus?(revision: Readonly<AgentRevision>): "none" | "current" | "withdrawn";
+  /**
+   * Withdraw the access identified by revisionAccessStatus, attempting independent closures
+   * even when another fails. Return only after required backing workloads and connections end.
+   * Use immutable ownership, never current approval to omit cleanup; do not start or repair.
+   */
+  withdrawRevisionAccess?(revision: Readonly<AgentRevision>): Promise<void>;
   readonly supportsWorkspaceSetup?: true;
   readonly capability: "compute";
   /** Deployment must observe and provision Agent-owned runtime credentials before revision admission. */
@@ -1796,6 +1857,8 @@ export interface ComputeDriver extends Driver {
   readonly agentProvisioning?: ComputeAgentProvisioningCapabilities;
   readonly activationOrder?: "beforeCommit" | "afterCommit";
   readonly maintenanceIntervalMs?: number;
+  /** Side-effect-free, bounded Driver-owned facts frozen into a new revision. */
+  admitRevision?(revision: Readonly<AgentRevision>): string | undefined;
   /**
    * Opt into exclusive replacement: the worker stops all earlier revisions before
    * preparation and supersedes their reconciliation once a newer exclusive

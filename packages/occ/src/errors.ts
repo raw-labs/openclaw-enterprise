@@ -459,6 +459,9 @@ const modelProviderSettingMessages = {
   // An http(s) scheme followed by one or no slash, which the URL parser accepts (finding 1285).
   baseUrlSlashes: (path: string): string =>
     `Configuration field ${path} must start with https:// or http:// (the // after the scheme is missing).`,
+  // A host with a numeric or 0x last label, which the URL parser reads as IPv4 (finding 1346).
+  baseUrlNumericHost: (path: string): string =>
+    `Configuration field ${path} must be an absolute http or https URL. A numeric or 0x last label parses as IPv4; use four decimal octets from 0 to 255 without leading zeros.`,
   api: (path: string): string =>
     `Configuration field ${path} must name a model API the runtime supports, such as openai-responses, openai-completions or anthropic-messages.`,
 } as const;
@@ -492,6 +495,20 @@ export class ResourceStateConflictError extends ResourceConflictError {
   constructor(message: string) {
     super(message);
     this.name = "ResourceStateConflictError";
+  }
+}
+
+/**
+ * The Configuration moved past the generation the update named. HTTP marks it with an
+ * `/expectedGeneration` detail, so a caller can tell it from other Configuration conflicts,
+ * such as one reserved for provisioning, and reread before saving again.
+ */
+export class ConfigurationGenerationConflictError extends ResourceStateConflictError {
+  constructor() {
+    super(
+      "The Configuration changed since it was read. Read its current generation before updating it.",
+    );
+    this.name = "ConfigurationGenerationConflictError";
   }
 }
 
@@ -726,6 +743,19 @@ export class TransientDependencyError extends Error {
     this.dependency = dependency;
     this.reason = reason;
     this.code = TRANSIENT_DEPENDENCY_CODES[dependency];
+  }
+}
+
+/**
+ * A Sandbox Driver's provider refused a Namespace step because the controller's own
+ * identity is unauthenticated or lacks a permission there. Retrying cannot help until an
+ * operator fixes that identity or grant, so Compute fails the Namespace step at once.
+ * The message names only the provider's refusal code, never provider text.
+ */
+export class SandboxNamespaceRefusedError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "SandboxNamespaceRefusedError";
   }
 }
 

@@ -1,7 +1,7 @@
 ---
 created: 2026-08-19
-updated: 2026-10-13
-last_updated_session: fix-1276-1278
+updated: 2026-10-14
+last_updated_session: authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3
 ---
 
 # Configuration Driver and Agent Revision Flow
@@ -132,9 +132,10 @@ detail, before parsing, schema validation, the NUL/surrogate check or
 Every JSON route shares this parser and limit. Creation requires `kind: "agent"` and a native
 root-object JSON document; omitted or unknown kinds and malformed request
 shapes fail with `400`. Updates require the complete replacement `values`
-document and accept optional `secretBindings`; `kind`,
-`generation`, and ownership are server-owned and cannot be supplied or changed.
-OCC preserves nested values and SecretRefs unchanged. Malformed,
+document and accept optional `secretBindings` and `expectedGeneration`, refusing
+a stale one under the row lock with an `/expectedGeneration` `409` detail.
+`kind`, `generation`, and ownership are server-owned. OCC preserves nested values
+and SecretRefs unchanged. Malformed,
 generation-mismatched, or ownership-invalid persisted ConfigMaps fail with
 `503`.
 Authorization denial fails with `403`, a missing exact resource with `404`, an
@@ -212,6 +213,8 @@ its optional integration is skipped.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-14 16:40: Document Gateway outbound admission (authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3 - bd8fe1f)
 
 - 2026-10-14 10:30: Writes refuse literals in the other slots OpenClaw marks sensitive ([rules](configuration-driver/persistence-and-revisions.md)). (fix-1309, finding 1309)
 - 2026-10-14 09:30: Writes and deployment require references in the other key and header slots the Gateway sends ([list](../reference/configuration/secrets.md#secret-boundaries)); those header slots and MCP headers refuse invalid header names. Stored documents still read. (fix-1307, finding 1307)

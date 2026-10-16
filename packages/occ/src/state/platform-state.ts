@@ -16,6 +16,7 @@ import {
 import type {
   AccessBinding,
   Agent,
+  GatewayOutboundSelection,
   AgentRead,
   AgentRevisionMetadata,
   AgentRevisionSummaryPage,
@@ -55,6 +56,8 @@ import type {
 import {
   normalizeInitialWorkspaceFiles,
   normalizeWorkspaceDefaultsId,
+  validGatewayOutboundSelection,
+  validGatewayOutboundSnapshot,
   normalizePluginDesiredState,
   normalizePluginApprovers,
   normalizeHarnessAuthBinding,
@@ -106,6 +109,8 @@ export interface InstallationRepository extends InstallationReadRepository {
    * no human account (its IAM bindings alone decide).
    */
   holdPrincipalAccount(principalId: string): Promise<boolean>;
+  /** Holds the user/session through COMMIT and validates expiry at commit; authentication validates its profile. */
+  holdAuthenticationSession(sessionId: string, userId: string): Promise<boolean>;
 }
 
 export interface NamespaceReadRepository {
@@ -186,6 +191,7 @@ export interface AgentRepository extends AgentReadRepository {
     pluginApprovers?: PluginApprovers | null,
     repositoryAccess?: RepositoryAccess | null,
     credentialSources?: readonly AgentCredentialSourceBinding[],
+    gatewayOutbound?: GatewayOutboundSelection,
   ): Promise<Readonly<Agent> | undefined>;
   compareAndSetActiveRevision(
     namespaceId: string,
@@ -552,7 +558,7 @@ export function validHarnessAuthSnapshot(value: HarnessAuthSnapshot, namespaceId
         Object.keys(value).length === 5 &&
         isNonEmptyString(value.credentialGatewayId) &&
         isNonEmptyString(value.sourceType) &&
-        value.loginMode === "api_key"
+        (value.loginMode === "api_key" || value.loginMode === "codex_pat")
       );
     }
     const binding = normalizeHarnessAuthBinding({ method: value.method, source: value.source });
@@ -773,16 +779,24 @@ function assertAdmittedAgentRevision(revision: AgentRevision): void {
     typeof revision.compute !== "object" ||
     revision.compute === null ||
     Array.isArray(revision.compute) ||
-    Object.keys(revision.compute).length !== 2 ||
+    Object.keys(revision.compute).some(
+      (key) => !["id", "implementation", "admission"].includes(key),
+    ) ||
     !Object.hasOwn(revision.compute, "id") ||
     !Object.hasOwn(revision.compute, "implementation") ||
     !isNonEmptyString(revision.compute.id) ||
     !isNonEmptyString(revision.compute.implementation) ||
+    (revision.compute.admission !== undefined &&
+      (typeof revision.compute.admission !== "string" ||
+        !/^[\x20-\x7e]{1,1024}$/.test(revision.compute.admission))) ||
     (revision.sandboxDriverId !== undefined && !isNonEmptyString(revision.sandboxDriverId)) ||
     (revision.secretDriverId !== undefined && !isNonEmptyString(revision.secretDriverId)) ||
     Object.hasOwn(revision, "serviceAccount") ||
     !validHarnessAuthSnapshot(revision.harnessAuth, revision.namespaceId) ||
     !validCredentialSourceSnapshots(revision.credentialSources) ||
+    (revision.gatewayOutbound !== undefined &&
+      (!validGatewayOutboundSnapshot(revision.gatewayOutbound) ||
+        revision.harness.mode !== "dedicated")) ||
     !validPluginRevisionState(revision.plugins) ||
     !validPluginApprovers(revision.pluginApprovers) ||
     (revision.repositoryCredentials !== undefined &&
@@ -1278,6 +1292,8 @@ function repositories(
     },
     // In-memory State has no human accounts, and its units are serialized.
     holdPrincipalAccount: async () => true,
+    // Memory authentication owns its sessions outside platform State.
+    holdAuthenticationSession: async () => false,
   };
 
   const namespaces: NamespaceRepository = {
@@ -2294,6 +2310,13 @@ function repositories(
         agent.credentialSources,
       );
       assertHarnessCredentialSourceListed(agent.harnessAuth, agent.credentialSources);
+      const gatewayOutbound = agent.gatewayOutbound ?? { mode: "channelsOnly" as const };
+      if (
+        !validGatewayOutboundSelection(gatewayOutbound) ||
+        (gatewayOutbound.mode !== "channelsOnly" && agent.executionMode !== "dedicated")
+      ) {
+        throw new ScopeViolationError("The Agent Gateway outbound selection is invalid.");
+      }
       const key = agentKey(agent.namespaceId, agent.id);
       if (snapshot.agents.has(key)) {
         throw new ResourceConflictError("The server generated an existing Agent identity.");
@@ -2323,6 +2346,7 @@ function repositories(
       } = agent;
       const saved = immutableCopy({
         ...withoutPlugins,
+        gatewayOutbound,
         ...(plugins === undefined ? {} : { plugins }),
         ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
         ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -2384,6 +2408,7 @@ function repositories(
       nextPluginApprovers,
       nextRepositoryAccess,
       nextCredentialSources,
+      gatewayOutbound,
     ) => {
       const current = await agents.findAgent(namespaceId, agentId);
       if (!current) {
@@ -2409,6 +2434,26 @@ function repositories(
           { secrets, serviceAccounts, credentialSources },
           namespaceId,
           harnessAuth,
+        );
+      }
+      if (
+        gatewayOutbound !== undefined &&
+        (!validGatewayOutboundSelection(gatewayOutbound) ||
+          (gatewayOutbound.mode !== "channelsOnly" &&
+            (executionMode ?? current.executionMode) !== "dedicated"))
+      ) {
+        throw new ScopeViolationError(
+          "The Gateway outbound selection is invalid for this topology.",
+        );
+      }
+      if (
+        gatewayOutbound === undefined &&
+        current.gatewayOutbound?.mode !== undefined &&
+        current.gatewayOutbound.mode !== "channelsOnly" &&
+        (executionMode ?? current.executionMode) !== "dedicated"
+      ) {
+        throw new ScopeViolationError(
+          "The Gateway outbound selection requires dedicated execution.",
         );
       }
       const association = harnessAuth === undefined ? current.harnessAuth : harnessAuth;
@@ -2453,6 +2498,7 @@ function repositories(
         configurationId,
         backendId: nextBackendId,
         executionMode: executionMode ?? current.executionMode,
+        ...(gatewayOutbound === undefined ? {} : { gatewayOutbound }),
         harnessAuth: association,
         ...(agentCredentialSources === undefined || agentCredentialSources.length === 0
           ? {}
@@ -2913,6 +2959,7 @@ function repositories(
       settleEffect: provisioningUnavailable,
       cancel: provisioningUnavailable,
       cancelByAgent: async () => undefined,
+      settleAbandonedEffect: provisioningUnavailable,
       retryByWorkId: provisioningUnavailable,
       releaseConfiguration: async () => false,
     },

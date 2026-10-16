@@ -1,3 +1,4 @@
+import { GATEWAY_OUTBOUND_HOST_PATTERN } from "../gateway-outbound.ts";
 import { Type } from "typebox";
 import {
   BACKEND_ID_MAX_CHARACTERS,
@@ -607,7 +608,18 @@ export const CreateConfigurationBody = Type.Object(
 );
 
 export const UpdateConfigurationBody = Type.Object(
-  { values: ConfigurationValues, secretBindings: Type.Optional(SecretBindings) },
+  {
+    values: ConfigurationValues,
+    secretBindings: Type.Optional(SecretBindings),
+    expectedGeneration: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+        description:
+          "The generation this update replaces, from the caller's last read. A Configuration at another generation refuses the update with 409 and an `/expectedGeneration` detail, and keeps its content. Omitted, the update replaces whatever generation is current.",
+      }),
+    ),
+  },
   { additionalProperties: false },
 );
 
@@ -749,12 +761,29 @@ export const ProvisionAgentBody = Type.Object(
   { additionalProperties: false },
 );
 
+export const GatewayOutboundSelectionSchema = Type.Union([
+  Type.Object({ mode: Type.Literal("channelsOnly") }, { additionalProperties: false }),
+  Type.Object(
+    {
+      mode: Type.Literal("restricted"),
+      hosts: Type.Array(Type.String({ maxLength: 253, pattern: GATEWAY_OUTBOUND_HOST_PATTERN }), {
+        minItems: 1,
+        maxItems: 64,
+        uniqueItems: true,
+      }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object({ mode: Type.Literal("publicHttps") }, { additionalProperties: false }),
+]);
+
 export const UpdateAgentBody = Type.Object(
   {
     configurationId: ConfigurationId,
     backendId: Type.Optional(Type.Union([BackendId, Type.Null()])),
     harnessAuth: Type.Optional(Type.Union([HarnessAuthBindingSchema, Type.Null()])),
     credentialSources: Type.Optional(AgentCredentialSourcesSchema),
+    gatewayOutbound: Type.Optional(GatewayOutboundSelectionSchema),
     executionMode: Type.Optional(HarnessExecutionModeSchema),
     plugins: Type.Optional(Type.Ref("PluginDesiredState")),
     pluginApprovers: Type.Optional(Type.Union([Type.Ref("PluginApprovers"), Type.Null()])),
@@ -873,6 +902,7 @@ export const ERROR_CODES = Object.freeze([
   "RUNTIME_LOGS_CURSOR_INVALID",
   "RUNTIME_LOGS_POD_INVALID",
   "RUNTIME_LOGS_SOURCE_UNAVAILABLE",
+  "NATIVE_ADMIN_RETURN_RATE_LIMITED",
   "RUNTIME_LOGS_RATE_LIMITED",
   "RUNTIME_LOGS_CLUSTER_RBAC",
   "RUNTIME_LOGS_SANDBOX_NOT_FOUND",
@@ -958,6 +988,7 @@ export const ErrorResponse = Type.Object(
           Type.Literal("RUNTIME_LOGS_CURSOR_INVALID"),
           Type.Literal("RUNTIME_LOGS_POD_INVALID"),
           Type.Literal("RUNTIME_LOGS_SOURCE_UNAVAILABLE"),
+          Type.Literal("NATIVE_ADMIN_RETURN_RATE_LIMITED"),
           Type.Literal("RUNTIME_LOGS_RATE_LIMITED"),
           Type.Literal("RUNTIME_LOGS_CLUSTER_RBAC"),
           Type.Literal("RUNTIME_LOGS_SANDBOX_NOT_FOUND"),
