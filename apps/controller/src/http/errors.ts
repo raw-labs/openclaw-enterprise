@@ -9,8 +9,11 @@ import {
   DeletionRetryOwnedError,
   ChannelDirectoryError,
   ChannelCredentialError,
+  ConfigurationGenerationConflictError,
   ConfigurationHarnessError,
+  ConfigurationSizeError,
   CredentialGatewayNotConfiguredError,
+  CredentialSourceConfigError,
   CredentialSourceDriverError,
   CredentialWithdrawalInProgressError,
   DependencyUnavailableError,
@@ -109,7 +112,9 @@ function cappedPointer(segments: readonly string[]): string {
     }
     if (path === "") {
       path = "/";
-      for (const piece of segment.match(/~[01]|[^]/gu) ?? []) {
+      // At most 511 characters of the first segment fit, so only its first 1,024 are split
+      // into pieces: a multi-megabyte key costs no more than a short one (finding 1131).
+      for (const piece of segment.slice(0, 1024).match(/~[01]|[^]/gu) ?? []) {
         if (path.length + piece.length > 512) {
           break;
         }
@@ -719,6 +724,11 @@ export function requestFailure(error: unknown): RequestFailure {
   if (error instanceof IAMRoleInUseError) {
     return failure(409, "RESOURCE_CONFLICT", error.message);
   }
+  if (error instanceof CredentialSourceConfigError) {
+    return failure(400, "INVALID_REQUEST", error.message, [
+      { path: `/config/${error.field}`, code: "INVALID_VALUE" },
+    ]);
+  }
   if (error instanceof CredentialGatewayNotConfiguredError) {
     return failure(409, "CREDENTIAL_GATEWAY_NOT_CONFIGURED", error.message);
   }
@@ -777,6 +787,10 @@ export function requestFailure(error: unknown): RequestFailure {
     // messages that name submitted object keys.
     return failure(400, "INVALID_REQUEST", capped(error.message));
   }
+  if (error instanceof ConfigurationSizeError) {
+    // The message names the Driver's limit and what to change, never the content.
+    return failure(400, "INVALID_REQUEST", capped(error.message));
+  }
   if (error instanceof ConfigurationValidationError) {
     return failure(400, "INVALID_REQUEST", "The supplied configuration is invalid.");
   }
@@ -812,6 +826,13 @@ export function requestFailure(error: unknown): RequestFailure {
   }
   if (isDependencyUnavailable(error)) {
     return failure(503, "DEPENDENCY_UNAVAILABLE", "A required platform dependency is unavailable.");
+  }
+  if (error instanceof ConfigurationGenerationConflictError) {
+    // The detail marks a stale read, which a reread fixes, apart from other Configuration
+    // conflicts such as a provisioning reservation, which a reread does not (finding 1511).
+    return failure(409, "RESOURCE_CONFLICT", error.message, [
+      { path: "/expectedGeneration", code: "INVALID_VALUE" },
+    ]);
   }
   if (error instanceof ResourceStateConflictError) {
     return failure(409, "RESOURCE_CONFLICT", error.message);

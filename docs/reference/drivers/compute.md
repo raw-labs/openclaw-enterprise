@@ -2,29 +2,25 @@
 
 ## Overview
 
-`ComputeDriver` prepares and removes Namespace infrastructure and runs Agent
-revisions. OCC selects one Driver per Installation, authorizes operations, and
-stores immutable revision configurations. Compute owns gateway, workload
-identity, routing, activation, and readiness; its backend owns underlying
-resources. A selected [SandboxDriver](sandbox.md) can create a dedicated Harness
-workload.
+`ComputeDriver` owns Namespace infrastructure, revisions, gateways, workload
+identity, routing, activation and readiness. OCC selects one per Installation,
+authorizes operations and records immutable revisions. Backends own resources;
+[SandboxDriver](sandbox.md) can create a Harness.
 
-See [Driver selection](selection.md) for supported combinations and package trust,
-the [feature matrix](compute-matrix.md), and
-[current versus planned placement](../../design.md#implementation-status).
+See [Driver selection](selection.md), the [feature matrix](compute-matrix.md),
+and [placement status](../../design.md#implementation-status).
 
 ## Interface
 
-The [shared contracts](../../../packages/contracts/src/index.ts) define the types.
-Every `ComputeDriver` has an `id`, `implementation`, and
-`capability: "compute"`.
+[Shared contracts](../../../packages/contracts/src/index.ts) require `id`,
+`implementation`, and `capability: "compute"`.
 
 Optional `getRuntimeImages(revision)` returns
 `{workload, container, image, imageId, commit, openclawCommit}` entries for
 containers owned by that admitted revision. OCC requires exact Agent read
 authority and calls the Driver pinned by the active revision. The
-`runtime-images` API reports `undeployed` without an active revision and
-`unsupported` when the Driver omits this method.
+`runtime-images` reports `undeployed` without an active revision, `unsupported`
+without this method.
 
 Commits must be full lowercase Git SHAs; missing IDs or provenance remain `null`.
 Results exclude separate Sandbox Driver workloads. Neither Docker nor Kubernetes
@@ -34,10 +30,10 @@ from a moved tag. Kubernetes
 binds its private metadata read to the Pod UID and running container ID; both
 commits apply only to containers with that image ID.
 
-Optional `discoverHarnessModels({provider, apiKey})` returns native model IDs
-and names without persisting credentials. OCC checks Agent creation authority
-before calling it. Bundled Kubernetes and Docker call the official OpenAI and
-Anthropic model-list APIs with bounded requests and no redirects. Discovery requires
+`discoverHarnessModels({provider, apiKey})` optionally returns native model IDs/names
+without storing credentials. OCC requires Agent creation authority. Kubernetes
+and Docker call official OpenAI/Anthropic model-list APIs with bounded requests,
+no redirects. Discovery requires
 [OCC API egress](../console/create-and-deploy.md#create-an-agent) to each
 provider; it neither provisions runtime credentials nor proves model
 compatibility. Unsupported or unavailable discovery permits manual model entry.
@@ -63,19 +59,32 @@ requires a true flag and no failure.
 Methods without a return value must reject if they cannot complete. The revision
 context is optional in TypeScript; the worker supplies it after authorization.
 
+`prepareRevision` throws `ComputePreparationFailedError` for terminal initialization.
+OCC atomically fails deployment with durable `stopRevision` cleanup.
+Restart resumes cleanup, not preparation; codes exclude credentials.
+
+### Human runtime access
+
+Kubernetes browser access requires `listAgentRuntimeRoles(configuration)` and
+`getAgentRuntimeAccess(revision, principalId, runtimeRole)`; Docker/SSH omit both.
+Saved Configuration supplies assignable roles; active Configuration supplies
+deployed summaries. Admission returns a private endpoint and server-owned person/role headers or an
+unavailable reason.
+Unknown roles, unsupported transport and service endpoints are refused. See
+[Runtime access](../agent-native-admin.md).
+
 ### Optional additions
 
-| Method or declaration                                                  | When it is needed                                                                                                                                                                                                                                                                             |
-| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bindAgent({ namespace, agent })`                                      | Receives the approved Namespace, Agent, and ServicePrincipal before the worker operates on a revision; may be asynchronous. Failure stops that attempt before further runtime work.                                                                                                           |
-| `validateHarnessAuth(harness, auth, configuration)`                    | Deployment and provisioning require this side-effect-free check of the Harness, authentication snapshot, and native Configuration. A missing method is a dependency-unavailable error. A thrown `ConfigurationHarnessError` answers `400` with its message; other errors become a conflict.   |
-| `validateGatewaySettings(configuration)`                               | Optional side-effect-free deployment check after `validateHarnessAuth`. Throw `ComputeGatewaySettingError` for a native gateway setting every preparation would refuse; OCC answers `409` with its message, which names the setting and never its value. Leave other refusals to preparation. |
-| `activateRevision(revision, context?)`, `deactivateRevision(revision)` | Production startup requires both. The worker also calls activation if a development Driver provides it. See [revision stages](#production-revision-stages).                                                                                                                                   |
-| `setLifecycleDrivers(drivers)`                                         | Startup requires it when another selected Driver provides [Compute hooks](#optional-selected-driver-hooks).                                                                                                                                                                                   |
-| `describePrepareRevisionFailure(error)`                                | Returns bounded safe fields for rejected preparation. OCC attributes them to the revision without serializing the raw error. Omission preserves generic retries.                                                                                                                              |
-| `resolveSandboxNamespace`, `withdrawCredentialSource`                  | [Credential Gateway](credential-gateway.md#optional-additions) hooks for registration and withdrawal.                                                                                                                                                                                         |
-| `activationOrder`, `maintenanceIntervalMs`                             | Control [activation timing](#production-revision-stages) and optional [maintenance](#optional-active-runtime-maintenance).                                                                                                                                                                    |
-| `requiresStoppedPredecessors(revision)`                                | A side-effect-free declaration, derived from the admitted revision, that opts into [exclusive replacement](#production-revision-stages).                                                                                                                                                      |
+| Method or declaration                                                                               | When it is needed                                                                                                                                                                   |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bindAgent({ namespace, agent })`                                                                   | Receives the approved Namespace, Agent, and ServicePrincipal before the worker operates on a revision; may be asynchronous. Failure stops that attempt before further runtime work. |
+| `validateHarnessAuth`, `validateConfiguration`, `validateGatewaySettings`, `validateWorkspaceSetup` | Side-effect-free [admission checks](compute-admission.md) at save, provisioning and deployment. Deployment and provisioning require `validateHarnessAuth`.                          |
+| `activateRevision(revision, context?)`, `deactivateRevision(revision)`                              | Production startup requires both. The worker also calls activation if a development Driver provides it. See [revision stages](#production-revision-stages).                         |
+| `setLifecycleDrivers(drivers)`                                                                      | Startup requires it when another selected Driver provides [Compute hooks](#optional-selected-driver-hooks).                                                                         |
+| `describePrepareRevisionFailure(error)`                                                             | Returns bounded safe fields for rejected preparation. OCC attributes them to the revision without serializing the raw error. Omission preserves generic retries.                    |
+| `resolveSandboxNamespace`, `withdrawCredentialSource`                                               | [Credential Gateway](credential-gateway.md#optional-additions) hooks for registration and withdrawal.                                                                               |
+| `activationOrder`, `maintenanceIntervalMs`                                                          | Control [activation timing](#production-revision-stages) and optional [maintenance](#optional-active-runtime-maintenance).                                                          |
+| `requiresStoppedPredecessors(revision)`                                                             | A side-effect-free declaration, derived from the admitted revision, that opts into [exclusive replacement](#production-revision-stages).                                            |
 
 ### Optional startup preflight
 
@@ -93,9 +102,9 @@ its active revision. The method does not check readiness, authorize the caller,
 grant backend route permissions, or save a URL in Agent Configuration. Connection
 errors are dependency failures.
 
-Workspace-file access and the opt-in
-[Agent native admin UI](../agent-native-admin.md#agent-host-identity) use this
-endpoint; without it, native admin access is unavailable. Kubernetes implements
+Workspace-file access uses this endpoint;
+[Agent native admin UI](../agent-native-admin.md#agent-host-identity) uses
+`getAgentRuntimeAccess`. Kubernetes implements
 [private routes](kubernetes-compute/networking-and-isolation.md#private-agent-gateway-routes).
 
 ### Optional initial runtime credential provisioning

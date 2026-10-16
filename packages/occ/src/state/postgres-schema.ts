@@ -685,11 +685,17 @@ export const agentRevisions = occSchema.table(
         AND (${table.admittedSpec} #>> '{harness,mode}') IN ('embedded', 'dedicated')
         AND jsonb_typeof(${table.admittedSpec}->'compute') = 'object'
         AND ((${table.admittedSpec}->'compute') ?& ARRAY['id', 'implementation'])
-        AND ((${table.admittedSpec}->'compute') - 'id' - 'implementation') = '{}'::jsonb
+        AND ((${table.admittedSpec}->'compute') - 'id' - 'implementation' - 'admission') = '{}'::jsonb
         AND jsonb_typeof(${table.admittedSpec} #> '{compute,id}') = 'string'
         AND COALESCE(btrim(${table.admittedSpec} #>> '{compute,id}'), '') <> ''
         AND jsonb_typeof(${table.admittedSpec} #> '{compute,implementation}') = 'string'
         AND COALESCE(btrim(${table.admittedSpec} #>> '{compute,implementation}'), '') <> ''
+        AND (
+          NOT ((${table.admittedSpec}->'compute') ? 'admission')
+          OR (jsonb_typeof(${table.admittedSpec} #> '{compute,admission}') = 'string'
+              AND char_length(${table.admittedSpec} #>> '{compute,admission}') BETWEEN 1 AND 1024
+              AND (${table.admittedSpec} #>> '{compute,admission}') ~ '^[ -~]+$')
+        )
         AND (
           NOT (${table.admittedSpec} ? 'sandbox_driver_id')
           OR (
@@ -968,8 +974,16 @@ export const iamAccessBindings = occSchema.table(
       .references(() => iamRoles.id, { onDelete: "restrict", onUpdate: "restrict" }),
     resourceKind: text("resource_kind"),
     resourceId: text("resource_id"),
+    runtimeRole: text("runtime_role"),
   },
   (table) => [
+    check(
+      "iam_access_bindings_runtime_role",
+      sql`${table.runtimeRole} IS NULL OR (${table.namespaceId} IS NOT NULL AND ${table.identitySubjectId} IS NOT NULL AND ${table.resourceKind} = 'agent' AND ${table.resourceId} IS NOT NULL AND ${table.runtimeRole} = btrim(${table.runtimeRole}) AND char_length(${table.runtimeRole}) BETWEEN 1 AND 128 AND ${table.runtimeRole} !~ '[[:cntrl:]]')`,
+    ),
+    uniqueIndex("iam_access_bindings_runtime_assignment")
+      .on(table.namespaceId, table.identitySubjectId, table.resourceId)
+      .where(sql`${table.runtimeRole} IS NOT NULL`),
     check(
       "iam_access_bindings_one_subject",
       sql`num_nonnulls(${table.identitySubjectId}, ${table.groupSubjectId}) = 1`,
@@ -997,7 +1011,7 @@ export const iamRestrictions = occSchema.table(
   (table) => [
     check(
       "iam_restrictions_action_valid",
-      sql`${table.action} IN ('create', 'read', 'update', 'delete', 'deploy', 'operate', 'administer', 'read_logs')`,
+      sql`${table.action} IN ('create', 'read', 'update', 'delete', 'deploy', 'operate', 'administer', 'read_logs', 'use')`,
     ),
     check(
       "iam_restrictions_resource_kind_valid",
@@ -1148,6 +1162,13 @@ export const controllerWork = occSchema.table(
       sql`${table.resultData} IS NULL OR (
         jsonb_typeof(${table.resultData}) = 'object'
         AND (
+          (
+            ${table.state} = 'failed_permanent'
+            AND ${table.reasonCode} IN ('HARNESS_CREDENTIAL_BOOTSTRAP_FAILED', 'HARNESS_CREDENTIAL_BOOTSTRAP_TIMEOUT')
+            AND (${table.resultData} - 'preparation') = '{}'::jsonb
+            AND occ.compute_preparation_failure_is_valid(${table.resultData}->'preparation')
+          )
+          OR
           (
             ${table.state} = 'failed_permanent'
             AND ${table.reasonCode} = 'CONVERGENCE_DEADLINE_EXCEEDED'
@@ -1320,8 +1341,8 @@ export const agentProvisioningWork = occSchema.table(
       sql`${table.status} <> 'succeeded' OR (${table.completedPhase} = 'handoff' AND ${table.agentId} IS NOT NULL AND ${table.revisionId} IS NOT NULL)`,
     ),
     check(
-      "agent_provisioning_failed_before_handoff",
-      sql`${table.status} NOT IN ('failed', 'cancelled') OR ${table.revisionId} IS NULL`,
+      "agent_provisioning_admitted_revision_status_valid",
+      sql`${table.revisionId} IS NULL OR ${table.status} IN ('running', 'succeeded', 'failed')`,
     ),
   ],
 );

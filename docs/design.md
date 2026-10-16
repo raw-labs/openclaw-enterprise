@@ -26,7 +26,7 @@ The API, console, durable worker, PostgreSQL persistence, and Kubernetes packagi
 are implemented. Single-cluster Kubernetes execution places Gateway and Harness in one tenant
 namespace with separate Pods, identities and storage. External access-gateway admission, workload
 token authentication to OCC, and general credential-free model inference remain
-planned. The two-cluster profile is experimental.
+planned. The two-cluster profile is experimental. Human Gateway entry now uses exact OCE person/Agent assignments and native role enforcement through the Kubernetes Driver and patched runtime; broader checkpoint 3 permission mediation remains planned. See [Agent OpenClaw access](reference/agent-native-admin.md).
 
 <a id="openclaw-as-the-open-enterprise-agent-platform"></a>
 <a id="summary"></a>
@@ -198,7 +198,7 @@ Operators must configure disjoint trusted Gateway and untrusted Harness node
 pools. Sharing a namespace trusts its workload managers with both roles; credential
 mounts and NetworkPolicies do not restrict a namespace administrator. The default
 placement uses one Kubernetes cluster; a second execution cluster is an
-[experimental profile](testing/two-cluster-local.md), with incomplete runtime
+[experimental profile](testing/kubernetes.md#two-cluster-validation), with incomplete runtime
 acceptance. See [Harness execution](reference/harness-execution.md) and
 [Kubernetes Compute](reference/drivers/kubernetes-compute.md).
 

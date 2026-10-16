@@ -52,7 +52,7 @@ Classify a database without applying migrations:
 pnpm db:migrate --check
 ```
 
-An exit-0 `migration.checked` record reports one reviewed history shape:
+An exit-0 `migration.checked` record reports a reviewed history shape:
 `empty`, `prePresetsMain`, `main`, `repositoryCredentials`,
 `repositoryRetention`, `workspaceSetup`, `agentProvisioning`,
 `backendCompleted`, `providerCompleted`, `backendTerminology`, `prePluginApprovers`,
@@ -62,7 +62,7 @@ An exit-0 `migration.checked` record reports one reviewed history shape:
 `preOAuth`, `preCredentialWithdrawals`, `preBrokerReceiptFence`,
 `preModelProbeFailureCause`, `preProvisioningConfigurationRelease`, `preAdministratorCredentialSourceGrants`,
 `preCodexPatSources`, `preAgentCredentialSources`,
-`preCredentialWithdrawalRequester`, or `completed`.
+`preCredentialWithdrawalRequester`, `preRuntimeRoles`, or `completed`.
 `prePresetsMain` means
 the exact canonical history through `0023_runtime_failure_timestamp_validation`;
 `main` also includes `0024_agent_presets`. `repositoryCredentials` adds
@@ -91,16 +91,19 @@ has 46 through `0046_model_probe_failure_cause`;
 `0047_provisioning_configuration_release`; `preCodexPatSources` has 48 through
 `0048_administrator_credential_source_grants`; `preAgentCredentialSources` has 49
 through `0049_codex_pat_sources`; `preCredentialWithdrawalRequester` has 50
-through `0050_agent_credential_sources`. `completed` is the current canonical
-history with all receipts, including `0051_credential_withdrawal_requester`.
+through `0050_agent_credential_sources`; `preComputeRevisionAdmission` has 54
+through `0054_credential_source_pat`; `preHeldAuthenticationSession` has 55 through
+`0055_compute_revision_admission`; `preRuntimeRoles` has 56 through
+`0056_held_authentication_session`. `completed` has all 57 receipts through
+`0057_agent_runtime_roles`.
 The source manifest is
 [`migrations/meta/canonical-history.json`](../../../migrations/meta/canonical-history.json).
-Empty schemas may be absent or have only their owner's ordinary `CREATE` and
+Empty schemas may be absent or have only their owner's `CREATE` and
 `USAGE` privileges, with no objects or unexpected default privileges. An empty
 stock Drizzle ledger left by a rolled-back first migration is also supported.
 
-Run `pnpm db:migrate` for development or `pnpm db:migrate:production` for
-production after a successful check. Both commands validate source hashes,
+After a successful check, run `pnpm db:migrate` for development or
+`pnpm db:migrate:production` for production. Both validate source hashes,
 receipts, catalog definitions, effective application privileges, and role
 separation under one PostgreSQL advisory lock. Drizzle applies the pending SQL
 and receipts in its normal transaction on that same connection. Existing
@@ -236,7 +239,7 @@ it does not use the API's listener or authentication settings.
 | `OCC_WORKER_POLL_INTERVAL_MS`       | `250`.                         | Positive safe integer controlling the delay between idle polling attempts.                                                                                    |
 | `OCC_WORKER_LEASE_DURATION_MS`      | `5000`.                        | Positive safe integer controlling the claim lease in milliseconds.                                                                                            |
 | `OCC_WORKER_MAX_ATTEMPTS`           | `5`.                           | Positive safe integer limiting attempts before permanent failure.                                                                                             |
-| `OCC_WORKER_CONVERGENCE_TIMEOUT_MS` | `900000`.                      | Positive safe integer bounding Namespace convergence from operation creation.                                                                                 |
+| `OCC_WORKER_CONVERGENCE_TIMEOUT_MS` | `900000`.                      | Positive safe integer bounding Namespace convergence from operation creation, on PostgreSQL's clock.                                                          |
 | `OCC_WORKER_DATABASE_TIMEOUT_MS`    | `60000`.                       | Client-side bound on each worker query and connection; a silent connection is dropped and retried, and longer lock waits fail the pass as an attempt.         |
 | `OCC_WORKER_READINESS_PATH`         | Optional absolute path.        | Writes a private freshness marker after real queue-health observations; required by packaged worker probes.                                                   |
 | `OCC_WORKER_LIVENESS_PATH`          | Optional absolute path.        | Writes a private marker as the run loop makes progress, even through database outages; the packaged liveness probe restarts a worker whose marker is stale.   |
