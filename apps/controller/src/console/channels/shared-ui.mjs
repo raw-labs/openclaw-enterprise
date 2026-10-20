@@ -1,5 +1,14 @@
-import { element, button, dismissOnBackdrop, focusSaveOutcome } from "../dom.mjs";
+import {
+  element,
+  button,
+  dismissOnBackdrop,
+  field as formField,
+  focusSaveOutcome,
+  statusBlock,
+  validateOnSubmit,
+} from "../dom.mjs";
 import { renderSecretReference } from "../agents/secret-picker.mjs";
+import { carryList, carryValue } from "../carry.mjs";
 
 const clone = (value) => (value === undefined ? undefined : structuredClone(value));
 export const isRecord = (value) =>
@@ -12,13 +21,7 @@ export const refsEqual = (left, right) =>
   left.id === right.id;
 
 export function field(label, control, hint) {
-  return element(
-    "div",
-    { className: "channel-field" },
-    element("label", { for: control.id }, label),
-    control,
-    hint ? element("p", { className: "hint", id: `${control.id}-hint` }, hint) : null,
-  );
+  return formField({ label, control, help: hint, className: "channel-field" });
 }
 
 export function checkbox(id, label, checked, disabled = false) {
@@ -174,7 +177,7 @@ function renderCard(section, state, provider) {
           : button(action, () => openDrawer(section, state, provider), actionAttrs),
         canDisable
           ? button(`Disable ${provider.name}`, () => void disableProvider(state, provider), {
-              className: "danger",
+              tone: "danger",
             })
           : null,
       ),
@@ -213,10 +216,10 @@ function renderCard(section, state, provider) {
       ),
     );
   } else if (blockReason) {
-    card.append(element("p", { className: "error" }, blockReason));
+    card.append(element("p", { className: "status", "data-tone": "danger" }, blockReason));
   } else if (!support.supported) {
     card.append(
-      element("p", { className: "error" }, support.reason),
+      element("p", { className: "status", "data-tone": "danger" }, support.reason),
       nativeDocument(`${provider.name} native configuration`, support.config),
     );
   }
@@ -234,12 +237,18 @@ async function disableProvider(state, provider) {
 }
 
 // The plain fields the reader changed from what the editor first showed (Secret and directory
-// search boxes are not among them), and the Secrets they chose.
+// search boxes are not among them), and the Secrets they chose. A value the editor changed by
+// itself, such as the DM user list a DM policy change clears, is not the reader's edit
+// (finding 1509).
 function draftChanges(draft) {
   const fields = Object.keys(draft?.initial ?? {}).filter((id) => {
     const field = draft.fields?.[id];
     const initial = draft.initial[id];
-    return field && (field.value !== initial.value || field.checked !== initial.checked);
+    return (
+      field &&
+      (draft.edited?.includes(id) ?? true) &&
+      (field.value !== initial.value || field.checked !== initial.checked)
+    );
   });
   // A Secret picked and then picked back is no change; carrying it would replace another
   // browser's binding with the old one.
@@ -251,6 +260,12 @@ function draftChanges(draft) {
       ),
   );
   return { fields: Object.fromEntries(fields.map((id) => [id, draft.fields[id]])), secrets };
+}
+
+// Whether the editor holds a change a reload or tab close would lose (finding 1902).
+function unsavedChannelDraft(draft) {
+  const changes = draftChanges(draft);
+  return Object.keys(changes.fields).length > 0 || changes.secrets.length > 0;
 }
 
 // A save conflict keeps the editor's changes: Reload draft reopens them over the reread
@@ -269,6 +284,7 @@ function carryDraft(state, dialog, provider) {
   const carried = { ...draft, carried: true, unresolved: false };
   state.carriedDraft = carried;
   state.drawerContext.drafts?.track("channels", () => carried);
+  state.drawerContext.drafts?.unsavedWhen("channels", unsavedChannelDraft);
 }
 
 function carriedNotice(draft, provider) {
@@ -328,9 +344,9 @@ async function save(state, values, dialog, targetError, secretBindingUpdate, pro
       dialog?.remove();
     }
     (sectionError ? state.error : errorNode).replaceChildren(
-      element(
-        "p",
-        { className: "error", role: "alert" },
+      statusBlock(
+        "danger",
+        null,
         errorText(error) +
           (state.reloadRequired ? carriedNotice(state.carriedDraft, provider) : ""),
       ),
@@ -376,17 +392,89 @@ export function input(id, value, attrs = {}) {
   return element("input", { id, value: value ?? "", autocomplete: "off", ...attrs });
 }
 
+const listValues = (value) => uniqueList(value.split(","));
+const sameSource = (left, right) =>
+  left === undefined ? right === undefined : refsEqual(left, right ?? {});
+const configurationOf = (baseline) => {
+  try {
+    return JSON.parse(baseline)?.[0];
+  } catch {
+    return undefined;
+  }
+};
+
+// How a control's value reads in a notice: an option's label, on or off, or the text itself.
+function shownValue(field, saved) {
+  if (field.type === "checkbox") {
+    return saved.checked ? "on" : "off";
+  }
+  const option = [...(field.options ?? [])].find((item) => item.value === saved.value);
+  return `“${option?.textContent ?? saved.value}”`;
+}
+
+// Reapplies carried field edits over the reread settings the editor just rendered. Lists take
+// the reader's added and removed entries; another value is reapplied, and when the other
+// browser changed it too, the notice names the saved value as well (finding 1509).
+function applyCarriedFields(provider, fields, carried, initial) {
+  const applied = [];
+  for (const field of fields) {
+    const mine = carried.fields[field.id];
+    const base = initial?.[field.id];
+    if (!mine || !base) {
+      continue;
+    }
+    const current = { value: field.value, checked: field.checked };
+    const isList = provider.listFields?.includes(field.id);
+    const list = isList
+      ? carryList(listValues(base.value), listValues(mine.value), listValues(current.value))
+      : null;
+    if (
+      isList
+        ? list.value.join(",") === listValues(current.value).join(",")
+        : current.value === mine.value && current.checked === mine.checked
+    ) {
+      continue;
+    }
+    if (field.disabled) {
+      // The reloaded settings turn this field off (an Open DM policy, or Everyone in these
+      // channels), so a save would ignore it: named as skipped, not applied.
+      applied.push({ id: field.id, detail: "", skipped: true });
+      continue;
+    }
+    let detail = "";
+    if (isList) {
+      field.value = list.value.join(", ");
+      detail = [
+        list.added.length ? `added ${list.added.join(", ")}` : "",
+        list.removed.length ? `removed ${list.removed.join(", ")}` : "",
+      ]
+        .filter(Boolean)
+        .join("; ");
+    } else {
+      if (carryValue(base, mine, current).conflict) {
+        detail = `also changed in another browser, saved as ${shownValue(field, current)}`;
+      }
+      field.value = mine.value;
+      field.checked = mine.checked;
+    }
+    field.dispatchEvent(new Event("input"));
+    field.dispatchEvent(new Event("change"));
+    applied.push({ id: field.id, detail });
+  }
+  return applied;
+}
+
 function openDrawer(section, state, provider, retained) {
   if (state.pending || state.outcomeUnknown || state.reloadRequired) {
-    return;
+    return false;
   }
   const support = provider.support(state.values);
   if (!support.supported || pluginBlockReason(state.values, provider)) {
-    return;
+    return false;
   }
   section.querySelector("dialog")?.remove();
   const dialog = element("dialog", {
-    className: "channel-dialog",
+    className: "dialog dialog--drawer channel-dialog",
     "aria-label": `${statusOf(providerConfig(state.values, provider.id)).label === "Not configured" ? "Configure" : "Edit"} ${provider.name}`,
   });
   const config = isRecord(support.config) ? support.config : {};
@@ -425,6 +513,7 @@ function openDrawer(section, state, provider, retained) {
     config.enabled !== false,
   );
   const body = element("form", { method: "dialog", className: "channel-drawer-form" });
+  validateOnSubmit(body);
   const carriedNote = carried
     ? element("p", { className: "hint", role: "status", id: `${provider.id}-carried-edits` })
     : null;
@@ -447,7 +536,7 @@ function openDrawer(section, state, provider, retained) {
   const cancel = button("Cancel", discard);
   const submit = element(
     "button",
-    { type: "submit", className: "primary" },
+    { type: "submit", className: "button button--primary" },
     state.copy.saveLabel ?? "Save configuration",
   );
   body.append(
@@ -461,11 +550,11 @@ function openDrawer(section, state, provider, retained) {
       ),
       button("Close", discard),
     ),
-    element(
-      "p",
-      { className: "notice", role: "status" },
+    statusBlock(
+      "info",
+      null,
       state.copy.drawerNotice ??
-        "New version. Changes affect future deployments using this Configuration. Configure model credentials in the Credentials tab before first deploy.",
+        "New version. Changes affect future deployments using this Configuration. Configure model credentials in the Credentials tab before deploying.",
     ),
     ...(carriedNote ? [carriedNote] : []),
     enabled,
@@ -488,32 +577,74 @@ function openDrawer(section, state, provider, retained) {
     retained && !carried
       ? clone(retained.initialSecretBindings)
       : clone(state.drawerContext.secretBindings);
-  for (const field of fields) {
-    const saved = (carried ? carried.fields : retained?.fields)?.[field.id];
-    if (saved) {
-      field.value = saved.value;
-      field.checked = saved.checked;
-      field.dispatchEvent(new Event("input"));
-      field.dispatchEvent(new Event("change"));
+  // The fields the reader changed. The editor's own follow-on changes fire no input event, so
+  // they stay out (finding 1509).
+  const edited = new Set(retained && !carried ? (retained.edited ?? []) : []);
+  let applied = [];
+  if (carried) {
+    applied = applyCarriedFields(provider, fields, carried, retained.initial);
+    for (const { id, skipped } of applied) {
+      if (!skipped) {
+        edited.add(id);
+      }
+    }
+  } else {
+    for (const field of fields) {
+      const saved = retained?.fields?.[field.id];
+      if (saved) {
+        field.value = saved.value;
+        field.checked = saved.checked;
+        field.dispatchEvent(new Event("input"));
+        field.dispatchEvent(new Event("change"));
+      }
     }
   }
+  const markEdited = (event) => {
+    if (fields.includes(event.target)) {
+      edited.add(event.target.id);
+    }
+  };
+  body.addEventListener("input", markEdited);
+  body.addEventListener("change", markEdited);
   if (carriedNote) {
     // Name what was reapplied, so the reader can see what overrides the reread settings.
+    const fieldName = ({ id, detail }) => {
+      const field = fields.find((node) => node.id === id);
+      // Directory-backed lists label their search box, not the hidden list input.
+      const label =
+        body.querySelector(`label[for="${id}"]`) ??
+        body.querySelector(`label[for="${id}-search"]`) ??
+        field?.closest("label");
+      const name = label?.textContent.trim() || id;
+      return detail ? `${name} (${detail})` : name;
+    };
+    const skipped = applied.filter((entry) => entry.skipped).map(fieldName);
     const names = [
-      ...Object.keys(carried.fields).map((id) => {
-        const field = fields.find((node) => node.id === id);
-        // Directory-backed lists label their search box, not the hidden list input.
-        const label =
-          body.querySelector(`label[for="${id}"]`) ??
-          body.querySelector(`label[for="${id}-search"]`) ??
-          field?.closest("label");
-        return label?.textContent.trim() || id;
+      ...applied.filter((entry) => !entry.skipped).map(fieldName),
+      ...carried.secrets.map((key) => {
+        const label = provider.secretBindings?.find((binding) => binding.key === key)?.label ?? key;
+        const saved = state.drawerContext.secretBindings?.[key]?.source;
+        // Another browser bound a different Secret here too; the reader's choice is shown.
+        return !sameSource(saved, retained.initialSecretBindings?.[key]?.source) &&
+          !sameSource(saved, retained.secretBindings?.[key]?.source)
+          ? `${label} (also changed in another browser)`
+          : label;
       }),
-      ...carried.secrets.map(
-        (key) => provider.secretBindings?.find((binding) => binding.key === key)?.label ?? key,
-      ),
     ];
-    carriedNote.textContent = `Your edits are applied over the reloaded settings: ${names.join(", ")}. Review them, then save.`;
+    carriedNote.textContent =
+      names.length || skipped.length
+        ? [
+            names.length
+              ? `Your edits are applied over the reloaded settings: ${names.join(", ")}.`
+              : "",
+            skipped.length
+              ? `Not applied, because the reloaded settings turn ${skipped.length === 1 ? "it" : "them"} off: ${skipped.join(", ")}.`
+              : "",
+            "Review them, then save.",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        : "The reloaded settings already include your edits.";
     dialog.setAttribute("aria-describedby", carriedNote.id);
   }
   const captureDraft = () => ({
@@ -521,6 +652,7 @@ function openDrawer(section, state, provider, retained) {
     baseline: (!carried && retained?.baseline) || state.drawerContext.baseline,
     initial,
     initialSecretBindings,
+    edited: [...edited],
     fields: fieldValues(fields),
     secretBindings: clone(drawerContext.draftSecretBindings),
     changedSecrets: clone(drawerContext.draftChangedSecrets),
@@ -529,12 +661,13 @@ function openDrawer(section, state, provider, retained) {
   state.captureDraft = captureDraft;
   state.carriedDraft = null;
   state.drawerContext.drafts?.track("channels", captureDraft);
+  state.drawerContext.drafts?.unsavedWhen("channels", unsavedChannelDraft);
   if (stale || unresolved) {
     submit.disabled = true;
     feedback.append(
-      element(
-        "p",
-        { className: "error", role: "alert" },
+      statusBlock(
+        "danger",
+        null,
         unresolved
           ? "Outcome unknown. Cancel this editor and reload the page to inspect saved settings before saving again."
           : "The saved Configuration changed while you were editing. Cancel this editor to use current settings.",
@@ -544,7 +677,7 @@ function openDrawer(section, state, provider, retained) {
   if (state.copy.drawerFootnote) {
     body.append(element("p", { className: "muted" }, state.copy.drawerFootnote));
   }
-  body.append(feedback, element("div", { className: "form-actions" }, cancel, submit));
+  body.append(feedback, element("div", { className: "dialog-actions" }, cancel, submit));
   body.addEventListener("submit", (event) => {
     event.preventDefault();
     if (state.pending || stale || unresolved) {
@@ -555,19 +688,13 @@ function openDrawer(section, state, provider, retained) {
       body.querySelector(`#${provider.id}-enabled`).checked
     ) {
       feedback.replaceChildren(
-        element(
-          "p",
-          { className: "error", role: "alert" },
-          "Channels require Dedicated execution.",
-        ),
+        statusBlock("danger", null, "Channels require Dedicated execution."),
       );
       return;
     }
     const validationError = provider.validate?.(body);
     if (validationError) {
-      feedback.replaceChildren(
-        element("p", { className: "error", role: "alert" }, validationError),
-      );
+      feedback.replaceChildren(statusBlock("danger", null, validationError));
       return;
     }
     const nextValues = provider.updatedValues(state.values, body);
@@ -601,6 +728,7 @@ function openDrawer(section, state, provider, retained) {
   );
   dialog.showModal();
   dialog.querySelector("input, button")?.focus();
+  return true;
 }
 
 export function renderChannelSection(
@@ -689,9 +817,28 @@ export function renderChannelSection(
   const retained = drawerContext.drafts?.get("channels");
   if (retained && !readOnly) {
     queueMicrotask(() => {
+      if (!section.isConnected) {
+        return;
+      }
       const provider = providers.find((item) => item.id === retained.provider);
-      if (section.isConnected && provider) {
-        openDrawer(section, state, provider, retained);
+      const carried = retained.carried && retained.reloaded;
+      // Carried edits apply only to the Configuration they were made on: another browser may
+      // have moved this Agent to one other Agents share (finding 1510).
+      const moved =
+        carried && configurationOf(retained.baseline) !== configurationOf(drawerContext.baseline);
+      const opened = provider && !moved && openDrawer(section, state, provider, retained);
+      if (carried && !opened) {
+        // A declined carried draft would otherwise reopen on a later visit.
+        drawerContext.drafts.forget("channels");
+        state.error.replaceChildren(
+          element(
+            "p",
+            { className: "hint", role: "status" },
+            moved
+              ? `Your ${provider?.name ?? "channel"} edits were not reapplied: this Agent now uses another Configuration.`
+              : `Your ${provider?.name ?? "channel"} edits were not reapplied: the reloaded settings cannot be edited here.`,
+          ),
+        );
       }
     });
   }

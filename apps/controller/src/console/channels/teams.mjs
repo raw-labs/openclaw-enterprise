@@ -263,6 +263,7 @@ export const teams = {
   setup:
     "Requires an Azure Bot app, an app password Secret, and operator-configured public callback routing.",
   secretBindings: TEAMS_SECRET_BINDINGS,
+  listFields: ["msteams-channel-ids", "msteams-group-users", "msteams-dm-users"],
   support,
   appendFields,
   validate(body) {

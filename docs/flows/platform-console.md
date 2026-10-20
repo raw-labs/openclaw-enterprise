@@ -1,7 +1,7 @@
 ---
 created: 2026-09-01
-updated: 2026-10-15
-last_updated_session: authoring-run/05ac6c84-8444-4dc1-8311-13c4e84369a3
+updated: 2026-10-20
+last_updated_session: authoring-run/e988d724-dd95-4e63-a711-5fd44393f211
 ---
 
 # Platform console request flow
@@ -9,19 +9,12 @@ last_updated_session: authoring-run/05ac6c84-8444-4dc1-8311-13c4e84369a3
 ## Overview
 
 `/console/` renders session-authorized resources.
-The [console reference](../reference/console.md) owns user-visible behavior;
-API and IAM authorize access.
+The [console reference](../reference/console.md) owns user-visible behavior.
 
 ## Entry Points
 
 - Browser entry: `apps/controller/src/console/console.mjs` composes the session,
   request client, view lifetime, navigation, and shell.
-- `api-client.mjs` owns cancellation and session expiry; `view-lifetime.mjs`
-  owns generation and abort state; `navigation.mjs` owns return paths and history;
-  `shell.mjs` owns navigation and collections.
-- `agents/{list,create,detail}.mjs` own Agent views;
-  `channels/{slack,shared-ui}.mjs` own Slack editing. `agents.mjs` and
-  `channels.mjs` compose them.
 - HTTP: `apps/controller/src/index.ts:createFastifyApp`.
 - Startup: `apps/controller/src/composition/production.ts:composeProduction`
   and `development-postgres.ts:composePostgresDevelopment`.
@@ -46,6 +39,7 @@ graph TD
     D -->|debug=true| DBG["Read accessible Agents and runtime image metadata"]
     DBG --> F
     D --> E["Request current page resource"]
+    E --> NC["Create Namespace"]
     E --> E1["Edit starter JSON and select associations"]
     E1 --> S1["Select Secret or open creation modal"]
     S1 -->|select| S3["Stage binding until Apply"]
@@ -59,6 +53,7 @@ graph TD
     E --> F["Authenticate and authorize exact scope"]
     F -->|Agents or Namespaces| G["OCC reads and filters by IAM"]
     F -->|Backends and Installation admin| H["Project loaded Backend IDs and types"]
+    NC --> NPOST["POST authorizes, persists and queues provisioning"]
     S1 -->|create| S2["POST stores Namespace Secret immediately"]
     S2 --> S3
     E1 -->|draft runtime| M1["POST creates Configuration with staged bindings"]
@@ -66,7 +61,7 @@ graph TD
     M3 --> M4["Worker creates resources, grants and first deployment"]
     M1 -->|returned Configuration ID| M["POST creates Agent draft only"]
     M --> M2["Console grants Agent use of selected Secrets"]
-    E2 --> N["GET draft Configuration or immutable revision"]
+    E2 --> N["GET draft Configuration or immutable Agent revision"]
     E3 --> O["PATCH Configuration, then grant selected Secret access"]
     E4 --> P["DELETE exact Agent"]
     E5 --> P2["POST exact Agent stop"]
@@ -74,6 +69,11 @@ graph TD
   subgraph Result["Browser result"]
     G --> I["Accept only current navigation response"]
     H --> I
+    NPOST -->|201| NSUCCESS["Creation accepted"]
+    NPOST -->|unconfirmed| NUNKNOWN["Inspect before retry"]
+    NPOST -->|refused| K
+    NUNKNOWN --> D
+    NSUCCESS --> D
     M2 --> I
     M4 --> I
     N --> I
@@ -83,7 +83,7 @@ graph TD
     P2 -->|denied| K
     P -->|denied| K
     Q -->|Agent not found| R["Return to Agents list"]
-    I --> J["Render list, draft, revision, or channel state"]
+    I --> J["Render list, draft, Agent revision, or channel state"]
     F -->|denied or unavailable| K["Clear rows and show recovery"]
     J -->|Logout| L["Hide private state and confirm sign-out"]
   end
@@ -105,7 +105,8 @@ Driver activation. Requests do not reread configuration or credentials.
 and the shared HTML shell with MIME types and same-origin CSP. Unknown console
 paths return the shell with `404`; API routes retain JSON errors.
 `encodedAsset` compresses static scripts and styles once (brotli or gzip, per
-`Accept-Encoding`, with `Vary`). The shell, which also answers sign-in, stays identity.
+`Accept-Encoding`, with `Vary`), unless an explicit `identity` weight beats both
+encodings. The shell, which also answers sign-in, stays identity.
 
 `scripts/build-console-metadata.mjs` bakes the publisher's checked
 `OCC_BUILD_REVISION` into HTML. With `debug=true`, `shell.mjs:renderShell` displays
@@ -114,7 +115,7 @@ the full commit; invalid or absent metadata remains unknown.
 `runtime-images.mjs:renderRuntimeImages` issues at most three concurrent reads for
 readable Agents in the selected Namespace.
 `packages/occ/src/index.ts:OpenClawController.getAgentRuntimeImages` authorizes
-exact Agent read, resolves its active revision, then calls its Compute Driver.
+exact Agent read, resolves its selected version, then calls its Compute Driver.
 The [Compute contract](../reference/drivers/compute.md) owns workload inspection
 and Enterprise/OpenClaw provenance. Navigation preserves `debug=true`; removing it
 stops reads. Missing provenance stays explicit.
@@ -123,27 +124,35 @@ stops reads. Missing provenance stays explicit.
 
 `apps/controller/src/console/console.mjs:loadPage`
 
-`loadPage` starts a request generation with `GET /api/auth/session`. Opening an Agent
-from the list shows its destination immediately, without Agent data or detail actions.
-**Back to Agents** cancels the read and returns to the list; a second press does
-nothing. A refocus during that read keeps this page. Other first visits and
-Refresh show loading after 250 ms. A return to a retained view or a refocus keeps the
-shown page inert and says **Still checking…** after one second. The Console retains up
-to 16 views by route, Namespace, and session owner, excluding passwords and discovery
-state. An interrupted return keeps its view; an interrupted Refresh discards it.
+`loadPage` starts with `GET /api/auth/session`. Opening an Agent from the list
+immediately shows **Loading agent details…** and **Back to Agents**. Its name,
+actions, and overview appear together after access checks. Back cancels the read;
+a second Back does nothing, and refocusing does not interrupt it. Other routes to
+an Agent keep the current page, or show loading after 400 ms on a fresh load.
+Once visible, loading stays at least 300 ms (`loadingMinimumMs`).
 
-`apps/controller/src/console/api-client.mjs:createApiClient` keeps its composed
-abort signal through JSON and text body consumption. After headers arrive,
-cancellation retains the signal's reason and socket failures reach the caller's
-interrupted-read recovery. Only JSON syntax failures become invalid-response
-errors; a failed body never causes an automatic replay.
+Other first visits and Refresh show loading after 250 ms. A return or refocus
+keeps the current page inert, with its own header and disabled Namespace selector;
+after one second it says **Still checking…**. The Console retains up to 16 views
+by route, Namespace, and session owner, excluding passwords and discovery state.
+An interrupted return preserves the view; an interrupted Refresh discards it.
 
-Completed views retain DOM, handlers, and draft callbacks. On return, `loadPage`
-checks GET dependencies and user identity. A match remounts the view with expanded
-debug details. Changed data or the first readable Namespace for a view without a
-selection rebuilds it; Refresh always rebuilds.
-Pending or failed reads, password input, and mutations prevent reuse; read-only
-catalog and diagnostic POSTs do not.
+`apps/controller/src/console/api-client.mjs:createApiClient` keeps the abort signal
+through the response body. Cancellation preserves its reason; a socket failure is an interrupted read,
+not invalid JSON. Neither replays the request.
+
+On return, `loadPage` checks the user and retained GET dependencies. A match
+restores the DOM, handlers, drafts, and expanded debug details. Changed data,
+a newly readable Namespace, or Refresh rebuilds the view. Pending or failed
+reads, password input, and mutations prevent reuse; read-only catalog and diagnostic POSTs do not.
+
+**Back to Agents:** session, Namespace, permission, and collection checks gate the
+list, not row reads. Each row's newest readable revisions page feeds its deployment
+and `agents/list.mjs:currentRevision`, which reads an off-page current version alone;
+`deniedReadsFor` keeps a `403`. On reuse, `renderAgentList` sets visible deployment
+cells to **Reading deployment…**, hidden 250 ms, then kept at least 150 ms, before paint, then shows
+each fresh result or refusal. Back or refocus from a deployment focuses that cell,
+not the old version's link. Unfinished or failed row reads never prevent reuse; resuming rereads them.
 
 A changed user or session key clears retained views and drafts before further
 private reads. Missing sessions open login; failed reads offer Retry.
@@ -178,78 +187,28 @@ Installation-wide collection. No readable selection means no Agent request.
 returning safe startup summaries. Empty configuration returns an empty list;
 missing wiring or failed dependencies return errors.
 
-`apps/controller/src/console/agents/create.mjs:renderCreateAgent` composes Provider,
-Harness, Preset, Configuration, and workspace inputs. Provider/Harness changes
-reset incompatible credentials and model choices while retaining unrelated JSON. The
-[creation reference](../reference/console/create-and-deploy.md) owns combinations,
-Preset constraints, token handling, permissions, and recovery.
+`apps/controller/src/console/namespaces.mjs:renderNamespaces` sends Name-rule-valid names
+through tracked `POST /namespaces`; `OpenClawController.createNamespace` authorizes
+each attempt, queues provisioning; `perform` audits. Open Agents needs the Namespace
+relisted. Closing refocuses the opener; a 403 disables it per account, across
+navigation, until Refresh (`fromRefresh`). Pending writes block dismissal; 400s
+mark names; conflicts keep input; unconfirmed responses need inspection.
 
-`agents/plugin-fields.mjs:createPluginFields` edits Agent `plugins` separately
-from Configuration. Invalid JSON and untouched fields survive; clearing overrides
-restores inheritance. Submission, uncertain outcomes, or invalid JSON lock editing.
-`capabilities.pluginPolicies` gates policy edits; unsupported reviewers remain clearable.
-The picker keeps a compact credential/access reminder beside an expandable
-**Access and credential setup** disclosure. Its bounded instructions, list, and
-details scroll within the dialog while search and pagination remain reachable.
-While mounted, Available and Configured retain separate selected plugins, queries,
-tool filters, and expanded rows without fetching pages or changing drafts.
-Removed selections clear their details; discovery resets clear both tabs.
+Agents and Create Agent read permissions. False `agents.create` or an Agent-refusing
+[Namespace status](../reference/namespaces.md#lifecycle) explains why, rechecking on return; failed reads keep creation open.
+Refused `GET /installation` saves only drafts. `agents/list.mjs` polls provisioning Namespaces;
+omission disables Create (`NAMESPACE_MISSING`) and stops; failures retry.
+OCC authorizes writes ([Agent creation](../reference/console/create-and-deploy.md)).
 
-`create.mjs:loadPluginCatalog` and `loadPluginTools` implement
-[PAT discovery](agent-plugins.md#credential-scoped-discovery): the selected or
-Preset Secret takes precedence over an entered token. OCC reads the
-Secret server-side. Pagination is upstream; filtering is local. Selecting a plugin loads tools.
-Credential, provider, and Harness changes clear results and invalidate pending reads.
-
-`create.mjs:MODEL_CHOICES` supplies unauthenticated static lists and manual entry.
-`renderAgentForm` toggles `manualModel`, invoking `updateModelConfiguration` and
-`updateControls`. Manual mode preserves `model.value` and clears the dropdown.
-`resetModelChoices` restores the current provider's list, including Configuration
-JSON changes, retaining only listed models; otherwise both inputs clear.
-Provider/authentication changes retain no model. Submission matches the primary
-Configuration model to `model.value`. `updateControls` sets the button label,
-visibility, and required input; the toggle moves focus. Returning preserves credentials and unrelated
-Configuration; saved-Configuration and pending-request locks govern both directions.
-
-`configurationTemplate` enables Control UI with loopback origins on port 18789.
-Compute supplies gateway authentication; Presets replace the starter unchanged.
-[Native admin access](agent-native-admin.md) owns HTTPS isolation.
-
-`createRepositoryFields` loads `GET /namespaces/:namespaceId/agents/repository-options`,
-then requests optional descriptions for visible refs. [Repository admission](agent-repository-credentials.md) resolves the
-submitted `repositoryAccess`. Retained drafts keep selections through failed
-discovery; retries recheck current policy. Only `503 REPOSITORY_OPTIONS_UNAVAILABLE`
-permits creation without bindings, and only without retained selections; other
-failures block submission.
-
-Supported Dedicated runtimes submit inline Configuration, optional repository
-access, and Secret references to [provisioning](agent-provisioning.md), even after
-that outage. The worker reauthorizes, creates resources and exact Secret grants,
-and deploys; Console polls, then opens the revision.
-
-Ordinary drafts post `{kind: "agent", values, secretBindings}` to
-`POST /namespaces/:namespaceId/configurations`, then submit its ID, plugins,
-`initialWorkspaceFiles`, and `workspaceDefaultsId` to
-`POST /namespaces/:namespaceId/agents`. Success opens `revision=draft`.
-OCC stages all four workspace textareas, including unchanged/empty values, outside
-Agent/Configuration for [workspace setup](workspace-files.md).
-
-`create.mjs:grantConfigurationSecretAccess` grants exact Secret `operate` for final
-same-Namespace `env` bindings. Failure retains the Agent; **Retry credential access**
-rereads grants without duplication. Failed Agent writes retain Configuration ID
-and lock JSON/Harness for explicit reuse. Writes never retry automatically; drafts
-admit no revision and start no runtime.
-
-`agents/harness-auth.mjs` edits bindings and shows
-[Secret identities](platform-console/agent-editing.md#4-render-draft-revision-or-channels),
-never values. Authentication source uses the shared form-field presentation;
-issued-account lookup feedback stays inside its conditionally visible account field.
-Switching methods hides that feedback without changing the lookup or saved choice.
+The [creation flow](platform-console/agent-creation.md) traces the form: plugin
+fields and discovery, model choices, the starter template, repository options,
+provisioning, ordinary drafts, Secret grants, and harness authentication.
 
 ### 4–6. Edit the Agent and access runtime files
 
-[Agent editing](platform-console/agent-editing.md) traces revision rendering,
-channels, credentials, workspace files, stopping, and deletion;
+[Agent editing](platform-console/agent-editing.md) traces version rendering,
+channels, credentials, and workspace files;
+[stop and deletion](platform-console/agent-stop-and-deletion.md) have their own trace;
 [Agent sharing](platform-console/agent-sharing.md) traces policy writes.
 Responses follow the ordering checks below.
 
@@ -261,10 +220,10 @@ Kubernetes `prepareRevision` carries them into `openclaw.json` without adding de
 
 `apps/controller/src/console/agents/detail.mjs:renderAgentDetail` registers tab
 navigation with `console.mjs:loadPage`. For the same Agent, Namespace, and
-revision, tab clicks/history replace only tab content; shell, native-admin panel,
-and revision controls stay mounted. Configuration and revision reads are shared;
-direct Workspace URLs start neither. Refresh, revision changes, and successful
-channel/authentication edits reload fully. A `403` on the configuration or revision
+version, tab clicks/history replace only tab content; shell, native-admin panel,
+and version controls stay mounted. Configuration and Agent revision reads are shared;
+direct Workspace URLs start neither. Refresh, version changes, and successful
+channel/authentication edits reload fully. A `403` on the configuration or Agent revision
 read is an audited denial, so `console.mjs:deniedReadsFor` remembers that path in tab
 `sessionStorage` for the session owner; later views show **Configuration unavailable**
 without asking again, and **Retry** forgets the path and rereads. Logout clears it.
@@ -281,15 +240,18 @@ Password values clear while [draft captures](platform-console/agent-editing.md#4
 Secret saves update the shared draft snapshot used by other tabs and deployment
 preflight.
 
-`agents/detail.mjs:renderAgentDetail` passes an `agents/list.mjs:link` to
-`deploymentFailure` for **Open vN Logs**. Client navigation selects the failed
-revision's `tab=logs`, even from the draft or a different version. Once the
-snapshot read and the panel's first reads settle, it focuses the Logs tab and
-scrolls the panel into view if the view is still current. Until then the tab keeps
-its height and hides Stop and Delete, which appear in place. The panel's
-`agents/logs.mjs:renderAgentLogs` reads that revision's runtime status and output,
-or displays its access or availability error;
-[Agent runtime logs](agent-runtime-logs.md) owns those reads.
+**Open vN Logs** opens the failed version from any version or draft. Logs reserves space;
+Stop and Delete stay put. Direct navigation focuses and scrolls to the output; selecting
+the tab leaves visible output in place. Recovery links scroll their version tab into view
+and focus its tab control, smoothly unless the page rebuilds or motion is reduced.
+
+[Runtime logs](agent-runtime-logs.md) explains access. Status `403` hides Pod details, not
+separately authorized logs. Denials last until logout; newly granted `operate` permits another
+status read. Refused reads or downloads clear the rows; late successes cannot restore them or
+download. Refusing allowed log text rereads status at once, superseding stale reads. Back
+rebuilds refused views, else shows the checked page. Refresh keeps rows and cursor until
+replaced; rate-limit notices update at the retry time without rereading. New streams or
+rejected cursors clear rows.
 
 ### 7. Commit only the current response, or clear the view
 
@@ -297,25 +259,26 @@ or displays its access or availability error;
 
 After full-page navigation settles, `loadPage` focuses the destination heading if
 focus fell to the body, using `preventScroll` to preserve return position. An Agent
-opened from the list focuses its heading when the title renders. Tabs and
-focused controls keep focus. Navigation, Namespace changes, and logout invalidate
+opened from the list focuses its heading when the title renders. Tabs (one Tab
+stop; arrows move) and focused controls keep focus. Navigation, Namespace changes, and logout invalidate
 reads; generations reject late responses. Refocus coalesces events. Agent detail
 rechecks access in place, preserving controls, input, and saves; failures clear it.
-Other pages revalidate before reuse; forms defer refocus. Draft save baselines and
-Namespace scopes stay separate.
+Other pages revalidate before reuse, including a shown 403 or 404; forms defer the check.
+Returning to the tab restores focus after the unchanged view is admitted, if the control
+remains and the reader hasn’t moved on. Draft save baselines and Namespace scopes stay separate.
 
 Authorization and dependency failures clear affected content and expose recovery;
 a current protected `401` clears all private state. `pagehide` clears
 private DOM, previews, and drafts even for BFCache; persisted `pageshow` performs
-a fresh load. Failure views show local reasons and bounded request IDs, never
+a fresh load. Failure views show local reasons and `req_<UUID>` request IDs, never
 backend error text. Backend authorization denial clears every retained preview,
 including other Namespace selections, because the permission is Installation-wide.
 
-The [detail action flow](platform-console/agent-editing.md#stop-agent) traces
+The [detail action flow](platform-console/agent-stop-and-deletion.md#stop-agent) traces
 confirmed Stop and Delete requests and permissions. Acceptance
 is not completed shutdown or deletion. Uncertain outcomes block replay until
 readback; only confirmed absence returns to Agents. Deployment resumes
-a stopped Agent through a new revision. The [Agent reference](../reference/agents.md#deletion)
+a stopped Agent through a new Agent revision. The [Agent reference](../reference/agents.md#deletion)
 owns asynchronous cleanup.
 
 Logout first hides private state, then calls the sign-out endpoint.
@@ -326,7 +289,9 @@ this client never infers it from a network error.
 
 <span id="deploy-the-saved-draft"></span>
 
-## Deploy the new revision
+<span id="deploy-the-new-revision" class="anchor-alias"></span>
+
+## Deploy the new version
 
 The **Create new version** draft exposes **Deploy new version**.
 **Operator-managed credentials** persist `{ "method": "runtime" }` and bypass
@@ -334,7 +299,7 @@ managed credential setup in Console; OCC does not validate host credentials.
 Deployment checks the Agent, Configuration association, and generation, then sends
 bodyless
 `POST /namespaces/:namespaceId/agents/:agentId/deploy`. The server authorizes
-and admits the revision. Its read-only details open while **Deployment
+and saves the version. Its read-only details open while **Deployment
 activity** follows the latest visible deployment. Workspace reads check gateway
 startup and file availability. An uncertain response disables replay until
 refresh and inspection.
@@ -355,6 +320,8 @@ refresh and inspection.
 ## Related docs
 
 - [Console reference](../reference/console.md)
+- [Console Agent creation](platform-console/agent-creation.md)
+- [Console Agent stop and deletion](platform-console/agent-stop-and-deletion.md)
 - [Authentication](../reference/authentication.md)
 - [Backend-managed credential delivery](service-account-driver-credential-delivery.md)
 - [Configuration and Agent revision](configuration-driver.md)
@@ -367,19 +334,7 @@ refresh and inspection.
 
 ## Changelog
 
-- 2026-10-15 23:00: Keep views across abandoned returns; show slow rechecks. (console-nav-1015)
-- 2026-10-15 20:00: Hold pages until returns revalidate. (public-pr/2523)
-- 2026-10-15 19:40: Compress static console scripts and styles per `Accept-Encoding`. (console-gzip)
-- 2026-10-15 19:03: Preserve scoped destinations across sign-in and resolve Agent recovery after session admission. (authoring-run/05ac6c84-8444-4dc1-8311-13c4e84369a3 - 91ac04d6919860b7d7386444468a3dc0ddc90481)
-- 2026-10-13 12:00: Explain outage sign-in reasons. (kc-guide-fix)
-- 2026-10-09 21:10: Preserve cancellation, deadline and transport failures during response body reads (authoring-run/2e195d67-c77d-43d0-8c32-2179523eb3a2 - 013bcf5f76819ca280a164745d470855fc5b74cd)
-
-- 2026-10-08 15:59: Trace responsive drawer and tab visibility, destination focus, scoped authentication feedback, and compact plugin setup. (01a11d68-d6e8-7033-ab93-03767bced2da - 58daaa5a3ac4c64bc5fb3af00759b59b365b20ca)
-- 2026-10-08 14:30: Trace client navigation from a failed deployment to its exact version and focus its Logs tab and scroll the panel into view. (01a11d68-d6e8-7033-ab93-03767bced2da - 0ff96342dc416325770eebed5963e9886fd3dff3)
-- 2026-10-07 12:30: Explain a disabled account's provider sign-in (`authReason=account-disabled`). (fix-member-1007/d534)
-
-- 2026-10-03 22:38: Trace switching between listed and manual model entry, preserving listed models and one submitted model. (01a10328-9de5-7081-ada2-d88ff80161e4 - 340feea42)
-- 2026-10-03 20:00: Rebuild a view retained without a Namespace selection once one is readable, so the header selector shows the default.
-- 2026-10-03 18:00: Re-enable the header selector during retained-view reads once Namespace access is checked.
+- 2026-10-20 05:00: Move the Create Agent form trace to [Agent creation](platform-console/agent-creation.md). (docs-split-1020)
+- 2026-10-19 15:16: Namespace creation and recovery. (authoring-run/e988d724-dd95-4e63-a711-5fd44393f211 - 141515257737cccdb75137fabbeec707915856af)
 
 [Platform console request documentation history](platform-console/history.md) preserves the older dated entries.
