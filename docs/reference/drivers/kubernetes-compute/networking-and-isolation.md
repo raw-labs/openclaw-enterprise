@@ -57,8 +57,7 @@ the native gateway port in this mode.
 
 ### Gateway authentication
 
-Kubernetes Compute supports only trusted-proxy authentication, in every
-routing mode. It renders `gateway.trustedProxies` from `network.gatewayTrustedProxyCidrs`,
+All Kubernetes routing modes require trusted-proxy authentication. Compute renders `gateway.trustedProxies` from `network.gatewayTrustedProxyCidrs`,
 `gateway.auth.mode: trusted-proxy`, `userHeader: x-occ-identity`, the allowed
 identity `occ-workspace-files` with `operator.admin`, and
 `gateway.allowRealIpFallback: true`. Configuration and Console starters
@@ -68,8 +67,7 @@ provisioning check the same fields and answer `409 RESOURCE_CONFLICT` naming the
 provisioning returns fixed `409` text with the reason in the API log; deployment
 is admitted, then fails with `DEPENDENCY_UNAVAILABLE` and the reason in the
 worker's `worker.compute-prepare-failed` line. `trustedProxy.allowLoopback` must be omitted or false:
-loopback access uses the separate password, not proxy identity headers. Native
-required-header and device auto-approval settings serve separate purposes.
+loopback access uses the separate password, not proxy identity headers. Required headers and device approval have separate purposes.
 
 Compute renders `gateway.bind: lan` when it is omitted or `auto`, as native
 container detection misses containerd on cgroup v2. Deployment/provisioning
@@ -77,8 +75,7 @@ refuse any other bind, `custom` unless `customBindHost` is `0.0.0.0`, and any
 `gateway.tailscale.mode` but `off`. Accepted `lan` and `custom` binds listen on
 IPv4 `0.0.0.0`, so Gateways need an IPv4 Pod address.
 
-An optional [loopback password](storage-and-credentials.md#runtime-credentials)
-supports operator verification.
+[Loopback passwords](storage-and-credentials.md#runtime-credentials) support verification.
 Kubernetes private status-port `GET /readyz` returns empty `200`/`503`, retaining
 readiness gates; Gateway probes HTTP. `gateway.tls.enabled: true` is refused
 before an Agent revision is created. Envoy terminates TLS. Docker/SSH
@@ -144,11 +141,10 @@ endpoint, Pod and Service CIDRs, and metadata endpoint fall inside them. A
 dedicated Agent has one authentication-only egress policy, pinned to its latest
 prepared Agent revision ID. Stop leaves it and the Agent's runtime and plugin-status
 policies, selecting no Pod, until the next preparation or Agent deletion.
-Supported channels and approved Gateway HTTPS use a per-revision proxy. Direct
-public access remains denied. See [Gateway outbound](../../gateway-outbound.md).
+Channels and approved Gateway HTTPS use revision proxies; direct public access is denied. [Gateway outbound](../../gateway-outbound.md) defines policy.
 
 Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
-Default-off `runtime.channels.experimentalEmbeddedChannels` permits the [unsupported embedded trial](../../../guides/integrations/embedded-channel-trial.md).
+`runtime.channels.experimentalEmbeddedChannels` defaults off; it permits the [unsupported embedded trial](../../../guides/integrations/embedded-channel-trial.md).
 
 ## Explicit network profiles
 
@@ -359,5 +355,4 @@ receive controller credentials.
 
 ## Teams callbacks
 
-See [Teams setup](../../../guides/integrations/teams.md) for public callbacks,
-credentials, routing, cleanup, and verification.
+[Teams setup](../../../guides/integrations/teams.md) covers callbacks.

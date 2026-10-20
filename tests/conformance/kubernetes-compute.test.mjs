@@ -5113,6 +5113,7 @@ test("Teams callback manifests preserve native authentication and cannot publish
   const driver = createKubernetesComputeDriver(
     routedOptions({
       gatewayRouting: { ...gatewayRouting, channels: { hostname: "channels.example.test" } },
+      runtime: { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" },
     }),
   );
   const revision = routedRevision(driver, {
@@ -5137,7 +5138,12 @@ test("Teams callback manifests preserve native authentication and cannot publish
   // Only Kubernetes transport is simulated here. Assertions protect generated routing
   // contracts; real cluster and native SDK enforcement require separate integration.
   driver.getOwned = async () => ({
-    metadata: { annotations: { "openclaw.dev/agent-revision-id": serving } },
+    metadata: {
+      annotations: {
+        "openclaw.dev/agent-revision-id": serving,
+        "openclaw.dev/msteams-webhook": "true",
+      },
+    },
     spec: {
       template: { metadata: { labels: { "openclaw.dev/network-profile": "broad-egress-v1" } } },
     },
@@ -5165,7 +5171,10 @@ test("Teams callback manifests preserve native authentication and cannot publish
     },
   ]);
   assert.equal(rule.filters[0].urlRewrite.path.replaceFullPath, "/api/messages");
-  assert.equal(rule.filters[1].requestHeaderModifier.set, undefined);
+  // Envoy supplies the actual transport address, never a caller identity or role.
+  assert.deepEqual(rule.filters[1].requestHeaderModifier.set, [
+    { name: "x-real-ip", value: "%DOWNSTREAM_DIRECT_REMOTE_ADDRESS_WITHOUT_PORT%" },
+  ]);
   assert.ok(rule.filters[1].requestHeaderModifier.remove.includes("x-occ-identity"));
   assert.equal(rule.filters[1].requestHeaderModifier.remove.includes("authorization"), false);
   const callbackService = objects.find(({ kind }) => kind === "Service");
@@ -6945,7 +6954,7 @@ test("the canonical Kubernetes runtime validates managed Gateway outbound author
       createKubernetesComputeDriver(
         options({ runtime: { ...runtime, channels: { proxyUrl: "http://10.42.0.15:3128" } } }),
       ),
-    /unsupported option channels/,
+    /runtime.channels accepts only/,
   );
   const restricted = createKubernetesComputeDriver(
     options({
@@ -9566,7 +9575,7 @@ test("account-token authentication grants only the exact Codex revision outbound
 
 test("embedded channels require a trusted boolean and retain native provider selection", () => {
   const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
-  const channels = { proxyUrl: "http://10.42.0.15:3128" };
+  const channels = {};
   const embedded = { id: "openclaw", version: "1.0.0", mode: "embedded" };
   const configuration = {
     agents: { defaults: { model: "anthropic/claude-sonnet-4-5" } },
@@ -9575,7 +9584,11 @@ test("embedded channels require a trusted boolean and retain native provider sel
   for (const flag of [undefined, false]) {
     const driver = createKubernetesComputeDriver(
       options({
-        runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: flag } },
+        runtime: {
+          ...runtime,
+          gatewayOutbound,
+          channels: { ...channels, experimentalEmbeddedChannels: flag },
+        },
       }),
     );
     assert.throws(
@@ -9593,7 +9606,11 @@ test("embedded channels require a trusted boolean and retain native provider sel
       () =>
         createKubernetesComputeDriver(
           options({
-            runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: flag } },
+            runtime: {
+              ...runtime,
+              gatewayOutbound,
+              channels: { ...channels, experimentalEmbeddedChannels: flag },
+            },
           }),
         ),
       /Installation boolean/,
@@ -9601,7 +9618,11 @@ test("embedded channels require a trusted boolean and retain native provider sel
   }
   const trial = createKubernetesComputeDriver(
     options({
-      runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: true } },
+      runtime: {
+        ...runtime,
+        gatewayOutbound,
+        channels: { ...channels, experimentalEmbeddedChannels: true },
+      },
     }),
   );
   assert.doesNotThrow(() => trial.validateHarnessAuth(embedded, apiKeyAuth, configuration));
@@ -9694,12 +9715,6 @@ test("native channel providers require Secret bindings and project guarded proxy
     },
   });
 
-  const teams = {
-    enabled: true,
-    appId: "00000000-0000-4000-8000-000000000001",
-    tenantId: "00000000-0000-4000-8000-000000000002",
-    appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
-  };
   for (const [channels, expectedSecrets] of [
     [{ slack: {} }, ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]],
     [{ msteams: { enabled: true } }, ["MSTEAMS_APP_PASSWORD"]],
@@ -9707,7 +9722,7 @@ test("native channel providers require Secret bindings and project guarded proxy
     [{ msteams: { enabled: true, webhook: {} } }, ["MSTEAMS_APP_PASSWORD"]],
     [{ msteams: { enabled: true, webhook: { path: "/api/messages" } } }, ["MSTEAMS_APP_PASSWORD"]],
     [
-      { slack: { enabled: true }, msteams: teams },
+      { slack: { enabled: true }, msteams: { enabled: true } },
       ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN", "MSTEAMS_APP_PASSWORD"],
     ],
     [
@@ -9722,6 +9737,14 @@ test("native channel providers require Secret bindings and project guarded proxy
     ],
     [{ defaults: {}, modelByChannel: {} }, []],
   ]) {
+    if (channels.msteams?.enabled === true) {
+      channels.msteams = {
+        appId: "00000000-0000-4000-8000-000000000001",
+        tenantId: "00000000-0000-4000-8000-000000000002",
+        appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+        ...channels.msteams,
+      };
+    }
     const configuredRevision = {
       ...revision,
       configuration: { agents: { defaults: { model: "codex/gpt-5" } }, channels },
@@ -9804,6 +9827,11 @@ test("native channel providers require Secret bindings and project guarded proxy
     assert.deepEqual(
       proxy,
       expectedSecrets.length === 0 ? [] : [{ name: "HTTPS_PROXY", value: transport.proxyUrl }],
+    );
+    assert.deepEqual(
+      environment.filter(({ name }) => name === "OPENCLAW_PROXY_ACTIVE"),
+      expectedSecrets.length === 0 ? [] : [{ name: "OPENCLAW_PROXY_ACTIVE", value: "1" }],
+      "only a Gateway with admitted managed transport may delegate native guarded-fetch routing",
     );
 
     // Dedicated Agents never receive gateway-owned channel credentials or their network proxy.
@@ -9890,6 +9918,27 @@ test("native channel providers require Secret bindings and project guarded proxy
       },
     },
     null,
+  );
+
+  await assert.rejects(
+    driver.prepareRevision({
+      ...revision,
+      configuration: {
+        agents: { defaults: { model: "codex/gpt-5" } },
+        channels: {
+          msteams: {
+            enabled: true,
+            appId: "00000000-0000-4000-8000-000000000001",
+            tenantId: "00000000-0000-4000-8000-000000000002",
+            appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+            webhook: { path: "/custom-callback" },
+          },
+        },
+        logging: { level: "info", consoleLevel: "info", consoleStyle: "json" },
+        diagnostics: { otel: { logs: false } },
+      },
+    }),
+    /channels.msteams.webhook.path must be \/api\/messages/,
   );
 });
 
@@ -16622,7 +16671,16 @@ test("retirement preserves active storage and node routing and deletes exact own
       async deleteNamespacedPersistentVolumeClaim(request) {
         deletions.push(["PersistentVolumeClaim", request]);
       },
+      async patchNamespacedService({ body }) {
+        teamsResources.set("Service", {
+          ...structuredClone(body),
+          metadata: { ...body.metadata, uid: "callback-service-uid", resourceVersion: "1" },
+        });
+      },
       async readNamespacedService({ name }) {
+        if (name.endsWith("-msteams")) {
+          return teamsResources.get("Service") ?? missing();
+        }
         if (name === agentName) {
           return structuredClone(agentService);
         }
@@ -16632,6 +16690,10 @@ test("retirement preserves active storage and node routing and deletes exact own
         return structuredClone(observedService);
       },
       async deleteNamespacedService(request) {
+        if (request.name.endsWith("-msteams")) {
+          teamsResources.delete("Service");
+          return;
+        }
         deletions.push(["Service", request]);
         if (failServiceDelete) {
           throw new Error("service delete failed");
@@ -16651,17 +16713,28 @@ test("retirement preserves active storage and node routing and deletes exact own
       },
     },
     networking: {
-      readNamespacedNetworkPolicy: missing,
+      async readNamespacedNetworkPolicy({ name }) {
+        return name.endsWith("-msteams")
+          ? (teamsResources.get("NetworkPolicy") ?? missing())
+          : missing();
+      },
+      async patchNamespacedNetworkPolicy({ body }) {
+        teamsResources.set("NetworkPolicy", {
+          ...structuredClone(body),
+          metadata: { ...body.metadata, uid: "callback-network-uid", resourceVersion: "1" },
+        });
+      },
+      async deleteNamespacedNetworkPolicy({ name: _name }) {
+        teamsResources.delete("NetworkPolicy");
+      },
     },
     objects: {
       async read({ kind, metadata }) {
         if (metadata.name === `${gatewayName}-people`) {
           return peopleResources.has(kind) ? structuredClone(peopleResources.get(kind)) : missing();
         }
-        if (metadata.name === `${gatewayName}-node`) {
-          const resource = nodeResources.get(kind);
-        if (metadata.name === `${gatewayName}-msteams`) {
-          const scopedResources = teamsResources;
+        if ([`${gatewayName}-node`, `${gatewayName}-msteams`].includes(metadata.name)) {
+          const scopedResources = metadata.name.endsWith("-node") ? nodeResources : teamsResources;
           const resource = scopedResources.get(kind);
           if (resource === undefined) {
             return missing();
@@ -16904,6 +16977,7 @@ test("retirement preserves active storage and node routing and deletes exact own
   });
   observedGateway.metadata.annotations["openclaw.dev/agent-revision"] = String(active.revision);
   observedGateway.metadata.annotations["openclaw.dev/msteams-webhook"] = "true";
+  active.configuration = { ...active.configuration, channels: { msteams: { enabled: true } } };
   const candidate = { ...active, id: "revision-3", revision: 3 };
   await driver.reconcileGatewayRoute(active, ownership, { name: namespace, plane: "execution" });
   const activeTeamsResources = structuredClone(teamsResources);
@@ -16965,7 +17039,9 @@ test("retirement preserves active storage and node routing and deletes exact own
     deletions.map(([kind, { spec }]) => [kind, spec.metadata.name]),
     [
       ["HTTPRoute", `${gatewayName}-msteams`],
+      ["Service", `${gatewayName}-msteams`],
       ["SecurityPolicy", `${gatewayName}-msteams`],
+      ["NetworkPolicy", `${gatewayName}-msteams`],
     ],
   );
   deletions.length = 0;

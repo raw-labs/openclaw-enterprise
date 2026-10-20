@@ -6,9 +6,9 @@ author: miguelbranco80
 
 # Proposal: managed outbound HTTPS for dedicated Gateways
 
-- **ID:** RFC-0023
+- **ID:** RFC-0024
 - **Created:** 2026-10-14
-- **Implementation plan:** [RFC-0023 delivery](../plans/0023-gateway-outbound.md)
+- **Implementation plan:** [RFC-0024 delivery](../plans/0024-gateway-outbound.md)
 - **Source baseline:** `d3ccc54781d0d50b40e9aeb814f0573d38c0a585`
 - **Related:** [Agent egress for 0.x](0017-agent-egress-0x/index.md),
   [Compute](../../docs/reference/drivers/compute.md),

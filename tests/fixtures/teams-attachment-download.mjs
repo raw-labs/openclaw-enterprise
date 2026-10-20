@@ -64,10 +64,9 @@ test("native guarded attachment downloads use the reviewed channel proxy", async
     retainAuthorizationRedirectHostnameAllowlist: ["graph.microsoft.com"],
     timeoutMs: 1500,
     // Strict direct transport has no route in the network-disabled container.
-    lookupFn: (_hostname, _options, callback) =>
-      callback(null, [{ address: "93.184.216.34", family: 4 }]),
+    lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
   };
-  await assert.rejects(fetchWithSsrFGuard(options));
+  await assert.rejects(fetchWithSsrFGuard(options), { name: "TypeError", message: /fetch failed/ });
   assert.deepEqual(requests, [], "HTTPS_PROXY alone must not bypass strict native transport");
 
   // This is the declaration projected by Kubernetes Compute only for an
@@ -92,6 +91,7 @@ test("native guarded attachment downloads use the reviewed channel proxy", async
   // Even a native-allowed redirect cannot escape the installation's exact list.
   await assert.rejects(
     fetchWithSsrFGuard({ ...options, url: "https://graph.microsoft.com/unapproved" }),
+    { name: "TypeError", message: /fetch failed/ },
   );
   assert.equal(requests.length, 3, "the unapproved storage host never receives a TLS request");
 });

@@ -151,10 +151,8 @@ path records mutations and denials without template or variable contents.
 [`createPresetFields`](../../apps/controller/src/console/agents/presets.mjs)
 lists summaries, then reads the exact selection. Quick-start prefers
 `default-codex`, otherwise the first readable Preset in case-insensitive locale
-order, with exact names breaking ties. The shortcut and accessible hint name
-custom starters. Variable-free templates apply immediately; variables retain
-the chooser and edits. Empty lists or failed reads cannot apply hidden templates.
-**Start without Preset** opens independently; creation authorization applies.
+order, with exact names breaking ties. The shortcut and hint name custom starters. Variable-free templates apply immediately; variables retain the chooser. Empty lists or failed reads cannot apply templates.
+**Start without Preset** still requires creation authorization.
 
 `console-assets.ts:readConsoleAsset` serves the public
 [`default-codex`](../../deploy/presets/default-codex.json) as
@@ -170,12 +168,11 @@ offers a masked new token or an existing same-Namespace Secret. The chooser read
 Secret metadata, validates the original template, then substitutes the selected
 reference in a temporary copy. Changing mode discards tokens; stale catalog
 responses cannot replace a later selection.
-The user then selects **Use Preset**. The shared
+**Use Preset** invokes
 [`renderPresetTemplate`](../../packages/contracts/src/preset-variables.mjs)
-walks JSON once, rejects missing or mistyped inputs and duplicate rendered native
-keys, and preserves runtime placeholders and unresolved SecretRefs.
+rejects missing/mistyped inputs and duplicate rendered keys, preserving runtime placeholders and unresolved SecretRefs.
 
-Rendering makes no requests. Success opens the Agent form with rendered settings
+Rendering is local. Success opens the Agent form with settings
 and optional ephemeral Secret metadata for grants. The alphabetic chooser moves
 password values into the masked credential input and clears detached controls;
 later Preset changes cannot alter the form. Before saving, **Start over** confirms

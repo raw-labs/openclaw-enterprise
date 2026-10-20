@@ -1218,7 +1218,10 @@ function receiptsMatchEntries(receipts, entries) {
   );
 }
 
-async function seedCanonicalData(db, { preset = false, computeAdmission = false } = {}) {
+async function seedCanonicalData(
+  db,
+  { preset = false, computeAdmission = false, gatewayOutbound = false } = {},
+) {
   const installation = `ins_${randomUUID()}`;
   const namespace = `ns_${randomUUID()}`;
   const configuration = `cfg_${randomUUID()}`;
@@ -1260,6 +1263,20 @@ async function seedCanonicalData(db, { preset = false, computeAdmission = false 
           configuration_kind: "agent",
           configuration_generation: 1,
           draft_spec: {},
+          ...(gatewayOutbound
+            ? {
+                gateway_outbound: {
+                  selection: { mode: "channelsOnly" },
+                  requirements: [
+                    {
+                      source: "slack",
+                      destinations: [{ host: "slack.com", includeSubdomains: true }],
+                    },
+                  ],
+                  denyCidrs: ["10.0.0.0/8"],
+                },
+              }
+            : {}),
           harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
           harness_auth: { method: "runtime" },
           compute: {
@@ -1655,18 +1672,24 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preRuntimeRoles"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [53, "preRuntimeRoles"],
+      [55, "preGatewayOutbound"],
+      [56, "preEmbeddedChannelOutbound"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
         // Preserve Compute's existing fingerprint when the Gateway constraint is added.
-        await seedCanonicalData(db, { preset: prefix >= 25, computeAdmission: prefix >= 55 });
+        await seedCanonicalData(db, {
+          preset: prefix >= 25,
+          computeAdmission: prefix >= 59,
+          gatewayOutbound: prefix === 58,
+        });
         const before = await canonicalData(db);
         const receipts = await historyReceipts(db.migrator);
         assert.deepEqual(await runHistoryMigration(db, "production", true), {
@@ -1709,7 +1732,7 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "externalchatgpt", { prefix: 56 });
+    const db = await historyDatabase(context, fixture, "externalchatgpt", { prefix: 59 });
     const namespaceId = await seedCanonicalData(db);
     const sourceId = `cs_${randomUUID()}`;
     await db.app.query(
@@ -2046,13 +2069,15 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preRuntimeRoles"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [53, "preRuntimeRoles"],
+      [55, "preGatewayOutbound"],
+      [56, "preEmbeddedChannelOutbound"],
     ]) {
       void context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -2134,18 +2159,23 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preRuntimeRoles"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [53, "preRuntimeRoles"],
+      [55, "preGatewayOutbound"],
+      [56, "preEmbeddedChannelOutbound"],
     ]) {
       void context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });
         if (prefix) {
-          await seedCanonicalData(db, { preset: prefix >= 25, computeAdmission: prefix >= 55 });
+          await seedCanonicalData(db, {
+            preset: prefix >= 25,
+            computeAdmission: prefix >= 59,
+            gatewayOutbound: prefix === 58,
+          });
         }
         const before = await historySnapshot(db);
         const data = prefix ? await canonicalData(db) : undefined;
@@ -2157,11 +2187,13 @@ test(
         // 0057 replaces the Harness validator, so reject that function replacement.
         // 0058 creates Sandbox policy tables; 0060 grants Gateway access after its functions and column.
         const rollbackTag = [
-          [58, "GRANT"],
-          [57, "CREATE TABLE"],
-          [56, "CREATE FUNCTION"],
-          [55, "CREATE TRIGGER"],
-          [54, "ALTER TABLE"],
+          [60, "CREATE TABLE"],
+          [59, "CREATE FUNCTION"],
+          [58, "ALTER TABLE"],
+          [57, "CREATE FUNCTION"],
+          [56, "ALTER TABLE"],
+          [55, "CREATE FUNCTION"],
+          [54, "CREATE TRIGGER"],
           [53, "CREATE FUNCTION"],
           [50, "GRANT"],
           [41, "ALTER TABLE"],
@@ -2736,7 +2768,7 @@ test(
     let pool;
     context.after(async () => pool?.end());
     const db = await historyDatabase(context, await migrationHistoryFixture(), "runtime_admin", {
-      prefix: 59,
+      prefix: 53,
     });
     const namespaceId = await seedCanonicalData(db, { preset: true });
     const agentId = (
@@ -2872,7 +2904,7 @@ test(
       context,
       await migrationHistoryFixture(),
       "runtime_denied",
-      { prefix: 59 },
+      { prefix: 53 },
     );
     const deniedNamespace = await seedCanonicalData(denied, { preset: true });
     await denied.app.query(

@@ -36,12 +36,20 @@ export class BundledChannelDriver implements ChannelDriver {
     return this.slack.validateCredentials(values, withSecret);
   }
 
-  gatewayNetworkRequirements(configuration: Readonly<OpenClawConfigurationDocument>): readonly GatewayOutboundRequirement[] {
-    return [...this.slack.gatewayNetworkRequirements(configuration), ...this.teams.gatewayNetworkRequirements(configuration)];
+  gatewayNetworkRequirements(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly GatewayOutboundRequirement[] {
+    return [
+      ...this.slack.gatewayNetworkRequirements(configuration),
+      ...this.teams.gatewayNetworkRequirements(configuration),
+    ];
   }
 
   controlPlaneNetworkRequirements(): readonly GatewayOutboundRequirement[] {
-    return [...this.slack.controlPlaneNetworkRequirements(), ...this.teams.controlPlaneNetworkRequirements()];
+    return [
+      ...this.slack.controlPlaneNetworkRequirements(),
+      ...this.teams.controlPlaneNetworkRequirements(),
+    ];
   }
 
   lookupDirectory(input: ChannelDirectoryLookupInput, signal?: AbortSignal) {

@@ -23,10 +23,10 @@ state for `occ dev down`. See [hosted execution](README.md#run-the-hosted-local-
 
 ## Kubernetes HTTP fixture
 
-Install Docker, k3d and `kubectl`. Use Kubernetes 1.35 or later. The CI preparer
-creates an owned cluster with enforcing NetworkPolicies, fixture/controller images
-and migrated limited-role PostgreSQL databases. It preserves the default kubeconfig and unrelated resources.
-Run these fixture lanes: `k3d-fixture-configuration`,
+Install Docker, k3d, `kubectl`, Kubernetes 1.35+. CI prepares an owned cluster
+with enforcing NetworkPolicies, fixture/controller images and limited-role
+PostgreSQL databases, preserving default kubeconfig and unrelated resources.
+Fixture lanes: `k3d-fixture-configuration`,
 `k3d-fixture-state` and `k3d-fixture-plugins`.
 
 ```sh
@@ -396,7 +396,7 @@ DNS settings across restarts. This is fixture setup, not production DNS setup.
 
 ### Configure the network and credentials
 
-All cross-cluster traffic uses verified HTTPS. Set reachable DNS names,
+Cross-cluster traffic requires verified HTTPS, reachable DNS names,
 certificates, observed CIDRs, and cluster API access. Do not use cluster-local
 `.svc` addresses across clusters. CP API and worker use separate scoped DP
 kubeconfigs; Gateway uses the exact-Agent transport token to reach the Harness,
@@ -406,8 +406,7 @@ Create a DP TLS Secret and install `deploy/helm/openclaw-execution` with
 `routing.hostname`, `gatewayClassName`, `tlsSecretName`, and
 `controlPlaneCidrs`. Provision distinct DP API and worker kubeconfigs, then
 store them in separate CP Secrets with a `kubeconfig` key. Administrators own
-credential issuance, rotation, and tenant grants. The worker must not have
-RoleBinding-write or impersonation permission.
+credential issuance, rotation, and tenant grants. The worker must lack RoleBinding-write and impersonation permission.
 
 Add this to the Installation Compute configuration:
 

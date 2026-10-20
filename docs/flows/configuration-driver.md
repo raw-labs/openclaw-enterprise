@@ -10,10 +10,8 @@ last_updated_session: Codex/01a12f94-4e1e-7df1-8b9d-1c7f305c2584
 
 The OCC API and worker load trusted, singleton Installation settings from
 startup YAML and validate each selected Driver before construction.
-Authenticated API
-requests then create, read, replace, or delete exact Namespace-owned native
-OpenClaw configuration documents through the selected bundled or installed
-Configuration Driver. The bundled Kubernetes implementation persists each
+Authenticated API requests create, read, replace or delete exact Namespace-owned
+OpenClaw documents through the selected Configuration Driver. The bundled Kubernetes implementation persists each
 document in a tenant-owned ConfigMap.
 Each Configuration requires immutable `kind: "agent"` and a server-managed
 generation; documents preserve unresolved inline SecretRefs without interpreting

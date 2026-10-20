@@ -6,7 +6,7 @@ author: miguelbranco80
 
 # Proposal: Temporarily trial channels in embedded OpenClaw
 
-- **ID:** RFC-0023
+- **ID:** RFC-0025
 - **Created:** 2026-10-14
 - **Last updated:** 2026-10-14
 - **Related:** [Harness execution](../../docs/reference/harness-execution.md),
@@ -90,7 +90,7 @@ See the [source-backed flow](../../docs/flows/agent-channel-runtime.md).
 
 ## Delivery, verification and removal
 
-The [implementation plan](../plans/0023-temporary-embedded-channel-trial.md)
+The [implementation plan](../plans/0025-temporary-embedded-channel-trial.md)
 records separate shared prerequisites, source delivery and qualification holds.
 
 The evaluation implementation and regular API/worker Kubernetes fixture exercise

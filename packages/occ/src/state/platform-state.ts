@@ -816,7 +816,8 @@ function assertAdmittedAgentRevision(revision: AgentRevision): void {
     !validCredentialSourceSnapshots(revision.credentialSources) ||
     (revision.gatewayOutbound !== undefined &&
       (!validGatewayOutboundSnapshot(revision.gatewayOutbound) ||
-        revision.harness.mode !== "dedicated")) ||
+        (revision.harness.mode !== "dedicated" &&
+          revision.gatewayOutbound.selection.mode !== "channelsOnly"))) ||
     !validPluginRevisionState(revision.plugins) ||
     !validPluginApprovers(revision.pluginApprovers) ||
     (revision.repositoryCredentials !== undefined &&

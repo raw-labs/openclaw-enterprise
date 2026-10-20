@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
-updated: 2026-10-14
-last_updated_session: authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c
+updated: 2026-10-15
+last_updated_session: 01a12f94-4e1e-7df1-8b9d-1c7f305c2584
 ---
 
 # Agent channel runtime
@@ -11,7 +11,7 @@ last_updated_session: authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c
 An authorized Agent deployment freezes native channel settings and Secret bindings
 into its revision. Kubernetes Compute prepares credentials and channel egress,
 then publishes the native Teams callback for the serving revision. This flow
-describes evaluation-branch source, not production or live-provider qualification.
+describes the combined integration source, not production or live-provider qualification.
 
 ## Entry Points
 
@@ -47,10 +47,12 @@ graph TD
 `packages/occ/src/index.ts:deployAgentWithAuthorization` authorizes the exact Agent
 and validates same-Namespace resource references. Kubernetes
 `validateHarnessAuth` applies provider settings and `requireChannelTopology` before
-a revision can stop predecessors. `requireTeamsConfiguration` requires explicit
-Public-cloud IDs, an environment Secret reference, the native `/api/messages` path
-and the packaged plugin. Teams also requires an Installation public callback
-hostname. Native JSON cannot provision a listener or change trusted Compute options.
+a revision can stop predecessors. `enabledChannels` restricts Teams to Public cloud,
+the native `/api/messages` path and an Installation public callback hostname.
+`validateChannelSecretBindings` requires a matching binding for every referenced
+credential name. Native registration and plugin inputs follow [Teams setup](../guides/integrations/teams.md);
+the native SDK owns Microsoft JWT authentication. Native JSON cannot provision a
+listener or change trusted Compute options.
 The temporary `runtime.channels.experimentalEmbeddedChannels` option permits
 embedded OpenClaw only when the Installation administrator explicitly enables it.
 The same option advertises embedded provisioning to the regular API; its default
@@ -65,12 +67,20 @@ into the owning Gateway. Dedicated Harnesses receive model authentication separa
 OpenClaw instead receives both channel and model credentials in its combined
 Gateway/execution Pod. This preserves exact resource ownership but weakens
 credential separation within that Agent.
-`reconcileChannelNetworkPolicy` permits the configured exact proxy endpoint; its
-hostname policy belongs to the external proxy or opt-in chart-managed process.
-`deployment` applies `HTTPS_PROXY`, `NODE_USE_ENV_PROXY` and internal `NO_PROXY`
-settings to the whole channel-enabled Gateway. Native integrations using that
-proxy need its destination authorization too. Embedded processes retain their
-existing direct public egress and can bypass these environment settings.
+The selected `BundledChannelDriver.gatewayNetworkRequirements` aggregates Slack and
+Teams destinations. Worker composition injects only the pure declaration through
+`createBundledChannelNetworkRequirements`; it receives no provider validation or
+directory methods. The API owns credential validation before enqueue; worker
+handoff freezes the same declarations without provider I/O inside its transaction. `admitGatewayOutbound` permits embedded `channelsOnly` snapshots
+only with the trusted option and managed outbound enabled; additional modes remain
+dedicated-only. See [Gateway outbound lifecycle](gateway-outbound.md) for immutable
+proxy policy, readiness, current-ceiling checks and withdrawal.
+
+`gatewayOutboundTransport` adds internal and selected model endpoint hosts to
+`NO_PROXY`, preserving the embedded model route while `HTTPS_PROXY` and
+`NODE_USE_ENV_PROXY` send channel traffic through the revision proxy. The embedded
+process retains its public model egress and can bypass environment settings.
+This is routing, not credential containment.
 
 The runtime image selects upstream `msteams` in
 `deploy/runtime/Dockerfile` and `scripts/build-runtime-assets.mjs`. No independent
@@ -78,7 +88,7 @@ Teams message engine or channel credential broker is introduced.
 
 ### 3. Publish the serving callback
 
-`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback`
+`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsRoute`
 reads the owned Gateway Deployment. A candidate whose revision does not match
 that Deployment cannot claim or delete its predecessor's callback.
 `activateRevisionWorkloads` rejects stale activation before publishing the new route.
@@ -92,7 +102,7 @@ Envoy Gateway peer to the native Gateway port; other tenants gain no ingress gra
 
 ### 4. Disable, stop or delete
 
-`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback` removes obsolete callback resources when the activated
+`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsRoute` removes obsolete callback resources when the activated
 revision disables Teams. `stopRevision` removes the serving route first.
 `deleteGatewayUnauthenticatedRoutes` deletes HTTPRoute before its revision-selecting Service and SecurityPolicy,
 then its NetworkPolicy, using the exact revision, observed UID and resourceVersion.
@@ -120,6 +130,12 @@ it does not establish native plugin support or execution containment.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-15 11:02: Adopt the source PR's pure worker requirement declaration and remove duplicate integration wiring. (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - b0c299f7e8a9cdb992500fa39d32dddea9271ed0)
+
+- 2026-10-15 09:30: Correct Teams admission source pointers for the combined implementation. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - ef947b01ff8b14fc522a7c1974731228d4900b57)
+
+- 2026-10-15 08:54: Adapt embedded evaluation to immutable Slack/Teams outbound requirements and preserve model transport. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - f0473090e63c6738d800cfea244675f970736e3d)
 
 - 2026-10-14 11:41: Trace trusted opt-in, shared credential execution and exact callback Service fencing. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
 

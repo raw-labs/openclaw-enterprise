@@ -13,15 +13,18 @@ add the opt-in to the existing trusted site-input JSON:
 ```json
 {
   "channels": {
-    "runtimeProxyUrl": "http://192.0.2.10:3128",
     "experimentalEmbeddedChannels": true
+  },
+  "gatewayOutbound": {
+    "enabled": true,
+    "denyCidrs": ["10.0.0.0/8"]
   }
 }
 ```
 
 Render with `--profile openclaw`; the option also works with `codex` when selecting
-embedded OpenClaw Agents. It requires `runtimeProxyUrl` or the existing
-`managedSlackProxy: true` input. Omit the option or set it to false to keep the default
+embedded OpenClaw Agents. It requires managed `gatewayOutbound.enabled: true` and actual infrastructure
+exclusions; replace the example CIDR for your Installation. Omit the option or set it to false to keep the default
 refusal. Preflight warns about the shared-credential risk when enabled. Apply the
 paired startup YAML and Helm values in the guide's order so API and worker load
 the same configuration. The option does not configure Teams ingress or broaden
@@ -35,16 +38,18 @@ runtime:
   transportSecretPrefix: transport
   gatewayStorageClassName: local-path
   channels:
-    proxyUrl: "http://192.0.2.10:3128"
     experimentalEmbeddedChannels: true
+  gatewayOutbound:
+    enabled: true
+    image: "registry.example.test/oce/controller@sha256:<reviewed-digest>"
+    denyCidrs: ["10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
 ```
 
-The example proxy address is a placeholder. Use an approved real endpoint that
-the Agent can reach; preserve the existing `managedProxy` peer configuration if
-using an approved Kubernetes Service. The chart-managed proxy also requires
-`gatewayRouting.enabled` for ingress from Agent namespaces. Load the same trusted configuration into
-API and worker. Record the administrator's trust decision with the Installation's
-configuration change. Adding this flag to native OpenClaw JSON grants no authority.
+Use the reviewed controller image for the per-revision outbound proxy and include
+all Installation infrastructure CIDRs in its exclusions. Load the same trusted
+configuration into API and worker. Native OpenClaw JSON cannot enable the option.
+The old `runtime.channels.proxyUrl` and shared channel proxy are unsupported;
+[Gateway outbound](../../reference/gateway-outbound.md) owns the current proxy setup.
 
 The default refuses embedded channels. This trusted opt-in permits ordinary Agent
 creation/deployment and provisioning with `executionMode: embedded` and the
@@ -56,21 +61,24 @@ is implied. Other native providers remain unsupported by Compute authentication.
 
 Use [Slack setup](slack.md) or the [fresh Teams trial](teams.md) for provider inputs.
 Teams additionally needs its public listener, certificate, application registration
-and exact callback endpoint. This branch uses API/native Configuration JSON for
-Teams; it adds no console editor. Shared Teams prerequisites are independently
-reviewable from the embedded exception.
+and exact callback endpoint. Embedded provisioning uses the API; the console continues to provision dedicated
+Agents. Existing Slack and Teams configuration editors remain available.
 
 ## Verify networking and credentials
 
-Channel enablement sets `HTTPS_PROXY`, `NODE_USE_ENV_PROXY=1` and a loopback/Service
-`NO_PROXY` list for the entire Gateway. This includes native plugins and ordinary
-native model requests. The stock proxy allows Slack only; its explicit Teams option
-adds bounded Microsoft destinations. Both still refuse Composio, ClawHub and model
-endpoints. Authentication probes use sanitized subprocess environments without
-the Gateway proxy variables, so startup authentication alone does not prove the
-normal model/plugin proxy path. Use an approved external proxy with the required destination policy for
-a channel-plus-native-plugin/model trial. Opening direct TCP/443 does not override
-a client using the restrictive proxy.
+Channel admission freezes the enabled Slack and Teams requirements into each
+revision. Its credential-free proxy allows their combined destinations; disabling
+a channel removes its requirements from the next revision. Embedded evaluation
+accepts only `gatewayOutbound.mode: channelsOnly`; additional restricted/public
+Gateway modes still require dedicated execution.
+
+Compute sets `HTTPS_PROXY`, `NODE_USE_ENV_PROXY=1` and `NO_PROXY` for the combined
+process. Internal endpoints and the selected embedded model provider's endpoint
+bypass the channel proxy, retaining existing embedded model egress. Default OpenAI
+and Anthropic endpoints and explicit provider/model `baseUrl` hosts are covered.
+This routing preserves model transport; it does not qualify live model execution
+or arbitrary native plugins. Other destinations honoring the proxy remain denied
+unless declared by the selected Channel Driver.
 
 The proxy is not a per-Agent credential or identity authority. Embedded tool/process
 execution can bypass proxy environment settings and retains the existing public
@@ -104,5 +112,5 @@ remove its retained state, and revoke or rotate provider credentials. Do not tre
 stop as a provider-token revocation or a wipe of plugin-maintained caches.
 
 The removal condition is a supported dedicated native path supplying the required
-models and integrations. The [proposed RFC](../../../specs/rfcs/0023-temporary-embedded-channel-trial.md)
+models and integrations. The [proposed RFC](../../../specs/rfcs/0025-temporary-embedded-channel-trial.md)
 records the risk and owner decision; it does not claim maintainer acceptance.

@@ -28,7 +28,6 @@ import {
   waitForReadyGatewayPod,
 } from "../helpers/harness-topology-k3d-real.mjs";
 import { ADMINISTRATOR_RUNTIME_ROLE } from "../../packages/contracts/src/index.ts";
-import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 
 const executeFile = promisify(execFile);
 
@@ -1007,9 +1006,17 @@ test(
     const expectedTarget = expectedNativeAdminTarget(topology, ingress.origin, nativeDomain);
     assert.match(expectedTarget.host, hostSuffixPattern(nativeDomain));
     const initialStatus = await topology.adminRequest("GET", agentPath(topology, "/native-admin"));
-    assert.equal(initialStatus.status, 403, "Installation administration alone must not admit native entry");
+    assert.equal(
+      initialStatus.status,
+      403,
+      "Installation administration alone must not admit native entry",
+    );
     await assignNativeAdminAccess(topology);
-    assert.equal(topology.revision.revision, 1, "native admin must work on the first admitted revision"    );
+    assert.equal(
+      topology.revision.revision,
+      1,
+      "native admin must work on the first admitted revision",
+    );
     const status = await nativeAdminStatus(topology);
     assert.equal(status.status, "available");
     assert.equal(status.host, expectedTarget.host, "Agent native host must be deterministic");

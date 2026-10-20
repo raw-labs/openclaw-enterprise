@@ -137,6 +137,10 @@
                     "label": "Native Admin UI"
                   },
                   {
+                    "page": "reference/agent-runtime-authority",
+                    "label": "Native Authority"
+                  },
+                  {
                     "page": "guides/topics/agent-troubleshoot",
                     "label": "Troubleshoot"
                   }
@@ -438,7 +442,10 @@
                     "page": "guides/integrations/teams",
                     "label": "Microsoft Teams"
                   },
-                  { "page": "guides/integrations/embedded-channel-trial", "label": "Embedded Trial" }
+                  {
+                    "page": "guides/integrations/embedded-channel-trial",
+                    "label": "Embedded Trial"
+                  }
                 ]
               }
             ],
@@ -919,12 +926,30 @@
               {
                 "group": "Release",
                 "pages": [
-                  { "page": "release/README", "label": "Overview" },
-                  { "page": "release/configuration", "label": "Configuration" },
-                  { "page": "release/containers", "label": "Containers" },
-                  { "page": "release/chart-publication", "label": "Helm Chart" },
-                  { "page": "release/cli-publication", "label": "OCC CLI" },
-                  { "page": "release/container-promotion", "label": "Docker Hub Promotion" }
+                  {
+                    "page": "release/README",
+                    "label": "Overview"
+                  },
+                  {
+                    "page": "release/configuration",
+                    "label": "Configuration"
+                  },
+                  {
+                    "page": "release/containers",
+                    "label": "Containers"
+                  },
+                  {
+                    "page": "release/chart-publication",
+                    "label": "Helm Chart"
+                  },
+                  {
+                    "page": "release/cli-publication",
+                    "label": "OCC CLI"
+                  },
+                  {
+                    "page": "release/container-promotion",
+                    "label": "Docker Hub Promotion"
+                  }
                 ]
               },
               {

@@ -2887,9 +2887,13 @@ export class KubernetesComputeDriver implements ComputeDriver {
     if (input.selection.mode === "channelsOnly" && input.requirements.length === 0) {
       return undefined;
     }
-    if (input.executionMode !== "dedicated" || !this.gatewayOutboundCapabilities.restricted) {
+    if (
+      (input.executionMode === "embedded" &&
+        this.options.runtime?.channels?.experimentalEmbeddedChannels !== true) ||
+      !this.gatewayOutboundCapabilities.restricted
+    ) {
       throw new ResourceConflictError(
-        "Gateway requirements need dedicated execution and enabled managed outbound.",
+        "Gateway requirements need enabled managed outbound and dedicated execution or trusted embedded channel evaluation.",
       );
     }
     const snapshot = structuredClone({
@@ -3064,7 +3068,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
           codexSeccompProfile: { type: "string", minLength: 1 },
           codexModelBaseUrl: { type: "string", minLength: 1 },
           channels: {
-            type: "object", additionalProperties: false,
+            type: "object",
+            additionalProperties: false,
             properties: { experimentalEmbeddedChannels: { type: "boolean", default: false } },
           },
           gatewayOutbound: {
@@ -3319,7 +3324,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
       );
     }
     if (options.runtime !== undefined) {
-      const { transportSecretPrefix, gatewayOutbound } = options.runtime;
+      const { transportSecretPrefix, gatewayOutbound, channels } = options.runtime;
       const runtimeProperties = asRecord(
         KubernetesComputeDriver.configurationSchema.properties.runtime.properties,
       );
@@ -3358,6 +3363,22 @@ export class KubernetesComputeDriver implements ComputeDriver {
         gatewayStorageClassName,
         "SQLite-compatible gateway storage class",
       );
+      if (
+        channels !== undefined &&
+        (asRecord(channels) === undefined ||
+          Object.keys(channels).some((key) => key !== "experimentalEmbeddedChannels") ||
+          (channels.experimentalEmbeddedChannels !== undefined &&
+            typeof channels.experimentalEmbeddedChannels !== "boolean"))
+      ) {
+        throw new ConfigurationFailure(
+          "runtime.channels accepts only the experimentalEmbeddedChannels Installation boolean.",
+        );
+      }
+      if (channels?.experimentalEmbeddedChannels === true && gatewayOutbound?.enabled !== true) {
+        throw new ConfigurationFailure(
+          "Experimental embedded channels require enabled managed Gateway outbound.",
+        );
+      }
       const nativeOpenClawSessionCapacity = options.runtime.nativeOpenClawSessionCapacity;
       if (
         nativeOpenClawSessionCapacity !== undefined &&
@@ -3428,14 +3449,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
             gatewayOutbound.resources,
             "Gateway outbound proxy",
             "runtime.gatewayOutbound.resources",
-          );
-        }
-        if (
-          channels.experimentalEmbeddedChannels !== undefined &&
-          typeof channels.experimentalEmbeddedChannels !== "boolean"
-        ) {
-          throw new ConfigurationFailure(
-            "Experimental embedded channels must be an Installation boolean.",
           );
         }
       }
@@ -4087,7 +4100,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
       {
         embedded: harness.mode === "embedded",
         channelRuntime: agentSave || this.options.runtime?.gatewayOutbound?.enabled === true,
-        experimentalEmbeddedChannels: this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
+        experimentalEmbeddedChannels:
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       callerSettingError,
     );
@@ -12684,6 +12698,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     }
     if (
       routing?.channels === undefined ||
+      gateway.metadata.annotations?.["openclaw.dev/msteams-webhook"] !== "true" ||
       !enabledChannelProviders(
         revision.configuration,
         CHANNEL_PROVIDERS,
@@ -12751,25 +12766,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
                 type: "URLRewrite",
                 urlRewrite: { path: { type: "ReplaceFullPath", replaceFullPath: "/api/messages" } },
               },
-              // Microsoft JWT authentication remains native; callbacks gain no OCE identity.
-              {
-                type: "RequestHeaderModifier",
-                requestHeaderModifier: {
-                  remove: [
-                    "cookie",
-                    "x-api-key",
-                    "x-occ-identity",
-                    "x-openclaw-scopes",
-                    "forwarded",
-                    "x-forwarded-for",
-                    "x-real-ip",
-                    "tailscale-user-login",
-                    "tailscale-user-name",
-                    "tailscale-user-profile-pic",
-                    "tailscale-funnel-request",
-                  ],
-                },
-              },
+              this.gatewayRouteHeaderFilter("channel"),
             ],
             backendRefs: [this.gatewayRouteBackendRef(callbackService)],
           },
@@ -13670,6 +13667,25 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     if (provider !== undefined) {
       internalHosts.push(provider.address);
     }
+    if (revision.harness.mode === "embedded") {
+      // Embedded model calls already have their own model egress grant. Preserve that
+      // path rather than sending them to the channel-only proxy, which denies them.
+      // This shared process is deliberately not a channel credential boundary.
+      const { providerId } = harnessModelAuthentication(revision.configuration);
+      const provider = asRecord(
+        asRecord(asRecord(revision.configuration.models)?.providers)?.[providerId],
+      );
+      const defaultHost = providerId === "anthropic" ? "api.anthropic.com" : "api.openai.com";
+      internalHosts.push(
+        typeof provider?.baseUrl === "string" ? new URL(provider.baseUrl).hostname : defaultHost,
+      );
+      for (const model of Array.isArray(provider?.models) ? provider.models : []) {
+        const baseUrl = asRecord(model)?.baseUrl;
+        if (typeof baseUrl === "string") {
+          internalHosts.push(new URL(baseUrl).hostname);
+        }
+      }
+    }
     // Only declared internal endpoints bypass the proxy; no wildcard or caller environment is imported.
     return {
       proxyUrl: `http://${this.gatewayOutboundName(revision)}.${namespace.name}.svc:${GATEWAY_OUTBOUND_PORT}`,
@@ -13926,7 +13942,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       {
         embedded: revision.harness.mode === "embedded",
         channelRuntime: this.options.runtime?.gatewayOutbound?.enabled === true,
-        experimentalEmbeddedChannels: this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
+        experimentalEmbeddedChannels:
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       preparationSettingError,
     );
@@ -13956,7 +13973,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       }
     }
     if (providers.includes("msteams") && this.options.gatewayRouting?.channels === undefined) {
-      throw new ConfigurationFailure("Microsoft Teams requires a dedicated public channel callback listener.");
+      throw new ConfigurationFailure(
+        "Microsoft Teams requires a dedicated public channel callback listener.",
+      );
     }
     return providers;
   }

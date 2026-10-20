@@ -60,8 +60,7 @@ REVOKE ALL ON FUNCTION occ.gateway_outbound_selection_valid(jsonb), occ.gateway_
 --> statement-breakpoint
 GRANT EXECUTE ON FUNCTION occ.gateway_outbound_selection_valid(jsonb), occ.gateway_outbound_snapshot_valid(jsonb) TO occ_app;
 --> statement-breakpoint
-ALTER TABLE occ.agent_revisions
-  DROP CONSTRAINT agent_revisions_admitted_snapshot;
+ALTER TABLE occ.agent_revisions DROP CONSTRAINT agent_revisions_admitted_snapshot;
 --> statement-breakpoint
 ALTER TABLE occ.agent_revisions
   ADD CONSTRAINT agent_revisions_admitted_snapshot CHECK (
@@ -71,7 +70,7 @@ ALTER TABLE occ.agent_revisions
     ])
     AND (admitted_spec
       - 'configuration_id' - 'configuration_kind' - 'configuration_generation'
-      - 'draft_spec' - 'harness' - 'compute' - 'sandbox_driver_id' - 'sandbox_policy'
+      - 'draft_spec' - 'harness' - 'compute' - 'sandbox_driver_id'
       - 'secret_driver_id' - 'secret_bindings' - 'harness_auth' - 'credential_sources' - 'plugins' - 'plugin_approvers'
       - 'repository_credentials' - 'gateway_outbound') = '{}'::jsonb
     AND jsonb_typeof(admitted_spec->'configuration_id') = 'string'
@@ -93,17 +92,11 @@ ALTER TABLE occ.agent_revisions
     AND (admitted_spec #>> '{harness,mode}') IN ('embedded', 'dedicated')
     AND jsonb_typeof(admitted_spec->'compute') = 'object'
     AND ((admitted_spec->'compute') ?& ARRAY['id', 'implementation'])
-    AND ((admitted_spec->'compute') - 'id' - 'implementation' - 'admission') = '{}'::jsonb
+    AND ((admitted_spec->'compute') - 'id' - 'implementation') = '{}'::jsonb
     AND jsonb_typeof(admitted_spec #> '{compute,id}') = 'string'
     AND COALESCE(btrim(admitted_spec #>> '{compute,id}'), '') <> ''
     AND jsonb_typeof(admitted_spec #> '{compute,implementation}') = 'string'
     AND COALESCE(btrim(admitted_spec #>> '{compute,implementation}'), '') <> ''
-    AND (
-      NOT ((admitted_spec->'compute') ? 'admission')
-      OR (jsonb_typeof(admitted_spec #> '{compute,admission}') = 'string'
-          AND char_length(admitted_spec #>> '{compute,admission}') BETWEEN 1 AND 1024
-          AND (admitted_spec #>> '{compute,admission}') ~ '^[ -~]+$')
-    )
     AND (
       NOT (admitted_spec ? 'sandbox_driver_id')
       OR (

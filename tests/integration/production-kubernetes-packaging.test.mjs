@@ -29,7 +29,7 @@ const repository = fileURLToPath(new URL("../../", import.meta.url));
 const controllerRequire = createRequire(
   new URL("../../apps/controller/package.json", import.meta.url),
 );
-const { loadAllYaml, loadYaml } = controllerRequire("@kubernetes/client-node");
+const { loadYaml } = controllerRequire("@kubernetes/client-node");
 const productionExamples = new URL("../../deploy/examples/production/", import.meta.url);
 const helm = process.env.OCC_HELM_BIN ?? "helm";
 const chatgptValues = {
@@ -239,9 +239,7 @@ test(
 test("Teams callbacks opt into a separate TLS listener and scoped ingress", tooling, async () => {
   const callbacks = {
     ...gatewayRoutingValues,
-    ...slackProxyValues,
-    "slackProxy.teamsEnabled": "true",
-    "slackProxy.teamsFileHosts[0]": "tenant.sharepoint.com",
+    ...outboundProxyValues,
     "gatewayRouting.channels.enabled": "true",
     "gatewayRouting.channels.hostname": "callbacks.example.test",
     "gatewayRouting.channels.tlsSecretName": "teams-public-tls",
@@ -262,21 +260,13 @@ test("Teams callbacks opt into a separate TLS listener and scoped ingress", tool
     .find(({ ports }) => ports?.some(({ port }) => port === 8444));
   assert.deepEqual(ingress.from, [{ ipBlock: { cidr: "198.51.100.0/24" } }]);
   const proxy = objects.find(
-    ({ kind, metadata }) => kind === "Deployment" && metadata.name.endsWith("slack-proxy"),
+    ({ kind, metadata }) => kind === "Deployment" && metadata.name.endsWith("outbound-proxy"),
   );
   assert.equal(
     proxy.spec.template.spec.containers[0].env.find(
-      ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS_ENABLED",
+      ({ name }) => name === "OCC_CONTROL_PLANE_OUTBOUND_PROXY_CONFIG_PATH",
     ).value,
-    "true",
-  );
-  assert.deepEqual(
-    JSON.parse(
-      proxy.spec.template.spec.containers[0].env.find(
-        ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS",
-      ).value,
-    ),
-    ["tenant.sharepoint.com"],
+    "/etc/openclaw/outbound-proxy/config.json",
   );
   for (const override of [
     { "gatewayRouting.enabled": "false" },
@@ -293,74 +283,6 @@ test("Teams callbacks opt into a separate TLS listener and scoped ingress", tool
       .find(({ kind }) => kind === "Gateway")
       .spec.listeners.some(({ name }) => name === "channels"),
     false,
-  );
-});
-
-test("Teams file hosts render exact proxy destinations and reject unsafe configuration", async (t) => {
-  try {
-    await execute(helm, ["version", "--short"], { cwd: repository });
-  } catch {
-    t.skip("Install Helm, or set OCC_HELM_BIN, to verify Teams file-host packaging.");
-    return;
-  }
-  const proxyValues = { ...slackProxyValues, "slackProxy.teamsEnabled": "true" };
-  const hostValues = (hosts) =>
-    Object.fromEntries(hosts.map((host, index) => [`slackProxy.teamsFileHosts[${index}]`, host]));
-  const hosts = [
-    "tenant.sharepoint.com",
-    "tenant.sharepoint-df.com",
-    "files.1drv.com",
-    "files.onedrive.com",
-    "account.blob.core.windows.net",
-  ];
-  // Parse actual Helm manifests with the installed Kubernetes client; this case needs no yq.
-  const objects = loadAllYaml((await render({ ...proxyValues, ...hostValues(hosts) })).stdout);
-  const proxy = objects.find(
-    (object) => object?.kind === "Deployment" && object.metadata.name.endsWith("slack-proxy"),
-  );
-  assert.deepEqual(
-    JSON.parse(
-      proxy.spec.template.spec.containers[0].env.find(
-        ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS",
-      ).value,
-    ),
-    hosts,
-  );
-  const defaults = loadAllYaml((await render(slackProxyValues)).stdout);
-  const defaultProxy = defaults.find(
-    (object) => object?.kind === "Deployment" && object.metadata.name.endsWith("slack-proxy"),
-  );
-  assert.equal(
-    defaultProxy.spec.template.spec.containers[0].env.find(
-      ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS",
-    ).value,
-    "[]",
-  );
-  // Exact Microsoft storage hosts are an explicit opt-in, never an arbitrary proxy escape.
-  for (const host of [
-    "*.sharepoint.com",
-    "192.0.2.12",
-    "tenant.sharepoint.com.example.test",
-    "notsharepoint.com",
-    "sharepoint.com",
-    "Tenant.sharepoint.com",
-    "https://tenant.sharepoint.com",
-  ]) {
-    await assert.rejects(
-      render({ ...proxyValues, ...hostValues([host]) }),
-      /slackProxy\.teamsFileHosts must contain exact Microsoft file-storage hostnames/,
-      host,
-    );
-  }
-  await assert.rejects(
-    render({ ...slackProxyValues, ...hostValues([hosts[0]]) }),
-    /slackProxy\.teamsFileHosts requires slackProxy\.teamsEnabled/,
-  );
-  const maximum = Array.from({ length: 32 }, (_, index) => `tenant-${index}.sharepoint.com`);
-  await render({ ...proxyValues, ...hostValues(maximum) });
-  await assert.rejects(
-    render({ ...proxyValues, ...hostValues([...maximum, "overflow.sharepoint.com"]) }),
-    /slackProxy\.teamsFileHosts permits at most 32 exact hosts/,
   );
 });
 

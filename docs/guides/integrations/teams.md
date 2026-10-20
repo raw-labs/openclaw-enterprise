@@ -37,20 +37,25 @@ gatewayRouting:
         podSelector:
           matchLabels:
             app: public-ingress
-slackProxy:
+outboundProxy:
   enabled: true
-  teamsEnabled: true
+  denyCidrs:
+    - 203.0.113.0/24 # Replace with reviewed Installation infrastructure CIDRs.
 ```
 
 Keep the existing private gateway settings. In the Installation's selected
 Compute Driver configuration, set `gatewayRouting.channels.hostname` to the
-same hostname and configure `runtime.channels.proxyUrl` and `managedProxy`
-for the chart-managed proxy as described in the [Slack proxy setup](slack.md#configure-both-slack-proxies).
-An external reviewed proxy can replace it. Allow TCP/443 CONNECT to
+same hostname and enable `runtime.gatewayOutbound` with reviewed infrastructure
+exclusions. For profile-based installations, use the `gatewayOutbound` input
+shown in [outbound setup](slack.md#configure-outbound-access).
+
+Enabling Teams automatically declares its exact Microsoft Public cloud hosts:
 `login.microsoftonline.com`, `login.botframework.com`, `api.botframework.com`,
-`smba.trafficmanager.net`, and `graph.microsoft.com`.
-The chart-managed proxy admits those exact Microsoft hosts only when
-`teamsEnabled` is true; it does not allow arbitrary Microsoft domains.
+`smba.trafficmanager.net`, and `graph.microsoft.com`. Deployment freezes these
+requirements in the revision and prepares its isolated Gateway proxy. Slack can
+be enabled alongside Teams; both providers' requirements are retained. The Agent
+needs no additional manually approved hosts for these channel destinations.
+The API-only management proxy uses a separate restricted policy.
 
 ## Configure and deploy the Agent
 
@@ -108,7 +113,7 @@ For channel files, the native plugin creates organization-scoped view links:
 people signed into the organization who obtain the link can access the file,
 including people outside the Team. Group chats use links for the resolved chat
 members; existing site/library permissions still apply. These are native
-[upload and sharing semantics](https://github.com/openclaw/openclaw/blob/90d30a1178a79dddd92e6190b66b95d89dfb3ca8/extensions/msteams/src/graph-upload.ts),
+[upload and sharing semantics](https://github.com/openclaw/openclaw/blob/f8386bc7df0a6c9eda7a28ae81943c5c06a414ff/extensions/msteams/src/graph-upload.ts),
 not additional restrictions enforced by the editor.
 
 Leave the destination empty when channel/group document sending is unnecessary.
@@ -120,39 +125,32 @@ network requirements. Live outgoing file delivery remains unqualified.
 ## Prepare attachment downloads
 
 Attachments remain unqualified for live Teams use. For a controlled trial,
-review the actual attachment URL and every redirect hostname without copying
-signed URLs into logs. Add only the required exact storage hosts to
-`slackProxy.teamsFileHosts`, with `slackProxy.teamsEnabled: true`, for example:
+review the actual attachment URL and each redirect hostname without logging
+signed URLs. On a dedicated Agent, an administrator can approve the required
+exact storage hosts through the [Gateway Network setting](../../reference/gateway-outbound.md):
 
-```yaml
-slackProxy:
-  enabled: true
-  teamsEnabled: true
-  teamsFileHosts:
-    - tenant.sharepoint.com
-    - files.blob.core.windows.net
+```json
+{
+  "gatewayOutbound": {
+    "mode": "restricted",
+    "hosts": ["tenant.sharepoint.com", "files.blob.core.windows.net"]
+  }
+}
 ```
 
-The list defaults to empty and accepts at most 32 exact lowercase subdomains of
-`sharepoint.com`, `sharepoint-df.com`, `1drv.com`, `onedrive.com` or
-`blob.core.windows.net`. Wildcards and bare parent domains are refused. Add each
-required redirect hostname separately. This policy applies to every client
-admitted to the Installation's proxy, not just this Agent.
+Enabled Teams contributes its messaging destinations automatically. Additional
+storage hosts belong to this Agent's admitted revision, rather than an
+Installation-wide shared proxy. Add each required redirect hostname separately
+and redeploy. Embedded evaluation permits only channel-derived destinations;
+it cannot approve additional storage hosts with this setting.
 
-The managed proxy validates every resolved IPv4 answer as public and connects
-to the validated numeric address under one DNS/connect deadline. Private or
-reserved answers, mixed public/private answers, IPv6-only destinations and
-resolution timeouts fail closed.
-
-Set `runtime.channels.guardedFetchProxy: true` in trusted Compute configuration
-and redeploy the Agent only after reviewing the selected proxy's destination
-policy. An external proxy must also reject private/reserved addresses, validate
-DNS answers and pin the connected address. The declaration defaults to `false`.
-Compute supplies `OPENCLAW_PROXY_ACTIVE=1` only to Gateways with an enabled
-channel, letting native guarded fetch delegate DNS/IP enforcement to the proxy.
-Native URL, redirect and credential checks remain active. This declaration
-applies throughout that Gateway process; it does not add proxy destinations.
-Agent configuration cannot override proxy environment or this trust marker.
+The managed proxy validates DNS answers and pins the selected public IPv4
+address. Private/reserved addresses, mixed public/private answers, unsupported
+IPv6 routes and timeouts fail closed. Compute projects `OPENCLAW_PROXY_ACTIVE=1`
+only when the Gateway has admitted managed transport, allowing native guarded
+fetch to use that proxy. Native URL, redirect and credential checks remain active.
+The marker applies throughout the Gateway but adds no destinations. Agent
+Configuration cannot override the transport or its trust markers.
 
 Native `channels.msteams.mediaAllowHosts` may also need an exact destination
 that its defaults do not admit. This is separate from proxy admission and
@@ -191,10 +189,12 @@ Team link again when reopening to browse names. See the
 [directory reference](../../reference/drivers/teams-channel.md) for bounds and
 visibility limits.
 
-The production API needs its channel directory proxy to permit
-`login.microsoftonline.com:443` and `graph.microsoft.com:443`. With the managed
-proxy, enable both `slackProxy.enabled` and `slackProxy.teamsEnabled`. This is
-separate from the Agent's runtime proxy. Missing directory consent or egress
+The production API needs its control-plane proxy to permit
+`login.microsoftonline.com:443` and `graph.microsoft.com:443`. Helm
+`outboundProxy.enabled` derives these management destinations from the bundled
+Channel Driver. An approved external endpoint can instead be selected with
+`api.controlPlaneOutboundProxyUrl`. Agent network selections do not broaden
+this API-only route. Missing directory consent or egress
 leaves exact-ID entry available and does not make Graph access a deployment
 prerequisite.
 
@@ -215,3 +215,8 @@ prerequisite.
 
 See [credential ownership](../../reference/drivers/kubernetes-compute/storage-and-credentials.md)
 and the [callback flow](../../flows/agent-channel-ingress.md).
+
+Embedded OpenClaw uses the same Teams destination declarations, public callback
+listener and revision ownership checks when the trusted
+[embedded evaluation option](embedded-channel-trial.md) is enabled. Its channel
+and model credentials share the execution workload.

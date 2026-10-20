@@ -311,12 +311,10 @@ prove readiness. See [Kubernetes startup status](kubernetes-compute.md#plugin-st
 ## Limits
 
 - Implementations differ in topology, credentials, Namespace deletion, and
-  private gateway access; see the [feature matrix](compute-matrix.md). The gateway
-  and Harness need not share a cluster or a component that writes their resources.
+  private gateway access; see the [feature matrix](compute-matrix.md). Gateway and Harness may use separate clusters and resource owners.
 - Initial credential helpers cannot rotate credentials, manage model
   authentication, or prove that credentials work or workloads are ready.
-- Selecting a different Driver does not migrate revisions that recorded the
-  previous Driver's identity.
+- Driver selection does not migrate revisions owned by the previous Driver.
 
 ## Troubleshooting
 

@@ -35,8 +35,8 @@ import {
 const browser = fileBrowser();
 
 // A bootstrapped Console with one ready Namespace.
-async function readyNamespace(t, name) {
-  const fixture = await createConsoleAppFixture(t);
+async function readyNamespace(t, name, options = {}) {
+  const fixture = await createConsoleAppFixture(t, options);
   await fixture.bootstrap();
   return { fixture, namespace: await fixture.createNamespace(name, { ready: true }) };
 }
@@ -1457,7 +1457,16 @@ for (const browserType of [chromium, webkit]) {
 
 // Reloading a conflict must not restore channel or sender access another editor revoked.
 test("Teams conflict recovery preserves concurrent channel and sender revocations", async (t) => {
-  const { fixture, namespace } = await readyNamespace(t, "Teams concurrent access");
+  const { fixture, namespace } = await readyNamespace(t, "Teams concurrent access", {
+    channelRuntime: true,
+    gatewayRouting: {
+      hostname: "agents.example.internal",
+      gatewayName: "oce-agent-gateways",
+      gatewayNamespace: "openclaw-system",
+      envoyNamespace: "envoy-gateway-system",
+      channels: { hostname: "callbacks.example.test" },
+    },
+  });
   const team = "19:team@thread.tacv2";
   const channel = (name) => `19:${name}@thread.tacv2`;
   const user = (digit) =>
@@ -1481,12 +1490,26 @@ test("Teams conflict recovery preserves concurrent channel and sender revocation
       },
     },
   };
-  const agent = await fixture.createAgent(
+  const values = nativeValues("teams-conflict", {
+    harnessId: "codex",
+    channels: { msteams: teams },
+  });
+  // This scenario edits channel policy; its authored plugin policy must permit Teams.
+  values.plugins.allow.push("msteams");
+  const password = await fixture.createSecret(
     namespace.id,
-    "Concurrent Teams Agent",
-    nativeValues("teams-conflict", { harnessId: "codex", channels: { msteams: teams } }),
-    { executionMode: "dedicated" },
+    "Teams app password",
+    "synthetic-teams-password",
   );
+  const agent = await fixture.createAgent(namespace.id, "Concurrent Teams Agent", values, {
+    executionMode: "dedicated",
+    secretBindings: {
+      MSTEAMS_APP_PASSWORD: {
+        source: { kind: "secret", namespaceId: namespace.id, id: password.id },
+        delivery: { type: "env" },
+      },
+    },
+  });
   const { page } = await newPage(t, fixture);
   await openDraft(page, fixture, agent, "Concurrent Teams Agent");
   await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();

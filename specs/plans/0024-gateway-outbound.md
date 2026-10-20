@@ -1,12 +1,12 @@
 ---
-rfc: ../rfcs/0023-gateway-outbound.md
+rfc: ../rfcs/0024-gateway-outbound.md
 ---
 
 # Implementation plan: managed Gateway outbound HTTPS
 
-- **ID:** RFC-0023
+- **ID:** RFC-0024
 - **Delivery status:** In progress
-- **Authority:** [RFC-0023](../rfcs/0023-gateway-outbound.md)
+- **Authority:** [RFC-0024](../rfcs/0024-gateway-outbound.md)
 - **Source baseline:** `d3ccc54781d0d50b40e9aeb814f0573d38c0a585`
 - **Refresh target:** upstream `main` at `26d3bcc89e313a7041c6def5b973dfc54ea0e2f4`
 

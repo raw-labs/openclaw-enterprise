@@ -28,7 +28,7 @@ graph TD
   DEP["Deploy or provision Agent"] --> PREP["Compute prepares enabled native policy"]
   PREP --> SNAP["Validate and freeze revision"]
   SNAP --> A
-  L["Local first-Agent selects Control UI"] --> L2["Create Agent, derive exact origin,<br/>and save Configuration generation 2"]
+  L["Local helper selects Control UI"] --> L2["Create Agent, derive exact origin,<br/>and save Configuration generation 2"]
   L2 --> A
   A["Console opens Agent detail tab"] --> B["GET exact Agent native-admin status"]
   B --> C["Resolve OCC session and human principal"]
@@ -42,7 +42,7 @@ graph TD
   J -->|no| Y["Return unavailable"]
   I -->|yes| K{"Agent desired running?"}
   K -->|no| L["Return stopped with derived origin"]
-  K -->|yes| R2{"Newer revision replacing it on an exclusive Compute Driver?"}
+  K -->|yes| R2{"Exclusive replacement pending?"}
   R2 -->|yes| Y
   R2 -->|no| M{"Native config supported?"}
   M -->|no| N["Return unsupported with derived origin"]
@@ -55,20 +55,20 @@ graph TD
   P -->|HTTP| Q["Resolve host to exact Agent"]
   P -->|WebSocket| V["OCC guards client socket during admission"]
   V --> Q
-  Q --> R{"Shared session and exact Agent use and assigned role still valid?"}
+  Q --> R{"Session, use grant and assignment valid?"}
   R -->|no| S["Reject request; audit exact-Agent authorization denial"]
   R -->|yes| T["Resolve current revision, native config and Compute owner"]
   T -->|owner mismatch| RF["Refuse before key lookup or gateway connection"]
-  T -->|matching owner| U["OCC strips browser credentials and proxies HTTP to private gateway"]
+  T -->|matching owner| U["Strip credentials; proxy private HTTPS"]
   T -->|WebSocket client reset| VB["Stop before gateway connection"]
-  T -->|WebSocket client connected with matching owner and exact Origin| VC["Proxy 101 upgrade with revision lease"]
+  T -->|Connected WebSocket, matching owner and Origin| VC["Proxy 101 upgrade with revision lease"]
   VC --> AD{"Gateway has configured roles?"}
-  AD -->|yes| AB["Native Gateway verifies assignment and commits profile role"]
+  AD -->|yes| AB["Gateway verifies assignment and commits role"]
   AD -->|no, explicit administrator| AC
   AB --> AC["Native policy authorizes subsequent commands"]
   U -->|HTML preview with sandbox routing enabled| W["Browser loads public shell from separate preview origin"]
   W --> Z["Envoy sandbox listener routes to Agent sandbox port"]
-  Z --> AA["Native UI delivers HTML into runtime-isolated iframe"]
+  Z --> AA["Native UI renders isolated iframe"]
 ```
 
 ## Execution Trace
@@ -79,12 +79,11 @@ graph TD
 `scripts/first-agent.mjs:nativeConfiguration`
 `scripts/first-agent.mjs:ensureManagedConfiguration`
 
-The option requires launcher-owned Compose/OpenShell browser state. Because OCC
-assigns the Agent ID, the helper saves disabled Configuration generation 1,
-creates the Agent, derives its origin, and patches generation 2 before
-deployment. Generation 2 enables `controlUi`, pins its origins, and grants the
-`occ-workspace-files` trusted-proxy identity `operator.admin` with device
-auto-approval. An existing helper-owned name cannot change this selection.
+The option requires launcher-owned Compose/OpenShell browser state. OCC allocates
+the Agent ID before the helper derives its origin: disabled Configuration generation
+1 becomes generation 2 with `controlUi`, exact origins, trusted-proxy
+`occ-workspace-files` authority and administrator device approval. Existing
+helper-owned names cannot change this selection.
 
 ### 0.5. Deployment admission prepares the Agent copy
 
@@ -92,14 +91,13 @@ auto-approval. An existing helper-owned name cannot change this selection.
 `packages/occ/src/index.ts:deployAgentWithAuthorization`
 `apps/controller/src/drivers/compute/kubernetes/index.ts:configureAgent`
 
-API and worker derive trusted Installation origins through `nativeAdminTarget`.
-Helm supplies matching inputs. Deployment and provisioning pass the allocated
-Agent and frozen Sandbox copy to Compute through `agentRuntimeConfiguration`.
-Agent save remains unchanged. Kubernetes prepares gateway identity, device
-approval and exact origins; conflicts refuse admission and opt-outs stay disabled.
-OCC then applies logging and validation, freezing the result in an Agent revision.
-The source Configuration and history stay unchanged. `admitRevision` records
-separate Compute metadata; the runtime renders a writable copy.
+API and worker derive trusted Installation origins through `nativeAdminTarget`;
+Helm supplies matching inputs. `agentRuntimeConfiguration` passes the allocated
+Agent and frozen Sandbox copy to Compute. Kubernetes prepares identity, device
+approval and exact origins, refusing conflicts and preserving opt-outs. OCC
+validates and freezes the revision without changing the source Configuration,
+history or Agent-save checks. `admitRevision` records separate Compute metadata;
+the runtime renders a writable copy.
 
 ### 1. Console renders native admin availability
 
@@ -124,26 +122,24 @@ Tab `sessionStorage` caches audited `403` paths per session owner. **Refresh acc
 `packages/occ/src/index.ts:getUsableActiveAgentRevision`
 
 Enabled access requires a public origin and native domain.
-`getUsableActiveAgentRevision` selects the active revision and successor. A
-stopped Agent without an active revision raises `ResourceStateConflictError`
-and returns `stopped`, including before first deployment.
-`NoActiveAgentRevisionError` returns `unavailable` while a desired-running Agent
-awaits activation. Dependency failures, including IAM Driver errors caught by
-`authorizeAgentRuntimeAccess`, return `503`; authorization denial returns `403`
-with human IAM audit evidence. The panel reports the active revision.
+`getUsableActiveAgentRevision` selects the active revision and successor. Before
+first deployment or after stop clears the active revision, `ResourceStateConflictError`
+returns `stopped`. A desired-running Agent awaiting activation returns `unavailable`.
+IAM/dependency failure returns `503`; denial returns attributable `403`.
 
-A newer successor on a Compute Driver requiring stopped predecessors also produces `unavailable`: the worker removes the old workload before starting its replacement. A failed replacement leaves the old revision recorded as active without a serving workload. Both status and proxy admission check this boundary.
+Exclusive replacement also returns `unavailable`: the worker removes the old
+workload before starting its successor. A failed replacement may leave the old
+revision recorded without a serving workload; both status and proxy admission
+check this boundary.
 
-OCC derives the target from the active revision; desired state other than
-`running` returns `stopped`. Compute qualifies trusted-proxy identity, role
-headers and device approval covering the selected role.
-`nativeAdminConfigurationSupported` checks `controlUi.enabled`, exact
-`allowedOrigins` and host-header/device-auth settings. Rejection returns
-`unsupported` with the target and a reason: UI configuration, missing role,
-insufficient device approval or unsupported transport. Missing endpoints and
-unclean private `wss:` URLs also return `unsupported`. Only `available` carries
-private `gatewayBase`, omitted from browser responses.
-Then the selected Compute Driver ID and implementation must match `revision.compute`. A mismatch returns `503 DEPENDENCY_UNAVAILABLE` before endpoint, key or transport lookup. Selection changes do not migrate existing revisions.
+For selected revisions, nonrunning desired state returns `stopped`. Compute
+qualifies identity, role headers and device approval. `nativeAdminConfigurationSupported`
+checks UI enablement, exact origins and device/host-header settings. Rejection
+returns `unsupported` with the target and reason; missing endpoints and unclean
+private WSS URLs are also unsupported. Only `available` carries the private
+`gatewayBase`, omitted from browser responses. Selected Compute ID and implementation
+must match `revision.compute` before endpoint, key or transport lookup; mismatch
+returns `503 DEPENDENCY_UNAVAILABLE`. Driver selection does not migrate revisions.
 
 ### 4. OCC derives the isolated Agent host
 
@@ -152,7 +148,7 @@ Then the selected Compute Driver ID and implementation must match `revision.comp
 
 `deriveNativeAdminHost` hashes Installation, Namespace and Agent IDs under the configured domain. `nativeAdminTarget` substitutes that host in `publicOrigin` and returns `/`. The first-Agent script imports the Node-only helper without workspace dependencies.
 
-Host admission checks existing platform state without a registry. Unknown hosts, wrong suffixes, deleted Agents and non-unique matches deny access. `nativeAdminGatewayHttpBase` converts a clean `wss:` endpoint to `https:` preserving authority and base path; userinfo, query and hash are refused. Workspace WSS routing is unchanged.
+Host admission checks existing platform state without a registry; unknown, deleted, ambiguous or wrong-suffix hosts deny access. `nativeAdminGatewayHttpBase` converts a clean `wss:` endpoint to `https:` preserving authority and base path; userinfo, query and hash are refused. Workspace WSS routing is unchanged.
 
 ### 5. Shared cookie admits the Agent host
 
@@ -178,12 +174,10 @@ The proxy bounds paths to the Agent base, checks exact `Origin` for writes, stri
 
 `apps/controller/src/http/native-admin.ts:handleNativeAdminUpgrade`
 
-The API intercepts `upgrade` before Fastify routing, accepts only derived Agent
-hosts and tracks sockets for `preClose` shutdown. It handles socket errors before
-awaiting admission, preventing uncaught TCP-reset errors. Authorization denial
-still audits after a reset. Allowed admission checks for client destruction
-before and after resolving private transport, preventing upstream connections
-for disconnected clients. Connected clients use the selected active revision.
+The API intercepts derived-host `upgrade` before Fastify routing and tracks sockets
+for `preClose`. Error handlers precede admission; denials audit even after reset.
+Destruction checks before and after private transport resolution prevent upstream
+connections for disconnected clients. Connected clients use the active revision.
 
 `apps/controller/src/gateway/native-admin-proxy.ts:proxyNativeAdminWebSocket`
 
@@ -227,21 +221,15 @@ The init container cannot write through the gateway's later mount path.
 
 ## Debugging and Verification
 
-Use the [availability states and startup checks](../reference/agent-native-admin.md#failure-behavior)
+Use [availability states and startup checks](../reference/agent-native-admin.md#failure-behavior)
 to distinguish configuration, lifecycle, authorization and dependency failures.
-Check `agentNativeAdmin.domain` and platform state for host refusals. The Gateway
-must never receive the OCE session cookie.
-
-Attributable IAM denials identify the human and exact Agent. Socket connect/close
-audits share `connectionId`; `closeReason` identifies lifecycle, revocation,
-dependency, client, upstream or shutdown. A TCP reset during admission must leave
-the API running, preserve a later denial audit and open no upstream connection.
-Service workers are blocked by the HTTP proxy and `worker-src 'none'`.
-
-Browser tests cover panel states, warnings and launch. Integration covers shared
-cookies, service-key/host denials, assets, WebSocket leases/reconnects and native
-edits. The [installed sharing case](../testing/kubernetes.md#native-gateway-sharing)
-checks role changes and selective revocation with real model turns.
+Check the configured domain and exact Agent; the Gateway must never receive OCE
+cookies. IAM denial audits identify the person and Agent. Socket connect/close
+audits share `connectionId`; `closeReason` names the failing boundary. A TCP reset
+must leave the API alive, audit later denial and open no upstream connection.
+Service workers remain blocked. Browser/API tests cover entry and leases; the
+[installed sharing case](../testing/kubernetes.md#native-gateway-sharing) covers
+role changes and selective revocation with model turns.
 
 ## Related docs
 

@@ -254,6 +254,8 @@ Plan filenames and historical commit links retain their original names.
 | `2026-09-28-installation-profiles-design`     | [RFC-0018](../../specs/rfcs/0018-installation-profiles-design/index.md)  |
 | `0021-driver-configuration-contributions.md`  | [RFC-0022](../../specs/rfcs/0022-driver-configuration-contributions.md)  |
 | `0021-native-admin-deployment-preparation.md` | [RFC-0023](../../specs/rfcs/0023-native-admin-deployment-preparation.md) |
-| -------------------------------------------- | ----------------------------------------------------------------------- |
-| `0020-gateway-outbound.md`                   | [RFC-0023](../../specs/rfcs/0023-gateway-outbound.md)                   |
-| `0021-gateway-outbound.md`                   | [RFC-0023](../../specs/rfcs/0023-gateway-outbound.md)                   |
+| --------------------------------------------  | -----------------------------------------------------------------------  |
+| `0020-gateway-outbound.md`                    | [RFC-0023](../../specs/rfcs/0024-gateway-outbound.md)                    |
+| `0021-gateway-outbound.md`                    | [RFC-0023](../../specs/rfcs/0024-gateway-outbound.md)                    |
+
+In the downstream integration, native-admin preparation retains RFC-0023. Gateway outbound uses [RFC-0024](../../specs/rfcs/0024-gateway-outbound.md), and the embedded trial uses [RFC-0025](../../specs/rfcs/0025-temporary-embedded-channel-trial.md). Their feature branches retain their submitted identifiers.

@@ -555,7 +555,7 @@ export async function createConsoleAppFixture(t, options = {}) {
         ...(options.secretBindings === undefined ? {} : { secretBindings: options.secretBindings }),
       },
     });
-    assert.equal(configuration.status, 201);
+    assert.equal(configuration.status, 201, JSON.stringify(configuration.body));
     return configuration.data;
   }
 
@@ -628,7 +628,7 @@ export async function createConsoleAppFixture(t, options = {}) {
         ...(options.executionMode === undefined ? {} : { executionMode: options.executionMode }),
       },
     });
-    assert.equal(agent.status, 201);
+    assert.equal(agent.status, 201, JSON.stringify(agent.body));
     if (harnessAuth?.method === "api_key") {
       grantAgentSecretOperate(agent.data, harnessAuth.source);
     }

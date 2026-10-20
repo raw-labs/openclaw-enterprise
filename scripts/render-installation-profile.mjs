@@ -1164,6 +1164,7 @@ function buildInput(rawInput, diagnostics) {
     [
       "controlPlane",
       "runtime",
+      "channels",
       "gatewayOutbound",
       "controlPlaneOutbound",
       "codex",
@@ -1175,6 +1176,7 @@ function buildInput(rawInput, diagnostics) {
   );
   const controlPlane = section(input, "controlPlane", diagnostics);
   const runtime = section(input, "runtime", diagnostics);
+  const channels = section(input, "channels", diagnostics, false);
   const gatewayOutbound = section(input, "gatewayOutbound", diagnostics, false);
   const controlPlaneOutbound = section(input, "controlPlaneOutbound", diagnostics, false);
   const codex = section(input, "codex", diagnostics, false);
@@ -1333,6 +1335,7 @@ function buildInput(rawInput, diagnostics) {
   return {
     controlPlane,
     runtime,
+    channels,
     gatewayOutbound,
     controlPlaneOutbound,
     codex,
@@ -1497,6 +1500,7 @@ function buildRendered(profile, parsed, diagnostics) {
   const {
     controlPlane,
     runtime,
+    channels,
     gatewayOutbound,
     controlPlaneOutbound,
     codex,
@@ -1630,12 +1634,21 @@ function buildRendered(profile, parsed, diagnostics) {
     validate: (value) => isIpv4Cidr(value, 32),
     description: "an IPv4 /32 CIDR",
   });
-  const experimentalEmbeddedChannels = asBoolean(channels, ["channels", "experimentalEmbeddedChannels"], diagnostics, false);
+  const experimentalEmbeddedChannels = asBoolean(
+    channels,
+    ["channels", "experimentalEmbeddedChannels"],
+    diagnostics,
+    false,
+  );
   if (experimentalEmbeddedChannels) {
     if (!gatewayOutboundEnabled) {
-      diagnostics.errors.push("channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled.");
+      diagnostics.errors.push(
+        "channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled: true.",
+      );
     }
-    diagnostics.warnings.push("Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.");
+    diagnostics.warnings.push(
+      "Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.",
+    );
   }
   if (profile.name === "openclaw" && Object.keys(codex).length > 0) {
     diagnostics.errors.push("codex inputs are only consumed by the codex profile.");
@@ -2014,9 +2027,11 @@ function buildRendered(profile, parsed, diagnostics) {
                     : { codexModelBaseUrl: codexModelBaseUrl(runtime, diagnostics) }),
                 }
               : {}),
+            ...(channels.experimentalEmbeddedChannels === undefined
+              ? {}
+              : { channels: { experimentalEmbeddedChannels } }),
             ...(gatewayOutboundEnabled
               ? {
-                  ...(channels.experimentalEmbeddedChannels === undefined ? {} : { channels: { experimentalEmbeddedChannels } }),
                   gatewayOutbound: {
                     enabled: true,
                     allowPublicHttps: asBoolean(
