@@ -253,8 +253,8 @@ retain their snapshots; see the
 The console rereads Agent and Configuration before admission. Refresh if
 generation, association, authentication, or plugins changed since loading.
 These reads are not atomic with admission.
-Teams-enabled drafts cannot deploy through this console path because Teams credential
-readiness is not exposed; use the operator deployment workflow for those Agents.
+Teams drafts require the app-password Secret binding and operator-configured
+public callback routing and proxy egress. See [Teams setup](../../guides/integrations/teams.md).
 
 A refused deployment creates no Agent revision. The console shows any reason
 the API names, such as a Configuration setting Compute cannot serve or a grant the

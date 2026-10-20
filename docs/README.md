@@ -37,3 +37,7 @@ If you are still learning the product, start with [Concepts](guides/concepts.md)
 Contributors can start with [Contribute](contributing/README.md), which links
 the [platform architecture](design.md), remaining design work, runtime flows, and
 historical specifications.
+
+For Microsoft Teams, see [Agent setup](guides/integrations/teams.md),
+[callback execution](flows/agent-channel-ingress.md), and
+[verification limits](testing/teams.md).

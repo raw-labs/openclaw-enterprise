@@ -1,7 +1,7 @@
 # Kubernetes networking and isolation
 
-Configure tenant network boundaries, private Agent routes, and existing
-namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
+Configure networking and private routes for the
+[Kubernetes Compute Driver](../kubernetes-compute.md).
 
 ## Networking
 
@@ -147,6 +147,8 @@ policies, selecting no Pod, until the next preparation or Agent deletion.
 Supported channels and approved Gateway HTTPS use a per-revision proxy. Direct
 public access remains denied. See [Gateway outbound](../../gateway-outbound.md).
 
+Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
+
 ## Explicit network profiles
 
 Proxy Pods use `gateway-outbound-v1`; only their exact Gateway revision receives
@@ -223,11 +225,10 @@ gatewayRouting:
   envoyNamespace: envoy-gateway-system
 ```
 
-These three settings are required when routing is enabled; `hostname` is
-optional. The Gateway name and namespace must match the Helm-managed Gateway,
-which the chart always creates in its release namespace; `envoyNamespace`
-identifies its Envoy data-plane Pods. `envoyHttpsTargetPort` defaults to
-`10443` and must match Helm. Compute grants Harness egress only to this
+Routing requires all three settings; `hostname` is optional. Gateway name and
+namespace must match the Helm-managed Gateway in its release namespace;
+`envoyNamespace` identifies Envoy data-plane Pods. `envoyHttpsTargetPort`
+defaults to `10443` and must match Helm. Compute grants Harness egress only to this
 installation's Envoy Pods on that port, before waiting for node enrollment.
 `endpointPort` defaults to `443` and changes only the port in generated WSS URLs.
 When set, the external load balancer must forward that port to the HTTPS listener.
@@ -354,3 +355,8 @@ receive controller credentials.
 
 - [Driver configuration and troubleshooting](../kubernetes-compute.md)
 - [Kubernetes security controls](../../security.md)
+
+## Teams callbacks
+
+See [Teams setup](../../../guides/integrations/teams.md) for public callbacks,
+credentials, routing, cleanup, and verification.

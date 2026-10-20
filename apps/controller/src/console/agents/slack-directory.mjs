@@ -121,6 +121,7 @@ export function createSlackNameResolver({
             method: "POST",
             readOnly: true,
             body: {
+              provider: "slack",
               secretId,
               kind,
               ids: requestedIds,
@@ -524,6 +525,7 @@ export function createSlackDirectoryField({
             readOnly: true,
             signal,
             body: {
+              provider: "slack",
               secretId,
               kind,
               ...selection,

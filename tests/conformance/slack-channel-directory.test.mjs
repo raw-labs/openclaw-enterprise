@@ -100,7 +100,7 @@ test("Slack directory accepts only literal IP or managed Service proxy endpoints
   for (const proxyUrl of ["http://0.0.0.0:3128", "https://0.0.0.0:8443"]) {
     assert.throws(
       () => new SlackChannelDriver(globalThis.fetch, proxyUrl),
-      /^Error: Control-plane outbound proxy must not use host 0\.0\.0\.0, which names no proxy address\.$/,
+      /^Error: Channel directory proxy must not use host 0\.0\.0\.0, which names no proxy address\.$/,
     );
   }
 });

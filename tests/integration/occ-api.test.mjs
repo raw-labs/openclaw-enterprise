@@ -3315,7 +3315,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.equal(agent.status, 201);
 
   const path = `/namespaces/${namespace.id}/channel-directory/lookup`;
-  const body = { secretId: secret.data.id, kind: "users", query: "mem" };
+  const body = { provider: "slack", secretId: secret.data.id, kind: "users", query: "mem" };
   const unavailable = await controller.request("POST", path, { body });
   assert.equal(unavailable.status, 501);
   assert.equal(unavailable.body.error.code, "NOT_IMPLEMENTED");
@@ -3354,7 +3354,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.equal(JSON.stringify(created.body).includes(token), false);
   assert.equal(providerCalls, 1);
   const hydrated = await controller.request("POST", path, {
-    body: { secretId: secret.data.id, kind: "users", ids: ["U123", "U999"] },
+    body: { provider: "slack", secretId: secret.data.id, kind: "users", ids: ["U123", "U999"] },
   });
   assert.equal(hydrated.status, 200, JSON.stringify(hydrated.body));
   assert.deepEqual(hydrated.data, expected);
@@ -3377,7 +3377,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.deepEqual(longQuery.body.error.details, [{ path: "/query", code: "TOO_LONG" }]);
   // A string array declared uniqueItems names the rule, not just an unsupported value.
   const repeatedIds = await controller.request("POST", path, {
-    body: { secretId: secret.data.id, kind: "users", ids: ["U123", "U123"] },
+    body: { provider: "slack", secretId: secret.data.id, kind: "users", ids: ["U123", "U123"] },
   });
   assert.equal(repeatedIds.status, 400, JSON.stringify(repeatedIds.body));
   assert.equal(
@@ -3456,7 +3456,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
 
   providerResult = { workspaceId: "T123", candidates: [], complete: false, nextCursor: "more" };
   const incompleteHydration = await controller.request("POST", path, {
-    body: { secretId: secret.data.id, kind: "users", ids: ["U123"] },
+    body: { provider: "slack", secretId: secret.data.id, kind: "users", ids: ["U123"] },
   });
   assert.equal(incompleteHydration.status, 503);
   assert.equal(incompleteHydration.body.error.code, "CHANNEL_DIRECTORY_INVALID_RESPONSE");
@@ -6053,6 +6053,10 @@ test("Agent provisioning API validates inline configuration with existing Secret
     await fixture.controller.listAgents(fixture.principal.id, namespace.data.id)
   ).length;
   for (const [values, message] of [
+    [
+      { ...model, env: { vars: { OPENCLAW_PROXY_ACTIVE: "1" } } },
+      "Configuration setting env.vars.OPENCLAW_PROXY_ACTIVE must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust.",
+    ],
     [
       { ...model, channels: { discord: { enabled: true } } },
       "Configuration setting channels.discord is not a supported channel: use slack or msteams, or set its enabled to false.",

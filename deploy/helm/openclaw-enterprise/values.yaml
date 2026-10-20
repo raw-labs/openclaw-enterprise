@@ -205,6 +205,13 @@ gatewayRouting:
   remoteNodeCidrs: []
   tenantGatewayPort: 8080
   envoyHttpsTargetPort: 10443
+  channels:
+    enabled: false
+    # Public DNS and an existing publicly trusted certificate for Microsoft callbacks.
+    hostname: ""
+    tlsSecretName: ""
+    listenerPort: 8444
+    ingressPeers: []
   sandbox:
     enabled: false
     # A dedicated wildcard domain outside the OCE session cookie domain, at most

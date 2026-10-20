@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, test } from "node:test";
+import { chromium, webkit } from "playwright";
+
+import { BundledChannelDriver } from "../../apps/controller/src/drivers/channel/index.ts";
+import {
+  teamsDirectoryProvider,
+  teamsDirectoryContext,
+  teamsLink,
+  teamsMemberId,
+} from "../helpers/teams-directory.mjs";
 
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
 import {
@@ -218,7 +227,7 @@ describe("Agent channels", { concurrency: 3 }, () => {
     for (const value of [secretValue, slackAppSecretValue, slackBotSecretValue]) {
       await expectNoText(page, value);
     }
-    assert.equal(await page.getByRole("button", { name: /Microsoft Teams/ }).count(), 0);
+    await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).waitFor();
 
     const configuration = await fixture.request(
       "GET",
@@ -1128,4 +1137,397 @@ describe("Agent channels", { concurrency: 3 }, () => {
       }
     });
   }
+});
+
+for (const [name, access] of [
+  ["explicit", { groupPolicy: "allowlist", groupAllowFrom: [teamsMemberId], teams: {} }],
+  ["inherited from personal access", { allowFrom: [teamsMemberId] }],
+]) {
+  test(`Teams editor preserves ${name} native sender-only access without a Team map`, async (t) => {
+    const { fixture, namespace } = await readyNamespace(t, "Native Teams sender access");
+    const teams = {
+      enabled: true,
+      appId: teamsDirectoryContext.appId,
+      tenantId: teamsDirectoryContext.tenantId,
+      appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+      dmPolicy: "allowlist",
+      ...access,
+    };
+    const agent = await fixture.createAgent(
+      namespace.id,
+      "Native Teams Agent",
+      nativeValues("native-teams-senders", { harnessId: "codex", channels: { msteams: teams } }),
+      { executionMode: "dedicated" },
+    );
+    const { page } = await newPage(t, fixture);
+    const requests = apiRequests(page, fixture.origin);
+    await openDraft(page, fixture, agent, "Native Teams Agent");
+
+    // Native sender allowlists work without channel IDs. The limited editor cannot
+    // represent that policy and must not offer a save that disables group access.
+    const edit = page.getByRole("button", { name: "Edit Microsoft Teams", exact: true });
+    await edit.waitFor();
+    assert.equal(await edit.isDisabled(), true);
+    await revealNativeConfiguration(page, "Microsoft Teams native configuration");
+    assert.deepEqual(JSON.parse(await page.locator(".channel-native pre").textContent()), teams);
+    assert.deepEqual(nonAuthWriteRequests(requests), []);
+    const saved = await fixture.request(
+      "GET",
+      `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
+    );
+    assert.equal(saved.data.generation, 1);
+    assert.deepEqual(saved.data.values.channels.msteams, teams);
+  });
+}
+
+test("Teams editor persists separate personal and channel access with an authorized password Secret binding", async (t) => {
+  const { fixture, namespace } = await readyNamespace(t, "Teams channels");
+  const password = await fixture.createSecret(
+    namespace.id,
+    "Teams app password",
+    "synthetic-teams-password",
+  );
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Teams Agent",
+    nativeValues("teams", { harnessId: "codex" }),
+    { executionMode: "dedicated" },
+  );
+  const { page } = await newPage(t, fixture);
+  await openDraft(page, fixture, agent, "Teams Agent");
+  await page.getByRole("button", { name: "Configure Microsoft Teams" }).click();
+  const dialog = page.getByRole("dialog", { name: "Configure Microsoft Teams" });
+  await dialog.getByLabel("App ID", { exact: true }).fill("11111111-1111-4111-8111-111111111111");
+  await dialog
+    .getByLabel("Tenant ID", { exact: true })
+    .fill("22222222-2222-4222-8222-222222222222");
+  const siteId =
+    "example.sharepoint.com,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666";
+  await dialog.getByLabel("SharePoint site ID", { exact: true }).fill(`  ${siteId}  `);
+  await selectSecret(dialog, "Teams app password", password);
+  await dialog.getByLabel("Team ID or link", { exact: true }).fill("19:general@thread.tacv2");
+  await dialog.getByLabel("Channels — exact IDs", { exact: true }).fill("19:general@thread.tacv2");
+  await dialog.locator("#msteams-channel-access").selectOption("everyone");
+  await dialog.locator("#msteams-dm-policy").selectOption("allowlist");
+  await dialog.locator("#msteams-dm-users").fill("44444444-4444-4444-8444-444444444444");
+  await dialog.getByRole("button", { name: "Save configuration" }).click();
+  await page.getByText(/Configuration .*generation 2/).waitFor();
+  const saved = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
+  );
+  assert.equal(saved.status, 200);
+  assert.equal(saved.data.values.channels.msteams.sharePointSiteId, siteId);
+  assert.equal(saved.data.values.channels.msteams.dmPolicy, "allowlist");
+  assert.deepEqual(saved.data.values.channels.msteams.allowFrom, [
+    "44444444-4444-4444-8444-444444444444",
+  ]);
+  assert.equal(saved.data.values.channels.msteams.groupPolicy, "allowlist");
+  assert.deepEqual(saved.data.values.channels.msteams.groupAllowFrom, ["*"]);
+  assert.deepEqual(saved.data.values.channels.msteams.teams, {
+    "19:general@thread.tacv2": {
+      channels: { "19:general@thread.tacv2": { requireMention: true } },
+    },
+  });
+  assert.deepEqual(saved.data.secretBindings.MSTEAMS_APP_PASSWORD, {
+    source: password.ref,
+    delivery: { type: "env" },
+  });
+  assert.equal(saved.data.values.plugins.entries.msteams.enabled, true);
+  await expectNoText(page, "synthetic-teams-password");
+  // The ordinary save workflow grants the Agent access to the selected Secret.
+  const bindings = await fixture.request("GET", `/namespaces/${namespace.id}/iam/access-bindings`);
+  assert.equal(bindings.status, 200);
+  assert.ok(
+    bindings.data.some(
+      (binding) =>
+        binding.subjectId === agent.servicePrincipalId && binding.resourceId === password.id,
+    ),
+  );
+  // Disabling channel conversations and clearing file storage must retain
+  // the independent personal allowlist across editor saves.
+  await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
+  let edit = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+  assert.equal(await edit.getByLabel("SharePoint site ID", { exact: true }).inputValue(), siteId);
+  await edit.getByLabel("Enable channel conversations", { exact: true }).uncheck();
+  await edit.getByRole("button", { name: "Save configuration", exact: true }).click();
+  await edit.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
+  edit = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+  assert.equal(await edit.getByLabel("SharePoint site ID", { exact: true }).inputValue(), siteId);
+  await edit.getByLabel("SharePoint site ID", { exact: true }).fill("");
+  assert.equal(
+    await edit.getByLabel("Enable channel conversations", { exact: true }).isChecked(),
+    false,
+  );
+  await edit.getByRole("button", { name: "Save configuration", exact: true }).click();
+  await edit.waitFor({ state: "hidden" });
+  const personalOnly = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
+  );
+  assert.equal(Object.hasOwn(personalOnly.data.values.channels.msteams, "sharePointSiteId"), false);
+  assert.equal(personalOnly.data.values.channels.msteams.groupPolicy, "disabled");
+  assert.equal(personalOnly.data.values.channels.msteams.dmPolicy, "allowlist");
+  assert.deepEqual(
+    personalOnly.data.values.channels.msteams.allowFrom,
+    saved.data.values.channels.msteams.allowFrom,
+  );
+  await page.getByRole("tab", { name: "Credentials", exact: true }).click();
+  await page.getByLabel("Teams app password", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Deploy new version" }).waitFor();
+});
+
+// Real Console/Fastify/OCC/Drivers and HTTP Microsoft protocol fixture: not live RSC proof.
+async function teamsDirectorySelection(t, browserType) {
+  const { fixture, namespace } = await readyNamespace(t, "Teams directory UI");
+  const provider = await teamsDirectoryProvider(t);
+  // More than one bounded lookup is needed to reach Engineering; Load more must stay clickable.
+  const channelPages = [
+    ["general", "General"],
+    ["design", "Design"],
+    ["marketing", "Marketing"],
+    ["engineering", "Engineering"],
+  ];
+  for (const [index, [id, name]] of channelPages.entries()) {
+    provider.routes.set(`${provider.path}/channels${index ? `?page-${index}` : ""}`, {
+      body: {
+        value: [{ id: `19:${id}@thread.tacv2`, displayName: name, membershipType: "standard" }],
+        ...(index + 1 < channelPages.length
+          ? {
+              "@odata.nextLink": `https://graph.microsoft.com${provider.path}/channels?$skiptoken=page-${index + 1}`,
+            }
+          : {}),
+      },
+    });
+  }
+  const driver = new BundledChannelDriver(provider.request);
+  fixture.controller.registerDriver(driver);
+  fixture.controller.selectDriver("channel", driver.id);
+  const password = await fixture.createSecret(
+    namespace.id,
+    "Teams password",
+    "synthetic-teams-password",
+  );
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Teams directory Agent",
+    nativeValues("teams-directory", { harnessId: "codex" }),
+    { executionMode: "dedicated" },
+  );
+  const { page } = await newPage(t, fixture, { browserType });
+  await openDraft(page, fixture, agent, "Teams directory Agent");
+  await page.getByRole("button", { name: "Configure Microsoft Teams" }).click();
+  const dialog = page.getByRole("dialog", { name: "Configure Microsoft Teams" });
+  await dialog.getByLabel("App ID", { exact: true }).fill(teamsDirectoryContext.appId);
+  await dialog.getByLabel("Tenant ID", { exact: true }).fill(teamsDirectoryContext.tenantId);
+  await selectSecret(dialog, "Teams app password", password);
+  // A group UUID must be resolved to the bot's native Team ID before saving.
+  await dialog.getByLabel("Team ID or link", { exact: true }).fill(teamsDirectoryContext.teamId);
+  const channels = dialog.getByLabel("Channels", { exact: true });
+  const channelIds = dialog.locator("#msteams-channel-ids");
+  await channels.fill("general");
+  await dialog.getByRole("option", { name: /General/ }).click();
+  assert.equal(await channelIds.inputValue(), "19:general@thread.tacv2");
+  assert.deepEqual(
+    await channelIds.locator("..").locator(".slack-directory-chip").allTextContents(),
+    ["General"],
+  );
+  await dialog.getByLabel("Channels", { exact: true }).fill("engineering");
+  await dialog.getByRole("button", { name: "Load more", exact: true }).click();
+  await dialog.getByRole("option", { name: /Engineering/ }).click();
+  const selectedChannels = "19:general@thread.tacv2, 19:engineering@thread.tacv2";
+  assert.equal(await channelIds.inputValue(), selectedChannels);
+  await dialog.getByLabel("Allowed people in these channels", { exact: true }).fill("alex");
+  await dialog.getByRole("option", { name: /Alex Chen/ }).click();
+  assert.equal(await dialog.locator("#msteams-group-users").inputValue(), teamsMemberId);
+  await dialog.locator("#msteams-dm-policy").selectOption("allowlist");
+  await dialog.getByLabel("Allowed people in personal messages", { exact: true }).fill("alex");
+  await dialog.getByRole("option", { name: /Alex Chen/ }).click();
+  assert.equal(await dialog.locator("#msteams-dm-users").inputValue(), teamsMemberId);
+  // Pointer focus retention must preserve keyboard activation and ordinary dismissal.
+  for (const action of ["Enter", "ArrowDown", "Escape", "outside"]) {
+    await channels.fill("general");
+    await dialog.getByRole("option", { name: /General/ }).waitFor();
+    if (action === "outside") {
+      await dialog.getByLabel("App ID", { exact: true }).click();
+    } else {
+      if (action === "Escape") {
+        await channels.press("ArrowDown");
+        await page.keyboard.press("Escape");
+      } else {
+        await channels.press(action);
+      }
+      if (action === "ArrowDown") {
+        await page.keyboard.press("Enter");
+      }
+    }
+    assert.equal(await dialog.locator("#msteams-channel-ids-results").isHidden(), true);
+    assert.equal(await channelIds.inputValue(), selectedChannels);
+  }
+  await dialog.getByRole("button", { name: "Save configuration" }).click();
+  await dialog.waitFor({ state: "hidden" }).catch(async (error) => {
+    throw new Error(`${error.message} ${await dialog.getByRole("alert").allTextContents()}`);
+  });
+  const saved = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
+  );
+  assert.deepEqual(saved.data.values.channels.msteams.teams, {
+    "19:general@thread.tacv2": {
+      channels: {
+        "19:general@thread.tacv2": { requireMention: true },
+        "19:engineering@thread.tacv2": { requireMention: true },
+      },
+    },
+  });
+  assert.deepEqual(saved.data.values.channels.msteams.groupAllowFrom, [teamsMemberId]);
+  assert.deepEqual(saved.data.values.channels.msteams.allowFrom, [teamsMemberId]);
+  assert.doesNotMatch(
+    JSON.stringify(saved.body),
+    /opaque-membership-id|synthetic-graph-access-token|synthetic-teams-password/,
+  );
+  // A real delayed provider response from the old scope must not survive a Team change.
+  await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
+  const staleEdit = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+  assert.equal(await staleEdit.locator("#msteams-channel-ids").inputValue(), selectedChannels);
+  assert.equal(await staleEdit.locator("#msteams-group-users").inputValue(), teamsMemberId);
+  assert.equal(await staleEdit.locator("#msteams-dm-users").inputValue(), teamsMemberId);
+  await staleEdit.getByLabel("Team ID or link", { exact: true }).fill(teamsLink);
+  let release;
+  let started;
+  let completed;
+  const wait = new Promise((resolve) => {
+    release = resolve;
+  });
+  const received = new Promise((resolve) => {
+    started = resolve;
+  });
+  const finished = new Promise((resolve) => {
+    completed = resolve;
+  });
+  provider.routes.set(`${provider.path}/members`, {
+    body: {
+      value: [{ id: "old-membership", userId: teamsMemberId, displayName: "Former Team person" }],
+    },
+    wait,
+    started,
+    completed,
+  });
+  await staleEdit.getByLabel("Allowed people in these channels", { exact: true }).fill("former");
+  await received;
+  await staleEdit.getByLabel("Team ID or link", { exact: true }).fill("19:another@thread.tacv2");
+  release();
+  await finished;
+  await expectNoText(staleEdit, "Former Team person");
+  assert.equal(await staleEdit.locator("#msteams-group-users").inputValue(), teamsMemberId);
+  assert.equal(
+    await staleEdit.getByLabel("Allowed people in these channels", { exact: true }).isDisabled(),
+    true,
+  );
+  await staleEdit.getByRole("button", { name: "Cancel", exact: true }).click();
+  // Consent loss cannot erase IDs or force tenant-wide directory permission.
+  provider.routes.set(`${provider.path}/members`, {
+    status: 403,
+    body: { error: { code: "Forbidden" } },
+  });
+  await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
+  const edit = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+  await edit.getByLabel("Team ID or link", { exact: true }).fill(teamsLink);
+  await edit.getByLabel("Allowed people in these channels", { exact: true }).fill("alex");
+  await edit
+    .getByText(/Directory consent is missing/)
+    .first()
+    .waitFor();
+  assert.equal(await edit.locator("#msteams-group-users").inputValue(), teamsMemberId);
+  await edit.locator("#msteams-dm-users").fill("29:manual-external-person");
+  await edit.getByRole("button", { name: "Save configuration" }).click();
+  await edit.waitFor({ state: "hidden" });
+  const manual = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
+  );
+  assert.deepEqual(manual.data.values.channels.msteams.allowFrom, ["29:manual-external-person"]);
+}
+
+for (const browserType of [chromium, webkit]) {
+  test(`Teams directory selects names, saves native IDs and preserves manual entry after consent denial (${browserType.name()})`, (t) =>
+    teamsDirectorySelection(t, browserType));
+}
+
+// Reloading a conflict must not restore channel or sender access another editor revoked.
+test("Teams conflict recovery preserves concurrent channel and sender revocations", async (t) => {
+  const { fixture, namespace } = await readyNamespace(t, "Teams concurrent access");
+  const team = "19:team@thread.tacv2";
+  const channel = (name) => `19:${name}@thread.tacv2`;
+  const user = (digit) =>
+    `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`;
+  const teams = {
+    enabled: true,
+    appId: teamsDirectoryContext.appId,
+    tenantId: teamsDirectoryContext.tenantId,
+    appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+    dmPolicy: "allowlist",
+    allowFrom: [user("1"), user("2")],
+    groupPolicy: "allowlist",
+    groupAllowFrom: [user("1"), user("2")],
+    requireMention: true,
+    teams: {
+      [team]: {
+        channels: {
+          [channel("keep")]: { requireMention: true },
+          [channel("revoke")]: { requireMention: true },
+        },
+      },
+    },
+  };
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Concurrent Teams Agent",
+    nativeValues("teams-conflict", { harnessId: "codex", channels: { msteams: teams } }),
+    { executionMode: "dedicated" },
+  );
+  const { page } = await newPage(t, fixture);
+  await openDraft(page, fixture, agent, "Concurrent Teams Agent");
+  await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+  await dialog
+    .locator("#msteams-channel-ids")
+    .fill([channel("keep"), channel("revoke"), channel("add")].join(", "));
+  for (const id of ["msteams-group-users", "msteams-dm-users"]) {
+    await dialog.locator(`#${id}`).fill([user("1"), user("2"), user("3")].join(", "));
+  }
+  const siteId =
+    "example.sharepoint.com,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666";
+  await dialog.getByLabel("SharePoint site ID", { exact: true }).fill(siteId);
+  const path = `/namespaces/${namespace.id}/configurations/${agent.configurationId}`;
+  const current = (await fixture.request("GET", path)).data;
+  const elsewhere = structuredClone(current.values);
+  elsewhere.channels.msteams.allowFrom = [user("1")];
+  elsewhere.channels.msteams.groupAllowFrom = [user("1")];
+  delete elsewhere.channels.msteams.teams[team].channels[channel("revoke")];
+  assert.equal(
+    (
+      await fixture.request("PATCH", path, {
+        body: { values: elsewhere, expectedGeneration: current.generation },
+      })
+    ).status,
+    200,
+  );
+  await dialog.getByRole("button", { name: "Save configuration", exact: true }).click();
+  await page.getByRole("button", { name: "Reload draft", exact: true }).click();
+  await dialog
+    .getByRole("status")
+    .filter({ hasText: "Your edits are applied over the reloaded settings:" })
+    .waitFor();
+  await dialog.getByRole("button", { name: "Save configuration", exact: true }).click();
+  await page.getByRole("status").filter({ hasText: "Channels saved." }).waitFor();
+  const saved = (await fixture.request("GET", path)).data.values.channels.msteams;
+  assert.deepEqual(Object.keys(saved.teams[team].channels).sort(), [
+    channel("add"),
+    channel("keep"),
+  ]);
+  assert.deepEqual(saved.groupAllowFrom, [user("1"), user("3")]);
+  assert.deepEqual(saved.allowFrom, [user("1"), user("3")]);
+  assert.equal(saved.sharePointSiteId, siteId);
 });
