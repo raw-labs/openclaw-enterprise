@@ -18,6 +18,11 @@
         "operation": "Join the independently reconstructed composition to published history",
         "commit": "d6dd59876e57ed7435f51bc91ef0c5e663766859",
         "input": "7f26c4c2e1d3373343f0f78119bc1728e5f9aa97"
+      },
+      {
+        "operation": "Align refreshed feature/upstream fixtures and fork sandbox runner selection after exact-head CI evidence",
+        "commit": "84d848fb96346418cdf4ddde4be7ade0e70c7bb2",
+        "input": "27dc2e809dce380c2f00017c9f1f0f88c10fd448"
       }
     ],
     "retainedUnchanged": []
@@ -258,6 +263,25 @@
         "docs/flows/agent-channel-runtime.md"
       ],
       "notes": "Qualify this combined source, retain current upstream CI lanes and unique RFC identities, and document the composed channel lifecycle."
+    },
+    {
+      "id": "refreshed-fixtures-and-fork-sandbox-runners",
+      "pullRequests": [2, 17, 18],
+      "commits": ["84d848fb96346418cdf4ddde4be7ade0e70c7bb2"],
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/full-integration.yml",
+        "tests/integration/ci-impact.test.mjs",
+        "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
+        "tests/conformance/secret-occ.test.mjs",
+        "tests/integration/configuration-controller.test.mjs",
+        "tests/browser/console-agent-detail-2.test.mjs",
+        "tests/browser/console-agent-channels.test.mjs",
+        "tests/browser/console-runtime-credentials.test.mjs",
+        "tests/browser/console-agent-saves.test.mjs",
+        "tests/browser/console-agents.test.mjs"
+      ],
+      "notes": "Keep Chromium and Codex sandbox probes enabled on a compatible configured runner. Restore the established real managed-proxy embedded scenario with Slack-only and Teams-only cutovers. Supply explicit provider/plugin/Secret/runtime prerequisites and scope provider-specific assertions; preserve current Teams credential readiness and proxy refusal behavior. No production code or migration changes in this repair."
     }
   ],
   "publishedMigrationPrefix": {
@@ -387,6 +411,14 @@
       "Embedded lifecycle uses the authenticated API, PostgreSQL worker and real scoped Kubernetes resources with a protocol runtime fixture and synthetic provider credentials.",
       "Public proxy checks verify actual DNS, CONNECT and certificate-verified TLS, not Slack Socket Mode or Microsoft Teams SDK delivery.",
       "Live provider messaging, consent, public Teams ingress and model execution require their separate authorized integration prerequisites."
+    ],
+    "failedCandidates": [
+      {
+        "commit": "27dc2e809dce380c2f00017c9f1f0f88c10fd448",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39430946127",
+        "repairCommit": "84d848fb96346418cdf4ddde4be7ade0e70c7bb2",
+        "notes": "Six failed lanes: two sandbox setup failures, one obsolete embedded shared-proxy fixture and composed provider/UI fixture or assertion mismatches. Targeted parity, controller and browser regressions pass locally; real sandbox and cluster outcomes require final-head CI."
+      }
     ]
   }
 }
