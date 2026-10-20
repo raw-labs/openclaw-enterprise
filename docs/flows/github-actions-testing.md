@@ -66,13 +66,12 @@ CI uses the event checkout without external service credentials. Impact and Suit
 Audit start independently. Every mode runs checkout, workspace, lint, format,
 OpenAPI and docs checks without product tests; docs mode stops there. Tests mode
 selects lanes from the [coverage map](../testing/ci.md#tests-in-each-workflow).
-Defaults use `blacksmith-32vcpu-ubuntu-2404` for k3d fixtures/observability, image
-startup, PostgreSQL Application and baseline/browser checks; remaining lanes,
-Static Checks and Audit use `blacksmith-16vcpu-ubuntu-2404`.
 `runtime-image-fixture` uses `ubuntu-22.04`.
 
 `CI_RUNNER` overrides audit/static runners; `CI_LARGE_RUNNER` overrides
-matrix, QA and same-source runners. Unset variables retain defaults.
+matrix, QA and same-source runners. Unset variables retain defaults. With a
+large-runner override, the native sandbox lane uses `CI_SANDBOX_RUNNER` or
+`ubuntu-22.04` for its required user-namespace mounts; qualification matches.
 `CI_RUNNER_FILE_CONCURRENCY` bounds CI/advisory file concurrency (1–32).
 
 For a PR, the selector verifies the tested checkout and that the event head is the merge's second parent, then compares the first parent (the current base) and tested trees. Git path decoding preserves a leading UTF-8 BOM as filename data; paths outside the allowlist select full. API reference outputs and Markdown under `docs/reference/api/` select full for `openapi:check`. Only nonempty changes to allowlisted regular Markdown files select docs mode. Registered test files (with documentation and their own lane manifest entries) select tests mode: their `ci` lanes in either tree (`checks-baseline-1` if only the fixture job would run). Other test-tree, code, configuration, workflow or unknown changes and non-PR events select full. Missing or unverifiable policy or source evidence selects full or fails closed. Policy comes from that first parent; a base without it selects full. `CI Required` re-verifies the mode (and tests mode's lane set) and requires impact, audit and every selected job to succeed and the rest skipped. Full and tests modes aggregate same-source results of their lanes; docs mode does not aggregate or invent test artifacts.

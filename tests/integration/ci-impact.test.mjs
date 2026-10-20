@@ -1120,9 +1120,12 @@ test("full-integration runs kernel- and sandbox-sensitive same-SHA lanes on ci.y
   const lanes = job.strategy.matrix.include.map((entry) => entry.lane);
   const pinned = lanes.filter(
     (lane) =>
-      lane === "postgres-auth" || lane.startsWith("k3d-fixture-") || lane === "k3d-observability",
+      lane === "postgres-auth" ||
+      lane === "images-runtime-startup" ||
+      lane.startsWith("k3d-fixture-") ||
+      lane === "k3d-observability",
   );
-  for (const lane of ["postgres-auth", "k3d-observability"]) {
+  for (const lane of ["postgres-auth", "images-runtime-startup", "k3d-observability"]) {
     assert.ok(pinned.includes(lane), lane);
   }
   for (const lane of pinned) {
@@ -1136,12 +1139,20 @@ test("full-integration runs kernel- and sandbox-sensitive same-SHA lanes on ci.y
   // otherwise the PR passes on one kernel while qualification queues on another.
   for (const lane of pinned) {
     const vars = { CI_LARGE_RUNNER: "configured-large-runner" };
-    assert.equal(runnerFor(lane, vars), "configured-large-runner");
+    const expected = lane === "images-runtime-startup" ? "ubuntu-22.04" : "configured-large-runner";
+    assert.equal(runnerFor(lane, vars), expected);
     assert.equal(
-      runInNewContext(ciExpression, { vars, matrix: { runner: ciRunners.get(lane) } }),
+      runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
       runnerFor(lane, vars),
     );
   }
+  const vars = { CI_LARGE_RUNNER: "configured-large-runner", CI_SANDBOX_RUNNER: "sandbox-runner" };
+  const lane = "images-runtime-startup";
+  assert.equal(runnerFor(lane, vars), "sandbox-runner");
+  assert.equal(
+    runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
+    "sandbox-runner",
+  );
 });
 
 test("Static Checks runs every check the CI lanes skip", () => {

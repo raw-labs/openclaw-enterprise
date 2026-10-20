@@ -348,7 +348,7 @@ jobs:
     needs: impact
     if: ${{ needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ vars.CI_LARGE_RUNNER || matrix.runner }}
+    runs-on: ${{ matrix.lane == 'images-runtime-startup' && (vars.CI_SANDBOX_RUNNER || vars.CI_LARGE_RUNNER && 'ubuntu-22.04') || vars.CI_LARGE_RUNNER || matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false

@@ -4671,7 +4671,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
 
   private serviceAccountSecretName(serviceAccountId: string): string {
     // This names a resource from its ID; it neither hashes nor verifies a password.
-    // codeql[js/insufficient-password-hash]
     const suffix = createHash("sha256").update(serviceAccountId).digest("hex").slice(0, 32);
     return `service-account-${suffix}`;
   }
