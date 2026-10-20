@@ -135,6 +135,10 @@ export interface ControllerWorkerOptions {
   readonly mode?: "development" | "production";
   readonly drivers?: InstallationRuntimeDrivers;
   readonly computeDriver?: ComputeDriver;
+  readonly nativeAdminOrigin?: (
+    installationId: string,
+    agent: Pick<Agent, "namespaceId" | "id">,
+  ) => string | undefined;
   readonly sandboxDriver?: SandboxDriver;
   readonly credentialGatewayDriver?: CredentialGatewayDriver;
   readonly pollIntervalMs?: number;
@@ -995,6 +999,7 @@ export class ControllerWorker {
   private readonly secretDriverId: string | undefined;
   private readonly configuredServiceAccountDriverId: string | undefined;
   private readonly nativeWorkerSupport: NativeWorkerSupport | undefined;
+  private readonly nativeAdminOrigin: ControllerWorkerOptions["nativeAdminOrigin"];
   private readonly secretDriver: SecretDriver | undefined;
   private provisioningController: OpenClawController | undefined;
   private readonly sandbox: SandboxDriver | undefined;
@@ -1060,6 +1065,7 @@ export class ControllerWorker {
   private readonly workOrigins = new WeakMap<ClaimedWork, number>();
 
   constructor(options: ControllerWorkerOptions) {
+    this.nativeAdminOrigin = options.nativeAdminOrigin;
     this.metrics = options.metrics;
     this.mode = options.mode ?? "development";
     if (this.mode !== "development" && this.mode !== "production") {
@@ -1210,6 +1216,9 @@ export class ControllerWorker {
       sandboxNetworkPolicyCeiling: this.policyCeiling,
       backends: this.backends,
       recordOperations: true,
+      ...(this.nativeAdminOrigin === undefined
+        ? {}
+        : { nativeAdminOrigin: this.nativeAdminOrigin }),
       ...(this.configuredServiceAccountDriverId === undefined
         ? {}
         : { configuredServiceAccountDriverId: this.configuredServiceAccountDriverId }),

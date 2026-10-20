@@ -1,3 +1,4 @@
+import { nativeAdminOriginResolver } from "../gateway/native-admin-origin.ts";
 import type { AuditEventFactory } from "@openclaw-enterprise/audit";
 import type {
   AuditEvent,
@@ -236,6 +237,9 @@ export async function composePostgresDevelopment(
       sandboxNetworkPolicyCeiling: drivers?.installation.sandboxNetworkPolicyCeiling ?? [],
       state,
       recordOperations: true,
+      ...(config.nativeAdmin?.enabled === true
+        ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! }
+        : {}),
       defaultPresets: drivers?.defaultPresets ?? [],
       bundledPresetVersions: drivers?.bundledPresetVersions ?? [],
       refreshBundledDefaultPresets: drivers?.installation.presets?.includeDefaults === true,

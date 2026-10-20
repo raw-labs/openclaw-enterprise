@@ -253,39 +253,7 @@ async function readOceControlState(topology) {
   };
 }
 
-async function redeployWithNativeAdminAccess(
-  topology,
-  publicOrigin,
-  nativeDomain,
-  { configuredRoles = true } = {},
-) {
-  const targetForStableOrigin = expectedNativeAdminTarget(topology, publicOrigin, nativeDomain);
-  const current = await topology.request(
-    "GET",
-    `/namespaces/${topology.agent.namespaceId}/configurations/${topology.agent.configurationId}`,
-  );
-  assert.equal(current.status, 200, JSON.stringify(current.error));
-  const values = nativeRolesGateway(current.data.values, targetForStableOrigin.origin);
-  if (!configuredRoles) {
-    delete values.gateway.roles;
-    const proxy = values.gateway.auth.trustedProxy;
-    delete proxy.roleHeader;
-    delete proxy.rolePolicyHashHeader;
-    delete proxy.managedIdentityPrefixes;
-    delete proxy.managedIdentities;
-    proxy.allowUsers = ["occ-workspace-files"];
-  }
-  const patched = await topology.request(
-    "PATCH",
-    `/namespaces/${topology.agent.namespaceId}/configurations/${topology.agent.configurationId}`,
-    {
-      values,
-      ...(current.data.secretBindings === undefined
-        ? {}
-        : { secretBindings: current.data.secretBindings }),
-    },
-  );
-  assert.equal(patched.status, 200, JSON.stringify(patched.error));
+async function assignNativeAdminAccess(topology) {
   const identity = await topology.observerPool.query(
     `SELECT identity.id FROM occ.iam_identities identity
     JOIN occ."user" account ON identity.subject = account.id
@@ -324,43 +292,6 @@ async function redeployWithNativeAdminAccess(
     });
     assert.equal(assignment.status, 201, JSON.stringify(assignment.error));
   }
-  const previousGatewayUid = topology.gatewayPod.metadata.uid;
-  const deployed = await topology.request(
-    "POST",
-    `/namespaces/${topology.agent.namespaceId}/agents/${topology.agent.id}/deploy`,
-  );
-  assert.equal(deployed.status, 202, JSON.stringify(deployed.error));
-  await waitFor(`native-admin revision ${deployed.data.id} activation`, async () => {
-    const observed = await topology.request(
-      "GET",
-      `/namespaces/${topology.agent.namespaceId}/agents/${topology.agent.id}`,
-    );
-    assert.equal(observed.status, 200);
-    return observed.data.activeRevisionId === deployed.data.id ? observed.data : undefined;
-  });
-  try {
-    await waitFor(`worker completion of native-admin revision ${deployed.data.id}`, () =>
-      topology.events.find(
-        (event) =>
-          event.event === "worker.completed" &&
-          event.revisionId === deployed.data.id &&
-          event.outcome === "success",
-      ),
-    );
-  } catch (cause) {
-    const events = topology.events
-      .filter((event) => event.revisionId === deployed.data.id)
-      .slice(-8)
-      .map(({ event, code, outcome, revisionId }) => ({ event, code, outcome, revisionId }));
-    throw new Error(`Native admin revision did not finish: ${JSON.stringify(events)}`, { cause });
-  }
-  topology.revision = deployed.data;
-  topology.gatewayPod = await waitForReadyGatewayPod(
-    topology,
-    topology.revision.id,
-    previousGatewayUid,
-  );
-  return expectedNativeAdminTarget(topology, publicOrigin, nativeDomain);
 }
 
 async function assertNoNativeCredentialLeak(page, protectedValues) {
@@ -1073,21 +1004,12 @@ test(
     ingress.setUpstream(topology.controllerUrl);
     await assertActualModelTurn(topology);
 
-    const unadmittedTarget = expectedNativeAdminTarget(topology, ingress.origin, nativeDomain);
-    assert.match(unadmittedTarget.host, hostSuffixPattern(nativeDomain));
+    const expectedTarget = expectedNativeAdminTarget(topology, ingress.origin, nativeDomain);
+    assert.match(expectedTarget.host, hostSuffixPattern(nativeDomain));
     const initialStatus = await topology.adminRequest("GET", agentPath(topology, "/native-admin"));
-    assert.equal(
-      initialStatus.status,
-      403,
-      "Installation administration alone must not admit native entry",
-    );
-
-    const expectedTarget = await redeployWithNativeAdminAccess(
-      topology,
-      ingress.origin,
-      nativeDomain,
-      { configuredRoles: false },
-    );
+    assert.equal(initialStatus.status, 403, "Installation administration alone must not admit native entry");
+    await assignNativeAdminAccess(topology);
+    assert.equal(topology.revision.revision, 1, "native admin must work on the first admitted revision"    );
     const status = await nativeAdminStatus(topology);
     assert.equal(status.status, "available");
     assert.equal(status.host, expectedTarget.host, "Agent native host must be deterministic");
@@ -1285,7 +1207,11 @@ test(
       workspaceGateway: true,
     });
     ingress.setUpstream(topology.controllerUrl);
-    await redeployWithNativeAdminAccess(topology, ingress.origin, nativeDomain);
+    assert.equal(
+      topology.revision.revision,
+      1,
+      "embedded native admin must work on the first admitted revision",
+    );
     const status = await nativeAdminStatus(topology);
     assert.equal(status.status, "available");
     const browser = await launchBrowser(context, ingress);

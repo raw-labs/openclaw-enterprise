@@ -17,6 +17,8 @@ and [placement status](../../design.md#implementation-status).
 [Shared contracts](../../../packages/contracts/src/index.ts) require `id`,
 `implementation`, and `capability: "compute"`.
 
+Optional [`configureAgent`](compute-admission.md#deployment-configuration) prepares deployment copies.
+
 Optional `getRuntimeImages(revision)` returns
 `{workload, container, image, imageId, commit, openclawCommit}` entries for
 containers owned by that Agent revision. OCC requires exact Agent read
