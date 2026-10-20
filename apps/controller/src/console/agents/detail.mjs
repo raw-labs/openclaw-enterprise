@@ -20,7 +20,7 @@ import {
   renderHarnessAuthSummary,
 } from "./harness-auth.mjs";
 import { renderAgentAccess } from "./access.mjs";
-import { renderNativeAdminAccess } from "./native-admin.mjs";
+import { renderRuntimeAccess } from "./runtime-access.mjs";
 import { createAgentDeletion } from "./deletion.mjs";
 import { createAgentStop } from "./stop.mjs";
 import { pluginWarningText, renderAgentPlugins } from "./plugins.mjs";
@@ -1800,7 +1800,7 @@ export async function renderAgentDetail(context, { agent: preloadedAgent = null 
   tabs.addEventListener("scroll", fadeTabEdges, { passive: true });
   versionSummary.append(detailHeading, versionEvidence);
   detailPane.append(tabs, content);
-  const nativeAdmin = renderNativeAdminAccess(context, path);
+  const runtimeAccess = renderRuntimeAccess(context, path);
   const recoveryTitle = element("h2");
   // A danger status block (spec 3.4): the failed version in the label, the code at the end of
   // the message's first sentence, and one primary action. Each part is its own node, so a poll
@@ -1842,7 +1842,7 @@ export async function renderAgentDetail(context, { agent: preloadedAgent = null 
     statusLine,
     deploymentStatus,
   );
-  view.replaceChildren(recovery, nativeAdmin.section, overviewStatus, versionLayout);
+  view.replaceChildren(recovery, runtimeAccess.section, overviewStatus, versionLayout);
   // Recovery or native administration can appear above the facts. Keep the Agent heading and
   // controls in place, then reveal the overview once its first deployment reads settle.
   // The bounded wait still exposes loading, refresh and the version controls on a slow read.
@@ -2488,7 +2488,7 @@ export async function renderAgentDetail(context, { agent: preloadedAgent = null 
         }
       }
       // Native admin access depends on the serving version, so a finished deployment rereads it.
-      nativeAdmin.refresh();
+      runtimeAccess.refresh();
     }
     if (revisionResult) {
       renderOverview(revisionResult, snapshot);
@@ -2899,7 +2899,7 @@ export async function renderAgentDetail(context, { agent: preloadedAgent = null 
           activityPanel.replaceWith(panel);
           activityPanel = panel;
         }
-        void Promise.all([nativeAdmin.ready, failed ? callerPermissionsRead : null]).then(
+        void Promise.all([runtimeAccess.ready, failed ? callerPermissionsRead : null]).then(
           revealDetail,
         );
       };

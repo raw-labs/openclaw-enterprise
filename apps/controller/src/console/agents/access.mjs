@@ -9,6 +9,7 @@ import {
 import { message, namespacePath, rejectionMessage } from "./list.mjs";
 
 const discoveryPermissions = [{ action: "read", resourceKind: "namespace" }];
+const agentReadPermissions = [{ action: "read", resourceKind: "agent" }];
 // People receive `prn_` Principal IDs; emails and other text never name an IAM subject.
 const principalIdPattern = /^prn_[A-Za-z0-9-]{1,196}$/;
 
@@ -20,10 +21,7 @@ function principalIdProblem(value) {
     ? "Enter the person’s Principal ID (it starts with prn_), not an email address. Sharing does not look up accounts by email."
     : "Enter a Principal ID that starts with prn_, exactly as returned when the person was provisioned.";
 }
-const agentPermissions = [
-  { action: "read", resourceKind: "agent" },
-  { action: "administer", resourceKind: "agent" },
-];
+const agentPermissions = [...agentReadPermissions, { action: "use", resourceKind: "agent" }];
 
 function matchesRole(role, namespaceId, permissions) {
   return (
@@ -59,6 +57,17 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
     autocomplete: "off",
     "aria-describedby": "share-principal-help",
   });
+  const runtimeRole = element("select", { id: "share-runtime-role", required: true });
+  const roleDetails = element("details", {}, element("summary", {}, "Selected role permissions"));
+  const roleSummary = element("pre", { className: "native-document" });
+  const deployedSummary = element("pre", { className: "native-document" });
+  const roleStatus = element("p", { className: "hint" });
+  roleDetails.append(
+    element("p", {}, "Configured permissions"),
+    roleSummary,
+    element("p", {}, "Deployed permissions"),
+    deployedSummary,
+  );
   const acknowledge = element("input", { type: "checkbox", required: true });
   // The Agent page's one primary action is its next deployment step, not sharing.
   const share = element("button", { type: "submit" }, "Share Agent");
@@ -78,10 +87,18 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
       "Use the Principal ID returned when the person was provisioned in this Installation. This does not create an account.",
     ),
     element(
+      "div",
+      { className: "form-field" },
+      element("label", { for: "share-runtime-role" }, "OpenClaw role"),
+      runtimeRole,
+    ),
+    roleStatus,
+    roleDetails,
+    element(
       "label",
       { className: "agent-access-consent" },
       acknowledge,
-      "I understand this grants full native administration of this Agent.",
+      "I understand the selected role grants access to this Agent’s shared data and tools.",
     ),
     element("div", { className: "form-actions" }, share),
   );
@@ -93,6 +110,8 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
     needsRefresh: false,
     roles: [],
     bindings: [],
+    catalog: null,
+    catalogError: null,
     progress: [],
     error: null,
     // Set once the API accepts a write in the current change.
@@ -108,14 +127,19 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
       statusBlock(
         "info",
         "What sharing grants",
-        "Recipients can access and administer this Agent’s native conversations, settings, tools and accessible credentials. This is not restricted chat and does not give each chat an automatic personal identity.",
+        "Recipients use the selected OpenClaw role. This Agent’s files, plugins and provider accounts remain shared.",
         [],
         { role: null },
       ),
       element(
         "p",
         { className: "muted" },
-        "Sharing adds read access to this Namespace for discovery and read plus native administration for this Agent. It does not grant access to other Agents, OCE configuration, deployment or secrets.",
+        "Sharing adds Namespace discovery, Agent read and OpenClaw entry access. The selected OpenClaw role defines runtime permissions; OCE deployment administration is separate.",
+      ),
+      element(
+        "p",
+        { className: "hint" },
+        "To open OpenClaw yourself, assign your Principal ID an OpenClaw role here.",
       ),
       feedback,
       form,
@@ -127,7 +151,7 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
       element(
         "p",
         { className: "hint" },
-        "These are explicit bindings to this Agent, not all effective access. Groups, other grants and Installation administration can still provide access. Removing a binding keeps Namespace discovery access.",
+        "These are direct grants to this Agent, not all effective access. OpenClaw requires an explicit role assignment for the person and Agent. Removing that assignment keeps Namespace discovery access.",
       ),
       grants,
       refresh,
@@ -135,10 +159,34 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
   );
 
   function render() {
+    const runtimeRoles = state.catalog?.roles ?? [];
     const blocked = state.pending || !state.loaded || state.needsRefresh;
     principal.disabled = blocked;
     acknowledge.disabled = blocked;
-    share.disabled = blocked;
+    share.disabled = blocked || runtimeRoles.length === 0;
+    runtimeRole.disabled = blocked || runtimeRoles.length === 0;
+    const selected = runtimeRole.value;
+    runtimeRole.replaceChildren(
+      ...runtimeRoles.map((role) => element("option", { value: role.id }, role.id)),
+    );
+    if (runtimeRoles.some((role) => role.id === selected)) {
+      runtimeRole.value = selected;
+    }
+    roleSummary.textContent = JSON.stringify(
+      runtimeRoles.find((role) => role.id === runtimeRole.value)?.permissions ?? {},
+      null,
+      2,
+    );
+    const deployedRole = state.catalog?.activeRevision?.roles.find(
+      (role) => role.id === runtimeRole.value,
+    );
+    deployedSummary.textContent = deployedRole
+      ? JSON.stringify(deployedRole.permissions, null, 2)
+      : "This role is not deployed.";
+    roleStatus.textContent =
+      state.pending && !state.catalog
+        ? "Reading OpenClaw roles…"
+        : runtimeRoleStatus(runtimeRole.value);
     refresh.disabled = state.pending;
     // The form shows disabled while the policy loads, instead of popping in above the grants
     // once it has (finding 1410); it hides only when the policy could not be read.
@@ -159,6 +207,7 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
             ),
           ]
         : []),
+      ...(state.catalogError ? [element("p", { className: "notice" }, state.catalogError)] : []),
       ...(state.error ? [element("p", { className: "error", role: "alert" }, state.error)] : []),
     );
     // A refusal shows in the danger status block (UX plan C1).
@@ -206,6 +255,30 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
         tone: "danger",
         disabled: blocked,
       });
+      const change =
+        binding.runtimeRole === undefined
+          ? null
+          : element(
+              "select",
+              {
+                "aria-label": `OpenClaw role for ${binding.subjectId}`,
+                disabled: blocked || runtimeRoles.length === 0,
+              },
+              ...runtimeRoles.map((role) => element("option", { value: role.id }, role.id)),
+            );
+      if (change) {
+        if (!runtimeRoles.some((role) => role.id === binding.runtimeRole)) {
+          change.append(
+            element(
+              "option",
+              { value: binding.runtimeRole },
+              `${binding.runtimeRole} (unavailable)`,
+            ),
+          );
+        }
+        change.value = binding.runtimeRole;
+        change.addEventListener("change", () => void changeRole(binding, change.value));
+      }
       grants.append(
         element(
           "div",
@@ -215,8 +288,15 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
             {},
             element("p", {}, `${binding.subjectKind}: ${binding.subjectId}`),
             element("p", { className: "hint" }, permissions),
+            ...(binding.runtimeRole === undefined
+              ? []
+              : [
+                  element("p", {}, `OpenClaw role: ${binding.runtimeRole}`),
+                  element("p", { className: "hint" }, runtimeRoleStatus(binding.runtimeRole)),
+                ]),
             element("p", { className: "resource-id" }, binding.id),
           ),
+          ...(change ? [element("div", { className: "form-field" }, change)] : []),
           remove,
         ),
       );
@@ -236,6 +316,58 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
     state.loaded = true;
   }
 
+  function runtimeRoleStatus(roleId) {
+    if (!state.catalog) {
+      return "";
+    }
+    if (state.catalog.desiredRuntimeState === "stopped") {
+      return "Agent stopped. Assignments can be saved now; OpenClaw access resumes after deployment.";
+    }
+    const deployed = state.catalog.activeRevision?.roles.find((role) => role.id === roleId);
+    if (!deployed) {
+      return "This role is not deployed. OpenClaw access becomes available after deploying its configuration.";
+    }
+    return "OpenClaw uses the deployed permissions. Deploy saved Configuration changes to apply them.";
+  }
+
+  async function requestRuntimeRoles() {
+    try {
+      return await context.request(
+        `${namespacePath(namespaceId)}/agents/${encodeURIComponent(agent.id)}/runtime-roles`,
+        { revalidate: false, rereadOnResume: true },
+      );
+    } catch (error) {
+      if (error.status === 401 || error.name === "AbortError") {
+        throw error;
+      }
+      return null;
+    }
+  }
+
+  function updateRuntimeRoles(catalog) {
+    if (JSON.stringify(catalog) !== JSON.stringify(state.catalog)) {
+      acknowledge.checked = false;
+    }
+    state.catalog = catalog;
+    if (catalog === null) {
+      state.catalogError =
+        "The configured OpenClaw role catalog is unavailable. Existing assignments can still be removed.";
+      return;
+    }
+    state.catalogError =
+      catalog.roles.length === 0
+        ? "Configure gateway.roles in this Agent’s saved Configuration before assigning OpenClaw access."
+        : null;
+  }
+
+  async function readRuntimeRoles() {
+    const catalog = await requestRuntimeRoles();
+    if (!context.isCurrent()) {
+      throw new DOMException("View closed", "AbortError");
+    }
+    updateRuntimeRoles(catalog);
+  }
+
   // OCC answers 400 naming /subjectId or /resourceId when the Principal cannot be bound in
   // this Namespace or the Agent is being deleted; both mean the same thing to the sharer.
   function unavailableShareInput(error) {
@@ -251,16 +383,18 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
       return;
     }
     state.needsRefresh = true;
-    // A rejected write shows the API's sentence; once a write in this change was accepted,
-    // later failures keep the generic text.
+    // Conflicts keep their actionable API reason even after earlier sharing steps succeed.
+    // Other failures after an accepted write retain the uncertain-outcome message.
     state.error =
-      error.status === 403
-        ? "Sharing policy requires Installation administration. Your other Agent controls remain available according to their own permissions."
-        : sharing && (error.status === 404 || unavailableShareInput(error))
-          ? "No existing person with that Principal ID can be granted access here, or this Agent is no longer available. Check the Principal ID."
-          : mutation && !state.saved
-            ? rejectionMessage(error, mutation)
-            : message(error, mutation);
+      error.status === 409
+        ? (error.serverMessage ?? message(error, mutation))
+        : error.status === 403
+          ? "Sharing policy requires Installation administration. Your other Agent controls remain available according to their own permissions."
+          : sharing && (error.status === 404 || unavailableShareInput(error))
+            ? "No existing person with that Principal ID can be granted access here, or this Agent is no longer available. Check the Principal ID."
+            : mutation && !state.saved
+              ? rejectionMessage(error, mutation)
+              : message(error, mutation);
     state.error += " Refresh sharing to inspect current policy before another change.";
     if (error.requestId) {
       state.error += ` Request ID: ${error.requestId}`;
@@ -278,6 +412,7 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
     render();
     try {
       await readPolicy();
+      await readRuntimeRoles();
       section.hidden = false;
       state.needsRefresh = false;
       // What the listed bindings cannot confirm is said once, in the page's disclosure.
@@ -310,7 +445,44 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
     return result;
   }
 
-  async function ensureGrant(subjectId, resourceKind, resourceId, permissions, label) {
+  async function ensureGrant(
+    subjectId,
+    resourceKind,
+    resourceId,
+    permissions,
+    label,
+    selectedRuntimeRole,
+  ) {
+    const direct = state.bindings.filter(
+      (binding) =>
+        binding.namespaceId === namespaceId &&
+        binding.subjectKind === "identity" &&
+        binding.subjectId === subjectId &&
+        binding.resourceKind === resourceKind &&
+        binding.resourceId === resourceId,
+    );
+    const assignment =
+      selectedRuntimeRole === undefined
+        ? undefined
+        : direct.find((binding) => binding.runtimeRole !== undefined);
+    if (assignment) {
+      const hasReadGrant = direct.some((binding) =>
+        state.roles.some(
+          (role) =>
+            role.id === binding.roleId &&
+            role.permissions.some(
+              (permission) => permission.action === "read" && permission.resourceKind === "agent",
+            ),
+        ),
+      );
+      if (!hasReadGrant) {
+        await ensureGrant(subjectId, "agent", resourceId, agentReadPermissions, "Agent read");
+      }
+      if (assignment.runtimeRole !== selectedRuntimeRole) {
+        await writeRuntimeRole(assignment, selectedRuntimeRole);
+      }
+      return;
+    }
     let role = state.roles.find((candidate) => matchesRole(candidate, namespaceId, permissions));
     if (!role) {
       role = await write(`${path}/roles`, {
@@ -322,24 +494,30 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
       }
       state.roles.push(role);
     }
-    const existing = state.bindings.find(
-      (binding) =>
-        binding.namespaceId === namespaceId &&
-        binding.subjectKind === "identity" &&
-        binding.subjectId === subjectId &&
-        binding.resourceKind === resourceKind &&
-        binding.resourceId === resourceId &&
-        state.roles.some(
-          (candidate) =>
-            candidate.id === binding.roleId && matchesRole(candidate, namespaceId, permissions),
-        ),
+    const existing = direct.find((binding) =>
+      state.roles.some(
+        (candidate) =>
+          candidate.id === binding.roleId && matchesRole(candidate, namespaceId, permissions),
+      ),
     );
-    if (existing) {
+    if (existing && selectedRuntimeRole === undefined) {
       return;
     }
     const binding = await write(`${path}/access-bindings`, {
       method: "POST",
-      body: { subjectKind: "identity", subjectId, roleId: role.id, resourceKind, resourceId },
+      body: {
+        subjectKind: "identity",
+        subjectId,
+        roleId: role.id,
+        resourceKind,
+        resourceId,
+        ...(selectedRuntimeRole === undefined
+          ? {}
+          : {
+              runtimeRole: selectedRuntimeRole,
+              runtimeRoleConfiguration: state.catalog.configuration,
+            }),
+      },
     });
     if (!context.isCurrent()) {
       throw new DOMException("View closed", "AbortError");
@@ -379,6 +557,31 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
     }
   }
 
+  async function writeRuntimeRole(binding, selectedRole) {
+    const updated = await write(
+      `${path}/access-bindings/${encodeURIComponent(binding.id)}/runtime-role`,
+      {
+        method: "PATCH",
+        body: { runtimeRole: selectedRole, runtimeRoleConfiguration: state.catalog.configuration },
+      },
+    );
+    if (!context.isCurrent()) {
+      return;
+    }
+    state.bindings = state.bindings.map((candidate) =>
+      candidate.id === updated.id ? updated : candidate,
+    );
+  }
+
+  function changeRole(binding, selectedRole) {
+    return mutate(async () => {
+      await writeRuntimeRole(binding, selectedRole);
+      state.progress.push(
+        "OpenClaw role changed. Existing connections close within 30 seconds; reconnect to use the new role.",
+      );
+    });
+  }
+
   function removeBinding(binding) {
     return mutate(async () => {
       await write(`${path}/access-bindings/${encodeURIComponent(binding.id)}`, {
@@ -390,15 +593,19 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
       }
       state.bindings = state.bindings.filter((candidate) => candidate.id !== binding.id);
       state.progress.push(
-        "Binding removed. Namespace discovery is unchanged. Other policy may still provide Agent access.",
+        binding.runtimeRole === undefined
+          ? "Binding removed. Namespace discovery is unchanged. Other grants may still provide OCE access to this Agent."
+          : "OpenClaw access revoked. Existing connections close within 30 seconds. Namespace discovery is unchanged; other grants may still provide OCE access to this Agent.",
       );
     });
   }
 
+  runtimeRole.addEventListener("change", render);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const subjectId = principal.value.trim();
-    if (!subjectId || !acknowledge.checked) {
+    const selectedRole = runtimeRole.value;
+    if (!subjectId || !acknowledge.checked || !selectedRole) {
       return;
     }
     const problem = principalIdProblem(subjectId);
@@ -424,13 +631,22 @@ export function renderAgentAccess(context, agent, { onDenied, onWriting } = {}) 
         "agent",
         agent.id,
         agentPermissions,
-        "Agent native administration",
+        "Agent OpenClaw access",
+        selectedRole,
       );
       state.progress.push(
         "Agent access is shared. Effective access remains subject to current IAM policy.",
       );
       acknowledge.checked = false;
     }, true);
+  });
+  // Catalog changes refresh Sharing without discarding unrelated Agent drafts or live logs.
+  context.onRevalidate?.(async () => {
+    if (state.pending) {
+      throw new Error("Sharing has an unfinished read.");
+    }
+    updateRuntimeRoles(await requestRuntimeRoles());
+    render();
   });
   render();
   void load();

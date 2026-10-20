@@ -141,10 +141,12 @@ An interrupted return preserves the view; an interrupted Refresh discards it.
 through the response body. Cancellation preserves its reason; a socket failure is an interrupted read,
 not invalid JSON. Neither replays the request.
 
-On return, `loadPage` checks the user and retained GET dependencies. A match
-restores the DOM, handlers, drafts, and expanded debug details. Changed data,
-a newly readable Namespace, or Refresh rebuilds the view. Pending or failed
-reads, password input, and mutations prevent reuse; read-only catalog and diagnostic POSTs do not.
+Returns revalidate GET data/pagination without request IDs and compare settled
+`403`/`404` refusals as outcomes. Matching answers restore DOM, handlers, drafts
+and disclosures; changed answers, a newly readable Namespace or Refresh rebuild.
+Other failed or pending reads, passwords and mutations prevent reuse. Live sections
+own their return checks rather than replaying polls. Tab-local `403` caching avoids
+repeated audits until Retry. Read-only catalog/diagnostic POSTs preserve views.
 
 **Back to Agents:** session, Namespace, permission, and collection checks gate the
 list, not row reads. Each row's newest readable revisions page feeds its deployment

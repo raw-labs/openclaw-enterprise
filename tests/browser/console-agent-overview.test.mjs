@@ -1610,7 +1610,7 @@ for (const viewport of [
     assert.equal(await details.evaluate((node) => node.open), true, "a running deploy shows");
     const background = (locator) =>
       locator.evaluate((node) => globalThis.getComputedStyle(node).backgroundColor);
-    const admin = page.getByRole("link", { name: "Open admin console" });
+    const admin = page.getByRole("link", { name: "Open OpenClaw" });
     const adminBefore = await background(admin);
 
     // The deploy fails its startup model check; the next poll reads it.
