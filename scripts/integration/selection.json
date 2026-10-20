@@ -28,6 +28,11 @@
         "operation": "Reuse proven CI sandbox host setup for nonpublishing native runtime qualification",
         "commit": "a1a9a7c1caf3e2fbebfabe6a9f42b18d50125201",
         "input": "be8c3013516a1825e588b0309a7ff28a74a9d7f3"
+      },
+      {
+        "operation": "Avoid the distro Skopeo fixed daemon API while retaining native export identity checks",
+        "commit": "1a8ab641fbd2cc8d153e3840cda81da3770fee6d",
+        "input": "8133a601183e95798543ebcc631df2a0af6ceaa4"
       }
     ],
     "retainedUnchanged": []
@@ -294,6 +299,17 @@
       "commits": ["a1a9a7c1caf3e2fbebfabe6a9f42b18d50125201"],
       "paths": [".github/workflows/container-check.yml", "docs/testing/ci.md"],
       "notes": "Nonpublishing native AMD64 runtime uses the configured compatibility runner; ARM64 stays native. Reuse the existing reviewed CI AppArmor profile setup/cleanup for both runtime jobs. Pin OS-packaged local OCI import tooling on Ubuntu22/24; preserve source/config digest checks, native architecture, all sandbox and startup tests, and separate publication gates. No product, recipe, source pin, migration or repository variable changed."
+    },
+    {
+      "id": "native-oci-import-docker-api",
+      "pullRequests": [],
+      "commits": ["1a8ab641fbd2cc8d153e3840cda81da3770fee6d"],
+      "paths": [
+        "scripts/ci/container-release.mjs",
+        "docs/testing/ci.md",
+        "docs/flows/container-publication.md"
+      ],
+      "notes": "Convert the immutable OCI export to a private temporary Docker archive with the selected Skopeo, load it through the current Docker CLI, and remove the archive immediately. The original export digest, loaded config ID, native architecture, full startup suite and cleanup remain mandatory. No model/runtime implementation, recipe, source pin, migration or publication authorization changed."
     }
   ],
   "publishedMigrationPrefix": {
@@ -438,6 +454,14 @@
         "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39435308191",
         "repairCommit": "a1a9a7c1caf3e2fbebfabe6a9f42b18d50125201",
         "notes": "All22 source lanes, First Agent Smoke and CodeQL passed. Native AMD64 sandbox probe hit Ubuntu24 user-namespace restrictions. Native ARM64 passed142/144 cases but two nested Docker sandbox cases lacked the reviewed CI AppArmor profile. Repair only native workflow setup and its documentation; qualify the resulting SHA."
+      },
+      {
+        "commit": "8133a601183e95798543ebcc631df2a0af6ceaa4",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39439403911",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39439404020",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39439972096",
+        "repairCommit": "1a8ab641fbd2cc8d153e3840cda81da3770fee6d",
+        "notes": "Source CI and CodeQL passed. Native AMD64 local image import failed because distro Skopeo1.4.1 used Docker API1.22 while the daemon requires1.24+. Use a temporary Docker archive and the native Docker CLI; keep all digest/config/architecture checks and qualify the resulting SHA."
       }
     ]
   }

@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
-updated: 2026-10-08
-last_updated_session: authoring-run/74dc7eaf-a67b-47ef-91bd-2ecd0463fb10
+updated: 2026-10-20
+last_updated_session: 01a12f94-4e1e-7df1-8b9d-1c7f305c2584
 ---
 
 # Container publication flow
@@ -121,8 +121,9 @@ import-closure and native-addon checks remain. See the
 ### 2. Verify and assemble both platform variants
 
 `scripts/ci/container-release.mjs:smoke` requires a native runner matching the
-selected platform. It binds the OCI export to the build output digest, loads it
-with Skopeo, checks Docker's config ID and architecture, and runs the existing
+selected platform. It binds the export to its build digest, converts it
+to a temporary Docker archive with Skopeo, and loads it through Docker's CLI.
+The archive is removed after loading. It checks Docker's config ID and architecture and runs the
 startup suite with native deadlines. A success receipt binds the platform digest
 to the source, workflow, run/attempt, CI evidence, image, and build base. Failed
 smokes cannot upload platform artifacts. The temporary loaded image is removed.
@@ -235,6 +236,8 @@ owns package-write access and coordination.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-20 14:47: Import native smoke through a temporary Docker archive and Docker CLI; retain OCI identity and cleanup checks. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - 1a8ab641fbd2cc8d153e3840cda81da3770fee6d)
 
 - 2026-10-10 03:00: Pin stock Codex 0.163.0-alpha.2; alpha.1 sent metadata the backend rejects. (fix-992-pin)
 
