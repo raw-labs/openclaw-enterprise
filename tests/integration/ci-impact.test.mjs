@@ -1146,7 +1146,30 @@ test("full-integration runs kernel- and sandbox-sensitive same-SHA lanes on ci.y
       runnerFor(lane, vars),
     );
   }
-  const vars = { CI_LARGE_RUNNER: "configured-large-runner", CI_SANDBOX_RUNNER: "sandbox-runner" };
+  // Both real sandbox probes need the compatibility kernel on forks whose
+  // default Ubuntu 24 runner restricts nested user-namespace operations.
+  const compatibility = {
+    CI_LARGE_RUNNER: "configured-large-runner",
+    CI_COMPAT_RUNNER: "compatible-auth-runner",
+  };
+  for (const lane of pinned) {
+    const expected = ["postgres-auth", "images-runtime-startup"].includes(lane)
+      ? "compatible-auth-runner"
+      : "configured-large-runner";
+    assert.equal(runnerFor(lane, compatibility), expected);
+    assert.equal(
+      runInNewContext(ciExpression, {
+        vars: compatibility,
+        matrix: { lane, runner: ciRunners.get(lane) },
+      }),
+      expected,
+    );
+  }
+  const vars = {
+    CI_LARGE_RUNNER: "configured-large-runner",
+    CI_COMPAT_RUNNER: "compatible-auth-runner",
+    CI_SANDBOX_RUNNER: "sandbox-runner",
+  };
   const lane = "images-runtime-startup";
   assert.equal(runnerFor(lane, vars), "sandbox-runner");
   assert.equal(

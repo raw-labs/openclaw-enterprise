@@ -76,3 +76,10 @@ retired PRs. Preserve the published migration prefix; mappings record original
 source revisions and any explicit transformations in newly appended upstream SQL.
 The checker verifies provenance and bytes; actual PostgreSQL upgrades and
 combined behavior still need qualification.
+
+## Select the fork's CI runners
+
+Use the existing runner overrides in [CI configuration](../testing/ci.md#ci-configuration)
+when the fork's kernel differs from upstream's. Keep sandbox probes enabled and
+ordinary CI aligned with same-source qualification; a runner label alone does
+not establish compatibility.

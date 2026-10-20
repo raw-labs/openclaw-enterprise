@@ -44,9 +44,13 @@ same-source qualification. Unset variables retain the workflow defaults. Select
 ephemeral Linux runners with sufficient resources, enforcing NetworkPolicies for
 k3d and the required browser sandbox support. `CI_RUNNER_FILE_CONCURRENCY`
 optionally bounds ordinary CI/advisory test-file concurrency from 1 through 32.
-`CI_SANDBOX_RUNNER` optionally selects a separate runner for `images-runtime-startup`;
-otherwise it follows the large-runner selection. Ordinary CI and same-source
-qualification use the same selection. On AppArmor hosts, this lane installs the
+`CI_COMPAT_RUNNER` optionally selects a compatibility runner for `postgres-auth`
+and `images-runtime-startup` when the default runner restricts their nested
+user-namespace operations. `CI_SANDBOX_RUNNER` takes priority for runtime startup;
+otherwise both follow the compatibility runner, then the large-runner selection.
+The selected runner must pass the actual browser and Codex sandbox probes with
+their containment enabled. Ordinary CI and same-source qualification use the same
+selection. On AppArmor hosts, this lane installs the
 named [CI container profile](../../scripts/ci/codex-bwrap.apparmor) and removes it
 after container cleanup. It preserves Docker’s default process, `/proc` and `/sys`
 restrictions while permitting Bubblewrap’s nested mounts, bounded by the existing

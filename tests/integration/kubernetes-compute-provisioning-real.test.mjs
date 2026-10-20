@@ -1086,7 +1086,7 @@ test(
 
 test(
   "trusted embedded channel opt-in projects exact Secrets through API provisioning, revisions and stop",
-  { ...requiresKubernetesAndPostgres, timeout: 360_000 },
+  { ...requiresKubernetesAndPostgres, timeout: 480_000 },
   async (context) => {
     await assertKubernetesFixtureAvailable();
     const installationId = `ins_${randomUUID()}`;
@@ -1142,7 +1142,17 @@ test(
     const runtime = {
       transportSecretPrefix: "transport",
       gatewayStorageClassName: "local-path",
-      channels: { proxyUrl: "http://10.42.0.15:3128" },
+      gatewayOutbound: {
+        enabled: true,
+        image: process.env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE,
+        denyCidrs: [
+          "10.0.0.0/8",
+          "100.64.0.0/10",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "169.254.0.0/16",
+        ],
+      },
     };
     const network = {
       dns: { namespace: "kube-system", podLabels: { "k8s-app": "kube-dns" } },
@@ -1264,10 +1274,17 @@ test(
       network,
       runtime: {
         ...runtime,
-        channels: { ...runtime.channels, experimentalEmbeddedChannels: true },
+        channels: { experimentalEmbeddedChannels: true },
       },
     });
-    const optedIn = await createProvisioningApiFixture(context, driver, controller.authentication);
+    const prepareDiagnostics = [];
+    const optedIn = await createProvisioningApiFixture(context, driver, controller.authentication, {
+      emit: (event) => {
+        if (event.event === "worker.compute-prepare-failed") {
+          prepareDiagnostics.push(event);
+        }
+      },
+    });
     const missingBinding = await optedIn.request("POST", path, {
       ...plan,
       requestId: `req_${randomUUID()}`,
@@ -1296,13 +1313,41 @@ test(
     const provisioned = await waitFor("embedded channel provisioning to succeed", async () => {
       const observed = await optedIn.request("GET", admitted.data.provisioning.url);
       assert.equal(observed.status, 200, JSON.stringify(observed.body));
-      assert.notEqual(observed.data.status, "failed", JSON.stringify(observed.body));
+      assert.notEqual(
+        observed.data.status,
+        "failed",
+        JSON.stringify({ response: observed.body, prepareDiagnostics }),
+      );
       return observed.data.status === "succeeded" ? observed.data : undefined;
     });
     const agentPath = `/namespaces/${namespaceId}/agents/${provisioned.agentId}`;
     const gateway = gatewayName(provisioned.agentId);
     const callbackName = `${gateway}-msteams`;
+    const waitForReconciledRevision = async (revisionId) => {
+      // Active revision selection precedes activation and predecessor retirement.
+      // Completion proves the callback cutover and old proxy withdrawal have settled.
+      await waitFor(`embedded revision ${revisionId} reconciliation`, async () => {
+        const work = await optedIn.readWork(`agent_revision:${revisionId}:reconcile`);
+        assert.notEqual(
+          work?.state,
+          "failed_permanent",
+          JSON.stringify({ work, prepareDiagnostics }),
+        );
+        return work?.state === "succeeded";
+      });
+    };
     const assertServing = async (revisionId) => {
+      await waitForReconciledRevision(revisionId);
+      const admittedRevision = await optedIn.readRevision(
+        namespaceId,
+        provisioned.agentId,
+        revisionId,
+      );
+      assert.deepEqual(admittedRevision.gatewayOutbound.selection, { mode: "channelsOnly" });
+      assert.deepEqual(
+        admittedRevision.gatewayOutbound.requirements.map(({ source }) => source).sort(),
+        ["msteams", "slack"],
+      );
       const deployment = await resource("deployment", gateway, placement);
       assert.equal(deployment.metadata.annotations["openclaw.dev/agent-revision-id"], revisionId);
       const environment = deployment.spec.template.spec.containers[0].env;
@@ -1354,16 +1399,50 @@ test(
       );
       assert.equal(
         environment.find(({ name }) => name === "HTTPS_PROXY").value,
-        runtime.channels.proxyUrl,
+        `http://${driver.gatewayOutboundName(await optedIn.readRevision(namespaceId, provisioned.agentId, revisionId))}.${placement}.svc:3128`,
       );
       assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
+      assert.ok(
+        environment
+          .find(({ name }) => name === "NO_PROXY")
+          .value.split(",")
+          .includes("127.0.0.1"),
+      );
+      const proxy = await resource(
+        "deployment",
+        driver.gatewayOutboundName(admittedRevision),
+        placement,
+      );
+      assert.equal(
+        proxy.spec.template.spec.containers[0].env?.some(
+          ({ valueFrom }) => valueFrom?.secretKeyRef,
+        ) ?? false,
+        false,
+      );
+      const proxyPolicy = await resource(
+        "configmap",
+        driver.gatewayOutboundName(admittedRevision),
+        placement,
+      );
+      const policy = JSON.parse(Object.values(proxyPolicy.data)[0]);
+      assert.equal(policy.mode, "restricted");
+      assert.deepEqual(
+        policy.destinations.map(({ host }) => host).sort(),
+        [
+          ...new Set(
+            admittedRevision.gatewayOutbound.requirements.flatMap(({ destinations }) =>
+              destinations.map(({ host }) => host),
+            ),
+          ),
+        ].sort(),
+      );
       assert.equal(
         (await resources("deployments", placement)).filter(
           ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId,
         ).length,
-        1,
-        "embedded remains one combined OpenClaw workload",
+        2,
+        "embedded has one combined OpenClaw workload and a credential-free outbound proxy",
       );
       const callback = await resource("httproute", callbackName, placement);
       assert.equal(callback.metadata.annotations["openclaw.dev/agent-revision-id"], revisionId);
@@ -1416,15 +1495,81 @@ test(
         (await optedIn.request("GET", agentPath)).data.activeRevisionId ===
         disabledRevision.data.id,
     );
-    for (const kind of ["httproute", "service", "securitypolicy", "networkpolicy"]) {
-      assert.equal(await missing(kind, callbackName, placement), true);
-    }
+    await waitForReconciledRevision(disabledRevision.data.id);
+    // The active pointer is committed before resource reconciliation finishes.
+    // Wait for actual callback withdrawal, not only the API's selected revision.
+    await waitFor("disabled Teams callback resources to be withdrawn", async () =>
+      (
+        await Promise.all(
+          ["httproute", "service", "securitypolicy", "networkpolicy"].map((kind) =>
+            missing(kind, callbackName, placement),
+          ),
+        )
+      ).every(Boolean),
+    );
     const disabledGateway = await resource("deployment", gateway, placement);
     assert.equal(
       disabledGateway.spec.template.spec.containers[0].env.some(
         ({ name }) => name === "MSTEAMS_APP_PASSWORD",
       ),
       false,
+    );
+    const slackOnly = await optedIn.readRevision(
+      namespaceId,
+      provisioned.agentId,
+      disabledRevision.data.id,
+    );
+    assert.deepEqual(
+      slackOnly.gatewayOutbound.requirements.map(({ source }) => source),
+      ["slack"],
+    );
+    const teamsOnlyValues = {
+      ...values,
+      channels: { ...values.channels, slack: { enabled: false } },
+    };
+    const teamsOnlySaved = await optedIn.request("PATCH", configurationPath, {
+      values: teamsOnlyValues,
+      secretBindings: { MSTEAMS_APP_PASSWORD: secretBindings.MSTEAMS_APP_PASSWORD },
+    });
+    assert.equal(teamsOnlySaved.status, 200, JSON.stringify(teamsOnlySaved.body));
+    const teamsOnlyDeployed = await optedIn.request("POST", `${agentPath}/deploy`);
+    assert.equal(teamsOnlyDeployed.status, 202, JSON.stringify(teamsOnlyDeployed.body));
+    await waitFor(
+      "Teams-only embedded cutover",
+      async () =>
+        (await optedIn.request("GET", agentPath)).data.activeRevisionId ===
+        teamsOnlyDeployed.data.id,
+    );
+    await waitForReconciledRevision(teamsOnlyDeployed.data.id);
+    const teamsOnly = await optedIn.readRevision(
+      namespaceId,
+      provisioned.agentId,
+      teamsOnlyDeployed.data.id,
+    );
+    assert.deepEqual(
+      teamsOnly.gatewayOutbound.requirements.map(({ source }) => source),
+      ["msteams"],
+    );
+    const teamsGateway = await resource("deployment", gateway, placement);
+    assert.equal(
+      teamsGateway.spec.template.spec.containers[0].env.some(
+        ({ name }) => name === "SLACK_BOT_TOKEN" || name === "SLACK_APP_TOKEN",
+      ),
+      false,
+    );
+    assert.equal(
+      (await resource("httproute", callbackName, placement)).metadata.annotations[
+        "openclaw.dev/agent-revision-id"
+      ],
+      teamsOnly.id,
+    );
+    assert.deepEqual(
+      (
+        await optedIn.readRevision(namespaceId, provisioned.agentId, provisioned.revisionId)
+      ).gatewayOutbound.requirements
+        .map(({ source }) => source)
+        .sort(),
+      ["msteams", "slack"],
     );
     const reenabled = await optedIn.request("PATCH", configurationPath, { values, secretBindings });
     assert.equal(reenabled.status, 200, JSON.stringify(reenabled.body));
@@ -1460,6 +1605,11 @@ test(
       async () =>
         (await missing("deployment", gateway, placement)) &&
         (await missing("httproute", callbackName, placement)),
+    );
+    await waitFor("all embedded Agent and revision proxy workloads to stop", async () =>
+      (await resources("deployments", placement)).every(
+        ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] !== provisioned.agentId,
+      ),
     );
     for (const kind of ["service", "securitypolicy", "networkpolicy"]) {
       assert.equal(await missing(kind, callbackName, placement), true);

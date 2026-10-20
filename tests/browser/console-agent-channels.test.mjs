@@ -1144,7 +1144,16 @@ for (const [name, access] of [
   ["inherited from personal access", { allowFrom: [teamsMemberId] }],
 ]) {
   test(`Teams editor preserves ${name} native sender-only access without a Team map`, async (t) => {
-    const { fixture, namespace } = await readyNamespace(t, "Native Teams sender access");
+    const { fixture, namespace } = await readyNamespace(t, "Native Teams sender access", {
+      channelRuntime: true,
+      gatewayRouting: {
+        hostname: "agents.example.internal",
+        gatewayName: "oce-agent-gateways",
+        gatewayNamespace: "openclaw-system",
+        envoyNamespace: "envoy-gateway-system",
+        channels: { hostname: "callbacks.example.test" },
+      },
+    });
     const teams = {
       enabled: true,
       appId: teamsDirectoryContext.appId,
@@ -1153,12 +1162,20 @@ for (const [name, access] of [
       dmPolicy: "allowlist",
       ...access,
     };
-    const agent = await fixture.createAgent(
+    const values = nativeValues("native-teams-senders", {
+      harnessId: "codex",
+      channels: { msteams: teams },
+    });
+    values.plugins.allow.push("msteams");
+    const password = await fixture.createSecret(
       namespace.id,
-      "Native Teams Agent",
-      nativeValues("native-teams-senders", { harnessId: "codex", channels: { msteams: teams } }),
-      { executionMode: "dedicated" },
+      "Teams app password",
+      "synthetic-teams-password",
     );
+    const agent = await fixture.createAgent(namespace.id, "Native Teams Agent", values, {
+      executionMode: "dedicated",
+      secretBindings: { MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } } },
+    });
     const { page } = await newPage(t, fixture);
     const requests = apiRequests(page, fixture.origin);
     await openDraft(page, fixture, agent, "Native Teams Agent");
