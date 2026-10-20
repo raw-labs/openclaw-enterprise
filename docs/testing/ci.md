@@ -56,6 +56,16 @@ after container cleanup. It preserves Docker’s default process, `/proc` and `/
 restrictions while permitting Bubblewrap’s nested mounts, bounded by the existing
 reviewed seccomp profile and dropped capabilities. It does not select an unconfined
 policy, modify host sysctls or change production container policy.
+The nonpublishing native image check also uses `CI_COMPAT_RUNNER` for the AMD64
+runtime job when configured; ARM64 retains its native runner. Both runtime jobs
+install the same named CI AppArmor profile when Docker enforces AppArmor, pass
+its name to the existing sandbox helpers, and remove it after smoke cleanup.
+The profile and production container security settings remain unchanged.
+The check imports local OCI exports with the selected runner's pinned Skopeo: 1.4.1 on Ubuntu 22.04
+or 1.13.3 on Ubuntu 24.04. It still verifies the export digest, loaded image identity,
+native architecture and complete startup suite. Registry publication keeps its
+separate Skopeo 1.13.3 gate and authorization.
+
 Manual dispatch inputs are per-run values; use the commands below.
 
 ### Shared Settings
