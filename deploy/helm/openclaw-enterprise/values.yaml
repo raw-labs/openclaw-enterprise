@@ -178,6 +178,15 @@ repositoryCredentials:
   publicCaKey: ca.crt
   upstreamCidrs: []
 
+# Anonymous reads of known public GitHub repositories, for ordinary dedicated
+# Codex Agents whose authored proxy allows the exact Service IP. No GitHub App or token required.
+publicGithubRead:
+  enabled: false
+  # Reserve this Service IP until all revisions granting access to it retire.
+  clusterIP: ""
+  # Operator-approved IPv4 CIDRs for api.github.com; no default Internet grant.
+  upstreamCidrs: []
+
 gatewayRouting:
   enabled: false
   # Empty derives the private Envoy Service DNS name:
@@ -196,13 +205,6 @@ gatewayRouting:
   remoteNodeCidrs: []
   tenantGatewayPort: 8080
   envoyHttpsTargetPort: 10443
-  channels:
-    enabled: false
-    # Public DNS and an existing publicly trusted certificate for Microsoft callbacks.
-    hostname: ""
-    tlsSecretName: ""
-    listenerPort: 8444
-    ingressPeers: []
   sandbox:
     enabled: false
     # A dedicated wildcard domain outside the OCE session cookie domain, at most
@@ -236,9 +238,9 @@ database:
 api:
   port: 8080
   clients: []
-  # Optional exact HTTP(S) endpoint for trusted control-plane provider requests.
-  # The selected Driver owns its required hosts; the external proxy enforces them.
-  controlPlaneOutboundProxyUrl: ""
+  # Optional exact HTTP(S) proxy endpoint for API-side Slack directory lookup.
+  # The proxy must allow CONNECT to slack.com:443; empty disables lookup in production.
+  channelDirectoryProxyUrl: ""
   # API-only HTTPS egress to explicit provider IPv4 /32 hosts for discovery and login.
   # Hosted codex-plugin needs auth.openai.com and chatgpt.com. Its installation
   # profile resolves these unless CIDRs are supplied; refresh on DNS changes.
@@ -264,13 +266,12 @@ api:
     # generic only; ingress-nginx and aws always read x-forwarded-for.
     clientAddressHeader: ""
 
-outboundProxy:
-  # API-only proxy. Gateway instances are owned separately by Kubernetes Compute.
+slackProxy:
+  # Optional chart-managed HTTP CONNECT proxy for Slack channel traffic. It is
+  # inert until enabled. HTTPS egress excludes private and reserved IPv4 ranges.
   enabled: false
-  serviceName: openclaw-enterprise-outbound-proxy
+  serviceName: openclaw-enterprise-slack-proxy
   port: 3128
-  # Required when enabled. Include actual infrastructure endpoints, even public IPs.
-  denyCidrs: []
   resources:
     requests:
       cpu: 25m

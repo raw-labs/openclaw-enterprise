@@ -52,7 +52,7 @@ Classify a database without applying migrations:
 pnpm db:migrate --check
 ```
 
-An exit-0 `migration.checked` record reports a reviewed history shape:
+An exit-0 `migration.checked` record reports one reviewed history shape:
 `empty`, `prePresetsMain`, `main`, `repositoryCredentials`,
 `repositoryRetention`, `workspaceSetup`, `agentProvisioning`,
 `backendCompleted`, `providerCompleted`, `backendTerminology`, `prePluginApprovers`,
@@ -62,7 +62,7 @@ An exit-0 `migration.checked` record reports a reviewed history shape:
 `preOAuth`, `preCredentialWithdrawals`, `preBrokerReceiptFence`,
 `preModelProbeFailureCause`, `preProvisioningConfigurationRelease`, `preAdministratorCredentialSourceGrants`,
 `preCodexPatSources`, `preAgentCredentialSources`,
-`preCredentialWithdrawalRequester`, `preRuntimeRoles`, or `completed`.
+`preCredentialWithdrawalRequester`, or `completed`.
 `prePresetsMain` means
 the exact canonical history through `0023_runtime_failure_timestamp_validation`;
 `main` also includes `0024_agent_presets`. `repositoryCredentials` adds
@@ -91,17 +91,16 @@ has 46 through `0046_model_probe_failure_cause`;
 `0047_provisioning_configuration_release`; `preCodexPatSources` has 48 through
 `0048_administrator_credential_source_grants`; `preAgentCredentialSources` has 49
 through `0049_codex_pat_sources`; `preCredentialWithdrawalRequester` has 50
-through `0050_agent_credential_sources`; `preRuntimeRoles` has 55 through
-`0055_held_authentication_session`. `completed` has all 56 receipts through
-`0056_agent_runtime_roles`.
+through `0050_agent_credential_sources`. `completed` is the current canonical
+history with all receipts, including `0051_credential_withdrawal_requester`.
 The source manifest is
 [`migrations/meta/canonical-history.json`](../../../migrations/meta/canonical-history.json).
-Empty schemas may be absent or have only their owner's `CREATE` and
+Empty schemas may be absent or have only their owner's ordinary `CREATE` and
 `USAGE` privileges, with no objects or unexpected default privileges. An empty
 stock Drizzle ledger left by a rolled-back first migration is also supported.
 
-After a successful check, run `pnpm db:migrate` for development or
-`pnpm db:migrate:production` for production. Both validate source hashes,
+Run `pnpm db:migrate` for development or `pnpm db:migrate:production` for
+production after a successful check. Both commands validate source hashes,
 receipts, catalog definitions, effective application privileges, and role
 separation under one PostgreSQL advisory lock. Drizzle applies the pending SQL
 and receipts in its normal transaction on that same connection. Existing
@@ -139,9 +138,9 @@ Migration `0049_codex_pat_sources` fails with `Unsupported legacy managed PAT
 authentication: recreate development Agents, revisions, and provisioning
 requests before migrating` when an Agent draft, any AgentRevision, or a
 provisioning plan still holds a retired `chatgpt_service_account` binding. No
-API deletes a revision or provisioning request on its own: delete each affected
-Agent, which also deletes its revisions and requests, and create it again after
-the upgrade. Changing an Agent's binding does not clear historical revisions.
+API deletes an Agent revision or provisioning request on its own: delete each affected
+Agent, which also deletes its Agent revisions and requests, and create it again after
+the upgrade. Changing an Agent's binding does not clear earlier Agent revisions.
 
 A provisioning request that never created an Agent survives Agent deletion.
 Let queued or running requests finish. Then, as the migration role, list the
@@ -267,7 +266,7 @@ NODE_ENV=production node apps/controller/src/worker.mjs
 
 The worker never handles controller API sessions. In production it claims,
 recovers, and counts Namespace work plus embedded OpenClaw and dedicated Codex
-AgentRevision work. Each Agent has its own active revision; the worker does not
+AgentRevision work. Each Agent has its own selected version; the worker does not
 impose a Namespace-wide Agent limit.
 
 ## Local Compose and PostgreSQL configuration
@@ -336,7 +335,7 @@ least-privilege local roles:
 
 Never give the controller the migrator or administrator URL. The application
 role cannot create schema objects, modify migration history, or rewrite
-immutable audit and revision records.
+immutable audit and Agent revision records.
 
 For database-only debugging, start PostgreSQL and apply migrations using its
 dedicated role:

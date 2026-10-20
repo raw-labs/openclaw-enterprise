@@ -1,7 +1,7 @@
 ---
 created: "2026-09-20"
-updated: "2026-10-15"
-last_updated_session: "authoring-run/f64d2a52-ee3c-4e67-9d22-30f2e4d89aa3"
+updated: 2026-10-15
+last_updated_session: "authoring-run/ec3b3e9d-0724-4b9e-a41d-4eb8a44d4851"
 ---
 
 # Namespace IAM Policy Flow
@@ -17,7 +17,7 @@ together in the platform state transaction.
 
 ## Entry Points
 
-- Trigger: `GET`, `POST`, `PATCH`, or `DELETE` under `/namespaces/:namespaceId/iam/*`
+- Trigger: `GET`, `POST`, or `DELETE` under `/namespaces/:namespaceId/iam/*`
 - Source: `packages/contracts/src/api/routes.ts:occApiRoutes`
 - Source: `apps/controller/src/index.ts:requiredPermissions`
 - Source: `apps/controller/src/http/iam.ts:iamHandlers`
@@ -32,7 +32,7 @@ graph TD
   A["Caller invokes Namespace IAM route"] --> B["OCC admits identity and required permissions"]
   B --> C{"Read or mutation?"}
   C -->|read| D["Controller asks selected IAM Driver to read Namespace policy"]
-  C -->|create/change/delete| S{"Human-session caller?"}
+  C -->|create/delete| S{"Human-session caller?"}
   S -->|yes| L{"Assigning session current?"}
   L -->|yes, held through transaction| E["Controller validates Role, subject, and exact target"]
   L -->|revoked or expired| X["Roll back and deny"]
@@ -64,7 +64,7 @@ policy delegation.
 `apps/controller/src/http/iam.ts:iamHandlers`
 
 List and read operations call the corresponding `OpenClawController` IAM method
-and return policy metadata. Create, runtime-role change and delete operations use the handler's `transactIAM` callback, append an attributable mutation audit event, and return
+and return policy metadata. Create and delete operations use the handler's `transactIAM` callback, append an attributable mutation audit event, and return
 only after the transaction commits. For human sessions, authentication wraps
 `controller.transact` and retains the admitted session before the IAM command and
 checks its expiry again after the command and audit append. PostgreSQL locks the
@@ -83,9 +83,9 @@ serializes policy writes with local logout and rechecks the session inside the
 transaction. Non-session credentials keep their existing admission behavior.
 The event's authorization records the
 Installation `administer` check. Role events carry the Namespace as resource and
-`roleId` plus `permissions` in details. AccessBinding create, runtime-role change and delete events
+`roleId` plus `permissions` in details. AccessBinding create and delete events
 carry the bound target as resource (the Namespace for a Namespace binding) and
-`bindingId`, `subjectKind`, `subjectId`, `roleId` and the optional `runtimeRole` in details. Deletion reads
+`bindingId`, `subjectKind`, `subjectId`, and `roleId` in details. Deletion reads
 the removed Role or AccessBinding in the same transaction to record it.
 ServicePrincipal creation takes an empty body; its event carries the Namespace
 as resource and `servicePrincipalId` in details. The new non-Agent identity is
@@ -109,8 +109,6 @@ the caller can read it before asking the IAM Driver to create the binding.
 `assertAccessBindingRoleApplies` then refuses, with `400`, a Role that has no
 Permission for the target's kind, or a `create` Permission stored before Role
 creation refused them, because evaluation would drop those grants.
-
-Runtime assignment creation and changes use the saved Agent Configuration through the Compute catalog, independent of deployment. `runtimeRoleConfiguration` supplies its reviewed ID and generation. After holding IAM authority and the Namespace lock, OCC reads that Configuration through its Driver and rejects a changed ID or generation with `409`, or an unknown role with `400`. The lock serializes this check and binding write against Configuration changes and Agent Configuration replacement. Only `runtimeRole` is persisted on the existing exact human/Agent binding. Native definitions and profile admission are traced in [OpenClaw access](agent-native-admin.md).
 
 ### 4. The IAM Driver persists or reads policy
 
@@ -167,7 +165,7 @@ COMMIT request was delayed after the last authentication check. An expired
 session raises the named `held_authentication_session_is_current` constraint;
 State maps that rejection to an authorization denial (`403`). The policy and
 success audit roll back together; the API records the denial separately.
-A duplicate runtime assignment returns `409` without a success audit. If commit outcome is unknown,
+If commit outcome is unknown,
 State discards the connection without another query. OCC reports dependency
 failure; a caller must not infer rollback or replay the mutation from that
 result. Later authorization requests read the current policy through the IAM
@@ -231,20 +229,7 @@ selected account, session, and policy writers join the same protocol.
 
 ## Changelog
 
-- 2026-10-15 13:36: Protect runtime-role PATCH with assigning-session authority through COMMIT. (authoring-run/f64d2a52-ee3c-4e67-9d22-30f2e4d89aa3 - b0fdd771426669636fc97b59c651a383b5d64984)
-
 - 2026-10-15 13:28: Retain assigning sessions through policy COMMIT, require transactional IAM writes, and preserve caller limits with shared guarded-session holds. (authoring-run/ec3b3e9d-0724-4b9e-a41d-4eb8a44d4851 - a302a3e2061575b64dcc37e212c55075d5c74b9a)
-- 2026-10-14 11:00: Read, validate and index native policy once per State unit of work instead of once per decision. (fix-1322)
-- 2026-10-15 13:28: Retain assigning sessions through policy COMMIT, require transactional IAM writes, and preserve caller limits with shared guarded-session holds. (authoring-run/ec3b3e9d-0724-4b9e-a41d-4eb8a44d4851 - a302a3e2061575b64dcc37e212c55075d5c74b9a)
-- 2026-10-13 13:33: Apply assigning-session protection to native role changes as well as create and delete commands. (authoring-run/5447c0d9-1574-4245-910a-fafc16fa5c0e - 378cf70fb08c44ee8ac4855ba073224fa5ea02cc)
-
-- 2026-10-12 13:25: Retain human sessions through Namespace policy commits and coordinate revocation. (authoring-run/3dab5ffe-1c2c-4b63-9899-8f98cacf0b43 - b195e54e9b0ce98ead2b2306015a5209325e837b)
-- 2026-10-13 15:22: Retain assigning sessions through policy COMMIT, require transactional IAM writes, and preserve caller limits with shared guarded-session holds. (authoring-run/7efed788-313c-4486-b931-770741ceeb29 - 9dabe685d3992abf1126cb37051b15b74b171478)
-
-- 2026-10-05 13:58: Trace saved Configuration role selection, stale-selection rejection and deployed permission previews. (authoring-run/80db88a0-8bf4-401d-b060-01f34cc3af10 - 76f9307b61ccb1c544257081d95b15a0ee893b92)
-
-- 2026-10-02 11:55: Trace atomic runtime-role updates, assignment audit fields and duplicate-assignment conflicts. (authoring-run/fd458bb6-fbf9-4c93-ad3f-1e6fc793300f - a946032a14cb2f33a5077c3c0340e8f5f54cf4b7)
-
 - 2026-10-14 11:00: Read, validate and index native policy once per State unit of work instead of once per decision. (fix-1322)
 - 2026-10-01 20:30: Refuse AccessBindings whose Role cannot apply to the target. (fix-d93-d100)
 - 2026-09-29 16:40: Record the Installation authorization and the Role or AccessBinding changed in IAM policy audit events. (fix-5)

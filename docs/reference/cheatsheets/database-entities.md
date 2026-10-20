@@ -36,14 +36,14 @@ Tracks platform Namespaces, their lifecycle status, and any existing Kubernetes 
 
 ### `agents`
 
-Stores Agent drafts, their desired runtime state, and the active revision reference.
+Stores Agent drafts, their desired runtime state, and the selected version reference.
 
 - `id`
 - `namespace_id`
 - `name`
 - `configuration_id`
 - `backend_id`
-- `execution_mode`, `gateway_outbound`
+- `execution_mode`
 - `plugins`
 - `plugin_approvers`
 - `repository_bindings`
@@ -56,8 +56,20 @@ Stores Agent drafts, their desired runtime state, and the active revision refere
 - `credential_sources` (every bound credential source)
 - `active_revision_id`
 - `desired_runtime_state`
+- `sandbox_policy_editing`
 - `status`
 - `created_at`
+
+### `sandbox_policies`
+
+Stores one Agent-owned desired network policy with versioned application evidence.
+See [per-Agent policies](../sandbox-policies.md).
+
+- `id`
+- `namespace_id`
+- `agent_id`
+- `version`
+- `document` (additions, pending/latest application, last confirmed live version)
 
 ### `agent_revisions`
 
@@ -265,7 +277,6 @@ Grants a native IAM role to an identity or group, optionally for a specific reso
 - `role_id`
 - `resource_kind`
 - `resource_id`
-- `runtime_role`: optional exact human/Agent runtime assignment; unique per person and Agent.
 
 ### `iam_restrictions`
 
@@ -297,7 +308,7 @@ Keeps an append-only record of bootstrap, changes to resources, and authorizatio
 
 ### `controller_work`
 
-Queues and tracks controller work for Namespace and Agent lifecycle changes, Agent provisioning, and revision deployments.
+Queues and tracks controller work for Namespace and Agent lifecycle changes, Agent provisioning, and version deployments.
 
 - `work_kind`
 - `idempotency_key`

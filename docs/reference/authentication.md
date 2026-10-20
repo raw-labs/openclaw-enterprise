@@ -1,10 +1,12 @@
 # Authentication
 
-OpenClaw Control Plane (OCC) authenticates people through email/password or
-administrator-enrolled GitHub, Google or OIDC sessions. Non-Agent automation uses
-service API keys. Better Auth verifies passwords and manages revocable session
-cookies and hashed keys. The IAM Driver maps authenticated accounts and service
-identities to provisioned Principals/ServicePrincipals and owns
+OpenClaw Control Plane (OCC) authenticates human controller API clients with
+user sessions established through email/password sign-in or an administrator-enrolled
+GitHub, Google or OIDC identity. Programmatic non-Agent automation authenticates with service
+API keys. Better Auth owns
+password verification, revocable session cookies, and hashed API-key storage.
+The selected IAM Driver resolves the authenticated account or service identity
+to an explicitly provisioned Principal or ServicePrincipal and owns
 [authorization](authorization.md).
 
 For a sign-in procedure, see
@@ -100,7 +102,7 @@ not require Origin, and an invalid key never falls back to a session cookie.
 | `GET /api/auth/session`        | Returns safe account identity and a noncredential `sessionKey`, or `data: null` without a valid session.                                                                                       |
 | `POST /api/auth/sign-out`      | Revokes the current session. Protected API requests using that session subsequently return `401`.                                                                                              |
 
-Human-session IAM writes retain assigning authority through COMMIT; see
+Human-session Namespace IAM writes retain assigning authority through their transaction; see
 [Sharing commit guarantees](authorization.md#manage-namespace-policy).
 
 The `sessionKey` names the current session, stays stable across reads, and changes
@@ -188,8 +190,8 @@ check. With external sign-in, a disabled account's entries verify
 nothing until it is enabled again; reset the password as well to revoke them for
 good. The controller reads the account only for an entry issued for the attempted
 email, so forged or foreign cookies add no timing signal about which emails exist,
-and a completed read that rejects the binding gives no exemption. Proof reads are
-bounded per controller: 30 per signed entry per minute, two active per entry,
+and a completed read that rejects the binding gives no exemption. Each controller
+limits proof reads to 30 per signed entry per minute, two active per entry,
 600 per minute overall, and 16 active overall. There is no proof cache or waiting
 queue. If a read fails or is refused, its signed entry keys also constrain the
 ordinary email/address lane: losing proof cannot reopen a spent device allowance.
@@ -237,12 +239,11 @@ sign-out clear prior host-only `openclaw_occ` and `openclaw_occ_shared` cookie
 names so browsers never choose between duplicates.
 
 Native-host requests authenticate the shared OCE session, resolve the exact
-Agent represented by the requested host, authorize exact Agent `use` with a
-direct runtime-role assignment, and validate the current active revision before
-proxying. OCC strips browser credentials and native identity, role, policy-digest
-and scope headers, then injects the verified human transport descriptor. The native
-Gateway never receives the OCE session cookie. See the
-[native authority contract](agent-native-admin.md#native-authority-and-drift). Native chat or other Agent-host
+Agent represented by the requested host, authorize exact Agent `administer`, and
+validate the selected version and supported native configuration before
+proxying. OCC strips browser cookies, `Authorization`, API and session keys,
+forwarded identity, and native scope headers before forwarding upstream, so the native
+gateway never receives the OCE session cookie. Native chat or other Agent-host
 activity does not renew the console session.
 
 ## Account provisioning

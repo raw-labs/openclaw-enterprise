@@ -77,8 +77,9 @@ function baseInput(overrides = {}) {
       gatewayNodeSelector: { "oce-role": "control" },
       transportSecretPrefix: "openclaw-agent-transport",
     },
-    gatewayOutbound: { enabled: true, denyCidrs: ["192.0.2.12/32"] },
-    controlPlaneOutbound: { managedProxy: true, denyCidrs: ["192.0.2.12/32"] },
+    channels: {
+      managedSlackProxy: true,
+    },
     ...overrides,
   };
 }
@@ -134,7 +135,6 @@ function render(
   input,
   directory = mkdtempSync(join(tmpdir(), `oce-profile-${profile}-`)),
   root = repository,
-  profileFile,
   dnsServer,
 ) {
   const inputPath = join(directory, "input.json");
@@ -155,7 +155,6 @@ function render(
         "scripts/render-installation-profile.mjs",
         "--profile",
         profile,
-        ...(profileFile === undefined ? [] : ["--profile-file", profileFile]),
         "--input",
         inputPath,
         "--out-dir",
@@ -335,16 +334,16 @@ test("renderer supports exactly the openclaw and codex profiles", () => {
   assert.doesNotMatch(openclaw.installation, /id: codex-plugin/);
   assert.match(openclaw.values, /agentNativeAdmin:\n {2}enabled: true/);
   assert.match(openclaw.values, /repositoryCredentials:\n {2}enabled: false/);
-  assert.equal(loadYaml(openclaw.values).outboundProxy.enabled, true);
-  const outbound = loadYaml(openclaw.installation).drivers.compute.configuration.runtime
-    .gatewayOutbound;
-  assert.equal(outbound.image, loadYaml(openclaw.values).images.controller);
-  assert.equal(outbound.enabled, true);
-  assert.equal(outbound.allowPublicHttps, false);
-  assert.deepEqual(
-    new Set(outbound.denyCidrs),
-    new Set(["192.0.2.10/32", "192.0.2.11/32", "192.0.2.12/32"]),
+  assert.match(openclaw.values, /slackProxy:\n {2}enabled: true/);
+  assert.match(
+    openclaw.installation,
+    /channels:\n\s+proxyUrl: http:\/\/openclaw-enterprise-slack-proxy\.openclaw-system\.svc:3128/,
   );
+  assert.match(
+    openclaw.installation,
+    /managedProxy:\n\s+hostname: openclaw-enterprise-slack-proxy\.openclaw-system\.svc/,
+  );
+  assert.match(openclaw.installation, /app\.kubernetes\.io\/component: slack-proxy/);
 
   const codex = render("codex", codexInput());
   assert.equal(codex.summary.ok, true);
@@ -352,195 +351,13 @@ test("renderer supports exactly the openclaw and codex profiles", () => {
   assert.match(codex.installation, /id: codex-plugin/);
   assert.match(codex.installation, /catalogSource: hosted/);
   assert.doesNotMatch(codex.installation, /service_account: chatgpt-service-accounts/);
-  assert.equal(loadYaml(codex.values).outboundProxy.enabled, true);
-  assert.equal(
-    loadYaml(codex.installation).drivers.compute.configuration.runtime.gatewayOutbound.enabled,
-    true,
+  assert.match(codex.values, /slackProxy:\n {2}enabled: true/);
+  assert.match(
+    codex.installation,
+    /channels:\n\s+proxyUrl: http:\/\/openclaw-enterprise-slack-proxy\.openclaw-system\.svc:3128/,
   );
-  assert.match(codex.preflight.prerequisites.join("\n"), /enabled supported channels contribute/);
-  assert.match(codex.preflight.prerequisites.join("\n"), /Hosted plugin discovery.*PAT/);
-  assert.match(codex.preflight.prerequisites.join("\n"), /runtime credentials.*Agent/);
-});
-
-test("an explicit profile selects the startup PluginDriver and its credential diagnostics", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "oce-profile-selection-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const profileFile = join(directory, "selected-profile.json");
-  for (const [name, pluginId, configuration] of [
-    ["openclaw", "occ-plugin", undefined],
-    ["codex", "codex-plugin", undefined],
-    ["codex", "codex-plugin", { catalogSource: "openai-curated" }],
-    ["openclaw", "codex-plugin", { catalogSource: "hosted" }],
-    ["openclaw", "codex-plugin", { catalogSource: "openai-curated" }],
-  ]) {
-    const profile = JSON.parse(
-      readFileSync(join(repository, `deploy/profiles/${name}.json`), "utf8"),
-    );
-    profile.installation.drivers.plugin.id = pluginId;
-    if (configuration === undefined) {
-      delete profile.installation.drivers.plugin.configuration;
-    } else {
-      profile.installation.drivers.plugin.configuration = configuration;
-    }
-    writeFileSync(profileFile, JSON.stringify(profile));
-
-    // Profile families select runtime settings; the selected PluginDriver independently
-    // determines catalog credentials, including an OpenClaw family with hosted Codex discovery.
-    const output = render(
-      name,
-      name === "codex" ? codexInput() : baseInput(),
-      directory,
-      repository,
-      profileFile,
-    );
-    const runtime = await loadInstallationConfiguration({
-      mode: "production",
-      environment: { OCC_CONFIG_PATH: join(directory, "installation.yaml") },
-    });
-    assert.equal(runtime.installation.drivers.plugin.id, pluginId);
-    assert.deepEqual(runtime.installation.drivers.plugin.configuration, configuration ?? {});
-    const diagnostics = [...output.preflight.prerequisites, ...output.preflight.warnings].join(
-      "\n",
-    );
-    if (name === "codex") {
-      assert.match(diagnostics, /runtime credentials.*Agent/);
-      assert.match(diagnostics, /seccomp profile installed/);
-    } else {
-      assert.doesNotMatch(diagnostics, /runtime credentials.*Agent|seccomp profile installed/);
-    }
-    if (pluginId === "codex-plugin" && configuration?.catalogSource !== "openai-curated") {
-      assert.match(diagnostics, /Hosted plugin discovery.*PAT/);
-    } else {
-      assert.doesNotMatch(diagnostics, /Hosted plugin discovery|codex_pat/);
-    }
-  }
-});
-
-test("an invalid explicit profile revokes prior outputs without falling back to the bundled profile", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "oce-profile-selection-invalid-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const profileFile = join(directory, "selected-profile.json");
-  for (const [contents, expected] of [
-    [undefined, /unavailable or invalid JSON/],
-    ["{", /unavailable or invalid JSON/],
-    [JSON.stringify({ name: "openclaw" }), /must declare matching name/],
-    [JSON.stringify({ name: "codex" }), /profile.installation must be an object/],
-    [JSON.stringify([]), /must declare matching name/],
-    [
-      JSON.stringify({
-        ...JSON.parse(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-        installation: {
-          drivers: { plugin: { id: "codex-plugin", configuration: [] } },
-        },
-      }),
-      /profile.installation.drivers.plugin.configuration must be an object/,
-    ],
-    [
-      JSON.stringify({
-        ...JSON.parse(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-        installation: { drivers: { plugin: { id: "uninstalled-plugin" } } },
-      }),
-      /must select occ-plugin or codex-plugin/,
-    ],
-    [
-      JSON.stringify({
-        ...JSON.parse(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-        installation: {
-          drivers: { plugin: { id: "codex-plugin" } },
-          presets: { includeDefaults: false },
-        },
-      }),
-      /profile.installation.presets is not supported/,
-    ],
-  ]) {
-    render("codex", codexInput(), directory);
-    if (contents !== undefined) {
-      writeFileSync(profileFile, contents);
-    }
-    const error = renderError(() =>
-      render("codex", codexInput(), directory, repository, profileFile),
-    );
-    assert.match(error.profileRendererOutput, expected);
-    for (const name of ["values.yaml", "installation.yaml", "preflight.json"]) {
-      assert.equal(existsSync(join(directory, name)), false);
-    }
-  }
-});
-
-test(
-  "installation profiles carry the trusted embedded channel opt-in into paired controller rollouts",
-  { skip: helmSkip },
-  (t) => {
-    for (const profile of ["openclaw", "codex"]) {
-      const checksums = [];
-      for (const enabled of [undefined, false, true]) {
-        const input = profile === "codex" ? codexInput() : baseInput();
-        input.gatewayOutbound = { enabled: true, denyCidrs: ["10.0.0.0/8"] };
-        input.channels = enabled === undefined ? {} : { experimentalEmbeddedChannels: enabled };
-        const output = render(profile, input);
-        t.after(() => rmSync(output.directory, { recursive: true, force: true }));
-        const compute = loadYaml(output.installation).drivers.compute.configuration;
-        assert.equal(compute.runtime.channels?.experimentalEmbeddedChannels, enabled);
-        assert.deepEqual(
-          compute.runtime.channels,
-          enabled === undefined ? undefined : { experimentalEmbeddedChannels: enabled },
-          "only the trusted flag is rendered; retired shared proxy settings stay absent",
-        );
-        assert.equal(
-          output.preflight.warnings.some((warning) =>
-            warning.includes("Experimental embedded channels"),
-          ),
-          enabled === true,
-        );
-        KubernetesComputeDriver.validateConfiguration(compute);
-        assert.equal(compute.runtime.gatewayOutbound.enabled, true);
-        // API and worker must roll with exactly the same trusted Installation bytes.
-        const checksum = createHash("sha256").update(output.installation).digest("hex");
-        assert.equal(loadYaml(output.values).controlPlane.installationChecksum, checksum);
-        const manifests = helmTemplate(output);
-        for (const component of ["api", "worker"]) {
-          assert.equal(deploymentChecksum(manifests, component), checksum);
-        }
-        checksums.push(checksum);
-      }
-      assert.notEqual(checksums[2], checksums[0]);
-      assert.notEqual(checksums[2], checksums[1]);
-    }
-  },
-);
-
-test("embedded channel profile inputs reject malformed authority and missing managed outbound", () => {
-  for (const profile of ["openclaw", "codex"]) {
-    const input = profile === "codex" ? codexInput() : baseInput();
-    assertFieldRefusals(
-      profile,
-      input,
-      "channels.experimentalEmbeddedChannels",
-      ["true", "false", 0, 1, null, {}, []],
-      "must be a boolean.",
-    );
-    assertPreflightFailure(
-      profile,
-      { ...input, channels: { experimentalEmbeddedChannel: true } },
-      /channels\.experimentalEmbeddedChannel is not supported/,
-    );
-    for (const gatewayOutbound of [undefined, { enabled: false }]) {
-      assertPreflightFailure(
-        profile,
-        { ...input, gatewayOutbound, channels: { experimentalEmbeddedChannels: true } },
-        /channels\.experimentalEmbeddedChannels requires gatewayOutbound\.enabled: true/,
-      );
-    }
-    const disabled = render(profile, {
-      ...input,
-      gatewayOutbound: { enabled: false },
-      channels: { experimentalEmbeddedChannels: false },
-    });
-    const runtime = loadYaml(disabled.installation).drivers.compute.configuration.runtime;
-    assert.equal(runtime.channels.experimentalEmbeddedChannels, false);
-    assert.equal(runtime.gatewayOutbound, undefined);
-    rmSync(disabled.directory, { recursive: true, force: true });
-  }
+  assert.match(codex.preflight.prerequisites.join("\n"), /Slack consumers remain inactive/);
+  assert.match(codex.preflight.warnings.join("\n"), /existing codex_pat token/);
 });
 
 // Tenant runtimes may burst to four cores; 100m requests keep the scheduling
@@ -746,20 +563,21 @@ test(
       input.repository = repositoryConfiguration(["140.82.112.0/20", "192.30.252.0/22"]);
       const directory = mkdtempSync(join(tmpdir(), `oce-profile-egress-${profile}-`));
       t.after(() => rmSync(directory, { recursive: true, force: true }));
-      const output = render(profile, input, directory, repository, undefined, dns.server);
+      const output = render(profile, input, directory, repository, dns.server);
       const manifests = helmTemplate(output);
       assert.match(manifests, /repository-credentials/);
       assert.match(manifests, /cidr: "140\.82\.112\.0\/20"/);
       assert.match(manifests, /cidr: "192\.30\.252\.0\/22"/);
-      const outboundPolicy = manifests
+      const slackPolicy = manifests
         .split(/\n---\n/)
         .find(
           (document) =>
             document.includes("kind: NetworkPolicy") &&
-            document.includes("name: openclaw-enterprise-outbound-proxy"),
+            document.includes("name: openclaw-enterprise-slack-proxy"),
         );
-      assert.ok(outboundPolicy);
-      assert.match(outboundPolicy, /cidr: 0\.0\.0\.0\/0\s+except:/);
+      assert.ok(slackPolicy);
+      assert.match(slackPolicy, /cidr: 0\.0\.0\.0\/0\s+except:/);
+      assert.doesNotMatch(output.values, /slackProxyUpstreamCidrs/);
       assert.deepEqual(
         loadYaml(output.values).api.modelDiscoveryCidrs,
         profile === "codex" ? ["192.0.2.20/32"] : [],
@@ -773,7 +591,6 @@ test(
       codexInput({ codex: { modelDiscoveryCidrs: [] } }),
       dns.directory,
       repository,
-      undefined,
       dns.server,
     );
     assert.deepEqual(loadYaml(external.values).api.modelDiscoveryCidrs, []);
@@ -788,7 +605,6 @@ test(
       codexInput({ codex: { modelDiscoveryCidrs: undefined } }),
       dns.directory,
       repository,
-      undefined,
       dns.server,
     );
     const cidrs = ["192.0.2.40/32", "198.51.100.20/32"];
@@ -827,7 +643,7 @@ test("hosted discovery DNS failures revoke stale deployment artifacts", async (t
   const dns = await startDnsFixture(t, { "auth.openai.com": ["192.0.2.40"] });
   // Explicit policy input stays usable with an unavailable hosted DNS name.
   assert.equal(
-    render("codex", codexInput(), dns.directory, repository, undefined, dns.server).preflight.ok,
+    render("codex", codexInput(), dns.directory, repository, dns.server).preflight.ok,
     true,
   );
   const error = renderError(() =>
@@ -836,7 +652,6 @@ test("hosted discovery DNS failures revoke stale deployment artifacts", async (t
       codexInput({ codex: { modelDiscoveryCidrs: undefined } }),
       dns.directory,
       repository,
-      undefined,
       dns.server,
     ),
   );
@@ -883,47 +698,25 @@ test(
 );
 
 test(
-  "profile preset selection reaches startup and rolls both controllers",
+  "profile preset files reach startup YAML and roll both controllers",
   { skip: helmSkip },
-  async (t) => {
+  () => {
     const original = render("codex", codexInput());
-    t.after(() => rmSync(original.directory, { recursive: true, force: true }));
-    const originalRuntime = await loadInstallationConfiguration({
-      mode: "production",
-      environment: { OCC_CONFIG_PATH: join(original.directory, "installation.yaml") },
-    });
-    assert.deepEqual(originalRuntime.defaultPresets.map((preset) => preset.name).sort(), [
-      "Standard Codex",
-      "Standard OpenClaw",
-      "default-codex",
-    ]);
-    const originalManifests = helmTemplate(original);
-    const customPresetPath = fileURLToPath(
-      new URL("../../deploy/presets/swe-preset.json", import.meta.url),
+    const changed = render(
+      "codex",
+      codexInput({ presets: { files: ["/app/deploy/presets/swe-preset.json"] } }),
     );
-    for (const [presets, expectedNames] of [
-      [
-        { files: [customPresetPath] },
-        ["SWE Agent", "Standard Codex", "Standard OpenClaw", "default-codex"],
-      ],
-      [{ includeDefaults: false, files: [customPresetPath] }, ["SWE Agent"]],
-      [{ includeDefaults: false }, []],
-    ]) {
-      // The renderer's choice must control the catalog loaded by both controller processes.
-      const changed = render("codex", codexInput({ presets }));
-      t.after(() => rmSync(changed.directory, { recursive: true, force: true }));
-      const runtime = await loadInstallationConfiguration({
-        mode: "production",
-        environment: { OCC_CONFIG_PATH: join(changed.directory, "installation.yaml") },
-      });
-      assert.deepEqual(runtime.defaultPresets.map((preset) => preset.name).sort(), expectedNames);
-      const changedManifests = helmTemplate(changed);
-      for (const component of ["api", "worker"]) {
-        assert.notEqual(
-          deploymentChecksum(originalManifests, component),
-          deploymentChecksum(changedManifests, component),
-        );
-      }
+    assert.match(
+      changed.installation,
+      /presets:\n {2}includeDefaults: true\n {2}files:\n {4}- \/app\/deploy\/presets\/swe-preset.json/,
+    );
+    const originalManifests = helmTemplate(original);
+    const changedManifests = helmTemplate(changed);
+    for (const component of ["api", "worker"]) {
+      assert.notEqual(
+        deploymentChecksum(originalManifests, component),
+        deploymentChecksum(changedManifests, component),
+      );
     }
   },
 );
@@ -1496,7 +1289,6 @@ for (const { name, profile = "openclaw", input = baseInput, cases } of [
     input: codexInput,
     cases: [
       ["presets.files", ["presets/custom.json", [""], [42]], /presets\.files/],
-      ["presets.includeDefaults", ["false", null, 0], /presets\.includeDefaults must be a boolean/],
       ["presets.unknown", [true], /presets\.unknown/],
     ],
   },
@@ -2543,64 +2335,163 @@ test("preflight refuses source CIDRs that cover every address and warns about wi
   assert.doesNotMatch(widerTrust.preflight.warnings.join("\n"), /covers more than one address/);
 });
 
-test("preflight rejects invalid control-plane outbound proxy endpoints", () => {
+test("preflight rejects channel proxy URLs with an invalid octet or port", () => {
   const message = /must be an HTTP\(S\) literal IPv4 endpoint with an explicit port/;
-  for (const proxyUrl of ["http://192.0.2.999:8080", "http://192.0.2.10:99999"]) {
-    assertPreflightFailure("openclaw", baseInput({ controlPlaneOutbound: { proxyUrl } }), message);
-  }
   assertPreflightFailure(
     "openclaw",
-    baseInput({ controlPlaneOutbound: { proxyUrl: "http://0.0.0.0:3128" } }),
-    /controlPlaneOutbound\.proxyUrl must not use host 0\.0\.0\.0/,
+    baseInput({ channels: { directoryProxyUrl: "http://192.0.2.999:8080" } }),
+    message,
   );
+  assertPreflightFailure(
+    "openclaw",
+    baseInput({ channels: { runtimeProxyUrl: "http://192.0.2.10:99999" } }),
+    message,
+  );
+  // Compute and the API's Slack directory refuse an unspecified proxy host, which names no proxy.
+  for (const field of ["runtimeProxyUrl", "directoryProxyUrl"]) {
+    assertPreflightFailure(
+      "openclaw",
+      baseInput({ channels: { [field]: "http://0.0.0.0:3128" } }),
+      new RegExp(
+        `channels\\.${field} must not use host 0\\.0\\.0\\.0, which names no proxy address\\.`,
+      ),
+    );
+  }
   const accepted = render(
     "openclaw",
-    baseInput({ controlPlaneOutbound: { proxyUrl: "http://192.0.2.10:8080" } }),
+    baseInput({
+      channels: {
+        directoryProxyUrl: "http://192.0.2.10:8080",
+        runtimeProxyUrl: "http://192.0.2.10:8080",
+      },
+    }),
   );
-  assert.equal(
-    loadYaml(accepted.values).api.controlPlaneOutboundProxyUrl,
-    "http://192.0.2.10:8080",
-  );
-  assert.equal(
-    loadYaml(accepted.installation).drivers.compute.configuration.runtime.channels,
-    undefined,
-  );
-});
-
-test("profile refuses legacy channel routes and requires explicit infrastructure exclusions", () => {
-  assertPreflightFailure(
-    "openclaw",
-    baseInput({ channels: { managedSlackProxy: true } }),
-    /channels/,
-  );
-  assertPreflightFailure(
-    "openclaw",
-    baseInput({ gatewayOutbound: { enabled: true } }),
-    /gatewayOutbound\.denyCidrs/,
-  );
-  assertPreflightFailure(
-    "openclaw",
-    baseInput({ controlPlaneOutbound: { managedProxy: true } }),
-    /controlPlaneOutbound\.denyCidrs/,
+  assert.match(accepted.values, /channelDirectoryProxyUrl: http:\/\/192\.0\.2\.10:8080/);
+  assert.match(accepted.installation, /proxyUrl: http:\/\/192\.0\.2\.10:8080/);
+  KubernetesComputeDriver.validateConfiguration(
+    loadYaml(accepted.installation).drivers.compute.configuration,
   );
 });
 
 for (const profile of ["openclaw", "codex"]) {
   for (const proxyUrl of ["http://192.0.2.10:80", "https://192.0.2.10:443"]) {
-    test(`${profile} preserves explicit default control-plane proxy port in ${proxyUrl}`, (t) => {
+    test(`${profile} preserves explicit default channel proxy port in ${proxyUrl}`, (t) => {
       const input = profile === "codex" ? codexInput() : baseInput();
-      input.controlPlaneOutbound = { proxyUrl };
+      input.channels = { directoryProxyUrl: proxyUrl, runtimeProxyUrl: proxyUrl };
       const output = render(profile, input);
       t.after(() => rmSync(output.directory, { recursive: true, force: true }));
       assert.equal(output.preflight.ok, true);
-      assert.equal(loadYaml(output.values).api.controlPlaneOutboundProxyUrl, proxyUrl);
+      assert.equal(loadYaml(output.values).api.channelDirectoryProxyUrl, proxyUrl);
       const compute = loadYaml(output.installation).drivers.compute.configuration;
-      assert.equal(compute.runtime.channels, undefined);
+      assert.equal(compute.runtime.channels.proxyUrl, proxyUrl);
       // Installation validation runs even before an Agent enables a channel.
       assert.doesNotThrow(() => KubernetesComputeDriver.validateConfiguration(compute));
     });
   }
 }
+
+test("channel proxy validation preserves explicit ports and exact managed peers", (t) => {
+  const output = render("openclaw", baseInput());
+  t.after(() => rmSync(output.directory, { recursive: true, force: true }));
+  const compute = loadYaml(output.installation).drivers.compute.configuration;
+  const managed = structuredClone(compute.runtime.channels);
+  assert.equal(managed.managedProxy.port, 3128);
+  KubernetesComputeDriver.validateConfiguration(compute);
+
+  // IPv6 is supported by Compute directly; profile input intentionally remains IPv4-only.
+  for (const proxyUrl of [
+    " http://192.0.2.10:8080 ",
+    "http://[2001:db8::10]:80",
+    "https://[2001:db8::10]:443/",
+    "http://192.0.2.10:443",
+    "https://192.0.2.10:80/",
+  ]) {
+    compute.runtime.channels = { proxyUrl };
+    assert.doesNotThrow(() => KubernetesComputeDriver.validateConfiguration(compute), proxyUrl);
+  }
+  for (const [scheme, port] of [
+    ["http", 80],
+    ["https", 443],
+  ]) {
+    compute.runtime.channels = {
+      ...managed,
+      proxyUrl: `${scheme}://${managed.managedProxy.hostname}:${port}/`,
+      managedProxy: { ...managed.managedProxy, port },
+    };
+    assert.doesNotThrow(() => KubernetesComputeDriver.validateConfiguration(compute));
+  }
+
+  for (const proxyUrl of [
+    "http://192.0.2.10",
+    "https://[2001:db8::10]",
+    "http://192.0.2.10:0",
+    "http://192.0.2.10:65536",
+    syntheticCredentialUrl({
+      protocol: "http",
+      username: "proxy-user",
+      password: "synthetic-password",
+      host: "192.0.2.10",
+      port: 80,
+    }),
+    "http://192.0.2.10:80/path",
+    "http://192.0.2.10:80?query=1",
+    "https://192.0.2.10:443#fragment",
+    "ftp://192.0.2.10:80",
+    "http://proxy.example.invalid:80",
+  ]) {
+    compute.runtime.channels = { proxyUrl };
+    assert.throws(() => KubernetesComputeDriver.validateConfiguration(compute), /Channel proxy/i);
+  }
+  // A valid peer grant never authorizes a different Service, port, or URL credentials.
+  for (const proxyUrl of [
+    "http://other.openclaw-system.svc:80",
+    `http://${managed.managedProxy.hostname}:443`,
+    `http://${managed.managedProxy.hostname}`,
+    syntheticCredentialUrl({
+      protocol: "http",
+      username: "proxy-user",
+      password: "synthetic-password",
+      host: managed.managedProxy.hostname,
+      port: 80,
+    }),
+  ]) {
+    compute.runtime.channels = {
+      ...managed,
+      proxyUrl,
+      managedProxy: { ...managed.managedProxy, port: 80 },
+    };
+    assert.throws(() => KubernetesComputeDriver.validateConfiguration(compute), /channel proxy/i);
+  }
+});
+
+test("channel proxy validation preserves omitted-port endpoint diagnostics", (t) => {
+  const output = render("openclaw", baseInput());
+  t.after(() => rmSync(output.directory, { recursive: true, force: true }));
+  const compute = loadYaml(output.installation).drivers.compute.configuration;
+  const managed = structuredClone(compute.runtime.channels);
+
+  for (const proxyUrl of [
+    "http://192.0.2.10",
+    "https://[2001:db8::10]",
+    "http://proxy.example.invalid:8080",
+    "http://192.0.2.10:8080/path",
+  ]) {
+    compute.runtime.channels = { proxyUrl };
+    assert.throws(() => KubernetesComputeDriver.validateConfiguration(compute), {
+      message: "Channel proxy URL must identify one credential-free HTTP(S) IP endpoint.",
+    });
+  }
+  for (const proxyUrl of [
+    `http://${managed.managedProxy.hostname}`,
+    `http://${managed.managedProxy.hostname}:8080`,
+    "http://other.openclaw-system.svc:3128",
+  ]) {
+    compute.runtime.channels = { ...managed, proxyUrl };
+    assert.throws(() => KubernetesComputeDriver.validateConfiguration(compute), {
+      message: "Managed channel proxy URL must match the exact configured Service host and port.",
+    });
+  }
+});
 
 test("profiles refuse database CA keys the chart refuses", () => {
   const withCa = (key) =>
@@ -2879,7 +2770,10 @@ test("the codex profile carries a Codex model endpoint under Compute startup's r
           ...compute,
           runtime: { ...compute.runtime, codexModelBaseUrl: value },
         }),
-      undefined,
+      // Compute startup has no separate nonempty-string refusal; its general rule covers it.
+      {
+        message: `Codex model endpoint ${message === "must be a nonempty string." ? general : message}`,
+      },
       JSON.stringify(value),
     );
   }

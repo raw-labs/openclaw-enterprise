@@ -14,11 +14,18 @@ import {
   slackApi,
   waitFor,
 } from "../helpers/harness-topology-k3d-real.mjs";
+import { boundedTeardown } from "../helpers/kubernetes-real.mjs";
+
+// The topology registers its platform Namespace delete before the worker and port-forward stops.
+// Run them newest-first, each bounded and all attempted (finding 1711).
+const topologyTeardown = (testContext) =>
+  boundedTeardown(testContext, { label: "production topology teardown" });
 
 test(
   "production k3d gateway replies once to a real Slack message through its approved proxy and Codex Agent",
   { ...requiresLiveSlack, timeout: 780_000 },
-  async (context) => {
+  async (testContext) => {
+    const { context } = topologyTeardown(testContext);
     for (const key of [
       "OCC_TEST_SLACK_PROXY_URL",
       "OCC_TEST_SLACK_CHANNEL_ID",
@@ -31,8 +38,8 @@ test(
     const proxy = new URL(process.env.OCC_TEST_SLACK_PROXY_URL);
     const address = proxy.hostname.replace(/^\[|\]$/g, "");
     const family = isIP(address);
-    assert.notEqual(family, 0, "the approved API proxy must use an exact literal IP");
-    assert.notEqual(proxy.port, "", "the approved API proxy requires an explicit port");
+    assert.notEqual(family, 0, "the approved channel proxy must use an exact literal IP");
+    assert.notEqual(proxy.port, "", "the approved channel proxy requires an explicit port");
     const [gatewayIdentity, senderIdentity] = await Promise.all([
       slackApi("auth.test", process.env.SLACK_BOT_TOKEN),
       slackApi("auth.test", process.env.OCC_TEST_SLACK_SENDER_BOT_TOKEN),
@@ -122,49 +129,26 @@ test(
       false,
       "Agent revisions must not persist the external sender credential",
     );
-    const outboundName = `gateway-outbound-${suffix}-${hash(topology.revision.id)}`;
     assert.equal(
       gatewayEnvironment.find(({ name }) => name === "HTTPS_PROXY")?.value,
-      `http://${outboundName}.${topology.gatewayPlacement}.svc:3128`,
-    );
-    assert.notEqual(
-      gatewayEnvironment.find(({ name }) => name === "HTTPS_PROXY")?.value,
       slack.proxyUrl,
-      "the API's management route grants no shared Gateway authority",
     );
     const policy = await resource(
       "networkpolicy",
-      `${outboundName}-gateway`,
+      `allow-gateway-channels-${suffix}`,
       topology.gatewayPlacement,
     );
+    // NetworkPolicy scopes its Pod selector to the owning Kubernetes namespace.
     assert.equal(policy.metadata.namespace, topology.gatewayPlacement);
     assert.deepEqual(policy.spec.podSelector.matchLabels, {
       "openclaw.dev/network-profile": "broad-egress-v1",
       "openclaw.dev/workload-role": "gateway",
-      "openclaw.dev/namespace": topology.agent.namespaceId,
       "openclaw.dev/agent": topology.agent.id,
-      "openclaw.dev/revision": topology.revision.id,
     });
     assert.deepEqual(policy.spec.egress, [
       {
-        to: [
-          {
-            namespaceSelector: {
-              matchLabels: { "kubernetes.io/metadata.name": topology.gatewayPlacement },
-            },
-            podSelector: {
-              matchLabels: {
-                "app.kubernetes.io/managed-by": "openclaw-enterprise",
-                "openclaw.dev/network-profile": "gateway-outbound-v1",
-                "openclaw.dev/workload-role": "gateway-outbound",
-                "openclaw.dev/namespace": topology.agent.namespaceId,
-                "openclaw.dev/agent": topology.agent.id,
-                "openclaw.dev/revision": topology.revision.id,
-              },
-            },
-          },
-        ],
-        ports: [{ protocol: "TCP", port: 3128 }],
+        to: [{ ipBlock: { cidr: `${address}/${family === 4 ? 32 : 128}` } }],
+        ports: [{ protocol: "TCP", port: Number(proxy.port) }],
       },
     ]);
     const target = await resource("pod", topology.approvedClient, topology.platformNamespace);

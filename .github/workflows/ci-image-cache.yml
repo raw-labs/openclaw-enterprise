@@ -62,7 +62,7 @@ jobs:
     name: Warm Image Cache
     if: ${{ github.ref == 'refs/heads/main' }}
     # The image lanes' runner, so the cache is written where they read it.
-    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     # Each image's build may take 20 min and its cache export 20 min more
     # (prepare.mjs); the two images run side by side.
     timeout-minutes: 45

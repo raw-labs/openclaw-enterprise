@@ -357,15 +357,15 @@ DNS/TLS, both Helm passes, recovery and destructive teardown.
 
 ## Debugging and Verification
 
-- `node --test tests/integration/dev-up.test.mjs` exercises profile selection,
-  generated configuration, authenticated readiness, rollback, and cleanup with
-  inert external engine and cluster commands.
+- `node --test tests/integration/dev-up-compose.test.mjs tests/integration/dev-up.test.mjs`
+  exercises profile selection, generated configuration, authenticated readiness,
+  rollback, and cleanup with inert engine and cluster commands.
 - `OCC_TEST_DEV_UP_OPENSHELL_REAL=1 node --test tests/integration/dev-up-openshell-k3d-real.test.mjs`
   selects the Kubernetes-only real-cluster proof.
 - `OCC_TEST_DEV_UP_OPENSHELL_COMPOSE_REAL=1 node --test tests/integration/dev-up-openshell-k3d-real.test.mjs`
   selects the Compose-backed real-cluster proof.
 - `OCC_TEST_DEV_UP_K3D_REAL=1 node --test tests/integration/dev-up-k3d-real.test.mjs`
-  selects the [real launcher cases](../../testing/keycloak.md#local-launcher-coverage),
+  selects the [real launcher cases](../../testing/kubernetes.md#keycloak-local-launcher-coverage),
   including Keycloak login, persistence and failure cleanup.
 
 - `OCC_TEST_LOCAL_FIRST_AGENT_CONTROL_UI=1 node --test tests/integration/local-first-agent-real.test.mjs`

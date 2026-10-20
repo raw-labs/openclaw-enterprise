@@ -1,9 +1,10 @@
-import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
-import { createBundledChannelDriver } from "../../apps/controller/src/composition/channel.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import test from "node:test";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 
+import { InMemoryAuditSink } from "../../packages/audit/src/index.ts";
 import { createConsoleAppFixture, backendFixtures } from "../helpers/console-app.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import {
@@ -178,6 +179,104 @@ test("console collection APIs keep exact Namespace and Agent IAM boundaries", as
   );
 });
 
+test("caller permission summaries report primary IAM decisions without authorizing a later operation", async (t) => {
+  const auditSink = new InMemoryAuditSink();
+  const fixture = await createConsoleAppFixture(t, { auditSink });
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Permission summaries", { ready: true });
+  const agent = await fixture.createAgent(namespace.id, "Summarized agent");
+  const other = await fixture.createAgent(namespace.id, "Unshared agent");
+  const agentPath = `/namespaces/${namespace.id}/agents/${agent.id}`;
+  const permissionsPath = `${agentPath}/permissions`;
+  const namespacePath = `/namespaces/${namespace.id}/permissions`;
+
+  const admin = await fixture.request("GET", permissionsPath);
+  assert.equal(admin.status, 200);
+  assert.deepEqual(admin.data, { update: true, deploy: true, operate: true, delete: true });
+  const adminNamespace = await fixture.request("GET", namespacePath);
+  assert.equal(adminNamespace.status, 200);
+  assert.deepEqual(adminNamespace.data, { agents: { create: true } });
+
+  // Namespace read plus exact read and deploy on one Agent: only deploy is reported.
+  const limited = await fixture.createAccountWithPolicy("permission-summary", (principal) => {
+    fixture.policy.roles.push(
+      {
+        id: "role-permission-summary-namespace",
+        namespaceId: namespace.id,
+        permissions: [{ action: "read", resourceKind: "namespace" }],
+      },
+      {
+        id: "role-permission-summary-agent",
+        namespaceId: namespace.id,
+        permissions: [
+          { action: "read", resourceKind: "agent" },
+          { action: "deploy", resourceKind: "agent" },
+        ],
+      },
+    );
+    fixture.policy.bindings.push(
+      {
+        id: "binding-permission-summary-namespace",
+        namespaceId: namespace.id,
+        subjectKind: "identity",
+        subjectId: principal.id,
+        roleId: "role-permission-summary-namespace",
+      },
+      {
+        id: "binding-permission-summary-agent",
+        namespaceId: namespace.id,
+        subjectKind: "identity",
+        subjectId: principal.id,
+        roleId: "role-permission-summary-agent",
+        resourceKind: "agent",
+        resourceId: agent.id,
+      },
+    );
+  });
+  const session = await fixture.signIn(limited.credentials);
+  const summary = await fixture.request("GET", permissionsPath, { session });
+  assert.equal(summary.status, 200);
+  assert.deepEqual(summary.data, { update: false, deploy: true, operate: false, delete: false });
+  const namespaceSummary = await fixture.request("GET", namespacePath, { session });
+  assert.equal(namespaceSummary.status, 200);
+  assert.deepEqual(namespaceSummary.data, { agents: { create: false } });
+  // A false flag is an answer, not an attempted operation, so nothing is audited as denied.
+  const denials = () => auditSink.list().filter((event) => event.kind === "authorization_denial");
+  assert.equal(denials().length, 0);
+
+  // The summary itself requires Agent read and an existing Agent.
+  const unshared = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/agents/${other.id}/permissions`,
+    { session },
+  );
+  assert.equal(unshared.status, 403);
+  assert.equal(unshared.body.error.code, "FORBIDDEN");
+  assert.deepEqual(
+    denials().map((event) => event.action),
+    ["openclaw.agents.permissions.read"],
+  );
+  const missing = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/agents/agt_00000000-0000-4000-8000-000000000000/permissions`,
+  );
+  assert.equal(missing.status, 404);
+
+  // The summary reported deploy: true. This caller lacks the Configuration read needed to deploy.
+  const configurationPath = `/namespaces/${namespace.id}/configurations/${agent.configurationId}`;
+  assert.equal((await fixture.request("GET", configurationPath, { session })).status, 403);
+  const revisionsPath = `${agentPath}/revisions`;
+  const before = await fixture.request("GET", revisionsPath);
+  assert.equal(before.status, 200);
+  const deploy = await fixture.request("POST", `${agentPath}/deploy`, { session });
+  assert.equal(deploy.status, 403);
+  assert.equal(deploy.body.error.code, "FORBIDDEN");
+  assert.equal(denials().at(-1).action, "openclaw.agents.deploy");
+  const after = await fixture.request("GET", revisionsPath);
+  assert.equal(after.status, 200);
+  assert.deepEqual(after.data, before.data, "denied deployment created no revision");
+});
+
 test("console static routes expose only public assets and preserve API JSON failures", async (t) => {
   const fixture = await createConsoleAppFixture(t);
 
@@ -232,6 +331,129 @@ test("console static routes expose only public assets and preserve API JSON fail
   const methodMiss = await fixture.rawRequest("POST", "/backends");
   assert.equal(methodMiss.response.status, 405);
   assert.equal(JSON.parse(methodMiss.text).error.code, "METHOD_NOT_ALLOWED");
+});
+
+test("console scripts and styles are compressed when accepted; the shell and binaries are not", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  const host = new URL(fixture.origin).host;
+  const consoleFile = (path) =>
+    readFile(new URL(`../../apps/controller/src/console/${path}`, import.meta.url));
+  // Read the wire bytes: Fetch decodes content codings before exposing its body.
+  const fetchRaw = (url, headers = {}, method = "GET") =>
+    new Promise((resolve, reject) => {
+      const request = httpRequest(
+        new URL(url, fixture.origin),
+        { method, headers: { host, ...headers } },
+        (response) => {
+          const chunks = [];
+          response.on("data", (chunk) => chunks.push(chunk));
+          response.on("error", reject);
+          response.on("end", () =>
+            resolve({
+              statusCode: response.statusCode,
+              headers: response.headers,
+              rawPayload: Buffer.concat(chunks),
+            }),
+          );
+        },
+      );
+      request.on("error", reject);
+      request.end();
+    });
+
+  const script = await consoleFile("agents/detail.mjs");
+  const plain = await fetchRaw("/console/agents/detail.mjs");
+  assert.equal(plain.statusCode, 200);
+  assert.equal(plain.headers["content-encoding"], undefined);
+  assert.equal(plain.headers.vary, "Accept-Encoding");
+  assert.deepEqual(plain.rawPayload, script);
+  const csp = plain.headers["content-security-policy"];
+  assert.match(csp, /script-src 'self'/);
+
+  for (const [acceptEncoding, encoding, decode] of [
+    ["gzip", "gzip", gunzipSync],
+    ["gzip, deflate, br, zstd", "br", brotliDecompressSync],
+    ["br;q=0.5, gzip;q=1", "gzip", gunzipSync],
+    ["identity;q=0.5, gzip;q=1", "gzip", gunzipSync],
+    ["identity;q=0, gzip;q=0.5", "gzip", gunzipSync],
+    ["identity;q=1, br;q=1, gzip;q=1", "br", brotliDecompressSync],
+    ["*", "br", brotliDecompressSync],
+  ]) {
+    const result = await fetchRaw("/console/agents/detail.mjs", {
+      "accept-encoding": acceptEncoding,
+    });
+    assert.equal(result.statusCode, 200, acceptEncoding);
+    assert.equal(result.headers["content-encoding"], encoding, acceptEncoding);
+    assert.equal(result.headers.vary, "Accept-Encoding", acceptEncoding);
+    assert.match(result.headers["content-type"], /javascript/, acceptEncoding);
+    assert.equal(Number(result.headers["content-length"]), result.rawPayload.length);
+    assert.ok(result.rawPayload.length < script.length / 3, acceptEncoding);
+    assert.deepEqual(decode(result.rawPayload), script, acceptEncoding);
+    // Compression changes neither the CSP nor the API headers that keep assets uncached.
+    assert.equal(result.headers["content-security-policy"], csp);
+    assert.equal(result.headers["cache-control"], "no-store");
+    assert.equal(result.headers["x-content-type-options"], "nosniff");
+  }
+
+  for (const acceptEncoding of [
+    "identity",
+    "br;q=0, gzip;q=0",
+    "deflate",
+    "*;q=0",
+    "identity;q=1, gzip;q=0.5",
+    "br;q=0.5, identity;q=1",
+    "identity;q=1, *;q=0.5",
+  ]) {
+    const result = await fetchRaw("/console/console.css", { "accept-encoding": acceptEncoding });
+    assert.equal(result.headers["content-encoding"], undefined, acceptEncoding);
+    assert.equal(result.headers.vary, "Accept-Encoding", acceptEncoding);
+    assert.deepEqual(result.rawPayload, await consoleFile("console.css"), acceptEncoding);
+  }
+
+  // HEAD reports the GET representation. Range is unsupported: it must keep returning the whole
+  // encoded body, never a slice of it, until someone adds range support on purpose.
+  const gzipGet = await fetchRaw("/console/console.css", { "accept-encoding": "gzip" });
+  const head = await fetchRaw("/console/console.css", { "accept-encoding": "gzip" }, "HEAD");
+  assert.equal(head.statusCode, 200);
+  assert.equal(head.headers["content-encoding"], "gzip");
+  assert.equal(head.headers["content-length"], gzipGet.headers["content-length"]);
+  assert.equal(head.rawPayload.length, 0);
+  const identityHead = await fetchRaw(
+    "/console/console.css",
+    { "accept-encoding": "identity;q=1, gzip;q=0.5" },
+    "HEAD",
+  );
+  assert.equal(identityHead.statusCode, 200);
+  assert.equal(identityHead.headers["content-encoding"], undefined);
+  assert.equal(
+    identityHead.headers["content-length"],
+    String((await consoleFile("console.css")).length),
+  );
+  assert.equal(identityHead.rawPayload.length, 0);
+  const ranged = await fetchRaw("/console/console.css", {
+    "accept-encoding": "gzip",
+    range: "bytes=0-9",
+  });
+  assert.equal(ranged.statusCode, 200);
+  assert.deepEqual(ranged.rawPayload, gzipGet.rawPayload);
+
+  // The generated preset module is compressed like the files beside it.
+  const preset = await fetchRaw("/console/default-codex-preset.mjs", { "accept-encoding": "gzip" });
+  assert.equal(preset.headers["content-encoding"], "gzip");
+  assert.match(gunzipSync(preset.rawPayload).toString("utf8"), /^export default \{/);
+
+  // The shell also answers the sign-in route; it and binary assets are always identity.
+  for (const path of ["/console/login", "/console/", "/console/missing.css"]) {
+    const result = await fetchRaw(path, { "accept-encoding": "gzip, br" });
+    assert.equal(result.headers["content-encoding"], undefined, path);
+    assert.equal(result.headers.vary, undefined, path);
+    assert.deepEqual(result.rawPayload, await consoleFile("index.html"), path);
+  }
+  for (const path of ["/console/oce-mascot.png", "/console/fonts/instrument-sans-latin.woff2"]) {
+    const result = await fetchRaw(path, { "accept-encoding": "gzip, br" });
+    assert.equal(result.statusCode, 200, path);
+    assert.equal(result.headers["content-encoding"], undefined, path);
+  }
 });
 
 test("console auth routes reject untrusted browser origins and issue production session cookies", async (t) => {
@@ -463,481 +685,3 @@ test("public Agent revisions return the selected binding without private credent
   const historical = await fixture.request("GET", `${path}/${revision.id}`);
   assert.deepEqual(historical.data.harnessAuth, agent.harnessAuth);
 });
-
-for (const providerId of ["codex", "openai", "anthropic"]) {
-  test(`REST ${providerId} Agent admission rejects blocked native plugin policy without changing Configuration`, async (t) => {
-    const harnessId = providerId === "codex" ? "codex" : "openclaw";
-    const executionMode = harnessId === "codex" ? "dedicated" : "embedded";
-    const configurationValues = () => {
-      const values = createHarnessConfiguration(harnessId, "gpt-5.1");
-      values.plugins ??= {};
-      if (providerId === "anthropic") {
-        const ref = "anthropic/claude-sonnet-4-5";
-        values.agents.defaults = {
-          model: ref,
-          models: { [ref]: { agentRuntime: { id: "openclaw" } } },
-        };
-        values.models.providers = {
-          anthropic: { api: "anthropic-messages", models: [{ id: "claude-sonnet-4-5" }] },
-        };
-      }
-      return values;
-    };
-    const fixture = await createConsoleAppFixture(t, {
-      filesystemConfiguration: true,
-      channelRuntime: true,
-    });
-    await fixture.bootstrap();
-    const namespace = await fixture.createNamespace(`REST ${providerId} native plugin policy`, {
-      ready: true,
-    });
-    const secret = await fixture.createSecret(namespace.id, "Model key", "synthetic-model-key");
-    const policies = [
-      [{ allow: ["knowledge"] }, "plugins.allow"],
-      [{ deny: [` ${providerId.toUpperCase()} `] }, "plugins.deny"],
-      [{ enabled: false }, "plugins.enabled"],
-      [{ entries: { [providerId]: { enabled: false } } }, `plugins.entries.${providerId}.enabled`],
-      [
-        { entries: { [providerId.toUpperCase()]: { enabled: false } } },
-        `plugins.entries.${providerId}.enabled`,
-      ],
-      // Required-plugin aliases are ambiguous in either order, even with equal enablement.
-      ...[true, false].flatMap((enabled) =>
-        [false, true].map((reverse) => {
-          const entries = [
-            [providerId, { enabled: true }],
-            [` ${providerId.toUpperCase()} `, { enabled }],
-          ];
-          return [
-            { entries: Object.fromEntries(reverse ? entries.reverse() : entries) },
-            "plugins.entries must contain at most one entry",
-          ];
-        }),
-      ),
-      [{ allow: providerId }, "plugins.allow"],
-      [{ deny: [42] }, "plugins.deny"],
-    ];
-    for (const [policy, setting] of policies) {
-      const values = configurationValues();
-      Object.assign(values.plugins, policy);
-      // Configuration may be staged; binding an Agent must reject policy that blocks its runtime or provider.
-      const configuration = await fixture.createConfiguration(namespace.id, values);
-      const response = await fixture.request("POST", `/namespaces/${namespace.id}/agents`, {
-        body: {
-          name: `Blocked ${providerId} Agent`,
-          executionMode,
-          configurationId: configuration.id,
-          harnessAuth: { method: "api_key", source: secret.ref },
-        },
-      });
-      assert.equal(response.status, 400, JSON.stringify(response.body));
-      assert.equal(response.body.error.code, "INVALID_REQUEST");
-      assert.ok(response.body.error.message.includes(setting), response.body.error.message);
-      const saved = await fixture.request(
-        "GET",
-        `/namespaces/${namespace.id}/configurations/${configuration.id}`,
-      );
-      assert.deepEqual(saved.data.values.plugins, values.plugins);
-      assert.deepEqual(
-        (await fixture.request("GET", `/namespaces/${namespace.id}/agents`)).data,
-        [],
-      );
-    }
-    // Missing/empty allowlists are unrestricted; explicit permission remains valid without rewriting it.
-    for (const allow of [
-      undefined,
-      [],
-      ["knowledge", providerId],
-      [` ${providerId.toUpperCase()} `],
-    ]) {
-      const values = configurationValues();
-      delete values.plugins.allow;
-      if (allow !== undefined) {
-        values.plugins.allow = allow;
-      }
-      values.plugins.deny = ["blocked-plugin"];
-      const configuration = await fixture.createConfiguration(namespace.id, values);
-      const response = await fixture.request("POST", `/namespaces/${namespace.id}/agents`, {
-        body: {
-          name: `Allowed ${providerId} ${JSON.stringify(allow)}`,
-          executionMode,
-          configurationId: configuration.id,
-          harnessAuth: { method: "api_key", source: secret.ref },
-        },
-      });
-      assert.equal(response.status, 201, JSON.stringify(response.body));
-      const saved = await fixture.request(
-        "GET",
-        `/namespaces/${namespace.id}/configurations/${configuration.id}`,
-      );
-      assert.deepEqual(saved.data.values.plugins, values.plugins);
-    }
-
-    const existing = await fixture.createAgent(
-      namespace.id,
-      "Policy update Agent",
-      configurationValues(),
-      {
-        executionMode,
-        harnessAuth: { method: "api_key", source: secret.ref },
-      },
-    );
-    const blocked = configurationValues();
-    blocked.plugins.allow = ["knowledge"];
-    // Staged Configuration edits cannot bypass validation through an existing Agent or deployment.
-    await fixture.updateConfiguration(namespace.id, existing.configurationId, blocked);
-    for (const [method, path, body] of [
-      [
-        "PATCH",
-        `/namespaces/${namespace.id}/agents/${existing.id}`,
-        { configurationId: existing.configurationId },
-      ],
-      ["POST", `/namespaces/${namespace.id}/agents/${existing.id}/deploy`, undefined],
-    ]) {
-      const response = await fixture.request(method, path, { body });
-      assert.equal(response.status, 400, `${method} ${path}: ${JSON.stringify(response.body)}`);
-      assert.equal(response.body.error.code, "INVALID_REQUEST");
-      assert.ok(response.body.error.message.includes("plugins.allow"), response.body.error.message);
-    }
-    const saved = await fixture.request(
-      "GET",
-      `/namespaces/${namespace.id}/configurations/${existing.configurationId}`,
-    );
-    assert.deepEqual(saved.data.values.plugins, blocked.plugins);
-    const unchanged = await fixture.request(
-      "GET",
-      `/namespaces/${namespace.id}/agents/${existing.id}`,
-    );
-    assert.equal(unchanged.data.name, "Policy update Agent");
-    assert.equal(unchanged.data.activeRevisionId, existing.activeRevisionId);
-  });
-}
-
-test("Gateway outbound approval is exact-Agent authority and deployment freezes its selection", async (t) => {
-  const fixture = await createConsoleAppFixture(t, {
-    channelRuntime: true,
-    gatewayOutbound: {
-      enabled: true,
-      allowPublicHttps: true,
-      image: "controller:local",
-      denyCidrs: ["10.0.0.0/8"],
-    },
-  });
-  await fixture.bootstrap();
-  const namespace = await fixture.createNamespace("Gateway outbound", { ready: true });
-  const agent = await fixture.createAgent(
-    namespace.id,
-    "Native integrations",
-    createHarnessConfiguration("codex", "gpt-5.1"),
-    { executionMode: "dedicated" },
-  );
-  const path = `/namespaces/${namespace.id}/agents/${agent.id}`;
-  const other = await fixture.createAgent(
-    namespace.id,
-    "Other Agent",
-    createHarnessConfiguration("codex", "gpt-5.1"),
-    { executionMode: "dedicated" },
-  );
-  const limited = await fixture.createAccountWithPolicy("outbound-editor", (principal) => {
-    fixture.policy.roles.push({
-      id: "outbound-editor",
-      namespaceId: namespace.id,
-      permissions: [
-        { action: "read", resourceKind: "agent" },
-        { action: "update", resourceKind: "agent" },
-        { action: "read", resourceKind: "configuration" },
-        { action: "operate", resourceKind: "secret" },
-      ],
-    });
-    fixture.policy.bindings.push({
-      id: "outbound-editor",
-      namespaceId: namespace.id,
-      subjectKind: "identity",
-      subjectId: principal.id,
-      roleId: "outbound-editor",
-      resourceKind: "agent",
-      resourceId: agent.id,
-    });
-    fixture.policy.bindings.push({
-      id: "outbound-auth",
-      namespaceId: namespace.id,
-      subjectKind: "identity",
-      subjectId: principal.id,
-      roleId: "outbound-editor",
-      resourceKind: "secret",
-      resourceId: agent.harnessAuth.source.id,
-    });
-    fixture.policy.bindings.push({
-      id: "outbound-config-reader",
-      namespaceId: namespace.id,
-      subjectKind: "identity",
-      subjectId: principal.id,
-      roleId: "outbound-editor",
-      resourceKind: "configuration",
-      resourceId: agent.configurationId,
-    });
-  });
-  const session = await fixture.signIn(limited.credentials);
-  const capabilities = await fixture.request("GET", `${path}/gateway-outbound/capabilities`, {
-    session,
-  });
-  assert.equal(capabilities.status, 200);
-  assert.equal(capabilities.data.canConfigure, false);
-  const denied = await fixture.request("PATCH", path, {
-    session,
-    body: { configurationId: agent.configurationId, gatewayOutbound: { mode: "publicHttps" } },
-  });
-  assert.equal(
-    denied.status,
-    403,
-    "ordinary Configuration editors cannot grant plugin connectivity",
-  );
-  assert.equal((await fixture.request("GET", path)).data.gatewayOutbound.mode, "channelsOnly");
-  fixture.policy.roles.push({
-    id: "outbound-admin",
-    namespaceId: namespace.id,
-    permissions: [{ action: "administer", resourceKind: "agent" }],
-  });
-  fixture.policy.bindings.push({
-    id: "outbound-admin",
-    namespaceId: namespace.id,
-    subjectKind: "identity",
-    subjectId: limited.principal.id,
-    roleId: "outbound-admin",
-    resourceKind: "agent",
-    resourceId: agent.id,
-  });
-  const allowed = await fixture.request("PATCH", path, {
-    session,
-    body: {
-      configurationId: agent.configurationId,
-      gatewayOutbound: { mode: "restricted", hosts: ["backend.composio.dev"] },
-    },
-  });
-  assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
-  assert.equal(
-    (await fixture.request("GET", `${path}/gateway-outbound/capabilities`, { session })).data
-      .canConfigure,
-    true,
-  );
-  const crossAgent = await fixture.request(
-    "PATCH",
-    `/namespaces/${namespace.id}/agents/${other.id}`,
-    {
-      session,
-      body: { configurationId: other.configurationId, gatewayOutbound: { mode: "publicHttps" } },
-    },
-  );
-  assert.equal(crossAgent.status, 403);
-  for (const hosts of [
-    ["127.0.0.1"],
-    ["*.example.com"],
-    ["HTTPS://example.com"],
-    ["example.com", "example.com"],
-  ]) {
-    assert.equal(
-      (
-        await fixture.request("PATCH", path, {
-          body: {
-            configurationId: agent.configurationId,
-            gatewayOutbound: { mode: "restricted", hosts },
-          },
-        })
-      ).status,
-      400,
-    );
-  }
-  const revision = await fixture.deployAgent(namespace.id, agent.id);
-  assert.deepEqual(revision.gatewayOutbound, {
-    selection: { mode: "restricted", hosts: ["backend.composio.dev"] },
-    requirements: [],
-    denyCidrs: ["10.0.0.0/8"],
-  });
-  await fixture.updateAgent(namespace.id, agent.id, {
-    configurationId: agent.configurationId,
-    gatewayOutbound: { mode: "publicHttps" },
-  });
-  const savedRevision = await fixture.request("GET", `${path}/revisions/${revision.id}`);
-  assert.deepEqual(
-    savedRevision.data.gatewayOutbound,
-    revision.gatewayOutbound,
-    "draft approval changes cannot broaden an already admitted revision",
-  );
-  const tightened = createTestKubernetesComputeDriver("tightened-compute", {
-    gatewayOutbound: {
-      enabled: true,
-      allowPublicHttps: false,
-      image: "controller:local",
-      denyCidrs: ["10.0.0.0/8"],
-    },
-  });
-  fixture.controller.registerDriver(tightened);
-  fixture.controller.selectDriver("compute", tightened.id);
-  const ordinarySave = await fixture.request("PATCH", path, {
-    session,
-    body: { configurationId: agent.configurationId },
-  });
-  assert.equal(
-    ordinarySave.status,
-    200,
-    "tightening the Installation does not block ordinary saved-draft edits",
-  );
-  assert.equal(ordinarySave.data.gatewayOutbound.mode, "publicHttps");
-  const refusedRedeploy = await fixture.request("POST", `${path}/deploy`);
-  assert.equal(
-    refusedRedeploy.status,
-    409,
-    "deployment still rechecks the new Installation ceiling",
-  );
-});
-
-test("Installation ceiling and embedded topology reject unsupported Gateway grants", async (t) => {
-  const fixture = await createConsoleAppFixture(t, {
-    channelRuntime: true,
-    gatewayOutbound: {
-      enabled: true,
-      allowPublicHttps: false,
-      image: "controller:local",
-      denyCidrs: ["10.0.0.0/8"],
-    },
-  });
-  await fixture.bootstrap();
-  const namespace = await fixture.createNamespace("Restricted Gateway", { ready: true });
-  const agent = await fixture.createAgent(
-    namespace.id,
-    "Dedicated",
-    createHarnessConfiguration("codex", "gpt-5.1"),
-    { executionMode: "dedicated" },
-  );
-  const path = `/namespaces/${namespace.id}/agents/${agent.id}`;
-  assert.equal(
-    (
-      await fixture.request("PATCH", path, {
-        body: { configurationId: agent.configurationId, gatewayOutbound: { mode: "publicHttps" } },
-      })
-    ).status,
-    409,
-  );
-  const embedded = await fixture.createAgent(
-    namespace.id,
-    "Embedded",
-    createHarnessConfiguration("openclaw", "gpt-5.1"),
-    { executionMode: "embedded" },
-  );
-  const refused = await fixture.request(
-    "PATCH",
-    `/namespaces/${namespace.id}/agents/${embedded.id}`,
-    {
-      body: {
-        configurationId: embedded.configurationId,
-        gatewayOutbound: { mode: "restricted", hosts: ["example.com"] },
-      },
-    },
-  );
-  assert.equal(refused.status, 409);
-});
-
-for (const enabled of [["slack"], ["msteams"], ["slack", "msteams"], []]) {
-  test(`enabled channels ${enabled.join("+") || "none"} derive immutable requirements without widening approved hosts`, async (t) => {
-    // Credential-provider responses and workloads are outside this admission proof.
-    // Production composition, Channel Drivers, HTTP/OCC/IAM and Configuration remain real.
-    const requirementsDriver = Object.assign(createBundledChannelDriver(), {
-      validateCredentials: undefined,
-    });
-    const fixture = await createConsoleAppFixture(t, {
-      channelRuntime: true,
-      channelDriver: requirementsDriver,
-      gatewayRouting: {
-        hostname: "agents.example.test",
-        gatewayName: "gateways",
-        gatewayNamespace: "gateway-system",
-        envoyNamespace: "envoy-system",
-        channels: { hostname: "callbacks.example.test" },
-      },
-      gatewayOutbound: { enabled: true, image: "controller:local", denyCidrs: ["10.0.0.0/8"] },
-    });
-    await fixture.bootstrap();
-    const namespace = await fixture.createNamespace("Automatic channel access", { ready: true });
-    const bot = await fixture.createSecret(namespace.id, "Channel bot", "synthetic-channel-bot");
-    const app = await fixture.createSecret(namespace.id, "Channel app", "synthetic-channel-app");
-    const teams = await fixture.createSecret(
-      namespace.id,
-      "Teams app password",
-      "synthetic-teams-password",
-    );
-    const secretBindings = {
-      SLACK_BOT_TOKEN: { source: bot.ref },
-      SLACK_APP_TOKEN: { source: app.ref },
-      MSTEAMS_APP_PASSWORD: { source: teams.ref },
-    };
-    const values = createHarnessConfiguration("codex", "gpt-5.1");
-    values.plugins.allow.push(...enabled);
-    for (const provider of enabled) {
-      values.plugins.entries[provider] = { enabled: true };
-    }
-    values.channels = {
-      msteams: {
-        enabled: enabled.includes("msteams"),
-        appId: "00000000-0000-4000-8000-000000000000",
-        tenantId: "11111111-1111-4111-8111-111111111111",
-        appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
-      },
-      slack: {
-        enabled: enabled.includes("slack"),
-        mode: "socket",
-        botToken: { source: "env", provider: "default", id: "SLACK_BOT_TOKEN" },
-        appToken: { source: "env", provider: "default", id: "SLACK_APP_TOKEN" },
-      },
-    };
-    const agent = await fixture.createAgent(namespace.id, "Channel integration", values, {
-      executionMode: "dedicated",
-      secretBindings,
-    });
-    fixture.grantAgentSecretOperate(agent, bot.ref);
-    fixture.grantAgentSecretOperate(agent, app.ref);
-    fixture.grantAgentSecretOperate(agent, teams.ref);
-    const selection = { mode: "restricted", hosts: ["backend.composio.dev"] };
-    await fixture.updateAgent(namespace.id, agent.id, {
-      configurationId: agent.configurationId,
-      gatewayOutbound: selection,
-    });
-    const revision = await fixture.deployAgent(namespace.id, agent.id);
-    assert.deepEqual(revision.gatewayOutbound.selection, selection);
-    assert.deepEqual(
-      revision.gatewayOutbound.requirements.map(({ source }) => source).sort(),
-      [...enabled].sort(),
-    );
-    if (enabled.includes("slack")) {
-      assert.ok(
-        revision.gatewayOutbound.requirements
-          .find(({ source }) => source === "slack")
-          .destinations.some(({ host }) => host === "slack.com"),
-      );
-    }
-    if (enabled.includes("msteams")) {
-      const requirement = revision.gatewayOutbound.requirements.find(
-        ({ source }) => source === "msteams",
-      );
-      assert.ok(requirement.destinations.some(({ host }) => host === "smba.trafficmanager.net"));
-      assert.ok(
-        requirement.destinations.every(({ includeSubdomains }) => includeSubdomains === false),
-      );
-    }
-    const frozen = structuredClone(revision.gatewayOutbound);
-    values.channels.slack.enabled = false;
-    values.channels.msteams.enabled = false;
-    await fixture.updateConfiguration(namespace.id, agent.configurationId, values);
-    const later = await fixture.deployAgent(namespace.id, agent.id);
-    assert.deepEqual(later.gatewayOutbound.selection, selection);
-    assert.deepEqual(
-      later.gatewayOutbound.requirements,
-      [],
-      "disabling a channel removes its derived requirement from the next version",
-    );
-    assert.deepEqual(
-      revision.gatewayOutbound,
-      frozen,
-      "the previous immutable version retains its own requirements",
-    );
-  });
-}

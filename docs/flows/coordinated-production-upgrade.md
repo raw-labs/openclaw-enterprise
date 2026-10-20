@@ -1,17 +1,19 @@
 ---
 created: 2026-09-23
-updated: "2026-10-16"
-last_updated_session: "authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584"
+updated: "2026-10-19"
+last_updated_session: "authoring-run/d59b973b-1f0b-46bb-b16f-d67bd24ed6d3"
 ---
 
 # Production image upgrade flow
 
 ## Overview
 
-`scripts/upgrade-production-images` updates OCC and/or Agent runtimes.
-Controller-only upgrades end after API/worker recovery. Runtime upgrades replace
-Agents running at invocation, then verify selected Pod readiness and read-only
-Gateway Doctor lint. Model and external integration checks remain operator tasks.
+`scripts/upgrade-production-images` updates the OpenClaw Control Plane (OCC),
+Agent runtimes, or both. The controller-only command ends after the OCC API and
+worker recover; it does not request Agent deployments. A runtime release deploys
+a new version for every Agent that was running when the command began and ends
+after the selected Pods are ready and each replacement gateway passes read-only
+Doctor lint. Model and external integration checks remain operator tasks.
 
 ## Entry Points
 
@@ -47,7 +49,7 @@ graph TD
     L --> M{"Dispatch response known?"}
     M -->|No| N["Read Agent and stop for reconciliation"]
     N --> L
-    M -->|Yes| O["Check revisions, Pods, and Doctor"]
+    M -->|Yes| O["Check versions, Pods, and Doctor"]
     O --> K
 ```
 
@@ -60,21 +62,15 @@ graph TD
 The script verifies the protected files, cluster, deployed Helm release, and
 matching OCC and Secret Installation IDs. It compares protected and live
 configuration in full, including selected image fields. It captures separate
-reviewed candidate files and accepts changes only to
-`api.controlPlaneOutboundProxyUrl` and the curated Codex PluginDriver selection. All other Helm and Installation
+reviewed candidate files and accepts changes only to the Slack directory proxy
+and the curated Codex PluginDriver selection. All other Helm and Installation
 settings remain protected, including new fields. The guard compares broker
 resource references, not the contents of referenced ConfigMaps or Secrets.
 Image flags select images after this comparison.
 A runtime release also reads complete authorized inventory and records every running Agent's baseline
-revision. Nonterminal deployment work, a missing active revision, or an unready
+version. Nonterminal deployment work, a missing selected version, or an unready
 Namespace stops preparation. Stopped and deleting Agents are excluded.
-
-`packages/occ/src/state/postgres-state.ts:operations.list` uses the queue's exact
-`isRepositoryCleanupWork` classifier. Completed cleanup, including history detached
-by `occ.finalize_agent_deletion`, stays in PostgreSQL but is excluded from resource
-operations. Unsettled or permanently failed cleanup raises `DependencyUnavailableError`;
-unknown targets retain validation. Queued or claimed revision reconciliation still
-blocks deployment inventory. See [inventory limits](../reference/cli.md#resource-commands).
+Pending repository cleanup does not block preparation.
 
 For repository-enabled releases, the helper requires explicit immutable
 controller and broker images. It inventories every node matching the control
@@ -115,7 +111,7 @@ the release-era tenant grant, SelfSubjectAccessReviews ask for the newer
 Event reads with runtime logs; worker: Pod `patch` and `batch` Job `get`, `create`,
 and `delete`). Worker Job grants are required even with runtime logs disabled.
 A missing rule refuses the candidate and points to
-[upgrading the execution chart](../testing/two-cluster-local.md#upgrade-the-execution-chart).
+[upgrading the execution chart](../testing/kubernetes.md#upgrade-the-execution-chart).
 Because the chart's default-deny NetworkPolicy also selects these Pods, the
 helper first creates a temporary NetworkPolicy carrying the rendered
 `openclaw-enterprise-dependency-egress` (and execution-cluster API) egress rules.
@@ -143,7 +139,7 @@ eligible-node set. Candidate files must still match the saved reviewed inputs; t
 helper applies the saved candidate. Unexpected drift or an in-progress Helm
 release stops the command.
 
-If a previously started Helm release is deployed at a newer revision with the
+If a previously started Helm release is deployed at a newer version with the
 candidate values, the script continues without repeating Helm. Otherwise it
 requires the operator's migration-history check and refuses a retry while an
 initialization Job or Pod remains active. A failed or disconnected migration may have
@@ -157,7 +153,7 @@ rollback. The guide describes the required attestation and recovery.
 Before changing the Secret or invoking Helm, the script scales the selected API
 and worker Deployments to zero, waits until their Pods disappear, and confirms
 both desired replica counts remain zero. Kubernetes requests in this phase share
-a bounded quiescence deadline. This covers the selected Helm release;
+the configured shutdown deadline. This covers the selected Helm release;
 it does not detect independent database writers, autoscalers, or partitioned
 nodes. The operator must stop those writers and keep nodes reachable.
 
@@ -169,8 +165,9 @@ If the candidate is already present after a lost response, it does not write it
 again. The candidate Installation checksum is included in both OCC Pod
 templates.
 
-A durable marker precedes `helm upgrade`. The candidate migrator and bootstrap
-run in the Helm initialization hook before API and worker rollout. If Helm
+A durable marker precedes `helm upgrade`. The Helm initialization hook checks
+the Installation, then runs the candidate migrator and bootstrap, before API and
+worker rollout. If Helm
 fails, resumption reads its current status and migration state before a retry;
 it does not start the old image to undo a committed schema change.
 
@@ -185,7 +182,7 @@ broker-enabled worker it also accepts a restartable init container, provided
 no worker exists in the ordinary container list. It rejects a non-restartable
 init worker or ambiguous placement. It retries authenticated OCC access and verifies the same Installation ID. A
 controller-only release then ends without requesting Agent deployments.
-An existing revision keeps the Pod specification of the controller that
+An existing version keeps the Pod specification of the controller that
 deployed it only until the worker prepares it again. Agents with repository
 credentials get a maintenance pass every 30 seconds (the repository Driver's
 `maintenanceIntervalMs`) until their repository session deadline. Other Agents
@@ -215,11 +212,11 @@ Before sending each ordinary exact-Agent deployment request, the script records
 an intent. Successful responses are saved atomically. On resume, existing
 responses are reused; an intent without a response triggers an Agent readback
 and stops for operator reconciliation. The helper does not infer rejection from
-an unchanged active revision or replay an unknown request. An operator can
+an unchanged selected version or replay an unknown request. An operator can
 record a verified accepted response and resume.
 
 The script polls each returned deployment through its authorized status
-operation, confirms active revision selection, and waits for all revision Pods
+operation, confirms the selected version, and waits for all version Pods
 to be `Running` and `Ready` on the candidate runtime digest. Before OpenClaw
 starts, `GATEWAY_RUNTIME_ENTRYPOINT` runs `openclaw doctor --fix
 --non-interactive` once when an agent database uses an older schema, such as a
@@ -254,25 +251,17 @@ checks the exported inventory before following the recovery procedure. Empty
 
 ## Debugging and Verification
 
-- `tests/integration/postgres-worker-agent-revision-teardown.test.mjs` and
-  `tests/integration/postgres-worker-agent-revision-stop.test.mjs` exercise
-  deployment inventory through PostgreSQL State and the real worker: completed
-  cleanup with live and deleted owners, retained queued or claimed cleanup,
-  unknown session outcomes, injected terminal cleanup failure, and a surviving
-  Agent's queued and claimed replacement. Repository and Compute boundary
-  Drivers provide observations; this does not verify a deployed upgrade or live
-  credential service. Follow [PostgreSQL setup](../testing/postgresql.md).
 - Inspect `server-dry-run.txt` for chart or admission failures before mutation,
   and `preflight-<api|worker>.log` and `-status.json` for a rejected candidate.
 - For OCC rollout failures, inspect `helm-upgrade.txt`, initialization Job logs,
   and API and worker rollout status.
-- For runtime failures, inspect `dispatch/*.error`, revision history, and
+- For runtime failures, inspect `dispatch/*.error`, version history, and
   `status/*.json` before retrying anything. Doctor failures are recorded in
   `status/*.doctor.json` and `status/*.doctor.error`.
 - Compare `before-workloads.json` and `after-workloads.json` for unexpected
   workload changes. The controller-only helper requests no Agent deployments;
   one same-image Pod template rollout per affected Agent is expected. Separately
-  check repository-bound revisions affected by broker restart.
+  check repository-bound versions affected by broker restart.
   Runtime proof should show the intended replacements.
 - Use the credentialed production Kubernetes integration with distinct baseline
   and candidate images for end-to-end proof. Mocked commands prove only script
@@ -294,13 +283,12 @@ checks the exported inventory before following the recovery procedure. Empty
 
 ## Changelog
 
-- 2026-10-16 08:42: Keep completed repository cleanup history out of resource operations while refusing unresolved cleanup during inventory reads. (authoring-run/87760e44-3e59-404d-9a1f-7507abe11351 - 80725162a946f80652b939a32a57ee4e922eeb5c)
+- 2026-10-19 22:34: Document that pending repository cleanup does not block upgrade preparation. (authoring-run/d59b973b-1f0b-46bb-b16f-d67bd24ed6d3 - 57acafe81482a890b02ae530793246f2c2e7be79)
 
-- 2026-10-15: Use the canonical API management proxy candidate field (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - 37472188e).
-
+- 2026-10-18: The initialization hook checks the Installation before migration.
 - 2026-10-12 15:14: Record bootstrap Job grants required by the two-cluster upgrade preflight alongside the fixture correction. (authoring-run/ebb1c629-97b2-4b9a-aa67-a5e750346031 - 9578f6f7aaff9b8545346f43043cbc5b9bcf674e)
 
-- 2026-10-10 03:30: Say that the worker's next preparation of an existing revision applies the new controller's Pod templates and rolls changed Pods once. (fix-990-991)
+- 2026-10-10 03:30: Say that the worker's next preparation of an existing version applies the new controller's Pod templates and rolls changed Pods once. (fix-990-991)
 
 - 2026-10-10 02:10: Require complete successful API responses before publishing the split-layout export bundle. (authoring-run/35b00357-b0c6-459f-aec1-b4fb63620dff - 0886f47d05fdeb2fa4359f4840fb77378d643bac)
 
@@ -309,7 +297,7 @@ checks the exported inventory before following the recovery procedure. Empty
 - 2026-10-09 20:10: Point the split-layout export at the split-layout upgrade page, where in-place adoption comes first. (fix-533-adopt)
 - 2026-10-07 21:20: Refuse a two-cluster upgrade before quiescence when the execution chart lacks this release's tenant grants. (fix-758)
 
-- 2026-10-07 12:00: Say that a controller-only release leaves existing revisions on their old Pod specification until the next deployment. (dogfood-r43)
+- 2026-10-07 12:00: Say that a controller-only release leaves existing versions on their old Pod specification until the next deployment. (dogfood-r43)
 
 - 2026-10-05 15:01: Keep filesystem layers outside the image identity metadata budget. (authoring-run/0b8bd46b-85c0-4664-8dbd-2ee77cd7b602 - 08248f8dbf227dfb7b73162056b6afd1c33cee0d)
 
@@ -333,7 +321,7 @@ checks the exported inventory before following the recovery procedure. Empty
 
 - 2026-09-25 13:40: Document Helm migration ordering and add post-readiness OpenClaw Doctor lint for replacement gateways. (authoring-run/d35fd05b-5bbd-4f21-a747-820c2df23b2c - 077e26ba0c0babe033569105e3a7e89abf06f40d)
 - 2026-09-25 12:29: Split controller and runtime releases while retaining an optional combined path. (authoring-run/ab700e2e-1baf-400c-ab18-0aa9a351f351 - 5e747ac1722f757d7949746e9ff9982142c8536b)
-- 2026-09-24 21:21: Separate operator instructions from the runtime trace; require revision-read admission, HTTPS, bounded Kubernetes reads, and the complete execution-mode workload set. (authoring-run/613d1e94-a661-4781-bae5-e28613aa3cf9 - c799988036f43ce1bb828373233f03cc77bb0ea9)
+- 2026-09-24 21:21: Separate operator instructions from the runtime trace; require version-read admission, HTTPS, Kubernetes reads with request timeouts, and the complete execution-mode workload set. (authoring-run/613d1e94-a661-4781-bae5-e28613aa3cf9 - c799988036f43ce1bb828373233f03cc77bb0ea9)
 - 2026-09-24: Record cluster/OCC identity binding, live/protected input equivalence, the supported empty-fleet path, and runtime Pod readiness discovered by the production rehearsal.
 - 2026-09-24 13:43: Trace fail-closed inventory admission, nonterminal deployment rejection, and the one-time controller-only bootstrap for older OCC versions. (authoring-run/0fc7c19b-0e15-498c-8328-e436bc702f37 - a7a609d5867398dd0dfd3bb77cfebf91b2cad116)
 - 2026-09-23 12:32: Trace matched image replacement and concurrent exact-Agent deployment through durable status convergence. (authoring-run/d29bdbc5-2a6a-46fa-a8e5-6ad78ea2e486 - 78cf9fd25f08e91158617fbd0ae3e42a22e54361)

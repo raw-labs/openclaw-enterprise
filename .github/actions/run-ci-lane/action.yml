@@ -20,10 +20,6 @@ inputs:
       separate job).
     required: false
     default: "true"
-  file-concurrency:
-    description: Optional test-file concurrency override for the selected lane.
-    required: false
-    default: ""
   job-timeout-minutes:
     description: >-
       The calling job's timeout-minutes. The runner stops every test file five minutes
@@ -129,10 +125,6 @@ runs:
       if: inputs.lane == 'checks-browser' || (inputs.lane == 'checks-baseline-1' && inputs.static-checks == 'false')
       shell: bash
       run: pnpm docs:install
-    - name: Load the runtime Codex AppArmor policy
-      if: inputs.lane == 'images-runtime-startup'
-      shell: bash
-      run: bash .github/actions/run-ci-lane/codex-sandbox.sh load
     - name: Run typecheck
       if: inputs.lane == 'checks-baseline-1'
       shell: bash
@@ -173,6 +165,8 @@ runs:
     - name: Prepare lane
       shell: bash
       env:
+        # Image builds keep a few minutes of it for the lane's tests (prepare.mjs).
+        CI_RUNNER_DEADLINE_MS: ${{ steps.deadline.outputs.ms }}
         OCC_CI_IMAGE_CACHE: ${{ (inputs.lane == 'images-packaging' || inputs.lane == 'images-model-probes' || inputs.lane == 'images-runtime-startup' || inputs.lane == 'images-runtime-startup-2' || inputs.lane == 'images-runtime-startup-3' || inputs.lane == 'repository-credentials-platform') && '1' || '' }}
         ACTIONS_RUNTIME_TOKEN: ${{ steps.image-cache.outputs.token }}
         ACTIONS_RESULTS_URL: ${{ steps.image-cache.outputs.url }}
@@ -184,8 +178,6 @@ runs:
     - name: Run lane
       shell: bash
       env:
-        # Configuration fixtures can select serial files on compatible hosts.
-        CI_RUNNER_FILE_CONCURRENCY: ${{ inputs.file-concurrency }}
         # Each file's timeout is CI_RUNNER_TEST_TIMEOUT_MS (60 minutes when unset), cut to what
         # is left before the lane deadline.
         CI_RUNNER_DEADLINE_MS: ${{ steps.deadline.outputs.ms }}
@@ -215,18 +207,10 @@ runs:
       continue-on-error: true
       shell: bash
       run: tail -n 120 "$RUNNER_TEMP/memory/${{ inputs.lane }}.log" || true
-    - name: Report sandbox host policy denials
-      if: failure() && inputs.lane == 'images-runtime-startup'
-      shell: bash
-      run: sudo dmesg --ctime | grep -E 'apparmor="(DENIED|AUDIT|ALLOWED)"|unprivileged_userns' | tail -n 40 || true
     - name: Cleanup lane
       if: always()
       shell: bash
       run: node scripts/ci/cleanup.mjs --state "$RUNNER_TEMP/state/${{ inputs.lane }}.json"
-    - name: Unload the job-owned Codex AppArmor policy
-      if: always() && inputs.lane == 'images-runtime-startup'
-      shell: bash
-      run: bash .github/actions/run-ci-lane/codex-sandbox.sh unload
     - name: Export image cleanup reconciliation
       id: image_reconciliation
       if: always() && inputs.lane == 'images-packaging'

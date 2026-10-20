@@ -1,4 +1,3 @@
-import { nativeAdminOriginResolver } from "../../apps/controller/src/gateway/native-admin-origin.ts";
 import { defaultAgentModel } from "../../apps/controller/src/console/agents/starter-model.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -24,6 +23,7 @@ import {
   createKubernetesInstallationConfiguration,
   createRealKubernetesFixture,
   kubernetesHash as hash,
+  withBoundedTeardown,
 } from "../helpers/kubernetes-real.mjs";
 import {
   ensureEnvoyGatewayControllers,
@@ -35,6 +35,7 @@ import {
   OTEL_RESOURCE,
 } from "../helpers/logging-otel-observation.mjs";
 import { assertDedicatedSkillSourceLifecycle } from "./dedicated-skill-source-lifecycle.mjs";
+import { installPublicGithubReadFixture } from "./public-github-read-k3d.mjs";
 
 const kubeconfigPath = process.env.OCC_TEST_KUBERNETES_KUBECONFIG;
 const kubernetesContext = process.env.OCC_TEST_KUBERNETES_CONTEXT;
@@ -55,7 +56,6 @@ const slackSelected = process.env.OCC_TEST_SLACK_LIVE === "1";
 const selected =
   !slackSelected &&
   (process.env.OCC_TEST_HARNESS_K3D_REAL === "1" ||
-    process.env.OCC_TEST_GATEWAY_OUTBOUND_K3D === "1" ||
     process.env.OCC_TEST_GATEWAY_ROUTING_REAL === "1" ||
     [runtimeImage, gatewayImage, codexImage].some(Boolean));
 const requiresProductionCluster = {
@@ -376,7 +376,6 @@ async function startInClusterControllers(
     authBaseURL,
     controller,
     controllerPort,
-    controlPlaneProxyUrl,
     databaseAddress,
     events,
     nativeAdminDomain,
@@ -717,8 +716,10 @@ async function startInClusterControllers(
   workerIsolation.metadata.name = `${workerName}-isolation`;
   workerIsolation.spec.podSelector.matchLabels = workerLabels;
   manifests.items.push(workerIsolation);
-  if (controlPlaneProxyUrl !== undefined) {
-    const channelProxy = new URL(controlPlaneProxyUrl);
+  const channelProxyUrl =
+    apiConfiguration.drivers.compute.configuration.runtime?.channels?.proxyUrl;
+  if (channelProxyUrl !== undefined) {
+    const channelProxy = new URL(channelProxyUrl);
     assert.equal(
       isIP(channelProxy.hostname),
       4,
@@ -727,14 +728,11 @@ async function startInClusterControllers(
     assert.notEqual(channelProxy.port, "", "the API Slack proxy requires an explicit port");
     // Admission validates Slack credentials before deployment. Give only the API
     // this approved proxy route; the worker keeps its existing isolation policy.
-    apiContainer.env.push({
-      name: "OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL",
-      value: controlPlaneProxyUrl,
-    });
+    apiContainer.env.push({ name: "OCC_CHANNEL_DIRECTORY_PROXY_URL", value: channelProxyUrl });
     manifests.items.push({
       apiVersion: "networking.k8s.io/v1",
       kind: "NetworkPolicy",
-      metadata: { name: `${name}-outbound-proxy`, namespace: platformNamespace },
+      metadata: { name: `${name}-channel-proxy`, namespace: platformNamespace },
       spec: {
         podSelector: { matchLabels: labels },
         policyTypes: ["Egress"],
@@ -781,95 +779,53 @@ async function startInClusterControllers(
     `deployment/${workerName}`,
     "--timeout=180s",
   );
+  const logs = spawn(
+    "kubectl",
+    kubectlArguments([
+      "logs",
+      "--namespace",
+      platformNamespace,
+      `deployment/${workerName}`,
+      "--container=worker",
+      "--follow=true",
+    ]),
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
   let logError;
+  let logStderr = "";
   let stopping = false;
-  const startLogs = async () => {
-    const pod = await waitFor("ready OCC worker Pod for log observation", async () => {
-      const current = await resources("pods", platformNamespace);
-      return current.find(
-        ({ metadata, status }) =>
-          metadata.deletionTimestamp === undefined &&
-          Object.entries(workerLabels).every(([key, value]) => metadata.labels?.[key] === value) &&
-          status.conditions?.some(({ type, status }) => type === "Ready" && status === "True"),
-      );
-    });
-    const logs = spawn(
-      "kubectl",
-      kubectlArguments([
-        "logs",
-        "--namespace",
-        platformNamespace,
-        `pod/${pod.metadata.name}`,
-        "--container=worker",
-        "--follow=true",
-      ]),
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    let logStderr = "";
-    let closing = false;
-    logs.once("error", (error) => {
-      logError = error;
-    });
-    const logExit = new Promise((resolve) =>
-      logs.once("close", (code) => {
-        if (!closing && !stopping) {
-          logError ??= new Error(`Worker log stream exited unexpectedly (${code}): ${logStderr}`);
-        }
-        resolve();
-      }),
-    );
-    logs.stderr.on("data", (chunk) => {
-      logStderr = `${logStderr}${chunk}`.slice(-2048);
-    });
-    const lines = createInterface({ input: logs.stdout });
-    lines.on("line", (line) => {
-      try {
-        const event = JSON.parse(line);
-        if (event.service === "occ-worker" && typeof event.event === "string") {
-          events.push(event);
-        }
-      } catch {
-        if (!closing && !stopping) {
-          logError ??= new Error("Worker emitted an invalid structured log record.");
-        }
+  logs.once("error", (error) => {
+    logError = error;
+  });
+  const logExit = new Promise((resolve) =>
+    logs.once("close", (code) => {
+      if (!stopping) {
+        logError ??= new Error(`Worker log stream exited unexpectedly (${code}): ${logStderr}`);
       }
-    });
-    await once(logs, "spawn");
-    return {
-      async close() {
-        closing = true;
-        logs.kill("SIGTERM");
-        await logExit;
-        lines.close();
-      },
-    };
-  };
-  let logStream = await startLogs();
+      resolve();
+    }),
+  );
+  logs.stderr.on("data", (chunk) => {
+    logStderr = `${logStderr}${chunk}`.slice(-2048);
+  });
+  const lines = createInterface({ input: logs.stdout });
+  lines.on("line", (line) => {
+    try {
+      const event = JSON.parse(line);
+      if (event.service === "occ-worker" && typeof event.event === "string") {
+        events.push(event);
+      }
+    } catch {
+      if (!stopping) {
+        logError ??= new Error("Worker emitted an invalid structured log record.");
+      }
+    }
+  });
   const worker = {
     assertHealthy() {
       if (logError !== undefined) {
         throw logError;
       }
-    },
-    async restart() {
-      // Projected startup configuration is read on process start; this is an actual operator restart.
-      await logStream.close();
-      await kubectl(
-        "rollout",
-        "restart",
-        `deployment/${workerName}`,
-        "--namespace",
-        platformNamespace,
-      );
-      await kubectl(
-        "rollout",
-        "status",
-        `deployment/${workerName}`,
-        "--namespace",
-        platformNamespace,
-        "--timeout=180s",
-      );
-      logStream = await startLogs();
     },
     async stop() {
       if (stopping) {
@@ -888,7 +844,9 @@ async function startInClusterControllers(
           "--timeout=120s",
         );
       } finally {
-        await logStream.close();
+        logs.kill("SIGTERM");
+        await logExit;
+        lines.close();
       }
       if (logError !== undefined) {
         throw logError;
@@ -896,12 +854,12 @@ async function startInClusterControllers(
     },
   };
   context.after(() => worker.stop());
+  await once(logs, "spawn");
   let activeApiPod = pods[0];
   return {
     pod: pods[0],
     url: forwarding.url,
     worker,
-    stopForwarding: () => forwarding.stop(),
     async restart() {
       const previousUid = activeApiPod.metadata.uid;
       const port = Number(new URL(forwarding.url).port);
@@ -953,8 +911,8 @@ function installationConfiguration(authentication, platformNamespace, slack, opt
       process.env.OCC_TEST_CODEX_OPENAI_BASE_URL;
   }
   configuration.drivers.plugin = { id: "codex-plugin", configuration: {} };
-  // The real Gateway was OOMKilled at 2Gi during a model turn; 4Gi passed the rerun.
-  configuration.drivers.compute.configuration.resources.gateway.limits.memory = "4Gi";
+  // The real Gateway loads its plugins during the first model request.
+  configuration.drivers.compute.configuration.resources.gateway.limits.memory = "2Gi";
   const pluginStatusProxyCidrs = process.env.OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS;
   if (pluginStatusProxyCidrs !== undefined && pluginStatusProxyCidrs.trim().length > 0) {
     configuration.drivers.compute.configuration.network.pluginStatusProxySourceCidrs =
@@ -972,16 +930,18 @@ function installationConfiguration(authentication, platformNamespace, slack, opt
     "requests.cpu": "2",
     "requests.memory": "2Gi",
     "limits.cpu": "8",
-    // Include simultaneous Agents, replacement Gateways and their revision-owned proxies.
-    "limits.memory": options.gatewayOutbound === undefined ? "12Gi" : "14Gi",
+    // Two embedded Agents plus one replacement Gateway may coexist during cutover.
+    "limits.memory": "6Gi",
   };
   configuration.drivers.compute.configuration.servicePrincipalCredentials.expirationSeconds = 3_600;
   if (options.gatewayRouting !== undefined) {
     configuration.drivers.compute.configuration.gatewayRouting = options.gatewayRouting;
     delete configuration.drivers.compute.configuration.network.gatewayClients;
   }
-  if (options.gatewayOutbound !== undefined) {
-    configuration.drivers.compute.configuration.runtime.gatewayOutbound = options.gatewayOutbound;
+  if (slack !== undefined) {
+    configuration.drivers.compute.configuration.runtime.channels = {
+      proxyUrl: slack.proxyUrl,
+    };
   }
   return configuration;
 }
@@ -1458,40 +1418,42 @@ async function topologyPods(topology) {
   return (await Promise.all(targets.map((target) => resources("pods", target)))).flat();
 }
 
-async function gatewayOutboundInfrastructureCidrs(command = kubectl) {
-  const nodes = JSON.parse(await command("get", "nodes", "-o", "json")).items;
-  const service = JSON.parse(
-    await command("get", "service", "kubernetes", "-n", "default", "-o", "json"),
-  );
-  const endpoints = JSON.parse(
-    await command("get", "endpoints", "kubernetes", "-n", "default", "-o", "json"),
-  );
-  const cidrs = new Set(
-    nodes.flatMap((node) => [
-      ...(node.spec.podCIDRs ?? (node.spec.podCIDR === undefined ? [] : [node.spec.podCIDR])),
-      ...(node.status.addresses ?? []).flatMap(({ type, address }) =>
-        ["InternalIP", "ExternalIP"].includes(type) && isIP(address) !== 0
-          ? [`${address}/${isIP(address) === 4 ? 32 : 128}`]
-          : [],
-      ),
-    ]),
-  );
-  for (const address of [
-    ...(service.spec.clusterIPs ?? [service.spec.clusterIP]),
-    ...endpoints.subsets.flatMap((subset) => subset.addresses.map(({ ip }) => ip)),
-  ]) {
-    if (isIP(address) !== 0) {
-      cidrs.add(`${address}/${isIP(address) === 4 ? 32 : 128}`);
+// The topology's own cleanups, each its own registration (finding 1711), so a worker stop that
+// rejects cannot keep the later ones from running. Operations are closures, so resources assigned
+// later are read at cleanup time. They run last-registered first: the forward and worker stop
+// before the pools, the Postgres network and the Namespaces they use go away.
+const productionTopologyCleanupOrder = Object.freeze([
+  "gatewayForward",
+  "worker",
+  "productionApp",
+  "observerPool",
+  "postgresNetwork",
+  "gatewayRuntimeNamespace",
+  "placementNamespace",
+  "temporaryDirectory",
+]);
+
+function registerProductionTopologyCleanups(context, operations) {
+  let stopped;
+  for (const name of [...productionTopologyCleanupOrder].reverse()) {
+    const operation = operations[name];
+    assert.equal(typeof operation, "function", `production topology cleanup ${name}`);
+    // Named for the teardown log: every registration comes from this line. Registered after its
+    // test's teardown, each runs at once and throws to stop the setup; register them all first.
+    try {
+      context.after({ [name]: () => operation() }[name]);
+    } catch (error) {
+      stopped ??= error;
     }
   }
-  assert.ok(
-    cidrs.size > 0 && cidrs.size <= 64,
-    "the fixture must declare its actual infrastructure exclusions",
-  );
-  return [...cidrs];
+  if (stopped !== undefined) {
+    throw stopped;
+  }
 }
 
-async function arrangeProductionTopology(context, mode, slack, options = {}) {
+async function arrangeProductionTopology(testContext, mode, slack, options = {}) {
+  // node:test would run these cleanups oldest-first and stop at the first failure (finding 1711).
+  const context = withBoundedTeardown(testContext, { label: "production topology teardown" });
   const loggingObservationStartedAt = Date.now();
   const includeSecretProbes = options.secretLifecycle === true;
   if (mode === "dedicated") {
@@ -1518,16 +1480,6 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
     options.gatewayPassword === false ? undefined : randomBytes(32).toString("base64url");
   let inClusterWorker;
   let restartInClusterApi;
-  let stopInClusterApiForwarding;
-  let directory;
-  let observerPool;
-  let detachPostgres;
-  let workerPool;
-  let worker;
-  let productionApp;
-  let placement;
-  let gatewayRuntimeNamespace;
-  let forwarding;
   const workerOptions = {
     pollIntervalMs: 50,
     leaseDurationMs: 60_000,
@@ -1538,41 +1490,17 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
   const platformNamespace = `oce-production-${mode}-${hash(identifier)}`;
   await kubectl("create", "namespace", platformNamespace);
   context.after(async () => {
-    // Finish every owned cleanup even if stopping a failed worker reports an error.
-    const failures = [];
-    const cleanup = async (operation) => {
-      try {
-        await operation();
-      } catch (error) {
-        failures.push(error);
-      }
-    };
-    await cleanup(() => forwarding?.stop());
-    await cleanup(() => stopInClusterApiForwarding?.());
-    await cleanup(() => inClusterWorker?.stop());
-    await cleanup(() => (worker === undefined ? workerPool?.end() : worker.stop()));
-    await cleanup(() => productionApp?.close());
-    await cleanup(() => observerPool?.end());
-    await cleanup(() => detachPostgres?.());
-    for (const namespace of new Set([gatewayRuntimeNamespace, placement, platformNamespace])) {
-      if (namespace !== undefined) {
-        await cleanup(() =>
-          kubectl(
-            "delete",
-            "namespace",
-            namespace,
-            "--ignore-not-found=true",
-            "--wait=true",
-            "--timeout=120s",
-          ),
-        );
-      }
-    }
-    if (directory !== undefined) {
-      await cleanup(() => rm(directory, { recursive: true, force: true }));
-    }
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "Owned production topology cleanup failed.");
+    try {
+      await inClusterWorker?.stop();
+    } finally {
+      await kubectl(
+        "delete",
+        "namespace",
+        platformNamespace,
+        "--ignore-not-found=true",
+        "--wait=true",
+        "--timeout=120s",
+      );
     }
   });
   const controller = await createScopedController(
@@ -1642,33 +1570,34 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
     import("../../apps/controller/src/drivers/compute/kubernetes/index.ts"),
   ]);
 
-  directory = await mkdtemp(join(tmpdir(), `oce-k3d-production-${mode}-`));
+  const directory = await mkdtemp(join(tmpdir(), `oce-k3d-production-${mode}-`));
   const startupPath = join(directory, "api-installation.yaml");
   const workerStartupPath = join(directory, "worker-installation.yaml");
   const workerConfiguration = installationConfiguration(
     controller.authentication,
     platformNamespace,
     slack,
-    {
-      ...(slack === undefined && options.gatewayOutbound === undefined
-        ? {}
-        : {
-            gatewayOutbound: {
-              enabled: true,
-              allowPublicHttps: options.gatewayOutbound !== undefined,
-              image: controllerImage,
-              denyCidrs:
-                options.gatewayOutboundDenyCidrs ?? (await gatewayOutboundInfrastructureCidrs()),
-            },
-          }),
-      ...(workspaceGateway === undefined
-        ? {}
-        : {
-            gatewayRouting: workspaceGateway.routing,
-            gatewayTrustedProxyCidrs: workspaceGateway.nativeOptions.gatewayAuth.trustedProxies,
-          }),
-    },
+    workspaceGateway === undefined
+      ? {}
+      : {
+          gatewayRouting: workspaceGateway.routing,
+          gatewayTrustedProxyCidrs: workspaceGateway.nativeOptions.gatewayAuth.trustedProxies,
+        },
   );
+  const publicGithubRead =
+    options.publicGithubRead !== true
+      ? undefined
+      : await installPublicGithubReadFixture({
+          namespace: platformNamespace,
+          controllerImage,
+          kubectl,
+          applyManifest,
+          waitFor,
+        });
+  if (publicGithubRead !== undefined) {
+    workerConfiguration.drivers.compute.configuration.network.publicGithubRead =
+      publicGithubRead.peer;
+  }
   const apiConfiguration = structuredClone(workerConfiguration);
   if (workspaceGateway !== undefined) {
     apiConfiguration.drivers.configuration.configuration.authentication = { mode: "inCluster" };
@@ -1693,15 +1622,60 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
           environment: { OCC_CONFIG_PATH: workerStartupPath },
         })
       : undefined;
-  observerPool = new pg.Pool({ connectionString: databaseUrl, max: 4 });
+  const observerPool = new pg.Pool({ connectionString: databaseUrl, max: 4 });
   const platformState = new PostgresPlatformState(observerPool);
+  let detachPostgres;
   let databaseAddress;
+  let workerPool;
+  let worker;
+  let productionApp;
   let controllerApiPod;
+  let placement;
+  let gatewayRuntimeNamespace;
   let gatewayPlacement;
+  let forwarding;
+  registerProductionTopologyCleanups(context, {
+    gatewayForward: () => forwarding?.stop(),
+    worker: async () => {
+      if (worker !== undefined) {
+        await worker.stop();
+      } else if (workerPool !== undefined) {
+        await workerPool.end();
+      }
+    },
+    productionApp: () => productionApp?.close(),
+    observerPool: () => observerPool.end(),
+    postgresNetwork: () => detachPostgres?.(),
+    gatewayRuntimeNamespace: async () => {
+      if (gatewayRuntimeNamespace !== undefined && gatewayRuntimeNamespace !== placement) {
+        await kubectl(
+          "delete",
+          "namespace",
+          gatewayRuntimeNamespace,
+          "--ignore-not-found=true",
+          "--wait=true",
+          "--timeout=120s",
+        );
+      }
+    },
+    placementNamespace: async () => {
+      if (placement !== undefined) {
+        await kubectl(
+          "delete",
+          "namespace",
+          placement,
+          "--ignore-not-found=true",
+          "--wait=true",
+          "--timeout=120s",
+        );
+      }
+    },
+    temporaryDirectory: () => rm(directory, { recursive: true, force: true }),
+  });
 
   // Docker may replace published-port connections when another network attaches.
   // Complete that topology change before opening the observer/bootstrap pools;
-  // its registered cleanup runs only after those pools and controllers stop.
+  // its registered cleanup runs only after those pools and the workers stop.
   if (workspaceGateway !== undefined) {
     databaseAddress = await attachPostgresToK3d((cleanup) => {
       detachPostgres = cleanup;
@@ -1751,7 +1725,6 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
       controller,
       databaseAddress,
       controllerPort: options.controllerPort,
-      controlPlaneProxyUrl: slack?.proxyUrl,
       events,
       nativeAdminDomain: options.nativeAdmin?.domain,
       nativeAdminSharedCookieDomain: options.nativeAdmin?.sharedCookieDomain,
@@ -1761,7 +1734,6 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
     });
     inClusterWorker = controllerApi.worker;
     restartInClusterApi = controllerApi.restart;
-    stopInClusterApiForwarding = controllerApi.stopForwarding;
     controllerApiPod = controllerApi.pod;
     controllerUrl = controllerApi.url;
     requestFactory = (requestCredentials) =>
@@ -1829,10 +1801,6 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
       mode: "production",
       pool: workerPool,
       drivers: workerDrivers,
-      nativeAdminOrigin: nativeAdminOriginResolver(
-        options.nativeAdmin === undefined ? undefined : { enabled: true, ...options.nativeAdmin },
-        controllerAuthBaseURL,
-      ),
       ...workerOptions,
       emit: (event) => events.push(event),
     });
@@ -2108,6 +2076,14 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
   // Exercise Preset selection through the same creation APIs as the console. The
   // scoped caller still needs its own Secret grants; the template grants nothing.
   const launchValues = nativeConfiguration(harnessId, slack, nativeOptions);
+  if (publicGithubRead !== undefined) {
+    launchValues.plugins.entries.codex.config.appServer.networkProxy = {
+      enabled: true,
+      mode: "limited",
+      allowLocalBinding: false,
+      domains: { [publicGithubRead.peer.address]: "allow" },
+    };
+  }
   if (gatewayPassword !== undefined) {
     assert.deepEqual(launchValues.gateway.auth.password, {
       source: "env",
@@ -2167,19 +2143,6 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
   });
   assert.equal(agent.status, 201, JSON.stringify(agent.error));
   assert.deepEqual(agent.data.harnessAuth, { method: "api_key", source: secretApi.model.ref });
-  if (options.gatewayOutbound !== undefined) {
-    // Outbound authority is an administrator-owned Agent setting, before revision admission.
-    const selected = await adminRequest(
-      "PATCH",
-      `/namespaces/${namespaceId}/agents/${agent.data.id}`,
-      {
-        configurationId: agent.data.configurationId,
-        gatewayOutbound: options.gatewayOutbound,
-      },
-    );
-    assert.equal(selected.status, 200, JSON.stringify(selected.error));
-    agent.data = selected.data;
-  }
   const changedPreset = await adminRequest("PATCH", presetPath, { template: {} });
   assert.equal(changedPreset.status, 200, JSON.stringify(changedPreset.error));
   const deletedPreset = await adminRequest("DELETE", presetPath);
@@ -2335,10 +2298,8 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
     );
   }
   const pods = await waitFor(`production ${mode} workload Pods`, async () => {
-    const running = (await topologyPods({ placement, gatewayPlacement })).filter(
-      (pod) =>
-        ["agent", "gateway"].includes(pod.metadata.labels?.["openclaw.dev/workload-role"]) &&
-        pod.status.conditions?.some(({ type, status }) => type === "Ready" && status === "True"),
+    const running = (await topologyPods({ placement, gatewayPlacement })).filter((pod) =>
+      pod.status.conditions?.some(({ type, status }) => type === "Ready" && status === "True"),
     );
     return running.length === (mode === "dedicated" ? 2 : 1) ? running : undefined;
   });
@@ -2498,6 +2459,7 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
     workspaceGateway,
     controllerApiPod,
     workspaceRequest,
+    publicGithubRead,
     approvedClient,
     controllerAccount: controller.account,
     controllerTenantRole: controller.tenantRole,
@@ -2507,26 +2469,6 @@ async function arrangeProductionTopology(context, mode, slack, options = {}) {
     adminRequest: (...args) => adminRequest(...args),
     request: (...args) => request(...args),
     restartControllerApi,
-    async updateGatewayOutboundInstallation(gatewayOutbound) {
-      assert.ok(inClusterWorker, "the production outbound proof requires in-cluster controllers");
-      apiConfiguration.drivers.compute.configuration.runtime.gatewayOutbound = gatewayOutbound;
-      await applyManifest(
-        JSON.stringify({
-          apiVersion: "v1",
-          kind: "Secret",
-          metadata: { name: "openclaw-enterprise-api-installation", namespace: platformNamespace },
-          stringData: { "installation.yaml": JSON.stringify(apiConfiguration) },
-        }),
-      );
-      await restartControllerApi();
-      await inClusterWorker.restart();
-    },
-    async restartControllerWorker() {
-      assert.ok(inClusterWorker, "the production outbound proof requires an in-cluster worker");
-      await inClusterWorker.restart();
-    },
-    gatewayOutboundInstallation:
-      workerConfiguration.drivers.compute.configuration.runtime.gatewayOutbound,
     events,
     agent: agent.data,
     persistedAgent,
@@ -3165,8 +3107,12 @@ function sharedVolumeClaimName(pod) {
 }
 
 function sharedVolumeSubPaths(pod) {
+  // Node identity shares the Harness claim under its own Agent subpath, outside task files.
   return (pod.spec.containers[0].volumeMounts ?? [])
-    .filter(({ name }) => name === sharedWorkspaceVolumeName)
+    .filter(
+      ({ name, mountPath }) =>
+        name === sharedWorkspaceVolumeName && mountPath !== "/home/node/.openclaw-node",
+    )
     .map(({ subPath }) => subPath)
     .sort();
 }
@@ -3195,10 +3141,7 @@ function assertPrivateStateInitContainer(pod) {
         { name: "runtime-temporary", mountPath: "/runtime-temporary" },
         ...(pod.metadata.labels?.["openclaw.dev/workload-role"] === "gateway"
           ? [{ name: "openclaw-gateway-state", mountPath: "/gateway-state" }]
-          : [
-              { name: "openclaw-workspace", mountPath: "/harness-workspace-state" },
-              { name: "openclaw-node-state", mountPath: "/workspace-node-state" },
-            ]),
+          : [{ name: "openclaw-workspace", mountPath: "/harness-workspace-state" }]),
       ],
       [],
       [],
@@ -3264,6 +3207,8 @@ const gatewayPrivatePaths = [
   ["state", "/home/node/.openclaw/state"],
   ["agent", "/home/node/.openclaw/agents/main/agent"],
   ["media", "/home/node/.openclaw/media"],
+  ["worktrees", "/home/node/.openclaw/worktrees"],
+  ["worktree-sources", "/home/node/.openclaw/worktree-sources"],
 ];
 
 async function assertGatewayPrivateResources(topology) {
@@ -3335,927 +3280,6 @@ async function gatewayCall(topology, method, params) {
     throw new Error(result.error.message, { cause: result.error });
   }
   return result;
-}
-
-async function redeployGatewayOutbound(topology, selection) {
-  const agentPath = `/namespaces/${topology.agent.namespaceId}/agents/${topology.agent.id}`;
-  if (selection !== undefined) {
-    const updated = await topology.adminRequest("PATCH", agentPath, {
-      configurationId: topology.agent.configurationId,
-      gatewayOutbound: selection,
-    });
-    assert.equal(updated.status, 200, JSON.stringify(updated.error));
-    topology.agent = updated.data;
-  }
-  const previousGateway = topology.gatewayPod.metadata.uid;
-  const previousHarness = topology.harnessPod.metadata.uid;
-  const admitted = await topology.adminRequest("POST", `${agentPath}/deploy`);
-  assert.equal(admitted.status, 202, JSON.stringify(admitted.error));
-  const agent = await waitFor(`outbound revision ${admitted.data.id} activation`, async () => {
-    const current = await topology.adminRequest("GET", agentPath);
-    assert.equal(current.status, 200, JSON.stringify(current.error));
-    return current.data.activeRevisionId === admitted.data.id ? current.data : undefined;
-  });
-  await waitFor(`outbound revision ${admitted.data.id} completion`, () =>
-    topology.events.find(
-      (event) =>
-        event.event === "worker.completed" &&
-        event.revisionId === admitted.data.id &&
-        event.outcome === "success",
-    ),
-  );
-  topology.agent = agent;
-  topology.revision = admitted.data;
-  topology.gatewayPod = await waitForReadyGatewayPod(topology, admitted.data.id, previousGateway);
-  topology.harnessPod = await waitForReadyAgentPod(topology, admitted.data.id, previousHarness);
-}
-
-async function gatewayOutboundProxy(topology) {
-  return waitFor(`ready outbound proxy for ${topology.revision.id}`, async () =>
-    (await resources("pods", topology.gatewayPlacement)).find(
-      (pod) =>
-        pod.metadata.labels?.["openclaw.dev/workload-role"] === "gateway-outbound" &&
-        pod.metadata.labels?.["openclaw.dev/agent"] === topology.agent.id &&
-        pod.metadata.labels?.["openclaw.dev/revision"] === topology.revision.id &&
-        pod.status.conditions?.some(({ type, status }) => type === "Ready" && status === "True"),
-    ),
-  );
-}
-
-async function gatewayOutboundDenials(topology, proxy) {
-  const logs = await kubectl(
-    "logs",
-    proxy.metadata.name,
-    "--namespace",
-    topology.gatewayPlacement,
-    "--container=gateway-outbound",
-    "--tail=100",
-  );
-  return logs.split("\n").flatMap((line) => {
-    try {
-      const event = JSON.parse(line);
-      return event.event === "outbound_proxy.denied" &&
-        event.agentId === topology.agent.id &&
-        event.revisionId === topology.revision.id
-        ? [event]
-        : [];
-    } catch {
-      return [];
-    }
-  });
-}
-
-async function assertNativeProxyRefusal(topology, url, reason) {
-  const proxy = await gatewayOutboundProxy(topology);
-  const host =
-    reason === "invalid_target" ? undefined : new URL(url).hostname.replace(/^\[|\]$/g, "");
-  const matches = (event) => event.reason === reason && event.host === host;
-  const before = (await gatewayOutboundDenials(topology, proxy)).filter(matches).length;
-  const response = await gatewayCall(topology, "outbound-proof.fetch", { url });
-  assert.equal(response.connected, false, `native outbound must refuse ${url}`);
-  // A fresh owning-proxy refusal distinguishes policy enforcement from unrelated DNS or TLS failure.
-  await waitFor(
-    `owning proxy ${reason} refusal for ${url}`,
-    async () => (await gatewayOutboundDenials(topology, proxy)).filter(matches).length > before,
-    10_000,
-  );
-}
-
-async function assertProxyResourcesAbsent(topology, revisionId) {
-  for (const kind of [
-    "deployments",
-    "pods",
-    "services",
-    "serviceaccounts",
-    "configmaps",
-    "networkpolicies",
-  ]) {
-    const current = await resources(kind, topology.gatewayPlacement);
-    assert.equal(
-      current.some(
-        (item) =>
-          item.metadata.labels?.["openclaw.dev/agent"] === topology.agent.id &&
-          item.metadata.labels?.["openclaw.dev/revision"] === revisionId &&
-          item.metadata.name.startsWith("gateway-outbound-"),
-      ),
-      false,
-      `${kind} for the withdrawn revision must be removed`,
-    );
-  }
-}
-
-async function tcpConnectionOutcome(namespace, pod, host, port) {
-  return execNode(
-    namespace,
-    pod,
-    `
-    const socket = require("node:net").connect({ host: ${JSON.stringify(host)}, port: ${port} });
-    let settled = false;
-    const finish = (outcome) => { if (settled) return; settled = true; clearTimeout(timer); socket.destroy(); process.stdout.write(outcome); };
-    const timer = setTimeout(() => finish("denied"), 4000);
-    socket.on("connect", () => finish("connected"));
-    socket.on("error", () => finish("denied"));
-  `,
-  );
-}
-
-async function holdGatewayOutboundTunnel(context, topology, proxyHost) {
-  const source = `
-    const net = require("node:net");
-    const tls = require("node:tls");
-    const socket = net.connect({ host: ${JSON.stringify(proxyHost)}, port: 3128 });
-    let connection;
-    let refresh;
-    let established = false;
-    let done = false;
-    const report = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
-    const finish = (reason) => {
-      if (done) return; done = true; clearTimeout(deadline); clearInterval(refresh);
-      report({ event: "closed", reason }); connection?.destroy(); socket.destroy();
-    };
-    const deadline = setTimeout(() => finish("deadline"), 180000);
-    socket.on("error", () => finish(established ? "socket-closed" : "connection-error"));
-    socket.on("connect", () => socket.write("CONNECT example.com:443 HTTP/1.1\\r\\nHost: example.com:443\\r\\n\\r\\n"));
-    let headers = "";
-    const receiveHeaders = (chunk) => {
-      headers += chunk.toString("latin1");
-      if (!headers.includes("\\r\\n\\r\\n")) return;
-      socket.off("data", receiveHeaders);
-      if (!headers.startsWith("HTTP/1.1 200 ") && !headers.startsWith("HTTP/1.0 200 ")) return finish("connect-denied");
-      connection = tls.connect({ socket, servername: "example.com", rejectUnauthorized: true });
-      connection.on("error", () => finish(established ? "socket-closed" : "tls-error"));
-      connection.on("close", () => finish("socket-closed"));
-      connection.on("data", () => {});
-      connection.on("secureConnect", () => {
-        established = true;
-        report({ event: "ready" });
-        const ping = () => connection.write("HEAD / HTTP/1.1\\r\\nHost: example.com\\r\\nConnection: keep-alive\\r\\n\\r\\n");
-        ping(); refresh = setInterval(ping, 2000);
-      });
-    };
-    socket.on("data", receiveHeaders);
-  `;
-  const child = spawn(
-    "kubectl",
-    kubectlArguments([
-      "exec",
-      topology.gatewayPod.metadata.name,
-      "--namespace",
-      topology.gatewayPlacement,
-      "--container=gateway",
-      "--",
-      "node",
-      "-e",
-      source,
-    ]),
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  const events = [];
-  const lines = createInterface({ input: child.stdout });
-  let failure;
-  child.on("error", (error) => {
-    failure = error;
-  });
-  child.stderr.on("data", (chunk) => {
-    failure = new Error(`Tunnel probe failed: ${chunk.toString().slice(0, 256)}`);
-  });
-  lines.on("line", (line) => {
-    events.push(JSON.parse(line));
-  });
-  context.after(() => {
-    child.kill("SIGTERM");
-    lines.close();
-  });
-  await waitFor(
-    "an established Gateway-owned public TLS CONNECT tunnel",
-    () => {
-      if (failure !== undefined) {
-        throw failure;
-      }
-      assert.equal(
-        events.some(({ event }) => event === "closed"),
-        false,
-        "the tunnel must stay open before withdrawal",
-      );
-      return events.some(({ event }) => event === "ready");
-    },
-    30_000,
-  );
-  return {
-    assertOpen() {
-      assert.equal(
-        events.some(({ event }) => event === "closed"),
-        false,
-      );
-    },
-    async assertClosed() {
-      const closed = await waitFor(
-        "withdrawal of the established CONNECT tunnel",
-        () => events.find(({ event }) => event === "closed"),
-        180_000,
-      );
-      assert.equal(
-        closed.reason,
-        "socket-closed",
-        "withdrawal must close the established tunnel before the probe deadline",
-      );
-      return closed;
-    },
-  };
-}
-
-async function assertGatewayOutboundActorWithdrawal(context, topology) {
-  const namespacePath = `/namespaces/${topology.agent.namespaceId}`;
-  const roles = await topology.adminRequest("GET", `${namespacePath}/iam/roles`);
-  assert.equal(roles.status, 200, JSON.stringify(roles.error));
-  const role = roles.data.find(({ name }) => name === "Namespace Secret assignment caller");
-  assert.ok(role, "the original deployer must have its scoped fixture Role");
-  const bindings = await topology.adminRequest("GET", `${namespacePath}/iam/access-bindings`);
-  assert.equal(bindings.status, 200, JSON.stringify(bindings.error));
-  const binding = bindings.data.find(
-    (candidate) =>
-      candidate.subjectKind === "identity" &&
-      candidate.subjectId === topology.secretApi.assignmentPrincipalId &&
-      candidate.roleId === role.id &&
-      candidate.resourceKind === undefined &&
-      candidate.resourceId === undefined,
-  );
-  assert.ok(binding, "the original deployer's Namespace-wide binding must exist");
-  const proxyName = `gateway-outbound-${hash(topology.agent.id)}-${hash(topology.revision.id)}`;
-  const proxy = await gatewayOutboundProxy(topology);
-  const tunnel = await holdGatewayOutboundTunnel(
-    context,
-    topology,
-    `${proxyName}.${topology.gatewayPlacement}.svc`,
-  );
-  tunnel.assertOpen();
-  const controllerRole = JSON.parse(
-    await kubectl("get", "clusterrole", topology.controllerTenantRole, "-o", "json"),
-  );
-  let changedRule = false;
-  const blockedRules = controllerRole.rules.flatMap((rule) => {
-    if (
-      !rule.apiGroups.includes("apps") ||
-      !rule.resources.includes("deployments") ||
-      !rule.verbs.includes("delete")
-    ) {
-      return [rule];
-    }
-    changedRule = true;
-    const otherResources = rule.resources.filter((resource) => resource !== "deployments");
-    return [
-      ...(otherResources.length === 0 ? [] : [{ ...rule, resources: otherResources }]),
-      {
-        ...rule,
-        resources: ["deployments"],
-        verbs: rule.verbs.filter((verb) => verb !== "delete"),
-      },
-    ];
-  });
-  assert.equal(changedRule, true, "the scoped controller must initially have Deployment delete");
-  const setRules = (rules) =>
-    kubectl(
-      "patch",
-      "clusterrole",
-      topology.controllerTenantRole,
-      "--type=json",
-      "--patch",
-      JSON.stringify([{ op: "replace", path: "/rules", value: rules }]),
-    );
-  const finalizer = "openclaw.dev/test-outbound-withdrawal";
-  let finalizerHeld = false;
-  const setProxyFinalizer = async (held) => {
-    await waitFor(
-      "exact proxy Pod finalizer mutation",
-      async () => {
-        const current = await resource("pod", proxy.metadata.name, topology.gatewayPlacement).catch(
-          (error) => {
-            if (!held && /NotFound|not found/i.test(error.stderr ?? error.message)) {
-              return undefined;
-            }
-            throw error;
-          },
-        );
-        if (current === undefined) {
-          return true;
-        }
-        assert.equal(
-          current.metadata.uid,
-          proxy.metadata.uid,
-          "only the observed proxy Pod may change",
-        );
-        const finalizers = (current.metadata.finalizers ?? []).filter(
-          (value) => value !== finalizer,
-        );
-        if (held) {
-          finalizers.push(finalizer);
-        }
-        try {
-          await kubectl(
-            "patch",
-            "pod",
-            proxy.metadata.name,
-            "--namespace",
-            topology.gatewayPlacement,
-            "--type=json",
-            "--patch",
-            JSON.stringify([
-              { op: "test", path: "/metadata/uid", value: proxy.metadata.uid },
-              {
-                op: "test",
-                path: "/metadata/resourceVersion",
-                value: current.metadata.resourceVersion,
-              },
-              { op: "add", path: "/metadata/finalizers", value: finalizers },
-            ]),
-          );
-        } catch (error) {
-          const latest = await resource("pod", proxy.metadata.name, topology.gatewayPlacement);
-          assert.equal(latest.metadata.uid, proxy.metadata.uid);
-          // Kubelet status updates may race our patch; retry only that verified optimistic-lock conflict.
-          if (latest.metadata.resourceVersion !== current.metadata.resourceVersion) {
-            return undefined;
-          }
-          throw error;
-        }
-        return true;
-      },
-      10_000,
-    );
-    finalizerHeld = held;
-  };
-  let restoredRole;
-  const restoredTargets = new Set();
-  const restoreBinding = async () => {
-    if (restoredRole === undefined) {
-      // Namespace-wide bootstrap Roles contain create grants; this API restores only exact resource authority.
-      const created = await topology.adminRequest("POST", `${namespacePath}/iam/roles`, {
-        name: `Restored outbound deployer ${randomUUID()}`,
-        permissions: [
-          { action: "deploy", resourceKind: "agent" },
-          { action: "read", resourceKind: "configuration" },
-        ],
-      });
-      assert.equal(created.status, 201, JSON.stringify(created.error));
-      restoredRole = created.data;
-    }
-    for (const [resourceKind, resourceId] of [
-      ["agent", topology.agent.id],
-      ["configuration", topology.revision.configurationId],
-    ]) {
-      if (restoredTargets.has(resourceId)) {
-        continue;
-      }
-      const restored = await topology.adminRequest("POST", `${namespacePath}/iam/access-bindings`, {
-        subjectKind: binding.subjectKind,
-        subjectId: binding.subjectId,
-        roleId: restoredRole.id,
-        resourceKind,
-        resourceId,
-      });
-      assert.equal(restored.status, 201, JSON.stringify(restored.error));
-      restoredTargets.add(resourceId);
-    }
-  };
-  const pendingEvidence = async () => {
-    const { rows } = await topology.observerPool.query(
-      `SELECT audit.id, audit.occurred_at, audit.details->>'workId' AS work_id
-         FROM occ.audit_events audit
-         JOIN occ.controller_work work ON work.idempotency_key = audit.details->>'workId'
-        WHERE audit.resource_kind = 'agent_revision' AND audit.resource_id = $1
-          AND audit.namespace_id = $2 AND audit.actor_id = $3
-          AND work.revision_id = $1 AND work.namespace_id = $2 AND work.agent_id = $4
-          AND audit.kind = 'mutation' AND audit.action = 'reconcile'
-          AND audit.details->>'reasonCode' = 'GATEWAY_OUTBOUND_WITHDRAWAL_PENDING'
-          AND audit.details->>'refusal' = 'AUTHORIZATION_DENIED'
-        ORDER BY audit.occurred_at DESC, audit.id DESC LIMIT 100`,
-      [
-        topology.revision.id,
-        topology.agent.namespaceId,
-        topology.secretApi.assignmentPrincipalId,
-        topology.agent.id,
-      ],
-    );
-    return rows;
-  };
-  let bindingRemoved = false;
-  let bindingRestored = false;
-  let roleRestored = false;
-  let serviceWatch;
-  const failures = [];
-  try {
-    // Deny only the fixture worker's actual Deployment delete. No network or credential fence changes.
-    await setRules(blockedRules);
-    await waitFor("actual controller Deployment delete denial", async () => {
-      const permission = await kubectl(
-        "auth",
-        "can-i",
-        "delete",
-        "deployments",
-        "--namespace",
-        topology.gatewayPlacement,
-        `--as=system:serviceaccount:${topology.platformNamespace}:${topology.controllerAccount}`,
-      ).then(
-        (stdout) => stdout.trim(),
-        (error) => {
-          assert.equal(error.code, 1, "the authorization probe must run and report a denial");
-          return error.stdout.trim();
-        },
-      );
-      return permission === "no";
-    });
-    const revoked = await topology.adminRequest(
-      "DELETE",
-      `${namespacePath}/iam/access-bindings/${binding.id}`,
-    );
-    assert.equal(revoked.status, 204, JSON.stringify(revoked.error));
-    bindingRemoved = true;
-    const marker = await waitFor(
-      "durable Gateway outbound withdrawal marker",
-      async () => (await pendingEvidence())[0],
-    );
-
-    // Actual partial cleanup removes the Service before Deployment delete fails. Ordinary preparation would repair it.
-    await waitFor(
-      "partial withdrawal to remove the proxy Service",
-      async () =>
-        !(await resources("services", topology.gatewayPlacement)).some(
-          ({ metadata }) => metadata.name === proxyName,
-        ),
-    );
-    serviceWatch = await watchGatewayOutboundServiceRepairs(topology, proxyName);
-    await restoreBinding();
-    bindingRestored = true;
-    await topology.restartControllerWorker();
-    const previousEvidence = new Set((await pendingEvidence()).map(({ id }) => id));
-    await waitFor(
-      "withdrawal-only retries after actor restore and worker restart",
-      async () =>
-        (await pendingEvidence()).filter(
-          ({ id, work_id }) => work_id === marker.work_id && !previousEvidence.has(id),
-        ).length >= 2,
-    );
-    assert.equal(
-      (await resources("services", topology.gatewayPlacement)).some(
-        ({ metadata }) => metadata.name === proxyName,
-      ),
-      false,
-      "restored IAM authority must not repair the refused revision's missing proxy Service",
-    );
-    assert.equal(
-      (await resource("pod", proxy.metadata.name, topology.gatewayPlacement)).metadata.uid,
-      proxy.metadata.uid,
-      "failed withdrawal must retain the original proxy rather than start another",
-    );
-    tunnel.assertOpen();
-    const unfinished = await topology.observerPool.query(
-      `SELECT state FROM occ.controller_work
-        WHERE revision_id = $1 AND state = 'failed_permanent'
-          AND reason_code = 'AUTHORIZATION_DENIED'`,
-      [topology.revision.id],
-    );
-    assert.equal(unfinished.rows.length, 0, "failed withdrawal must not finalize the refusal");
-
-    // Keep the actual Pod object after its process exits: withdrawal must wait for Kubernetes deletion.
-    await setProxyFinalizer(true);
-    await setRules(controllerRole.rules);
-    roleRestored = true;
-    await waitFor("terminated proxy container held by the owned Pod finalizer", async () => {
-      const current = await resource("pod", proxy.metadata.name, topology.gatewayPlacement);
-      assert.equal(current.metadata.uid, proxy.metadata.uid);
-      return (
-        current.metadata.deletionTimestamp !== undefined &&
-        current.status.containerStatuses?.find(({ name }) => name === "gateway-outbound")?.state
-          .terminated !== undefined
-      );
-    });
-    const maintenance = async () => {
-      const { rows } = await topology.observerPool.query(
-        `SELECT state, lease_expires_at FROM occ.controller_work WHERE idempotency_key = $1`,
-        [marker.work_id],
-      );
-      assert.equal(rows.length, 1);
-      assert.equal(rows[0].state, "claimed", "withdrawal must remain pending while its Pod exists");
-      return rows[0];
-    };
-    const lease = await maintenance();
-    await tunnel.assertClosed();
-    await waitFor(
-      "a live withdrawal worker lease renewal while Pod deletion is blocked",
-      async () =>
-        (await maintenance()).lease_expires_at.getTime() > lease.lease_expires_at.getTime(),
-      45_000,
-    );
-    assert.equal(
-      (await resource("pod", proxy.metadata.name, topology.gatewayPlacement)).metadata.uid,
-      proxy.metadata.uid,
-      "the original terminated proxy Pod must still exist until its finalizer is removed",
-    );
-    await setProxyFinalizer(false);
-    await waitFor("permanent maintenance refusal after completed outbound withdrawal", async () => {
-      const { rows } = await topology.observerPool.query(
-        `SELECT state, reason_code, completed_at
-         FROM occ.controller_work
-        WHERE revision_id = $1 AND state = 'failed_permanent'
-          AND reason_code = 'AUTHORIZATION_DENIED'
-        ORDER BY completed_at DESC LIMIT 1`,
-        [topology.revision.id],
-      );
-      return rows[0];
-    });
-    await assertProxyResourcesAbsent(topology, topology.revision.id);
-    for (const [namespace, pod] of [
-      [topology.gatewayPlacement, topology.gatewayPod],
-      [topology.placement, topology.harnessPod],
-    ]) {
-      assert.equal(
-        (await resource("pod", pod.metadata.name, namespace)).metadata.uid,
-        pod.metadata.uid,
-        "actor revocation must withdraw outbound authority without replacing runtime Pods",
-      );
-    }
-    const modelStorage = await storedSecret(
-      topology.observerPool,
-      topology.agent.namespaceId,
-      topology.secretApi.model.id,
-    );
-    await assertModelRuntimeProjection(topology.harnessPod, modelStorage);
-    await serviceWatch.assertNoRepair();
-  } catch (error) {
-    failures.push(error);
-  } finally {
-    for (const operation of [
-      () => serviceWatch?.close(),
-      () => (roleRestored ? undefined : setRules(controllerRole.rules)),
-      () => (finalizerHeld ? setProxyFinalizer(false) : undefined),
-      () => (bindingRemoved && !bindingRestored ? restoreBinding() : undefined),
-    ]) {
-      try {
-        await operation();
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-  }
-  if (failures.length === 1) {
-    throw failures[0];
-  }
-  if (failures.length > 1) {
-    throw new AggregateError(failures, "Gateway withdrawal scenario and owned cleanup failed.");
-  }
-  context.diagnostic(
-    "Native Gateway outbound: durable actor withdrawal survived real RBAC denial, missing Service, restored actor and worker restart; live work waited for the finalized proxy Pod after CONNECT closed, with runtime/model projection intact.",
-  );
-  topology.request = topology.adminRequest;
-}
-
-async function watchGatewayOutboundServiceRepairs(topology, proxyName) {
-  const snapshot = JSON.parse(
-    await kubectl("get", "services", "--namespace", topology.gatewayPlacement, "-o", "json"),
-  );
-  assert.equal(
-    snapshot.items.some(({ metadata }) => metadata.name === proxyName),
-    false,
-  );
-  const parameters = new URLSearchParams({
-    watch: "true",
-    resourceVersion: snapshot.metadata.resourceVersion,
-    timeoutSeconds: "240",
-  });
-  const child = spawn(
-    "kubectl",
-    kubectlArguments([
-      "get",
-      "--raw",
-      `/api/v1/namespaces/${topology.gatewayPlacement}/services?${parameters}`,
-    ]),
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  const events = [];
-  let closing = false;
-  let failure;
-  const lines = createInterface({ input: child.stdout });
-  child.once("error", (error) => {
-    failure = error;
-  });
-  child.stderr.on("data", () => {
-    failure = new Error("The real Kubernetes Service watch reported an error.");
-  });
-  const exited = new Promise((resolve) =>
-    child.once("close", (code) => {
-      if (!closing) {
-        failure ??= new Error(`The real Kubernetes Service watch ended unexpectedly (${code}).`);
-      }
-      resolve();
-    }),
-  );
-  lines.on("line", (line) => {
-    try {
-      const event = JSON.parse(line);
-      if (event.type === "ERROR") {
-        failure = new Error("The real Kubernetes Service watch returned a failure event.");
-      }
-      events.push({
-        type: event.type,
-        name: event.object.metadata?.name,
-        resourceVersion: event.object.metadata?.resourceVersion,
-      });
-    } catch {
-      failure = new Error("The real Kubernetes Service watch returned an invalid event.");
-    }
-  });
-  await once(child, "spawn");
-  return {
-    async assertNoRepair() {
-      const key = "openclaw.dev/test-outbound-watch-barrier";
-      const gatewayService = await resource(
-        "service",
-        topology.gatewayServiceName,
-        topology.gatewayPlacement,
-      );
-      const previous = gatewayService.metadata.annotations?.[key];
-      const patchAnnotation = (value) =>
-        kubectl(
-          "patch",
-          "service",
-          topology.gatewayServiceName,
-          "--namespace",
-          topology.gatewayPlacement,
-          "--type=merge",
-          "--patch",
-          JSON.stringify({ metadata: { annotations: { [key]: value } } }),
-          "-o",
-          "json",
-        );
-      try {
-        // Observing this real event proves the ordered watch has caught up through withdrawal.
-        const barrier = JSON.parse(await patchAnnotation(randomUUID()));
-        await waitFor("the Service watch to catch up through the no-repair barrier", () => {
-          if (failure !== undefined) {
-            throw failure;
-          }
-          return events.some(
-            (event) =>
-              event.type === "MODIFIED" &&
-              event.name === topology.gatewayServiceName &&
-              event.resourceVersion === barrier.metadata.resourceVersion,
-          );
-        });
-        assert.equal(
-          events.some(({ type, name }) => type === "ADDED" && name === proxyName),
-          false,
-          "pending withdrawal must never recreate the missing proxy Service, even temporarily",
-        );
-      } finally {
-        await patchAnnotation(previous ?? null);
-      }
-    },
-    async close() {
-      closing = true;
-      child.kill("SIGTERM");
-      await exited;
-      lines.close();
-    },
-  };
-}
-
-async function assertManagedGatewayOutbound(context, topology) {
-  await assertGatewayOutboundActorWithdrawal(context, topology);
-  const pluginRoot = "/home/node/.openclaw/state/plugins/oce-outbound-proof";
-  for (const name of ["openclaw.plugin.json", "package.json", "index.mjs"]) {
-    await writeFileInPod(
-      topology.gatewayPlacement,
-      topology.gatewayPod.metadata.name,
-      `${pluginRoot}/${name}`,
-      await readFile(`tests/fixtures/gateway-outbound/${name}`, "utf8"),
-    );
-  }
-  // The operator installs trusted native code into retained Gateway state; normal Configuration + deploy loads it.
-  const configurationPath = `/namespaces/${topology.agent.namespaceId}/configurations/${topology.agent.configurationId}`;
-  const configuration = await topology.adminRequest("GET", configurationPath);
-  assert.equal(configuration.status, 200, JSON.stringify(configuration.error));
-  const values = structuredClone(configuration.data.values);
-  values.plugins.allow.push("oce-outbound-proof");
-  values.plugins.load = { paths: [pluginRoot] };
-  values.plugins.entries["oce-outbound-proof"] = { enabled: true };
-  const saved = await topology.adminRequest("PATCH", configurationPath, { values });
-  assert.equal(saved.status, 200, JSON.stringify(saved.error));
-  const initialRevisionId = topology.revision.id;
-  await redeployGatewayOutbound(topology);
-  await assertProxyResourcesAbsent(topology, initialRevisionId);
-  const nativeFetch = (url) => gatewayCall(topology, "outbound-proof.fetch", { url });
-  const allowed = await nativeFetch("https://example.com/");
-  assert.equal(
-    allowed.connected,
-    true,
-    "native plugin global fetch must use the managed restricted proxy",
-  );
-  assert.equal(allowed.status, 200);
-  assert.match(allowed.body, /Example Domain/);
-  const [major, minor] = allowed.nodeVersion.split(".").map(Number);
-  assert.ok(
-    major > 24 || (major === 24 && minor >= 5),
-    "the stock runtime must support fetch proxy transport",
-  );
-  const apiService = await resource("service", "kubernetes", "default");
-  await assertNativeProxyRefusal(topology, "https://example.org/", "destination_not_approved");
-  const proxy = await gatewayOutboundProxy(topology);
-  const proxyName = `gateway-outbound-${hash(topology.agent.id)}-${hash(topology.revision.id)}`;
-  const proxyService = await resource("service", proxyName, topology.gatewayPlacement);
-  const environment = topology.gatewayPod.spec.containers[0].env;
-  assert.equal(
-    environment.find(({ name }) => name === "HTTPS_PROXY").value,
-    `http://${proxyName}.${topology.gatewayPlacement}.svc:3128`,
-  );
-  assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
-  assert.equal(proxy.spec.automountServiceAccountToken, false);
-  assert.equal(
-    proxy.spec.containers
-      .flatMap(({ env }) => env ?? [])
-      .some(({ valueFrom }) => valueFrom?.secretKeyRef !== undefined),
-    false,
-  );
-  const publicAddress = JSON.parse(
-    await execNode(
-      topology.gatewayPlacement,
-      topology.gatewayPod.metadata.name,
-      'require("node:dns").promises.resolve4("example.com").then((addresses) => process.stdout.write(JSON.stringify(addresses[0])))',
-    ),
-  );
-  assert.equal(
-    await tcpConnectionOutcome(topology.gatewayPlacement, proxy.metadata.name, publicAddress, 443),
-    "connected",
-    "the identical public TCP endpoint must be live and reachable from the permitted proxy Pod",
-  );
-  assert.equal(
-    await tcpConnectionOutcome(
-      topology.gatewayPlacement,
-      topology.gatewayPod.metadata.name,
-      publicAddress,
-      443,
-    ),
-    "denied",
-    "the dedicated Gateway must not bypass the proxy with direct public TCP",
-  );
-  assert.equal(
-    await tcpConnectionOutcome(
-      topology.placement,
-      topology.harnessPod.metadata.name,
-      proxyService.spec.clusterIP,
-      3128,
-    ),
-    "denied",
-    "the Harness must not inherit the Gateway proxy grant",
-  );
-  assert.equal(
-    (await nativeFetch("https://example.com/")).connected,
-    true,
-    "the owning route remains live after denied probes",
-  );
-
-  // A real embedded peer retains its existing model egress, but cannot borrow another Agent's route.
-  const peer = await createUndeployedAgent(
-    topology.adminRequest,
-    topology.agent.namespaceId,
-    "embedded",
-    `outbound-isolation-peer-${randomUUID()}`,
-  );
-  const peerPath = `/namespaces/${topology.agent.namespaceId}/agents/${peer.agent.id}`;
-  const bound = await topology.adminRequest("PATCH", peerPath, {
-    configurationId: peer.agent.configurationId,
-    harnessAuth: topology.agent.harnessAuth,
-  });
-  assert.equal(bound.status, 200, JSON.stringify(bound.error));
-  const persistedPeer = await storedAgent(
-    topology.observerPool,
-    topology.agent.namespaceId,
-    peer.agent.id,
-  );
-  await grantSecretOperate(
-    topology.observerPool,
-    topology.agent.namespaceId,
-    persistedPeer.servicePrincipalId,
-    topology.secretApi.model.id,
-  );
-  await provisionAgentTransportSecret(topology.directory, topology.placement, peer.agent.id, {
-    executionMode: "embedded",
-  });
-  const peerRuntime = await deployEmbeddedAgentAndWait(
-    { ...topology, agent: bound.data },
-    peer.agent.id,
-    "cross-Agent proxy isolation peer",
-  );
-  assert.equal(
-    await tcpConnectionOutcome(
-      topology.gatewayPlacement,
-      peerRuntime.gatewayPod.metadata.name,
-      proxyService.spec.clusterIP,
-      3128,
-    ),
-    "denied",
-    "another real Agent must not connect to the owning Agent's proxy",
-  );
-  const stoppedPeer = await topology.adminRequest("POST", `${peerPath}/stop`);
-  assert.equal(stoppedPeer.status, 202, JSON.stringify(stoppedPeer.error));
-  await waitFor("cross-Agent proxy isolation peer stop", async () =>
-    (await topologyPods(topology)).every(
-      (pod) => pod.metadata.labels?.["openclaw.dev/agent"] !== peer.agent.id,
-    ),
-  );
-
-  const restrictedRevisionId = topology.revision.id;
-  await assertActualModelTurn(topology);
-  await redeployGatewayOutbound(topology, { mode: "publicHttps" });
-  await assertProxyResourcesAbsent(topology, restrictedRevisionId);
-  assert.equal(
-    (await nativeFetch("https://example.org/")).connected,
-    true,
-    "administrator-approved public HTTPS must admit a host absent from the earlier restricted policy",
-  );
-  for (const [url, reason] of [
-    ["https://169.254.169.254/", "forbidden_address"],
-    [`https://${apiService.spec.clusterIP}/`, "forbidden_address"],
-    ["https://kubernetes.default.svc/", "forbidden_dns_answer"],
-    ["https://[::ffff:127.0.0.1]/", "forbidden_address"],
-    ["https://[2606:4700:4700::1111]/", "ipv6_route_unavailable"],
-    ["https://example.com:444/", "invalid_target"],
-  ]) {
-    await assertNativeProxyRefusal(topology, url, reason);
-  }
-  await assertActualModelTurn(topology);
-  const livePublicRevisionId = topology.revision.id;
-  // Stop while the approved proxy is live, then deploy again from retained native plugin state.
-  const liveStop = await topology.adminRequest(
-    "POST",
-    `/namespaces/${topology.agent.namespaceId}/agents/${topology.agent.id}/stop`,
-  );
-  assert.equal(liveStop.status, 202, JSON.stringify(liveStop.error));
-  topology.agent = liveStop.data;
-  await waitFor("live-proxy Agent stop to terminate every workload", async () =>
-    (await topologyPods(topology)).every(
-      (pod) => pod.metadata.labels?.["openclaw.dev/agent"] !== topology.agent.id,
-    ),
-  );
-  await assertProxyResourcesAbsent(topology, livePublicRevisionId);
-  await redeployGatewayOutbound(topology);
-  assert.equal(
-    (await nativeFetch("https://example.com/")).connected,
-    true,
-    "stop and redeploy must restore the approved route and retained native plugin",
-  );
-  const publicProxyName = `gateway-outbound-${hash(topology.agent.id)}-${hash(topology.revision.id)}`;
-  const tunnel = await holdGatewayOutboundTunnel(
-    context,
-    topology,
-    `${publicProxyName}.${topology.gatewayPlacement}.svc`,
-  );
-  tunnel.assertOpen();
-  const gatewayUid = topology.gatewayPod.metadata.uid;
-  // Restart actual controllers with a tighter startup profile; active maintenance must remove the old authority.
-  await topology.updateGatewayOutboundInstallation({
-    ...topology.gatewayOutboundInstallation,
-    allowPublicHttps: false,
-  });
-  await waitFor("active public proxy Pods to terminate after Installation tightening", async () =>
-    (await resources("pods", topology.gatewayPlacement)).every(
-      (pod) =>
-        pod.metadata.labels?.["openclaw.dev/workload-role"] !== "gateway-outbound" ||
-        pod.metadata.labels?.["openclaw.dev/agent"] !== topology.agent.id,
-    ),
-  );
-  await tunnel.assertClosed();
-  await assertProxyResourcesAbsent(topology, topology.revision.id);
-  assert.equal(
-    (await resource("pod", topology.gatewayPod.metadata.name, topology.gatewayPlacement)).metadata
-      .uid,
-    gatewayUid,
-    "authority withdrawal must not replace the Gateway itself",
-  );
-  assert.equal(
-    (await nativeFetch("https://example.com/")).connected,
-    false,
-    "the old admitted public snapshot must stop reaching the internet after tightening",
-  );
-  const denied = await topology.adminRequest(
-    "PATCH",
-    `/namespaces/${topology.agent.namespaceId}/agents/${topology.agent.id}`,
-    { configurationId: topology.agent.configurationId, gatewayOutbound: { mode: "publicHttps" } },
-  );
-  assert.equal(denied.status, 409, "current Installation ceiling must refuse new public approval");
-  const stopped = await topology.adminRequest(
-    "POST",
-    `/namespaces/${topology.agent.namespaceId}/agents/${topology.agent.id}/stop`,
-  );
-  assert.equal(stopped.status, 202, JSON.stringify(stopped.error));
-  await waitFor("the stopped Agent's workloads to terminate", async () =>
-    (await topologyPods(topology)).every(
-      (pod) => pod.metadata.labels?.["openclaw.dev/agent"] !== topology.agent.id,
-    ),
-  );
-  await assertProxyResourcesAbsent(topology, topology.revision.id);
-  context.diagnostic(
-    `Native Gateway outbound: restricted/public HTTPS, private/metadata/IPv6/direct/cross-Agent/Harness denials, revision retirement, active tunnel withdrawal and stop; stock Node ${allowed.nodeVersion}.`,
-  );
 }
 
 async function assertDedicatedSkillSources(topology) {
@@ -4349,14 +3373,14 @@ async function assertGatewayEffectiveDefaultModel(context, topology, expectedMod
   const actualModel = typeof model === "string" ? model : model?.primary;
   assert.ok(
     typeof actualModel === "string" && actualModel.trim(),
-    "Gateway configuration did not expose agents.defaults.model",
+    "Effective runtime config did not expose agents.defaults.model",
   );
   assert.equal(
     actualModel,
     expectedModel,
     `gateway effective default model does not match its runtime projection: ${actualModel}`,
   );
-  context.diagnostic(`${topology.mode}: configured default model ${actualModel}`);
+  context.diagnostic(`${topology.mode}: effective default model ${actualModel}`);
 }
 
 function messageText(message) {
@@ -5016,6 +4040,26 @@ async function requestDedicatedAgentTurn(topology, sessionKey, prompt) {
   );
   assert.equal(response.status, 200, `dedicated Agent model turn failed: ${body}`);
   return JSON.parse(body).choices?.[0]?.message?.content ?? "";
+}
+
+async function assertActualPublicGithubRead(topology) {
+  const status = await gatewayCall(topology, "skills.status", { agentId: "main" });
+  assert.ok(
+    status.skills.some(({ name }) => name === "public-github-read"),
+    "native managed skill discovery did not report the revision's public reader",
+  );
+  // The fresh, unbound Agent must discover the actual endpoint and obtain a
+  // title absent from its prompt using the limited native proxy and Helm Service.
+  const answer = await requestDedicatedAgentTurn(
+    topology,
+    "agent:main:read-public-pull",
+    "Use your credential-free public GitHub reader to read pull request 27 in known public repository example/public-project. " +
+      "Request the single pull's detail, not a list. Return its exact title. Use no credentials or escalated execution.",
+  );
+  assert.ok(
+    answer.includes(topology.publicGithubRead.marker),
+    "the Agent did not return the provider's pull title",
+  );
 }
 
 async function assertDedicatedNativeChildRelay(topology) {
@@ -6823,9 +5867,10 @@ async function assertRoutedWorkspaceModelTurn(topology, connection, marker) {
 
 export {
   arrangeProductionTopology,
-  gatewayOutboundInfrastructureCidrs,
+  productionTopologyCleanupOrder,
+  registerProductionTopologyCleanups,
   assertActualModelTurn,
-  assertManagedGatewayOutbound,
+  assertActualPublicGithubRead,
   assertDedicatedAgentsInstructionsInFreshSession,
   assertDedicatedNativeChildRelay,
   assertLegacyModelSecretBindingDenied,

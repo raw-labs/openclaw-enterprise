@@ -1,4 +1,3 @@
-import { nativeAdminOriginResolver } from "../gateway/native-admin-origin.ts";
 import type { AuditEventFactory } from "@openclaw-enterprise/audit";
 import type {
   AuditEvent,
@@ -28,7 +27,7 @@ import {
 import { createDockerDevelopmentComputeDriverFromEnv } from "../drivers/compute/docker/index.ts";
 import { createFilesystemDevelopmentConfigurationDriverFromEnv } from "../drivers/configuration/filesystem/index.ts";
 import { createFastifyApp } from "../index.ts";
-import { BundledChannelDriver } from "../drivers/channel/index.ts";
+import { SlackChannelDriver } from "../drivers/channel/slack.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -234,11 +233,9 @@ export async function composePostgresDevelopment(
 
     const loggingLevel = config.logging?.level ?? drivers?.installation.logging.level;
     const controller = new OpenClawController(persistedInstallation, {
+      sandboxNetworkPolicyCeiling: drivers?.installation.sandboxNetworkPolicyCeiling ?? [],
       state,
       recordOperations: true,
-      ...(config.nativeAdmin?.enabled === true
-        ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! }
-        : {}),
       defaultPresets: drivers?.defaultPresets ?? [],
       bundledPresetVersions: drivers?.bundledPresetVersions ?? [],
       refreshBundledDefaultPresets: drivers?.installation.presets?.includeDefaults === true,
@@ -252,7 +249,7 @@ export async function composePostgresDevelopment(
     controller.selectDriver("iam", driverId);
     controller.registerDriver(computeDriver);
     controller.selectDriver("compute", computeDriver.id);
-    const channelDriver = new BundledChannelDriver();
+    const channelDriver = new SlackChannelDriver();
     controller.registerDriver(channelDriver);
     controller.selectDriver("channel", channelDriver.id);
     if (sandboxDriver !== undefined) {

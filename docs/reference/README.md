@@ -8,6 +8,7 @@ the OpenClaw Control Plane (OCC).
 
 ## Cheat sheets
 
+- [GitHub Actions](cheatsheets/github-actions.md): workflows, triggers, and blocking failures.
 - [API](cheatsheets/api.md): public methods and what they do, by entity.
 - [Permissions](cheatsheets/permissions.md): all IAM actions, resources, and access scopes.
 - [Database entities](cheatsheets/database-entities.md): PostgreSQL tables, their purpose, and their columns.
@@ -47,7 +48,6 @@ pool/schema ownership for controller authentication.
 - [Authentication](authentication.md) and [authorization](authorization.md)
   explain which credentials and permissions requests need.
 - [Agent Presets](presets.md) defines reusable launch settings, variables, and CRUD permissions.
-- [Gateway outbound HTTPS](gateway-outbound.md) defines administrator-approved native integration access and channel requirements.
 - [Agent native admin UI](agent-native-admin.md) covers trusted operator access,
   exact Agent authorization, and routing limits.
 

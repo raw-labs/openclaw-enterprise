@@ -26,49 +26,6 @@ import type { HarnessAuthMethodRule } from "../harness-auth-method.ts";
  */
 type SettingError = (setting: string, requirement: string) => Error;
 
-/** The selected runtime needs its plugin; admission must not widen the caller's policy. */
-export function requireHarnessPluginPolicy(
-  configuration: Readonly<OpenClawConfigurationDocument>,
-  pluginId: string,
-  requirement: string,
-  createError: SettingError,
-): void {
-  const plugins = asRecord(configuration.plugins);
-  if (plugins?.enabled === false) {
-    throw createError("plugins.enabled", `must not be false ${requirement}`);
-  }
-  const ids = (key: "allow" | "deny"): readonly string[] => {
-    const list = plugins?.[key];
-    if (list === undefined) {
-      return [];
-    }
-    if (!Array.isArray(list) || list.some((id) => typeof id !== "string")) {
-      throw createError(`plugins.${key}`, "must be a list of plugin IDs");
-    }
-    return (list as string[]).map((id) => id.trim().toLowerCase()).filter(Boolean);
-  };
-  if (ids("deny").includes(pluginId)) {
-    throw createError("plugins.deny", `must not list ${pluginId} ${requirement}`);
-  }
-  const allow = ids("allow");
-  if (allow.length > 0 && !allow.includes(pluginId)) {
-    throw createError("plugins.allow", `must include ${pluginId} ${requirement}`);
-  }
-  const entries = Object.entries(asRecord(plugins?.entries) ?? {}).filter(
-    ([id]) => id.trim().toLowerCase() === pluginId,
-  );
-  // Provisioning fingerprints and PostgreSQL jsonb cannot preserve ordered alias overrides.
-  if (entries.length > 1) {
-    throw createError(
-      "plugins.entries",
-      `must contain at most one entry for ${pluginId} after trimming whitespace and ignoring case; remove duplicate entries`,
-    );
-  }
-  if (asRecord(entries[0]?.[1])?.enabled === false) {
-    throw createError(`plugins.entries.${pluginId}.enabled`, `must not be false ${requirement}`);
-  }
-}
-
 export const OPENCLAW_GATEWAY_PASSWORD = "OPENCLAW_GATEWAY_PASSWORD";
 
 /**
@@ -118,26 +75,20 @@ export function requireWorkspaceNodePlugins(
 }
 
 /**
- * Enabled channels need dedicated execution or trusted embedded evaluation, and a channel runtime
- * (`runtime.gatewayOutbound`: a managed proxy). `providers` lists the
+ * Enabled channels need a dedicated Agent workload and an Installation channel runtime
+ * (`runtime.channels`: isolated credentials and a reviewed proxy). `providers` lists the
  * enabled channel providers, in Configuration order.
  */
 export function requireChannelTopology(
   providers: readonly string[],
-  topology: {
-    readonly embedded: boolean;
-    readonly channelRuntime: boolean;
-    readonly experimentalEmbeddedChannels?: boolean;
-  },
+  topology: { readonly embedded: boolean; readonly channelRuntime: boolean },
   createError: SettingError,
 ): void {
   const [provider] = providers;
   if (provider === undefined) {
     return;
   }
-  // TODO(dedicated native parity): remove this shared-credential evaluation exception
-  // once dedicated OpenClaw provides the required models and native integrations.
-  if (topology.embedded && topology.experimentalEmbeddedChannels !== true) {
+  if (topology.embedded) {
     throw createError(
       `channels.${provider}`,
       "is enabled, but channels require a dedicated Agent workload",
@@ -146,7 +97,7 @@ export function requireChannelTopology(
   if (!topology.channelRuntime) {
     throw createError(
       `channels.${provider}`,
-      "is enabled, but this Installation has no channel runtime: enabled channels require an enabled managed outbound proxy",
+      "is enabled, but this Installation has no channel runtime: enabled channels require isolated credentials and a reviewed proxy",
     );
   }
 }
@@ -184,28 +135,6 @@ const PROVIDER_ENVIRONMENT =
   "the Agent's Harness authentication binding owns model provider environment";
 const MODEL_CREDENTIAL_ENVIRONMENT =
   /^(?:OPENAI_|ANTHROPIC_|CODEX_(?:ACCESS_TOKEN|CHATGPT_WORKSPACE_ID|LOGIN_MODE)$)/i;
-const CHANNEL_PROXY_ENVIRONMENT =
-  /^(?:https?_proxy|all_proxy|no_proxy|node_use_env_proxy|openclaw_proxy_(?:active|ca_file))$/i;
-
-/** Only trusted Compute configuration can select the proxy and delegate guarded-fetch checks. */
-export function requireChannelProxyEnvironment(
-  configuration: Readonly<OpenClawConfigurationDocument>,
-  createError: SettingError,
-): void {
-  const env = asRecord(configuration.env);
-  for (const [parent, values] of [
-    ["env", env],
-    ["env.vars", asRecord(env?.vars)],
-  ] as const) {
-    const name = Object.keys(values ?? {}).find((key) => CHANNEL_PROXY_ENVIRONMENT.test(key));
-    if (name !== undefined) {
-      throw createError(
-        keyedSettingPath(parent, name),
-        "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
-      );
-    }
-  }
-}
 // The refusal names the header, so it explains itself whatever word the rule matched; never its
 // value. A header name is not a secret. A long one is cut so the message fits its cap.
 const credentialHeaderRequirement = (name: string): string =>
@@ -647,12 +576,12 @@ export type KubernetesHarnessTopology =
   "embedded OpenClaw" | "Dedicated OpenClaw" | "Dedicated Codex";
 
 // The Harness authentication methods Kubernetes Compute delivers to each topology. What a
-// method also needs from the Installation (oauth needs no Sandbox Driver, credential_source
-// its paired Sandbox) is checked after this, with a fixed refusal.
+// method also needs from the Installation (credential_source needs its paired Sandbox)
+// is checked after this, with a fixed refusal.
 const HARNESS_AUTH_METHODS: Readonly<Record<KubernetesHarnessTopology, readonly string[]>> = {
   "embedded OpenClaw": ["api_key"],
   "Dedicated OpenClaw": ["api_key", "credential_source"],
-  "Dedicated Codex": ["api_key", "codex_pat", "oauth", "credential_source"],
+  "Dedicated Codex": ["api_key", "codex_pat", "credential_source"],
 };
 
 /** The `requireHarnessAuthMethod` rule for an Agent's topology on Kubernetes Compute. */

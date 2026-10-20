@@ -58,6 +58,20 @@
 {{- fail (printf "%s must be an approved immutable SHA-256 image reference" $label) -}}
 {{- end -}}
 {{- end -}}
+{{- /* Resolves a mount destination as the container runtime does inside the controller image: one component at a time, following the image's top-level symlinks. The runtime stage of the root Dockerfile is node:24-bookworm-slim, where Debian base-files links /var/run and /var/lock into /run and merged /usr links /bin, /lib, /lib64 and /sbin. */ -}}
+{{- define "openclaw.runtimeMountDestination" -}}
+{{- $links := dict "/var/run" "/run" "/var/lock" "/run/lock" "/bin" "/usr/bin" "/lib" "/usr/lib" "/lib64" "/usr/lib64" "/sbin" "/usr/sbin" -}}
+{{- $resolved := "/" -}}
+{{- range $part := splitList "/" (toString .) -}}
+{{- if eq $part ".." -}}
+{{- $resolved = dir $resolved -}}
+{{- else if and $part (ne $part ".") -}}
+{{- $resolved = clean (printf "%s/%s" $resolved $part) -}}
+{{- $resolved = get $links $resolved | default $resolved -}}
+{{- end -}}
+{{- end -}}
+{{- $resolved -}}
+{{- end -}}
 {{- /* An operator-named Secret or ConfigMap: a Kubernetes resource name (DNS subdomain) of at most 253 characters, as the profile renderer's resourceNameRule checks. */ -}}
 {{- define "openclaw.validateResourceName" -}}
 {{- $value := toString .value -}}
@@ -412,8 +426,12 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- if and .Values.auth.oidc .Values.auth.oidc.enabled .Values.auth.oidc.caSecretName -}}
 {{- $reservedCaMounts = append $reservedCaMounts "/etc/openclaw/api-extra-ca" -}}
 {{- end -}}
-{{- if has (toString .Values.database.caMountPath) $reservedCaMounts -}}
+{{- /* Linux kubelet makes relative mounts absolute; the runtime resolves dot segments, trailing slashes and image symlinks. Compare destinations without changing the emitted operator path. */ -}}
+{{- $caDestination := include "openclaw.runtimeMountDestination" .Values.database.caMountPath -}}
+{{- range $mount := $reservedCaMounts -}}
+{{- if eq $caDestination (include "openclaw.runtimeMountDestination" $mount) -}}
 {{- fail "database.caMountPath must be distinct from other active mounts in the production database clients" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if .Values.executionCluster.enabled -}}
@@ -445,21 +463,17 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- if .Values.outboundProxy.enabled -}}
-{{- $proxy := .Values.outboundProxy -}}
-{{- if .Values.api.controlPlaneOutboundProxyUrl -}}{{- fail "api.controlPlaneOutboundProxyUrl must be empty when outboundProxy.enabled uses the chart-managed Service" -}}{{- end -}}
-{{- if not (kindIs "bool" $proxy.enabled) -}}{{- fail "outboundProxy.enabled must be a boolean" -}}{{- end -}}
+{{- if .Values.slackProxy.enabled -}}
+{{- $proxy := .Values.slackProxy -}}
+{{- if .Values.api.channelDirectoryProxyUrl -}}{{- fail "api.channelDirectoryProxyUrl must be empty when slackProxy.enabled uses the chart-managed Service" -}}{{- end -}}
+{{- if not (kindIs "bool" $proxy.enabled) -}}{{- fail "slackProxy.enabled must be a boolean" -}}{{- end -}}
 {{- if or (gt (len $proxy.serviceName) 63) (not (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" $proxy.serviceName)) -}}
-{{- fail "outboundProxy.serviceName must be a DNS-1035 Service name" -}}
+{{- fail "slackProxy.serviceName must be a DNS-1035 Service name" -}}
 {{- end -}}
 {{- if or (not (regexMatch "^[1-9][0-9]*$" (toString $proxy.port))) (lt (int $proxy.port) 1) (gt (int $proxy.port) 65535) -}}
-{{- fail "outboundProxy.port must be an integer TCP port from 1 to 65535" -}}
+{{- fail "slackProxy.port must be an integer TCP port from 1 to 65535" -}}
 {{- end -}}
-{{- include "openclaw.resourceRequirements" (dict "name" "outboundProxy.resources" "requirements" $proxy.resources) -}}
-{{- if or (not (kindIs "slice" $proxy.denyCidrs)) (not $proxy.denyCidrs) -}}{{- fail "outboundProxy.denyCidrs must name the Installation infrastructure CIDRs when enabled" -}}{{- end -}}
-{{- range $cidr := $proxy.denyCidrs -}}
-{{- include "openclaw.requireIpv4Cidr" (dict "label" "outboundProxy.denyCidrs" "cidr" $cidr) -}}
-{{- end -}}
+{{- include "openclaw.resourceRequirements" (dict "name" "slackProxy.resources" "requirements" $proxy.resources) -}}
 {{- end -}}
 {{- if .Values.repositoryCredentials.enabled -}}
 {{- $credentials := .Values.repositoryCredentials -}}
@@ -517,21 +531,17 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- end -}}
 {{- end -}}
 {{- if and .Values.gatewayRouting.sandbox.enabled (not .Values.gatewayRouting.enabled) -}}{{- fail "gatewayRouting.sandbox requires gatewayRouting.enabled" -}}{{- end -}}
-{{- if and .Values.gatewayRouting.channels.enabled (not .Values.gatewayRouting.enabled) -}}{{- fail "gatewayRouting.channels requires gatewayRouting.enabled" -}}{{- end -}}
 {{- if .Values.gatewayRouting.enabled -}}
 {{- $routing := .Values.gatewayRouting -}}
-{{- if $routing.channels.enabled -}}
-{{- if not (regexMatch "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\\.[a-z0-9-]+$" $routing.channels.hostname) -}}{{- fail "gatewayRouting.channels.hostname must be a DNS hostname" -}}{{- end -}}
-{{- $privateHostname := default (printf "%s.%s.svc" (include "openclaw.gatewayRouting.serviceName" .) $routing.envoyNamespace) $routing.hostname -}}
-{{- if eq $routing.channels.hostname $privateHostname -}}{{- fail "channel callbacks must use a hostname separate from gateway administration" -}}{{- end -}}
-{{- if not $routing.channels.tlsSecretName -}}{{- fail "gatewayRouting.channels.tlsSecretName must reference a public HTTPS certificate Secret" -}}{{- end -}}
-{{- if or (lt (int $routing.channels.listenerPort) 1024) (gt (int $routing.channels.listenerPort) 65535) (eq (int $routing.channels.listenerPort) (int $routing.envoyHttpsTargetPort)) (eq (int $routing.channels.listenerPort) 443) (and $routing.sandbox.enabled (eq (int $routing.channels.listenerPort) (int $routing.sandbox.listenerPort))) -}}{{- fail "channel listener must use an unprivileged port separate from private HTTPS and sandbox listeners" -}}{{- end -}}
-{{- if not $routing.channels.ingressPeers -}}{{- fail "gatewayRouting.channels.ingressPeers must explicitly select public ingress sources" -}}{{- end -}}
-{{- end -}}
 {{- if and (hasKey $routing "hostname") (not (kindIs "string" $routing.hostname)) -}}{{- fail "gatewayRouting.hostname must be a string when supplied" -}}{{- end -}}
 {{- /* The same custom hostname enters the Gateway listener and Certificate SANs. Compute validates it while loading the Installation; empty keeps automatic Service DNS derivation. */ -}}
 {{- if and $routing.hostname (or (gt (len $routing.hostname) 253) (not (regexMatch "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$" $routing.hostname))) -}}
 {{- fail "gatewayRouting.hostname must be a DNS hostname without a port or path" -}}
+{{- end -}}
+{{- /* Shorthand, integer, hex, and leading-zero IPv4 are legal DNS labels, but a URL parser dials another address. Four decimal octets stay. */ -}}
+{{- /* A numeric or 0x last label is an address unless the host is four decimal octets from 0 to 255 with no leading zeros. A hex label that is not last, such as 0xdead.gateway.example.test, stays. */ -}}
+{{- if and $routing.hostname (and (regexMatch "(^|\\.)(?:0x[0-9a-f]*|[0-9]+)$" $routing.hostname) (not (regexMatch "^(?:0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])(?:\\.(?:0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])){3}$" $routing.hostname))) -}}
+{{- fail "gatewayRouting.hostname must be a DNS hostname without a port or path. A numeric or 0x last label parses as IPv4; use a DNS name resolving to the gateway that its TLS certificate covers." -}}
 {{- end -}}
 
 {{- if not $routing.gatewayClassName -}}{{- fail "gatewayRouting.gatewayClassName must reference an operator-created GatewayClass" -}}{{- end -}}
@@ -590,6 +600,10 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- end -}}
 {{- if $routing.sandbox.enabled -}}
 {{- if not (regexMatch "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$" $routing.sandbox.domain) -}}{{- fail "gatewayRouting.sandbox.domain must be a DNS hostname without wildcard, scheme, port or path" -}}{{- end -}}
+{{- /* Sandbox domain is a suffix: a direct IPv4 host cannot follow the Agent label. */ -}}
+{{- if regexMatch "(^|\\.)(?:0x[0-9a-f]*|[0-9]+)$" $routing.sandbox.domain -}}
+{{- fail "gatewayRouting.sandbox.domain must be a DNS hostname usable after an Agent label; use a DNS suffix such as previews.example.com, not a numeric or 0x last label." -}}
+{{- end -}}
 {{- /* Dedicated Agent routes use agent-<32 hex>.<domain>, which must fit the 253-character Gateway API hostname limit. */ -}}
 {{- if gt (len $routing.sandbox.domain) 214 -}}{{- fail "gatewayRouting.sandbox.domain must not exceed 214 characters, leaving room for the agent-<32 hex>. prefix of dedicated Agent hostnames" -}}{{- end -}}
 {{- if not $routing.sandbox.tlsSecretName -}}{{- fail "gatewayRouting.sandbox.tlsSecretName must reference a wildcard certificate Secret" -}}{{- end -}}
@@ -715,12 +729,12 @@ capabilities:
       key: {{ .key | quote }}
 {{- end -}}
 
-{{- define "openclaw.outboundProxy.serviceName" -}}
-{{- .Values.outboundProxy.serviceName -}}
+{{- define "openclaw.slackProxy.serviceName" -}}
+{{- .Values.slackProxy.serviceName -}}
 {{- end -}}
 
-{{- define "openclaw.outboundProxy.url" -}}
-{{- printf "http://%s.%s.svc:%v" (include "openclaw.outboundProxy.serviceName" .) .Release.Namespace (int .Values.outboundProxy.port) -}}
+{{- define "openclaw.slackProxy.url" -}}
+{{- printf "http://%s.%s.svc:%v" (include "openclaw.slackProxy.serviceName" .) .Release.Namespace (int .Values.slackProxy.port) -}}
 {{- end -}}
 
 {{- define "openclaw.gatewayRouting.gatewayName" -}}

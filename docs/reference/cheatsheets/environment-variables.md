@@ -45,26 +45,16 @@ console uses the current origin and has no separate environment settings.
 - `OCC_AUTH_TRUSTED_PROXY_CIDRS` — Production-only, off by default: comma-separated ingress or load balancer CIDRs. IPv4-mapped IPv6 counts as IPv4 (prefix 1–32); entries covering every IPv4 or every IPv6 address are refused. Trusted peers may report client addresses for sign-in limits; see [trusted proxies](../settings/production.md#github-sign-in-and-trusted-proxies).
 - `OCC_AUTH_TRUSTED_PROXY_PRESET` — `ingress-nginx` (default) or `aws` (Application Load Balancer), both reading `X-Forwarded-For`, or `generic`. A Network Load Balancer that preserves client addresses needs no trusted proxy.
 - `OCC_AUTH_CLIENT_IP_HEADER` — Lowercase header carrying the client address, such as `x-real-ip`; required by `generic` only.
-- `OCC_AGENT_NATIVE_ADMIN_ENABLED` — Enables the Agent native admin pilot and API/worker deployment preparation; default: `false`.
+- `OCC_AGENT_NATIVE_ADMIN_ENABLED` — Enables the Agent native admin pilot; default: `false`.
 - `OCC_AGENT_RUNTIME_LOGS_ENABLED` — `false` makes the Agent runtime status and log routes answer `501`; default: `true`. Set by the chart's `agentRuntimeLogs.enabled`.
-- `OCC_AGENT_NATIVE_ADMIN_DOMAIN` — Agent hostname suffix for API/worker origin derivation; required when the pilot is enabled.
+- `OCC_AGENT_NATIVE_ADMIN_DOMAIN` — Agent hostname suffix; required when the pilot is enabled.
 - `OCC_AUTH_COOKIE_DOMAIN` — Shared parent domain for console and Agent cookies; required when the pilot is enabled.
 - `OCC_GATEWAY_API_KEY_PATH` — API/worker absolute path to the private gateway service-key file for operator RPCs and dedicated node enrollment.
-- `OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL` — Optional API-only CONNECT endpoint for trusted ChannelDriver management requests; set by Helm `outboundProxy.enabled` or `api.controlPlaneOutboundProxyUrl`.
-- `OCC_CONTROL_PLANE_OUTBOUND_PROXY_MANAGED_HOST` — Exact managed proxy Service host accepted by the bundled Driver; set by Helm `outboundProxy.enabled`.
+- `OCC_CHANNEL_DIRECTORY_PROXY_URL` — Optional API-only HTTP(S) proxy endpoint for production Slack directory lookup and credential validation; set by Helm `slackProxy.enabled` or `api.channelDirectoryProxyUrl`.
+- `OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST` — Exact Kubernetes Service host accepted as a managed Slack directory proxy; set only by Helm `slackProxy.enabled`.
 - `NODE_EXTRA_CA_CERTS` — Additional process-wide Node.js PEM trust for private OCC, Gateway or IdP CAs; read at process startup. The chart combines IdP and Gateway roots for the API; see [OIDC CA settings](../settings/oidc.md).
 - `OCC_GATEWAY_CA_PATH` — API-only path to the Gateway-only CA bundle that dedicated Harness nodes trust; empty means none. Unset, node enrollment uses `NODE_EXTRA_CA_CERTS`. Helm sets it with OIDC CA values.
 - `OCC_CA_SOURCES`, `OCC_DATABASE_CA_SOURCE` — Chart-set labels (value, Secret and key) that the OIDC CA startup checks print in their errors instead of mount paths. Helm sets them with OIDC CA values; not operator inputs.
-
-## Outbound proxy processes
-
-See [production proxy settings](../settings/production.md#control-plane-outbound-proxy)
-and [Gateway outbound access](../gateway-outbound.md).
-
-- `OCC_CONTROL_PLANE_OUTBOUND_PROXY_CONFIG_PATH` — Absolute JSON config path for the control-plane wrapper; Helm supplies infrastructure exclusions, and the trusted Driver supplies destinations.
-- `OCC_OUTBOUND_PROXY_POLICY_PATH` — JSON policy path required by the generic standalone Gateway proxy entrypoint.
-- `OCC_OUTBOUND_PROXY_HOST` — Proxy listener bind address; default: `0.0.0.0`.
-- `OCC_OUTBOUND_PROXY_PORT` — Proxy listener port; default: `3128`.
 
 ## PostgreSQL and migrations
 
@@ -127,8 +117,8 @@ for supported engines, images, and security restrictions.
 - `OCC_DOCKER_RUNTIME_IMAGE` — Shared image for the Docker gateway and Agent; may replace the two separate images.
 - `OCC_DOCKER_GATEWAY_IMAGE` — Docker gateway image when a shared image is not used.
 - `OCC_DOCKER_AGENT_IMAGE` — Docker Codex Agent image when a shared image is not used.
-- `OCC_KUBERNETES_RUNTIME_IMAGE` — Existing local Kubernetes runtime image; Kubernetes-only startup requires a matching controller digest and checkout revision.
-- `OCC_DEVELOPMENT_CONTROLLER_IMAGE` — Existing local OCE controller digest matching the runtime and checkout revision for the Kubernetes-only profile.
+- `OCC_KUBERNETES_RUNTIME_IMAGE` — Existing local Kubernetes runtime image; Kubernetes-only startup requires a matching controller digest and checkout commit.
+- `OCC_DEVELOPMENT_CONTROLLER_IMAGE` — Existing local OCE controller digest matching the runtime and checkout commit for the Kubernetes-only profile.
 - `OCC_DEVELOPMENT_REPOSITORY_INPUT_DIRECTORY` — Private local repository registry, App key, and approved upstream IPv4 `/32` endpoint inputs.
 - `OCC_DEVELOPMENT_REPOSITORY_IMAGE` — Optional matching immutable repository service image for the Kubernetes-only profile.
 - `OCC_DEVELOPMENT_POSTGRES_IMAGE` — Existing local PostgreSQL image for the Kubernetes-only profile; defaults to the pinned PostgreSQL 18.6 image.
@@ -172,7 +162,3 @@ Collector or local Docker log forwarding. See [Observability](../../guides/obser
 - `OTEL_COLLECTOR_PORT` — Local Collector Fluent Forward port; default: `24224`.
 - `OTEL_COLLECTOR_METRICS_PORT` — Local Collector metrics port; default: `8888`.
 - `OCC_DOCKER_LOGGING_ADDRESS` — Docker Compute log destination; local override default: `127.0.0.1:24224`.
-
-## Channel proxy
-
-- `OPENCLAW_PROXY_ACTIVE` — Compute-owned marker for admitted managed Gateway transport; see [Gateway outbound](../gateway-outbound.md). Native Configuration cannot set it or `OPENCLAW_PROXY_CA_FILE`.

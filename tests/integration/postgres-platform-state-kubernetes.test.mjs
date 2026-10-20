@@ -54,7 +54,11 @@ test(
         name: "PostgreSQL restart integration",
       });
       assert.equal(created.status, 201);
-      installation = created.data;
+      // The read adds the capabilities derived from the selected Drivers (#2670).
+      const read = await request(first, "GET", "/installation");
+      assert.equal(read.status, 200);
+      assert.equal(read.data.id, created.data.id);
+      installation = read.data;
     }
 
     const namespace = await request(first, "POST", "/namespaces", {
@@ -335,16 +339,14 @@ test(
     assert.equal(persistedRevision.rows[0].active_revision_id, revision.id);
     assert.equal(activeAgent.activeRevisionId, revision.id);
 
-    // Admission reconciliation and periodic maintenance have separate work rows.
-    // Activation is visible before post-commit effects complete the admission claim.
+    // Activation is visible before post-commit effects complete the worker claim.
     // Wait for durable completion before asserting the admitted work's ownership.
     const revisionWork = await pollUntil(
       `admitted revision ${revision.id} work to succeed`,
       async () => {
         const current = await pool.query(
           `SELECT namespace_id, agent_id, revision_id, actor_id, state
-           FROM occ.controller_work WHERE revision_id = $1
-           AND idempotency_key = 'agent_revision:' || revision_id || ':reconcile'`,
+           FROM occ.controller_work WHERE revision_id = $1`,
           [revision.id],
         );
         assert.equal(current.rowCount, 1);
@@ -501,8 +503,7 @@ test(
     const admittedWork = await pool.query(
       `SELECT idempotency_key, state, attempt_count, claim_token,
               lease_expires_at, completed_at
-       FROM occ.controller_work WHERE revision_id = $1
-           AND idempotency_key = 'agent_revision:' || revision_id || ':reconcile'`,
+       FROM occ.controller_work WHERE revision_id = $1`,
       [revision.id],
     );
     assert.equal(admittedWork.rowCount, 1);
@@ -840,7 +841,6 @@ test(
     assert.equal(primaryIdentity.namespace_id, namespaceA);
     assert.equal(primaryIdentity.id, persistedRevisions.rows[0].service_principal_id);
 
-    // Select admission reconciliation, independently of periodic maintenance work.
     // Activation becomes visible before post-commit effects finish and the worker
     // completes its claim, so wait for the durable work state asserted below.
     const expectedRevisionIds = [
@@ -855,7 +855,6 @@ test(
         const current = await pool.query(
           `SELECT namespace_id, agent_id, revision_id, idempotency_key, state
            FROM occ.controller_work WHERE agent_id = ANY($1::text[])
-             AND idempotency_key = 'agent_revision:' || revision_id || ':reconcile'
            ORDER BY agent_id, idempotency_key`,
           [[primary.id, sibling.id, foreign.id]],
         );

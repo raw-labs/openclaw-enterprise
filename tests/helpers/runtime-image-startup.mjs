@@ -3,8 +3,9 @@
 // runtime-image-startup-termination.test.mjs,
 // runtime-image-gateway-peer.test.mjs, runtime-image-native-worker.test.mjs,
 // runtime-image-state-migration.test.mjs,
-// runtime-image-managed-files.test.mjs and
-// runtime-image-native-listener.test.mjs).
+// runtime-image-managed-files.test.mjs,
+// runtime-image-native-listener.test.mjs and
+// runtime-image-gateway-workspace.test.mjs).
 import { defaultAgentModel } from "../../apps/controller/src/console/agents/starter-model.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -107,25 +108,6 @@ export async function temporaryGatewayConfiguration(t, harnessId) {
 
 export function createRuntimeImageConfiguration(harnessId, providerModel, options = {}) {
   const configuration = createHarnessConfiguration(harnessId, providerModel);
-  if (options.enableTeams === true) {
-    configuration.plugins = {
-      ...configuration.plugins,
-      allow: [...new Set([...(configuration.plugins?.allow ?? []), "msteams"])],
-      entries: { ...configuration.plugins?.entries, msteams: { enabled: true } },
-    };
-    configuration.channels = {
-      ...configuration.channels,
-      msteams: {
-        enabled: true,
-        appId: "11111111-1111-4111-8111-111111111111",
-        tenantId: "22222222-2222-4222-8222-222222222222",
-        appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
-        legacyWebhook: false,
-        dmPolicy: "disabled",
-        groupPolicy: "disabled",
-      },
-    };
-  }
   if (options.enableSlack !== true) {
     return configuration;
   }
@@ -424,4 +406,19 @@ export async function reviewedCodexSeccompSecurityOptions({
     );
   }
   return [...securityOptions, "--security-opt", `seccomp=${profile}`];
+}
+
+function gatewayLogDiagnostic(entries) {
+  return entries
+    .filter((entry) => entry.subsystem === "gateway")
+    .map(({ level, message }) => `${level}: ${message}`)
+    .slice(-8)
+    .join("\n");
+}
+
+export function assertGatewayLogEntry(entries, predicate, description) {
+  assert.ok(
+    entries.some(predicate),
+    `${description}\nRecent gateway logs:\n${gatewayLogDiagnostic(entries)}`,
+  );
 }

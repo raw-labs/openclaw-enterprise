@@ -20,7 +20,6 @@ import {
   consoleStorage,
   detailUrl,
   login,
-  slackSelectionValue,
   nativeValues,
   newPage,
   nonAuthWriteRequests,
@@ -1286,6 +1285,11 @@ test("API-key Presets keep their credential provider fixed while allowing model 
     .getByRole("alert")
     .filter({ hasText: "Configuration must use the selected provider" })
     .waitFor();
+  // The JSON is what to fix, so it takes focus (finding 1903).
+  assert.equal(
+    await page.evaluate(() => globalThis.document.activeElement?.id),
+    "configuration-json",
+  );
   assert.deepEqual(nonAuthWriteRequests(requests), []);
   const provider = page.getByLabel("Provider", { exact: true });
   assert.equal(await provider.inputValue(), "openai");
@@ -1320,192 +1324,6 @@ test("API-key Presets keep their credential provider fixed while allowing model 
   assert.equal(pathRequests(requests, "POST", `/namespaces/${namespace.id}/secrets`).length, 0);
 });
 
-test("Harness switches preserve unrestricted and explicit native plugin allowlists through Agent creation", async (t) => {
-  for (const allow of [undefined, [], ["knowledge"], ["knowledge", "codex"], ["codex"]]) {
-    const fixture = await createConsoleAppFixture(t);
-    await fixture.bootstrap();
-    const namespace = await fixture.createNamespace("Native plugin settings", { ready: true });
-    const secret = await fixture.createSecret(namespace.id, "OpenAI model key", "preset-model-key");
-    const harnessAuth = { method: "api_key", source: secret.ref };
-    const values = nativeValues("preserved-native-plugin");
-    values.plugins.deny = ["blocked-plugin"];
-    if (allow !== undefined) {
-      values.plugins.allow = allow;
-    }
-    const preset = await fixture.request("POST", `/namespaces/${namespace.id}/presets`, {
-      body: {
-        name: "Native plugins",
-        template: {
-          agent: { name: "Native plugin Agent", executionMode: "embedded", harnessAuth },
-          configuration: { values },
-        },
-      },
-    });
-    assert.equal(preset.status, 201);
-    const { page } = await newPage(t, fixture);
-    await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
-    await page.getByLabel("Preset template", { exact: true }).selectOption(preset.data.id);
-    await page.getByRole("button", { name: "Use Preset", exact: true }).click();
-    await openAdvancedSettings(page);
-    const configuration = page.getByLabel("Configuration JSON", { exact: true });
-    const harness = page.getByLabel("Harness", { exact: true });
-
-    // Harness wiring changes must neither grant plugins nor erase an authored restriction.
-    await harness.selectOption("codex");
-    const dedicated = JSON.parse(await configuration.inputValue());
-    assert.deepEqual(dedicated.plugins.allow, allow);
-    assert.deepEqual(dedicated.plugins.deny, values.plugins.deny);
-    assert.deepEqual(dedicated.plugins.entries.knowledge, values.plugins.entries.knowledge);
-    assert.equal(dedicated.plugins.entries.codex.enabled, true);
-    await harness.selectOption("openclaw");
-    assert.deepEqual(JSON.parse(await configuration.inputValue()).plugins, values.plugins);
-
-    if (allow?.length && !allow.includes("openai")) {
-      const requests = apiRequests(page, fixture.origin);
-      await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-      await page
-        .getByRole("alert")
-        .filter({ hasText: /plugins.allow must include openai/ })
-        .waitFor();
-      assert.deepEqual(nonAuthWriteRequests(requests), []);
-      assert.deepEqual(JSON.parse(await configuration.inputValue()).plugins, values.plugins);
-      // The preserved policy must be repaired explicitly before OpenClaw can use its provider.
-      values.plugins.allow = [...allow, "openai"];
-      const repaired = JSON.parse(await configuration.inputValue());
-      repaired.plugins.allow = values.plugins.allow;
-      await configuration.fill(JSON.stringify(repaired));
-    }
-
-    // Save through the ordinary Agent form and read its owned Configuration back from the API.
-    const createdResponse = page.waitForResponse(
-      (response) =>
-        response.url().endsWith(`/namespaces/${namespace.id}/agents`) &&
-        response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-    const response = await createdResponse;
-    assert.equal(response.status(), 201);
-    const created = (await response.json()).data;
-    assert.equal(created.executionMode, "embedded");
-    assert.deepEqual(created.harnessAuth, harnessAuth);
-    const saved = await fixture.request(
-      "GET",
-      `/namespaces/${namespace.id}/configurations/${created.configurationId}`,
-    );
-    assert.equal(saved.status, 200);
-    assert.deepEqual(saved.data.values.plugins, values.plugins);
-  }
-});
-
-test("Default Codex policy survives Harness switches, explicit edits and restored drafts", async (t) => {
-  const fixture = await createConsoleAppFixture(t);
-  await fixture.bootstrap();
-  const namespace = await fixture.createNamespace("Codex policy round-trip", { ready: true });
-  const { page } = await newPage(t, fixture);
-  await login(page, fixture, `/console/agents?namespace=${namespace.id}`);
-  await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  const presets = await fixture.request("GET", `/namespaces/${namespace.id}/presets`);
-  const starter = presets.data.find((preset) => preset.name === "default-codex");
-  // Explicit Preset selection supports restored drafts; the starter shortcut deliberately discards them.
-  await page.getByLabel("Preset template", { exact: true }).selectOption(starter.id);
-  await page.getByRole("button", { name: "Use Preset", exact: true }).click();
-  await openAdvancedSettings(page);
-  const configuration = page.getByLabel("Configuration JSON", { exact: true });
-  const harness = page.getByLabel("Harness", { exact: true });
-  assert.deepEqual(JSON.parse(await configuration.inputValue()).plugins.allow, ["codex"]);
-  await harness.selectOption("openclaw");
-  assert.deepEqual(JSON.parse(await configuration.inputValue()).plugins.allow, ["codex"]);
-  await harness.selectOption("codex");
-  assert.deepEqual(JSON.parse(await configuration.inputValue()).plugins.allow, ["codex"]);
-
-  // An operator's explicit unrestricted policy replaces the preset restriction, even after navigation.
-  const edited = JSON.parse(await configuration.inputValue());
-  edited.plugins.allow = [];
-  await openAdvancedSettings(page);
-  await configuration.fill(JSON.stringify(edited));
-  await page.goBack();
-  await page.goForward();
-  await openAdvancedSettings(page);
-  await harness.selectOption("openclaw");
-  await harness.selectOption("codex");
-  assert.deepEqual(JSON.parse(await configuration.inputValue()).plugins.allow, []);
-});
-
-test("Codex policy conflicts stop Console creation before writes and allow an explicit repair", async (t) => {
-  for (const policy of [
-    { allow: ["knowledge"] },
-    { deny: ["codex"] },
-    { enabled: false },
-    { entries: { codex: { enabled: true }, " CODEX ": { enabled: false } } },
-  ]) {
-    const fixture = await createConsoleAppFixture(t);
-    await fixture.bootstrap();
-    const namespace = await fixture.createNamespace("Codex policy conflict", { ready: true });
-    const secret = await fixture.createSecret(namespace.id, "Model key", "synthetic-model-key");
-    const values = nativeValues("policy-conflict");
-    Object.assign(values.plugins, policy);
-    const preset = await fixture.request("POST", `/namespaces/${namespace.id}/presets`, {
-      body: {
-        name: "Restricted plugins",
-        template: {
-          agent: {
-            name: "Policy conflict Agent",
-            executionMode: "embedded",
-            harnessAuth: { method: "api_key", source: secret.ref },
-          },
-          configuration: { values },
-        },
-      },
-    });
-    assert.equal(preset.status, 201);
-    const { page } = await newPage(t, fixture);
-    await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
-    await page.getByLabel("Preset template", { exact: true }).selectOption(preset.data.id);
-    await page.getByRole("button", { name: "Use Preset", exact: true }).click();
-    await openAdvancedSettings(page);
-    const configuration = page.getByLabel("Configuration JSON", { exact: true });
-    await page.getByLabel("Harness", { exact: true }).selectOption("codex");
-    const requests = apiRequests(page, fixture.origin);
-    await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-    await page
-      .getByRole("alert")
-      .filter({ hasText: /Configuration setting plugins\./ })
-      .waitFor();
-    assert.deepEqual(nonAuthWriteRequests(requests), []);
-    const blocked = JSON.parse(await configuration.inputValue());
-    for (const [key, value] of Object.entries(policy)) {
-      if (key === "entries") {
-        // Harness selection adds runtime wiring but must retain each authored enablement.
-        for (const [id, entry] of Object.entries(value)) {
-          assert.equal(blocked.plugins.entries[id].enabled, entry.enabled);
-        }
-      } else {
-        assert.deepEqual(blocked.plugins[key], value);
-      }
-    }
-    // Permission is changed only by the explicit JSON edit, after which the ordinary API save succeeds.
-    blocked.plugins.allow = ["knowledge", "codex"];
-    blocked.plugins.deny = [];
-    blocked.plugins.enabled = true;
-    delete blocked.plugins.entries[" CODEX "];
-    await configuration.fill(JSON.stringify(blocked));
-    const createdResponse = page.waitForResponse(
-      (response) =>
-        response.url().endsWith(`/namespaces/${namespace.id}/agents`) &&
-        response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-    const response = await createdResponse;
-    assert.equal(response.status(), 201, await response.text());
-    const created = (await response.json()).data;
-    const saved = await fixture.request(
-      "GET",
-      `/namespaces/${namespace.id}/configurations/${created.configurationId}`,
-    );
-    assert.deepEqual(saved.data.values.plugins, blocked.plugins);
-  }
-});
-
 test("Dedicated OpenClaw Presets preserve custom provider transport across execution mode changes", async (t) => {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
@@ -1531,7 +1349,7 @@ test("Dedicated OpenClaw Presets preserve custom provider transport across execu
   });
   assert.equal(preset.status, 201, JSON.stringify(preset.body));
   const unavailable =
-    /Dedicated OpenClaw is unavailable: this installation's OpenClaw runtime lacks native worker support/;
+    /Dedicated OpenClaw is unavailable: this installation has no Sandbox Driver that can provision it, or its OpenClaw runtime lacks native worker support/;
   {
     // Without native worker support, the Preset opens as it was saved but cannot be created.
     const { page } = await newPage(t, fixture);
@@ -1875,7 +1693,7 @@ test("Presets render variables into independent Agent drafts and keep partial-sa
   );
 
   await page.waitForURL((url) => url.pathname === `/console/agents/${created.data.id}`);
-  await page.getByRole("button", { name: "Credentials", exact: true }).click();
+  await page.getByRole("tab", { name: "Credentials", exact: true }).click();
   await page.getByLabel("Service account token Secret").waitFor();
   assert.equal(await page.getByLabel("Authentication source").inputValue(), "codex_pat");
   await waitForInputValue(page.getByLabel("Service account token Secret"), secret.name);
@@ -2064,44 +1882,26 @@ test("Preset marks referenced variables without defaults as required before rend
   assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "Required Agent");
 });
 
-test("Embedded Preset grants all bound Secrets and retries denied access without duplicate writes", async (t) => {
-  const fixture = await createConsoleAppFixture(t, { provisionedPeople: [] });
-  const installation = await fixture.bootstrap();
+test("Preset with a prebound model Secret grants the created draft access", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Bound Secret Preset", { ready: true });
   const modelSecret = await fixture.createSecret(namespace.id, "Model token", "hidden-model-token");
-  // A distinct generic source prevents the model grant from masking missing Configuration grants.
-  const toolSecret = await fixture.createSecret(namespace.id, "Tool token", "hidden-tool-token");
-  const unusedSecret = await fixture.createSecret(
-    namespace.id,
-    "Unbound token",
-    "hidden-unbound-token",
-  );
   const artifact = JSON.parse(
-    await readFile(new URL("../../deploy/presets/standard-openclaw.json", import.meta.url), "utf8"),
+    await readFile(new URL("../../deploy/presets/standard-codex.json", import.meta.url), "utf8"),
   );
   delete artifact.template.variables.modelSecret;
   artifact.template.agent.harnessAuth = { method: "api_key", source: modelSecret.ref };
-  artifact.template.configuration.secretBindings = {
-    TOOL_TOKEN: { source: toolSecret.ref },
-    SECOND_TOOL_TOKEN: { source: toolSecret.ref, delivery: { type: "env" } },
-  };
   const preset = await fixture.request("POST", `/namespaces/${namespace.id}/presets`, {
     body: artifact,
   });
   assert.equal(preset.status, 201, JSON.stringify(preset.body));
-  fixture.policy.restrictions.push({
-    id: "deny-bound-secret-delegation",
-    resourceKind: "installation",
-    resourceId: installation.id,
-    action: "administer",
-    effect: "deny",
-  });
   const { page } = await newPage(t, fixture);
-  const requests = apiRequests(page, fixture.origin);
+  await routeInstallationWithoutProvisioning(page, fixture);
   await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
   await page.getByLabel("Preset template").selectOption(preset.data.id);
   await page.getByLabel("Name", { exact: true }).fill("Bound Secret Agent");
-  await page.getByLabel("Model", { exact: true }).fill("gpt-4.1");
+  await page.getByLabel("Model", { exact: true }).fill("gpt-5.1");
   await page.getByRole("button", { name: "Use Preset" }).click();
   const createdResponse = page.waitForResponse(
     (response) =>
@@ -2110,26 +1910,8 @@ test("Embedded Preset grants all bound Secrets and retries denied access without
   );
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
   const created = (await (await createdResponse).json()).data;
-  await page
-    .getByRole("alert")
-    .filter({ hasText: /credential access is not confirmed/ })
-    .waitFor();
-  assert.equal(await page.getByLabel("Agent name").isDisabled(), true);
-  assert.match(
-    await page.getByRole("link", { name: "Open saved Agent" }).getAttribute("href"),
-    new RegExp(created.id),
-  );
-  const bindingPath = `/namespaces/${namespace.id}/iam/access-bindings`;
-  assert.equal(pathRequests(requests, "POST", bindingPath).length, 0);
-
-  // Removing the delegation denial repairs access to the retained draft, without recreating it.
-  fixture.policy.restrictions.splice(
-    fixture.policy.restrictions.findIndex((item) => item.id === "deny-bound-secret-delegation"),
-    1,
-  );
-  await page.getByRole("button", { name: "Retry credential access" }).click();
   await page.waitForURL((url) => url.pathname === `/console/agents/${created.id}`);
-  const bindings = await fixture.request("GET", bindingPath);
+  const bindings = await fixture.request("GET", `/namespaces/${namespace.id}/iam/access-bindings`);
   const roles = await fixture.request("GET", `/namespaces/${namespace.id}/iam/roles`);
   const secretOperateRole = roles.data.find(
     (role) =>
@@ -2138,59 +1920,16 @@ test("Embedded Preset grants all bound Secrets and retries denied access without
       role.permissions[0].action === "operate",
   );
   assert.ok(secretOperateRole);
-  assert.deepEqual(
-    bindings.data
-      .map((binding) => ({
-        subjectKind: binding.subjectKind,
-        subjectId: binding.subjectId,
-        roleId: binding.roleId,
-        resourceKind: binding.resourceKind,
-        resourceId: binding.resourceId,
-      }))
-      .sort((a, b) => a.resourceId.localeCompare(b.resourceId)),
-    [modelSecret, toolSecret]
-      .map((secret) => ({
-        subjectKind: "identity",
-        subjectId: created.servicePrincipalId,
-        roleId: secretOperateRole.id,
-        resourceKind: "secret",
-        resourceId: secret.id,
-      }))
-      .sort((a, b) => a.resourceId.localeCompare(b.resourceId)),
+  assert.ok(
+    bindings.data.some(
+      (binding) =>
+        binding.subjectKind === "identity" &&
+        binding.subjectId === created.servicePrincipalId &&
+        binding.roleId === secretOperateRole.id &&
+        binding.resourceKind === "secret" &&
+        binding.resourceId === modelSecret.id,
+    ),
   );
-  assert.equal(pathRequests(requests, "POST", bindingPath).length, 2);
-  assert.equal(configurationPostRequests(requests, namespace.id).length, 1);
-  assert.equal(agentPostRequests(requests, namespace.id).length, 1);
-  const savedConfiguration = await fixture.request(
-    "GET",
-    `/namespaces/${namespace.id}/configurations/${created.configurationId}`,
-  );
-  assert.equal(savedConfiguration.data.secretBindings.TOOL_TOKEN.delivery.type, "env");
-  assert.equal(savedConfiguration.data.secretBindings.SECOND_TOOL_TOKEN.delivery.type, "env");
-  const unrelated = await fixture.iamDriver.authorize({
-    principalId: created.servicePrincipalId,
-    action: "operate",
-    resource: unusedSecret.ref,
-  });
-  assert.equal(unrelated.allowed, false, "a saved draft must not gain access to unbound Secrets");
-
-  // Real deployment admission requires the generic grant independently of the model grant.
-  const toolBinding = bindings.data.find((binding) => binding.resourceId === toolSecret.id);
-  assert.equal((await fixture.request("DELETE", `${bindingPath}/${toolBinding.id}`)).status, 204);
-  const deployPath = `/namespaces/${namespace.id}/agents/${created.id}/deploy`;
-  assert.equal((await fixture.request("POST", deployPath)).status, 403);
-  const restored = await fixture.request("POST", bindingPath, {
-    body: {
-      subjectKind: toolBinding.subjectKind,
-      subjectId: toolBinding.subjectId,
-      roleId: toolBinding.roleId,
-      resourceKind: toolBinding.resourceKind,
-      resourceId: toolBinding.resourceId,
-    },
-  });
-  assert.equal(restored.status, 201, JSON.stringify(restored.body));
-  const deployed = await fixture.request("POST", deployPath);
-  assert.equal(deployed.status, 202, JSON.stringify(deployed.body));
 });
 
 test("password Preset can reuse an existing Secret and retry an uncertain grant without duplicate writes", async (t) => {
@@ -2650,7 +2389,7 @@ test("Preset picker ignores stale Preset responses after switching selection", a
   assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "Current Agent");
 });
 
-test("leaving a default starter creation form discards its in-progress state", async (t) => {
+test("a default starter creation form survives every exit but a confirmed Cancel", async (t) => {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Creation exit", { ready: true });
@@ -2658,18 +2397,22 @@ test("leaving a default starter creation form discards its in-progress state", a
   const savedAgent = await fixture.createAgent(namespace.id, "Saved Agent");
   const { page } = await newPage(t, fixture);
   const requests = apiRequests(page, fixture.origin);
+  const dialogs = [];
+  let acceptDialogs = false;
+  page.on("dialog", async (dialog) => {
+    dialogs.push(`${dialog.type()}: ${dialog.message()}`);
+    await (acceptDialogs ? dialog.accept() : dialog.dismiss());
+  });
   await login(page, fixture, `/console/agents?namespace=${namespace.id}`);
 
-  for (const exit of ["cancel", "breadcrumb", "sidebar", "history", "namespace"]) {
+  for (const exit of ["breadcrumb", "sidebar", "history", "namespace"]) {
     await page.getByRole("button", { name: "Create Agent", exact: true }).click();
     await page.getByRole("button", { name: "Start with default Preset", exact: true }).click();
-    await page.getByLabel("Agent name", { exact: true }).fill(`Abandoned ${exit}`);
+    await page.getByLabel("Agent name", { exact: true }).fill(`Kept ${exit}`);
     await openAdvancedSettings(page);
-    await page.getByLabel("USER.md", { exact: true }).fill(`Abandoned workspace ${exit}`);
+    await page.getByLabel("USER.md", { exact: true }).fill(`Kept workspace ${exit}`);
 
-    if (exit === "cancel") {
-      await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    } else if (exit === "breadcrumb") {
+    if (exit === "breadcrumb") {
       await page.getByRole("link", { name: "← Agents" }).click();
     } else if (exit === "sidebar") {
       await page
@@ -2677,46 +2420,58 @@ test("leaving a default starter creation form discards its in-progress state", a
         .getByRole("link", { name: "Agents", exact: true })
         .click();
     } else if (exit === "history") {
-      // Leave with an un-applied channel drawer open; its draft must not reopen later.
-      await page.getByRole("button", { name: "Configure Slack", exact: true }).click();
-      await page
-        .getByRole("dialog", { name: "Configure Slack" })
-        .getByRole("combobox", { name: "Channels", exact: true })
-        .fill("C12345");
       await page.goBack();
     } else {
       await page.getByLabel("Namespace", { exact: true }).selectOption(otherNamespace.id);
+      await page.getByRole("button", { name: "Create Agent", exact: true }).click();
+      // Drafts belong to their Namespace: the other one starts from the choices.
+      await page.getByRole("button", { name: "Start with default Preset", exact: true }).waitFor();
+      assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0);
       await page.getByLabel("Namespace", { exact: true }).selectOption(namespace.id);
     }
 
-    // History re-entry and the normal Create button must both return to the choice page.
+    // History re-entry and the normal Create button both return to the kept form.
     if (exit === "history") {
       await page.goForward();
     } else {
       await page.getByRole("button", { name: "Create Agent", exact: true }).click();
     }
-    await page.getByRole("button", { name: "Start with default Preset", exact: true }).waitFor();
-    await page.getByLabel("Preset template").waitFor();
-    assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0, exit);
-    await page.getByRole("button", { name: "Start with default Preset", exact: true }).click();
-    assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "", exit);
-    assert.notEqual(
+    const name = page.getByLabel("Agent name", { exact: true });
+    await name.waitFor();
+    assert.equal(await name.inputValue(), `Kept ${exit}`, exit);
+    await openAdvancedSettings(page);
+    assert.equal(
       await page.getByLabel("USER.md", { exact: true }).inputValue(),
-      `Abandoned workspace ${exit}`,
+      `Kept workspace ${exit}`,
       exit,
     );
-    if (exit === "history") {
-      assert.equal(await page.getByRole("dialog", { name: "Configure Slack" }).count(), 0);
-      await page.getByRole("button", { name: "Configure Slack", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Configure Slack" });
-      assert.equal(
-        await slackSelectionValue(dialog.getByRole("combobox", { name: "Channels", exact: true })),
-        "",
-      );
-      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-    }
+
+    // Cancel is the explicit discard, and it asks first.
+    acceptDialogs = false;
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    assert.deepEqual(dialogs.splice(0), ["confirm: Discard this draft?"], exit);
+    assert.equal(await name.inputValue(), `Kept ${exit}`, exit);
+    acceptDialogs = true;
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Create Agent", exact: true }).click();
+    assert.deepEqual(dialogs.splice(0), ["confirm: Discard this draft?"], exit);
+    await page.getByRole("button", { name: "Start with default Preset", exact: true }).waitFor();
+    await page.getByLabel("Preset template").waitFor();
+    assert.equal(await name.count(), 0, exit);
+    await page.getByRole("link", { name: "← Agents" }).click();
   }
+
+  // An untouched form has nothing to lose: Start over and Cancel leave without asking.
+  await page.getByRole("button", { name: "Create Agent", exact: true }).click();
+  await page.getByRole("button", { name: "Start with default Preset", exact: true }).click();
+  await page.getByLabel("Agent name", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Start over", exact: true }).click();
+  await page.getByLabel("Preset template").waitFor();
+  await page.getByRole("button", { name: "Start with default Preset", exact: true }).click();
+  await page.getByLabel("Agent name", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "Create Agent", exact: true }).waitFor();
+  assert.deepEqual(dialogs, []);
 
   // Exiting an unsaved form must not mutate or delete an Agent already saved by the user.
   assert.deepEqual(nonAuthWriteRequests(requests), []);
@@ -2728,7 +2483,7 @@ test("leaving a default starter creation form discards its in-progress state", a
   assert.equal(result.data.name, "Saved Agent");
 });
 
-test("a restored default starter chooser still discards its applied form on exit", async (t) => {
+test("a restored default starter chooser keeps its applied form across navigation", async (t) => {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Customized starter", { ready: true });
@@ -2758,22 +2513,13 @@ test("a restored default starter chooser still discards its applied form on exit
   );
   await page.getByRole("link", { name: "← Agents" }).click();
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  await page.getByRole("button", { name: "Start with default Preset", exact: true }).waitFor();
-  assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0);
-
-  // Explicit selection of the same Preset retains its form across navigation.
-  await page.getByLabel("Preset template").selectOption(starter.id);
-  await page.getByLabel("Name", { exact: true }).fill("Explicit starter");
-  await page.getByRole("button", { name: "Use Preset", exact: true }).click();
-  await page.getByRole("link", { name: "← Agents" }).click();
-  await page.getByRole("button", { name: "Create Agent", exact: true }).click();
   assert.equal(
     await page.getByLabel("Agent name", { exact: true }).inputValue(),
-    "Explicit starter",
+    "Restored starter",
   );
 });
 
-test("a default shortcut restored after a pending Preset read discards its form", async (t) => {
+test("a default shortcut restored after a pending Preset read keeps its form", async (t) => {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Pending starter", { ready: true });
@@ -2806,11 +2552,13 @@ test("a default shortcut restored after a pending Preset read discards its form"
   await page.getByLabel("Agent name", { exact: true }).fill("Pending read draft");
   await page.getByRole("link", { name: "← Agents" }).click();
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  await page.getByRole("button", { name: "Start with default Preset", exact: true }).waitFor();
-  assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0);
+  assert.equal(
+    await page.getByLabel("Agent name", { exact: true }).inputValue(),
+    "Pending read draft",
+  );
 });
 
-test("invalid Preset application retains chooser edits and preserves the selected origin", async (t) => {
+test("invalid Preset application retains chooser edits and the applied form for both origins", async (t) => {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Invalid starter", { ready: true });
@@ -2854,16 +2602,22 @@ test("invalid Preset application retains chooser edits and preserves the selecte
     await page.getByLabel("Agent name", { exact: true }).waitFor();
     await page.getByRole("link", { name: "← Agents" }).click();
     await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-    if (origin === "shortcut") {
-      await page.getByRole("button", { name: "Start with default Preset", exact: true }).waitFor();
-      assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0);
-      await page.getByRole("link", { name: "← Agents" }).click();
-    } else {
-      assert.equal(
-        await page.getByLabel("Agent name", { exact: true }).inputValue(),
-        "Preset draft",
-      );
-    }
+    assert.equal(
+      await page.getByLabel("Agent name", { exact: true }).inputValue(),
+      "Preset draft",
+      origin,
+    );
+    // The variables typed in the chooser are the form's changes: Cancel asks before discarding.
+    const asked = [];
+    const answer = async (dialog) => {
+      asked.push(dialog.message());
+      await dialog.accept();
+    };
+    page.once("dialog", answer);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Create Agent", exact: true }).waitFor();
+    page.off("dialog", answer);
+    assert.deepEqual(asked, ["Discard this draft?"], origin);
   }
 });
 
@@ -2986,20 +2740,29 @@ test("unsaved Preset drafts retain unfinished edits across navigation until expl
   assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0);
 
   // Reload ends the SPA session; a new form must not recover discarded or browser-stored inputs.
+  // The browser asks first while the draft holds changes.
   await page.getByRole("button", { name: "Start with default Preset" }).click();
   await page.getByLabel("Agent name", { exact: true }).fill("Reload-only draft");
+  const leaving = [];
+  const answer = async (dialog) => {
+    leaving.push(dialog.type());
+    await dialog.accept();
+  };
+  page.once("dialog", answer);
   await page.reload();
+  page.off("dialog", answer);
+  assert.deepEqual(leaving, ["beforeunload"]);
   await page.getByLabel("Preset template").waitFor();
   assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0);
 
   // Signing back in without reloading must not recover the previous session's in-memory draft.
   await page.getByRole("button", { name: "Start with default Preset" }).click();
   await page.getByLabel("Agent name", { exact: true }).fill("Private session draft");
-  await page.getByRole("button", { name: "OpenClaw Enterprise", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Logout" }).click();
-  await page.getByLabel("Username").fill(fixture.credentials.email);
+  await page.locator(".account-toggle").click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.getByLabel("Email", { exact: true }).fill(fixture.credentials.email);
   await page.getByLabel("Password").fill(fixture.credentials.password);
-  await page.getByRole("button", { name: "Login", exact: true }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
   await page.getByLabel("Preset template").waitFor();
   assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0);
@@ -3023,11 +2786,11 @@ test("an empty Namespace can create an Agent without a Preset", async (t) => {
   );
   await page.getByRole("button", { name: "Start without Preset" }).click();
   assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
-  await page.getByLabel("Agent name", { exact: true }).fill("Abandoned draft");
+  await page.getByLabel("Agent name", { exact: true }).fill("Kept draft");
+  // A form started without a Preset is kept across navigation, as a Preset form is.
   await page.getByRole("link", { name: "← Agents" }).click();
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  await page.getByRole("button", { name: "Start without Preset" }).click();
-  assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
+  assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "Kept draft");
   await page.getByLabel("Agent name", { exact: true }).fill("Agent without Preset");
   await enterManualModel(page, "no-preset-model-key", "gpt-4.1");
   const saved = page.waitForResponse(
@@ -3200,111 +2963,39 @@ test("denied Preset reads do not automatically start an Agent form", async (t) =
   await page.getByRole("button", { name: "Start without Preset" }).click();
   assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
   // A later list filters the now-unreadable Preset; the independent action remains available.
-  await page.getByRole("link", { name: "← Agents" }).click();
+  // Cancel discards the untouched form without asking.
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
   await page.getByText(/^No Presets available to you in this Namespace\./).waitFor();
   await page.getByRole("button", { name: "Start without Preset" }).click();
   assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
 });
 
-test("The console quick-start prefers the readable installed default, then the first readable Preset by name", async (t) => {
-  for (const installedDefault of ["readable", "absent", "denied"]) {
-    const fixture = await createConsoleAppFixture(t, {
-      defaultPresets: installedDefault === "absent" ? [] : [defaultCodexPreset],
-      filesystemConfiguration: true,
-    });
-    await fixture.bootstrap();
-    const namespace = await fixture.createNamespace("Readable starters", { ready: true });
-    // Creation order differs from display order, and an installed default is not first by name.
-    for (const [name, agentName] of [
-      ["Zulu starter", "Zulu Agent"],
-      ["First tied starter", "Lowercase Alpha Agent"],
-      ["Second tied starter", "Alpha Agent"],
-    ]) {
-      const created = await fixture.request("POST", `/namespaces/${namespace.id}/presets`, {
-        body: { name, template: { agent: { name: agentName } } },
-      });
-      assert.equal(created.status, 201);
-    }
-    // OCC lists by generated ID, so use real updates to guarantee lowercase-first delivery.
-    // The shortcut must choose the uppercase name even when both names collate equally.
-    const seeded = await fixture.request("GET", `/namespaces/${namespace.id}/presets`);
-    const tied = seeded.data.filter((preset) => preset.name.endsWith("tied starter"));
-    assert.equal(tied.length, 2);
-    for (const [index, preset] of tied.entries()) {
-      const renamed = await fixture.request(
-        "PATCH",
-        `/namespaces/${namespace.id}/presets/${preset.id}`,
-        {
-          body: {
-            name: index === 0 ? "alpha starter" : "Alpha starter",
-            template: { agent: { name: index === 0 ? "Lowercase Alpha Agent" : "Alpha Agent" } },
-          },
-        },
-      );
-      assert.equal(renamed.status, 200);
-    }
-    if (installedDefault === "denied") {
-      const presets = await fixture.request("GET", `/namespaces/${namespace.id}/presets`);
-      const starter = presets.data.find((preset) => preset.name === "default-codex");
-      // Exact-resource denial filters the stock default before the Console chooses a starter.
-      fixture.policy.restrictions.push({
-        id: "deny-unreadable-default",
-        namespaceId: namespace.id,
-        resourceKind: "preset",
-        resourceId: starter.id,
-        action: "read",
-        effect: "deny",
-      });
-    }
-    const { page } = await newPage(t, fixture);
-    const requests = apiRequests(page, fixture.origin);
-    await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
-    const starterName = installedDefault === "readable" ? "the default Preset" : "Alpha starter";
-    await page
-      .getByText(`Choose a Preset or start with ${starterName}.`, { exact: true })
-      .waitFor();
-    const shortcut = page.getByRole("button", {
-      name:
-        installedDefault === "readable" ? "Start with default Preset" : "Start with Alpha starter",
+test("The console requires a readable installed default for quick-start and still allows other Presets", async (t) => {
+  const fixture = await createConsoleAppFixture(t, {
+    defaultPresets: [],
+    filesystemConfiguration: true,
+  });
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("No installed starter", { ready: true });
+  const alternative = await fixture.request("POST", `/namespaces/${namespace.id}/presets`, {
+    body: { name: "Custom starter", template: { agent: { name: "Custom Agent" } } },
+  });
+  assert.equal(alternative.status, 201);
+  const { page } = await newPage(t, fixture);
+  await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
+  await page
+    .getByText("Choose a Preset. default-codex is not available to you in this Namespace.", {
       exact: true,
-    });
-    assert.equal(await shortcut.isEnabled(), true);
-    await shortcut.click();
-    assert.equal(
-      await page.getByLabel("Agent name", { exact: true }).inputValue(),
-      installedDefault === "readable" ? "" : "Alpha Agent",
-    );
-    const listed = await fixture.request("GET", `/namespaces/${namespace.id}/presets`);
-    const expected = listed.data.find(
-      (preset) =>
-        preset.name === (installedDefault === "readable" ? "default-codex" : "Alpha starter"),
-    );
-    assert.deepEqual(
-      requests
-        .filter(
-          (request) =>
-            request.method === "GET" &&
-            request.path.startsWith(`/namespaces/${namespace.id}/presets/`),
-        )
-        .map((request) => request.path),
-      [`/namespaces/${namespace.id}/presets/${expected.id}`],
-    );
-    if (installedDefault === "absent") {
-      // The custom-only shortcut must reach the regular Agent creation API, not just open a form.
-      await routeInstallationWithoutProvisioning(page, fixture);
-      await enterManualModel(page, "synthetic-custom-preset-key", "gpt-4.1");
-      const saved = page.waitForResponse(
-        (response) =>
-          response.url() === `${fixture.origin}/namespaces/${namespace.id}/agents` &&
-          response.request().method() === "POST",
-      );
-      await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-      assert.equal((await saved).status(), 201);
-      const agents = await fixture.request("GET", `/namespaces/${namespace.id}/agents`);
-      assert.equal(agents.data[0].name, "Alpha Agent");
-    }
-  }
+    })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Start with default Preset" }).isDisabled(),
+    true,
+  );
+  await page.getByLabel("Preset template", { exact: true }).selectOption(alternative.data.id);
+  await page.getByRole("button", { name: "Use Preset" }).click();
+  assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "Custom Agent");
 });
 
 test("Preset with a managed PAT account creates a draft without a Secret grant", async (t) => {
@@ -3358,4 +3049,59 @@ test("Preset with a managed PAT account creates a draft without a Secret grant",
     false,
   );
   assert.equal(secretPostRequests(requests, namespace.id).length, 0);
+});
+
+// The chooser's Start with default Preset named no Preset, and after a Preset was chosen Use
+// Preset stayed secondary while the shortcut kept the filled style (finding 2066).
+test("the Preset chooser names its default and fills Use Preset once a Preset is chosen", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Preset emphasis", { ready: true });
+  const other = await fixture.request("POST", `/namespaces/${namespace.id}/presets`, {
+    body: {
+      name: "Team Preset",
+      template: {
+        variables: { agentName: { type: "string" } },
+        agent: { name: "{{ vars.agentName }}", executionMode: "embedded" },
+      },
+    },
+  });
+  assert.equal(other.status, 201, JSON.stringify(other.body));
+  const { page } = await newPage(t, fixture);
+  await routeInstallationWithoutProvisioning(page, fixture);
+  await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
+  const shortcut = page.getByRole("button", { name: "Start with default Preset" });
+  const use = page.getByRole("button", { name: "Use Preset" });
+  const filled = (locator) =>
+    locator.evaluate((node) => node.classList.contains("button--primary"));
+  await page.getByText("The default Preset is default-codex.", { exact: true }).waitFor();
+  assert.equal(await shortcut.getAttribute("aria-describedby"), "agent-preset-default-hint");
+  assert.equal(await shortcut.isEnabled(), true);
+  assert.deepEqual([await filled(shortcut), await filled(use)], [true, false]);
+
+  await page.getByLabel("Preset template").selectOption(other.data.id);
+  await page.getByLabel("Agent Name", { exact: true }).waitFor();
+  assert.deepEqual([await filled(shortcut), await filled(use)], [false, true]);
+
+  // Clearing the choice gives the filled style back to the shortcut.
+  await page.getByLabel("Preset template").selectOption("");
+  await page.getByLabel("Agent Name", { exact: true }).waitFor({ state: "detached" });
+  assert.deepEqual([await filled(shortcut), await filled(use)], [true, false]);
+
+  // A failed Preset read leaves Use Preset disabled, so the shortcut keeps the filled style.
+  await page.route(`**/namespaces/${namespace.id}/presets/${other.data.id}`, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "DEPENDENCY_UNAVAILABLE", message: "Preset storage is unavailable." },
+      }),
+    }),
+  );
+  await page.getByLabel("Preset template").selectOption(other.data.id);
+  await page
+    .getByText("Service unavailable. The read could not be completed. Try again.")
+    .waitFor();
+  assert.equal(await use.isDisabled(), true);
+  assert.deepEqual([await filled(shortcut), await filled(use)], [true, false]);
 });

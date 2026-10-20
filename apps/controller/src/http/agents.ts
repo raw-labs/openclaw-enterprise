@@ -16,6 +16,7 @@ import {
   type HarnessResolver,
   type ProvisionAgentInput,
   type UpdateAgentInput,
+  type ValidateAgentCreateInput,
 } from "@openclaw-enterprise/occ";
 import type { FastifyRequest } from "fastify";
 import { dependencyUnavailable, failure } from "./errors.ts";
@@ -32,6 +33,7 @@ function clientAgent(agent: Readonly<AgentRead>): Record<string, unknown> {
     return { ...agent };
   }
   return {
+    sandboxPolicyEditing: agent.sandboxPolicyEditing === true,
     id: agent.id,
     namespaceId: agent.namespaceId,
     name: agent.name,
@@ -43,7 +45,6 @@ function clientAgent(agent: Readonly<AgentRead>): Record<string, unknown> {
     pluginApprovers: agent.pluginApprovers,
     repositoryBindings: agent.repositoryBindings,
     repositoryAccess: agent.repositoryAccess,
-    gatewayOutbound: agent.gatewayOutbound,
     harnessAuth: agent.harnessAuth,
     ...(agent.credentialSources === undefined || agent.credentialSources.length === 0
       ? {}
@@ -74,6 +75,7 @@ function clientAgentProvisioning(
     revisionId: provisioning.revisionId,
     url: provisioning.url ?? agentProvisioningUrl(namespaceId, provisioning.workId),
     error: provisioning.error,
+    progress: provisioning.progress,
   };
 }
 
@@ -91,9 +93,8 @@ function clientRevision(revision: Readonly<AgentRevisionRead>): Record<string, u
     configurationGeneration: revision.configurationGeneration,
     backendId: revision.backendId,
     configuration: revision.configuration,
-    gatewayOutbound: revision.gatewayOutbound,
     harness: revision.harness,
-    compute: revision.compute,
+    compute: { id: revision.compute.id, implementation: revision.compute.implementation },
     secretDriverId: revision.secretDriverId,
     secretBindings: revision.secretBindings,
     plugins: revision.plugins,
@@ -225,6 +226,18 @@ export function createAgentHandlers(options: AgentHandlerOptions) {
       });
       reply.status(201).send({ data: agent, meta: { requestId: request.id } });
     },
+    // Writes nothing and records no mutation: a refusal names the same rule createAgent would.
+    async validateAgentCreate({ controller, context, reply, body, namespaceId }) {
+      const input = body as Omit<ValidateAgentCreateInput, "namespaceId">;
+      validateWorkspaceSetup(input);
+      await controller.validateAgentCreate(
+        context.actorId,
+        { ...input, namespaceId },
+        options.resolveHarness,
+      );
+      reply.header("cache-control", "no-store");
+      reply.status(204).send();
+    },
     async listAgents({ controller, context, request, reply, namespaceId }) {
       const agents = await controller.listAgents(context.actorId, namespaceId);
       reply.send({ data: agents.map(clientAgent), meta: { requestId: request.id } });
@@ -285,21 +298,6 @@ export function createAgentHandlers(options: AgentHandlerOptions) {
         ),
         meta: { requestId: request.id },
       });
-    },
-    async getAgentGatewayOutboundCapabilities({
-      controller,
-      context,
-      request,
-      reply,
-      params,
-      namespaceId,
-    }) {
-      const capabilities = await controller.getAgentGatewayOutboundCapabilities(
-        context.actorId,
-        namespaceId,
-        params.agentId!,
-      );
-      reply.send({ data: capabilities, meta: { requestId: request.id } });
     },
     async updateAgent({
       controller,

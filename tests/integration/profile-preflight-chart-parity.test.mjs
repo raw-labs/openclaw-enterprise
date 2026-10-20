@@ -62,8 +62,7 @@ function input(controlPlane) {
       gatewayNodeSelector: { "oce-role": "control" },
       transportSecretPrefix: "openclaw-agent-transport",
     },
-    gatewayOutbound: { enabled: true, denyCidrs: ["192.0.2.12/32"] },
-    controlPlaneOutbound: { managedProxy: true, denyCidrs: ["192.0.2.12/32"] },
+    channels: { managedSlackProxy: true },
   };
 }
 
@@ -328,11 +327,8 @@ fieldParity("directory proxy URLs get the same verdict from the preflight and th
     ["https://0.0.0.0:443", false, /must not use host 0\.0\.0\.0, which names no proxy address/],
   ],
   controlPlane: () => ({}),
-  extraInput: (url) => ({ controlPlaneOutbound: { managedProxy: false, proxyUrl: url } }),
-  values: (url) => ({
-    outboundProxy: { enabled: false },
-    api: { controlPlaneOutboundProxyUrl: url },
-  }),
+  extraInput: (url) => ({ channels: { managedSlackProxy: false, directoryProxyUrl: url } }),
+  values: (url) => ({ slackProxy: { enabled: false }, api: { channelDirectoryProxyUrl: url } }),
 });
 
 // The chart's clientAddressHeader refusal, in its order. generic still accepts a plain
@@ -1314,9 +1310,18 @@ test(
       for (const mountPath of [
         undefined,
         "/etc/company/postgres-ca",
+        "etc/company/postgres-ca",
+        "/etc/openclaw/./installation",
+        "/etc/openclaw/database-ca/../installation",
+        "/etc/openclaw/installation/",
+        "etc/openclaw/installation",
         "/etc/openclaw/execution", // Profiles do not enable executionCluster mounts.
         "/etc/openclaw/installation",
         "/run/openclaw-worker",
+        "/var/run/openclaw-worker", // The controller image links /var/run to /run.
+        "/var/run/../var/lib/openclaw/bootstrap", // Dot segments apply after the link.
+        "/var/lock/../openclaw-worker", // The image links /var/lock to /run/lock, so this is /run.
+        "/run/lock/../openclaw-worker",
         "/var/lib/openclaw/bootstrap",
         "/etc/openclaw/gateway-api-key",
         "/etc/openclaw/gateway-ca",
@@ -1334,7 +1339,11 @@ test(
           values: { database: { caSecretName: "occ-db-ca", caMountPath: mountPath } },
           accepted:
             mountPath === undefined ||
-            ["/etc/company/postgres-ca", "/etc/openclaw/execution"].includes(mountPath),
+            [
+              "/etc/company/postgres-ca",
+              "etc/company/postgres-ca",
+              "/etc/openclaw/execution",
+            ].includes(mountPath),
           chartError,
         });
       }
@@ -1344,7 +1353,9 @@ test(
         "/etc/openclaw/repository-registry",
         "/etc/openclaw/repository-ca",
         "/var/run/secrets/kubernetes.io/serviceaccount",
+        "/run/secrets/kubernetes.io/serviceaccount",
         "/run/openclaw/repository-control",
+        "/var/run/openclaw/repository-control",
         "/etc/openclaw/repository-inputs", // Broker-only mounts cannot collide with its absent CA.
       ]) {
         for (const enabled of [false, true]) {

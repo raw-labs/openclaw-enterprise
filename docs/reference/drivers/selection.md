@@ -51,7 +51,7 @@ Sandbox packages in trusted YAML in either mode.
 | Capability           | Shared contract                                                 | Selection boundary                                                                                     |
 | -------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `configuration`      | [ConfigurationDriver](configuration.md)                         | Required in Installation YAML; bundled Kubernetes or installed package.                                |
-| `channel`            | [ChannelDriver](channel.md)                                     | Controller-selected bundled Slack and Teams directory Driver; no Installation YAML selector.           |
+| `channel`            | [ChannelDriver](channel.md)                                     | Controller-selected bundled Slack directory Driver; no Installation YAML selector.                     |
 | `iam`                | [IAMDriver](iam.md)                                             | Required in Installation YAML; bundled native IAM or installed package.                                |
 | `compute`            | [ComputeDriver](compute.md)                                     | Required in Installation YAML; bundled Kubernetes, bundled SSH, or installed package.                  |
 | `secret`             | [SecretDriver](secret.md)                                       | Required in trusted Installation YAML, including SSH; bundled Kubernetes only.                         |
@@ -128,7 +128,8 @@ The root export is resolved as Node's `import()` resolves it: ordered target
 arrays and the `node`, `import`, `module-sync`, `node-addons`, and `default`
 conditions in key order, with `"."` only at the top level. Invalid targets and
 unmatched conditions permit another array entry. The selected target must name
-an existing file exactly (no extension, directory, or `main` lookup). A selected
+an existing file exactly (no extension, directory, or `main` lookup). Its query
+and fragment remain part of the imported module URL, as in Node. A selected
 missing file, directory, or failed import stops startup. The entry must be
 `.mjs`, or `.js` whose nearest `package.json` within the package declares
 `"type": "module"`; Node's import uses that file, not always the package root.

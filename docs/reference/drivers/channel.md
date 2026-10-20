@@ -5,18 +5,15 @@
 `ChannelDriver` validates configured credentials and looks up provider identities for an authorized Namespace edit.
 OpenClaw Control Plane (OCC) owns caller authorization, Secret access, and the
 saved Agent or Configuration. The Driver owns the provider request and returns
-bounded display candidates with stable provider IDs. It does not send messages
-or grant channel access. The current controller selects the bundled Slack and Teams
+display candidates with stable provider IDs. It does not send messages
+or grant channel access. The current controller selects the bundled Slack
 implementation for directory lookup; see [Driver selection](selection.md).
 
 ## Interface
 
 The [shared interface](../../../packages/contracts/src/index.ts) requires a
-Driver identity and `lookupDirectory({ token, provider, context?, kind, query?, cursor?, ids? })`. `kind`
-selects users or channels. `provider` selects a provider-owned adapter; optional
-`context` contains at most eight nonsecret strings of at most 200 characters.
-Adapters validate their own context, authentication and pagination; OCC remains
-provider-neutral. `ids` resolves saved IDs directly and cannot be
+Driver identity and `lookupDirectory({ token, kind, query?, cursor?, ids? })`. `kind`
+selects users or channels. `ids` resolves saved IDs directly and cannot be
 combined with a search query or cursor. The method returns workspace identity, candidates,
 an optional next cursor, and `complete`. A returned name is a display hint;
 callers save IDs. A missing selected Driver makes lookup unavailable.
@@ -26,14 +23,6 @@ channel credentials before API provisioning or deployment. `withSecret(binding,
 path, validate)` authorizes the exact same-Namespace Secret and supplies its value
 only inside the SecretDriver callback. Provider calls run before the write
 transaction. Validation does not pin Secret versions or revalidate queued work.
-
-Optional `gatewayNetworkRequirements(configuration)` declares required native
-channel destinations from enabled saved settings. `controlPlaneNetworkRequirements()`
-declares independent management destinations before an Agent exists. Both return
-trusted host/subdomain declarations; they neither hold credentials nor approve
-additional Agent access. Worker provisioning receives only the pure Gateway
-declaration; API credential validation remains outside its admission transaction.
-See [Gateway outbound](../gateway-outbound.md).
 
 ## IAM
 
@@ -70,8 +59,6 @@ A successful lookup does not prove the bot can post to a channel.
 
 ## Implementations
 
-- [Bundled Teams Channel Driver](teams-channel.md) reads a selected Team's
-  standard channels and member roster with resource-specific consent.
 - [Bundled Slack Channel Driver](slack-channel.md) uses a Slack bot token for
   user and channel directory reads.
 

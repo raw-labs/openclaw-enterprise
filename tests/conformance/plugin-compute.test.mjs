@@ -2379,14 +2379,17 @@ function useRoutedGateway(candidate) {
 }
 
 function enrolledNodeSecret(driver, candidate, namespace) {
+  const manifest = driver.manifest(
+    "v1",
+    "Secret",
+    driver.workspaceNodeName(candidate),
+    driver.pluginRuntimeOwnership(candidate),
+    { name: namespace, plane: "execution" },
+  );
   return {
-    ...driver.manifest(
-      "v1",
-      "Secret",
-      driver.workspaceNodeName(candidate),
-      driver.pluginRuntimeOwnership(candidate),
-      { name: namespace, plane: "execution" },
-    ),
+    ...manifest,
+    // Like the API server, the stored object carries a resource version.
+    metadata: { ...manifest.metadata, uid: "workspace-node-secret-uid", resourceVersion: "1" },
     data: {
       deviceId: Buffer.from("fixture-node").toString("base64"),
       // A current setup code, as preparation keeps renewing it.
@@ -2437,6 +2440,8 @@ test("embedded plugin preparation applies runtime egress before gateway readines
         credentialObjects.set(`${body.metadata.namespace}:${body.metadata.name}`, observed);
         return observed;
       },
+      // The connected readiness check records the enrolled revision in the node Secret.
+      replaceNamespacedSecret: async ({ body }) => body,
       createNamespacedConfigMap: async ({ body }) => {
         configMaps.set(body.metadata.name, {
           ...structuredClone(body),
@@ -2877,6 +2882,18 @@ test("Kubernetes startup failure evidence requires the exact runtime Pod report"
     [{ kind: "PROBE_STATUS", detail: "rate_limit" }, "MODEL_PROBE_FAILED", true],
     [{ kind: "WRAPPER_ERROR" }, "MODEL_PROBE_FAILED", true],
     [{ kind: "PROCESS_EXIT", detail: "exit-1" }, "MODEL_PROBE_FAILED", true],
+    // A retried transient failure keeps its token with the second attempt's suffix.
+    [{ kind: "PROBE_STATUS", detail: "turn-failed-attempt2" }, "MODEL_PROBE_FAILED", true],
+    [{ kind: "PROCESS_EXIT", detail: "signal-SIGKILL-attempt2" }, "MODEL_PROBE_FAILED", true],
+    [{ kind: "PROBE_STATUS", detail: "turn-failed-attempt3" }, "MODEL_PROBE_FAILED", false],
+    [{ kind: "PROBE_STATUS", detail: "attempt2" }, "MODEL_PROBE_FAILED", false],
+    [{ kind: "PROBE_STATUS", detail: "-attempt2" }, "MODEL_PROBE_FAILED", false],
+    [{ kind: "WRAPPER_ERROR", detail: "-attempt2" }, "MODEL_PROBE_FAILED", false],
+    [
+      { kind: "PROBE_STATUS", detail: "turn-failed-attempt2-attempt2" },
+      "MODEL_PROBE_FAILED",
+      false,
+    ],
     [{ kind: "PROBE_STATUS", detail: "sk-fixture-credential" }, "MODEL_PROBE_FAILED", false],
     [{ kind: "PROCESS_EXIT", detail: "HTTP 404 model not found" }, "MODEL_PROBE_FAILED", false],
     [{ kind: "WRAPPER_ERROR", detail: "json" }, "MODEL_PROBE_FAILED", false],
@@ -4698,7 +4715,7 @@ test("Kubernetes dedicated Codex agent mounts plugin-free runtime without plugin
       name: kubernetesNamespaceName(tenant.id),
       plane: "control",
     }),
-    undefined,
+    [],
     [],
     { name: "plugin-runtime-agent-plugin-compute", runtime },
   );
@@ -4784,7 +4801,7 @@ for (const withBroker of [false, true]) {
       false,
       undefined,
       undefined,
-      undefined,
+      [],
       [],
       { name: "plugin-runtime-gateway-plugin-compute", runtime },
     );
@@ -4860,7 +4877,7 @@ test("Kubernetes embedded OpenClaw gateway mounts broker-only Codex bridge runti
       },
       { name: "oce-plugin-compute", plane: "execution" },
     ),
-    undefined,
+    [],
     [],
     { name: "plugin-runtime-gateway-plugin-compute", runtime },
   );
@@ -4948,6 +4965,8 @@ test("Kubernetes dedicated successor readiness preserves the stable Agent Servic
         credentialObjects.set(`${body.metadata.namespace}:${body.metadata.name}`, observed);
         return observed;
       },
+      // The connected readiness check records the enrolled revision in the node Secret.
+      replaceNamespacedSecret: async ({ body }) => body,
       createNamespacedConfigMap: async () => ({}),
       patchNamespacedConfigMap: async () => ({}),
       listNamespacedPod: async () => ({ apiVersion: "v1", kind: "PodList", items: [] }),
@@ -5103,7 +5122,7 @@ test("Kubernetes dedicated Codex gateway mounts bridge runtime and prior plugin 
     false,
     undefined,
     undefined,
-    undefined,
+    [],
     [],
     { name: "plugin-runtime-gateway-plugin-compute", runtime },
     [{ pluginId: "codex-plugin:linear@openai-curated-remote", code: "PLUGIN_AUTH_REQUIRED" }],
@@ -5185,7 +5204,7 @@ test("Kubernetes plugin-free Codex gateway receives explicit Agent approvers", (
       false,
       undefined,
       undefined,
-      undefined,
+      [],
       [],
       { name: "plugin-runtime-gateway-plugin-free", runtime },
     );

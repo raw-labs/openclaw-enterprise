@@ -377,35 +377,42 @@
       "idx": 53,
       "version": "7",
       "when": 1787000000054,
-      "tag": "0054_agent_runtime_roles",
+      "tag": "0054_credential_source_pat",
       "breakpoints": true
     },
     {
       "idx": 54,
       "version": "7",
       "when": 1787000000055,
-      "tag": "0055_held_authentication_session",
+      "tag": "0055_compute_revision_admission",
       "breakpoints": true
     },
     {
       "idx": 55,
       "version": "7",
       "when": 1787000000056,
-      "tag": "0056_gateway_outbound",
+      "tag": "0056_held_authentication_session",
       "breakpoints": true
     },
     {
       "idx": 56,
       "version": "7",
       "when": 1787000000057,
-      "tag": "0057_embedded_channel_outbound",
+      "tag": "0057_canonical_harness_auth",
       "breakpoints": true
     },
     {
       "idx": 57,
       "version": "7",
       "when": 1787000000058,
-      "tag": "0058_credential_source_pat",
+      "tag": "0058_sandbox_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1787000000059,
+      "tag": "0059_administrator_sandbox_policy_grants",
       "breakpoints": true
     }
   ]

@@ -1,4 +1,3 @@
-import { GATEWAY_OUTBOUND_HOST_PATTERN } from "../gateway-outbound.ts";
 import { Type } from "typebox";
 import {
   BACKEND_ID_MAX_CHARACTERS,
@@ -243,7 +242,7 @@ export const AgentRevisionListQuery = Type.Object(
     limit: Type.Optional(
       Type.String({
         pattern: "^(?:[1-9][0-9]?|100)$",
-        description: "Revisions per page, 1 to 100; default 50.",
+        description: "Agent revisions per page, 1 to 100; default 50.",
       }),
     ),
     cursor: Type.Optional(
@@ -317,10 +316,6 @@ export const HarnessAuthBindingSchema = Type.Union([
         ),
       ]),
     },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    { method: Type.Literal("oauth"), source: SecretReference },
     { additionalProperties: false },
   ),
   Type.Object(
@@ -468,7 +463,7 @@ const PluginDiscoveryAccessToken = Type.String({
 export const DiscoverAgentPluginsBody = Type.Union([
   Type.Object(
     {
-      oauthLogin: SecretReference,
+      credentialSource: CredentialSourceReference,
       cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 8192 })),
       q: Type.Optional(Type.String({ maxLength: 1024 })),
     },
@@ -501,7 +496,10 @@ export const DiscoverAgentPluginsBody = Type.Union([
 
 export const DiscoverAgentPluginDetailsBody = Type.Union([
   Type.Object(
-    { oauthLogin: SecretReference, pluginId: Type.String({ minLength: 1, maxLength: 256 }) },
+    {
+      credentialSource: CredentialSourceReference,
+      pluginId: Type.String({ minLength: 1, maxLength: 256 }),
+    },
     { additionalProperties: false },
   ),
   Type.Object(
@@ -523,7 +521,7 @@ export const DiscoverAgentPluginDetailsBody = Type.Union([
 
 export const DiscoverSavedAgentPluginsBody = Type.Object(
   {
-    oauthLogin: Type.Optional(SecretReference),
+    credentialSource: Type.Optional(CredentialSourceReference),
     cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 8192 })),
     q: Type.Optional(Type.String({ maxLength: 1024 })),
   },
@@ -533,7 +531,7 @@ export const DiscoverSavedAgentPluginsBody = Type.Object(
 export const DiscoverSavedAgentPluginDetailsBody = Type.Object(
   {
     pluginId: Type.String({ minLength: 1, maxLength: 256 }),
-    oauthLogin: Type.Optional(SecretReference),
+    credentialSource: Type.Optional(CredentialSourceReference),
   },
   { additionalProperties: false },
 );
@@ -547,7 +545,7 @@ export const PermissionActionSchema = Type.Union([
   Type.Literal("operate"),
   Type.Literal("administer"),
   Type.Literal("read_logs"),
-  Type.Literal("use"),
+  Type.Literal("manage_policy"),
 ]);
 
 export const ResourceKindSchema = Type.Union([
@@ -560,6 +558,7 @@ export const ResourceKindSchema = Type.Union([
   Type.Literal("agent"),
   Type.Literal("agent_revision"),
   Type.Literal("credential_source"),
+  Type.Literal("sandbox_policy"),
 ]);
 
 export const NamespacePolicyResourceKindSchema = Type.Union([
@@ -568,6 +567,7 @@ export const NamespacePolicyResourceKindSchema = Type.Union([
   Type.Literal("agent_revision"),
   Type.Literal("configuration"),
   Type.Literal("credential_source"),
+  Type.Literal("sandbox_policy"),
   Type.Literal("preset"),
   Type.Literal("secret"),
   Type.Literal("service_account"),
@@ -586,16 +586,6 @@ export const CreateIAMRoleBody = Type.Object(
   { additionalProperties: false },
 );
 
-export const RuntimeRoleConfiguration = Type.Object(
-  { id: ConfigurationId, generation: ConfigurationGeneration },
-  { additionalProperties: false },
-);
-
-export const AgentRuntimeRoleSchema = Type.Object(
-  { id: Type.String(), permissions: Type.Record(Type.String(), Type.Unknown()) },
-  { additionalProperties: false },
-);
-
 export const CreateIAMServicePrincipalBody = Type.Object({}, { additionalProperties: false });
 
 export const CreateIAMAccessBindingBody = Type.Object(
@@ -603,20 +593,8 @@ export const CreateIAMAccessBindingBody = Type.Object(
     subjectKind: Type.Literal("identity"),
     subjectId: Type.String({ minLength: 1, maxLength: 200 }),
     roleId: IAMRoleId,
-    runtimeRole: Type.Optional(
-      Type.String({ minLength: 1, maxLength: 128, pattern: "^\\S(?:.*\\S)?$" }),
-    ),
-    runtimeRoleConfiguration: Type.Optional(RuntimeRoleConfiguration),
     resourceKind: NamespacePolicyResourceKindSchema,
     resourceId: Type.String({ minLength: 1, maxLength: 200 }),
-  },
-  { additionalProperties: false },
-);
-
-export const UpdateIAMRuntimeRoleBody = Type.Object(
-  {
-    runtimeRole: Type.String({ minLength: 1, maxLength: 128, pattern: "^\\S(?:.*\\S)?$" }),
-    runtimeRoleConfiguration: RuntimeRoleConfiguration,
   },
   { additionalProperties: false },
 );
@@ -631,7 +609,18 @@ export const CreateConfigurationBody = Type.Object(
 );
 
 export const UpdateConfigurationBody = Type.Object(
-  { values: ConfigurationValues, secretBindings: Type.Optional(SecretBindings) },
+  {
+    values: ConfigurationValues,
+    secretBindings: Type.Optional(SecretBindings),
+    expectedGeneration: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+        description:
+          "The generation this update replaces, from the caller's last read. A Configuration at another generation refuses the update with 409 and an `/expectedGeneration` detail, and keeps its content. Omitted, the update replaces whatever generation is current.",
+      }),
+    ),
+  },
   { additionalProperties: false },
 );
 
@@ -761,7 +750,7 @@ export const ProvisionAgentBody = Type.Object(
     harnessAuth: Type.Optional(
       Type.Union([HarnessAuthBindingSchema, Type.Null()], {
         description:
-          "Dedicated Harness authentication, required. Omitted, null, `runtime` and `credential_source` are refused with 400 INVALID_REQUEST; for a credential source, create the Agent with the source, then deploy it.",
+          "Dedicated Harness authentication, required. Omitted, null and `runtime` are refused with 400 INVALID_REQUEST. A ready model `credential_source` is supported when the selected Credential Gateway owns it and the caller has source `operate` permission.",
       }),
     ),
     executionMode: Type.Optional(HarnessExecutionModeSchema),
@@ -773,21 +762,22 @@ export const ProvisionAgentBody = Type.Object(
   { additionalProperties: false },
 );
 
-export const GatewayOutboundSelectionSchema = Type.Union([
-  Type.Object({ mode: Type.Literal("channelsOnly") }, { additionalProperties: false }),
-  Type.Object(
-    {
-      mode: Type.Literal("restricted"),
-      hosts: Type.Array(Type.String({ maxLength: 253, pattern: GATEWAY_OUTBOUND_HOST_PATTERN }), {
-        minItems: 1,
-        maxItems: 64,
-        uniqueItems: true,
-      }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object({ mode: Type.Literal("publicHttps") }, { additionalProperties: false }),
-]);
+export const ValidateAgentCreateBody = Type.Object(
+  {
+    initialWorkspaceFiles: Type.Optional(CreateAgentBody.properties.initialWorkspaceFiles),
+    configuration: Type.Object(
+      { kind: ConfigurationKindSchema, values: ConfigurationValues },
+      {
+        additionalProperties: false,
+        description: "The Agent Configuration the caller will save, not yet saved.",
+      },
+    ),
+    executionMode: Type.Optional(HarnessExecutionModeSchema),
+    plugins: Type.Optional(Type.Ref("PluginDesiredState")),
+    pluginApprovers: Type.Optional(Type.Ref("PluginApprovers")),
+  },
+  { additionalProperties: false },
+);
 
 export const UpdateAgentBody = Type.Object(
   {
@@ -795,7 +785,6 @@ export const UpdateAgentBody = Type.Object(
     backendId: Type.Optional(Type.Union([BackendId, Type.Null()])),
     harnessAuth: Type.Optional(Type.Union([HarnessAuthBindingSchema, Type.Null()])),
     credentialSources: Type.Optional(AgentCredentialSourcesSchema),
-    gatewayOutbound: Type.Optional(GatewayOutboundSelectionSchema),
     executionMode: Type.Optional(HarnessExecutionModeSchema),
     plugins: Type.Optional(Type.Ref("PluginDesiredState")),
     pluginApprovers: Type.Optional(Type.Union([Type.Ref("PluginApprovers"), Type.Null()])),
@@ -807,14 +796,6 @@ export const UpdateAgentBody = Type.Object(
 
 const ChannelDirectoryLookupFields = {
   secretId: SecretId,
-  provider: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$" }),
-  context: Type.Optional(
-    Type.Record(
-      Type.String({ pattern: "^[a-zA-Z][a-zA-Z0-9_]{0,63}$" }),
-      Type.String({ minLength: 1, maxLength: 200, pattern: "^[^\\u0000-\\u001f\\u007f]+$" }),
-      { maxProperties: 8 },
-    ),
-  ),
   kind: Type.Union([Type.Literal("users"), Type.Literal("channels")]),
   query: Type.Optional(Type.String({ maxLength: 200, pattern: "^[^\\u0000]*$" })),
   cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2048, pattern: "^[^\\u0000]*$" })),
@@ -822,8 +803,6 @@ const ChannelDirectoryLookupFields = {
 
 const ChannelDirectoryHydrationFields = {
   secretId: SecretId,
-  provider: ChannelDirectoryLookupFields.provider,
-  context: ChannelDirectoryLookupFields.context,
   kind: Type.Union([Type.Literal("users"), Type.Literal("channels")]),
   ids: Type.Array(
     Type.String({ minLength: 1, maxLength: 200, pattern: "^[^\\u0000-\\u001f\\u007f]+$" }),
@@ -924,6 +903,7 @@ export const ERROR_CODES = Object.freeze([
   "RUNTIME_LOGS_CURSOR_INVALID",
   "RUNTIME_LOGS_POD_INVALID",
   "RUNTIME_LOGS_SOURCE_UNAVAILABLE",
+  "NATIVE_ADMIN_RETURN_RATE_LIMITED",
   "RUNTIME_LOGS_RATE_LIMITED",
   "RUNTIME_LOGS_CLUSTER_RBAC",
   "RUNTIME_LOGS_SANDBOX_NOT_FOUND",
@@ -1009,6 +989,7 @@ export const ErrorResponse = Type.Object(
           Type.Literal("RUNTIME_LOGS_CURSOR_INVALID"),
           Type.Literal("RUNTIME_LOGS_POD_INVALID"),
           Type.Literal("RUNTIME_LOGS_SOURCE_UNAVAILABLE"),
+          Type.Literal("NATIVE_ADMIN_RETURN_RATE_LIMITED"),
           Type.Literal("RUNTIME_LOGS_RATE_LIMITED"),
           Type.Literal("RUNTIME_LOGS_CLUSTER_RBAC"),
           Type.Literal("RUNTIME_LOGS_SANDBOX_NOT_FOUND"),

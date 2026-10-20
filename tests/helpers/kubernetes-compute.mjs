@@ -5,12 +5,12 @@ export function createTestKubernetesComputeDriver(
   id,
   {
     repositoryCredentials = false,
-    // Explicitly enable the managed Gateway route used by channel requirements.
+    // An Installation with runtime.channels: isolated channel credentials and a reviewed proxy.
     channelRuntime = false,
-    gatewayOutbound,
     authentication = { mode: "inCluster" },
     gatewayTrustedProxyCidrs = ["127.0.0.1/32"],
-    gatewayRouting,
+    sandboxDriver,
+    credentialGatewayDriver,
   } = {},
 ) {
   const resources = {
@@ -31,9 +31,7 @@ export function createTestKubernetesComputeDriver(
         dns: { namespace: "kube-system", podLabels: { app: "dns" } },
         gatewayPort: 8080,
         gatewayTrustedProxyCidrs,
-        ...(gatewayRouting === undefined
-          ? { gatewayClients: [{ namespace: "controller", podLabels: { app: "controller" } }] }
-          : {}),
+        gatewayClients: [{ namespace: "controller", podLabels: { app: "controller" } }],
         ...(repositoryCredentials
           ? {
               repositoryCredentials: {
@@ -45,26 +43,17 @@ export function createTestKubernetesComputeDriver(
           : {}),
       },
       servicePrincipalCredentials: { mode: "disabled" },
-      ...(gatewayRouting === undefined ? {} : { gatewayRouting }),
-      ...(repositoryCredentials || channelRuntime || gatewayOutbound !== undefined
+      ...(repositoryCredentials || channelRuntime
         ? {
             runtime: {
               transportSecretPrefix: "transport",
               gatewayStorageClassName: "local-path",
-              ...(channelRuntime || gatewayOutbound !== undefined
-                ? {
-                    gatewayOutbound: gatewayOutbound ?? {
-                      enabled: true,
-                      image: "controller:local",
-                      denyCidrs: ["10.0.0.0/8"],
-                    },
-                  }
-                : {}),
+              ...(channelRuntime ? { channels: { proxyUrl: "http://10.42.0.15:3128" } } : {}),
             },
           }
         : {}),
     },
-    { id },
+    { id, sandboxDriver, credentialGatewayDriver },
   );
 }
 

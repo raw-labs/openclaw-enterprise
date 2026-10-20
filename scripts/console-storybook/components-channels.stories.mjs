@@ -8,6 +8,10 @@ export const SlackEnterpriseDm = { ...story("slackEnterpriseDm") };
 export const SlackThreadedDefault = { ...story("slackThreadedDefault") };
 export const SlackReplyOverride = { ...story("slackReplyOverride") };
 export const SlackDrawer = { ...story("slackDrawer"), name: "Slack editor" };
+export const SlackDrawerNoAuthentication = {
+  ...story("slackDrawerNoAuthentication"),
+  name: "Slack editor, no model authentication",
+};
 export const SlackDirectoryChannels = story("slackDirectoryChannels");
 export const SlackDirectorySavedNames = story("slackDirectorySavedNames");
 export const SlackDirectoryQualifiedNames = story("slackDirectoryQualifiedNames");
@@ -54,6 +58,15 @@ export const SlackChannelAccessFlow = {
 export const ChannelsEmpty = { ...story("channelsEmpty"), name: "Not configured" };
 export const ChannelsReadOnly = { ...story("channelsReadOnly"), name: "Revision read only" };
 export const ChannelConflict = { ...story("channelConflict"), name: "Save conflict" };
+export const ChannelSaveRejected = { ...story("channelSaveRejected"), name: "Save rejected" };
+export const ChannelSaveDenied = { ...story("channelSaveDenied"), name: "Save denied" };
+export const ChannelProvisioningReserved = {
+  ...story("channelProvisioningReserved"),
+  name: "Save refused during provisioning",
+};
+export const ChannelChangedElsewhere = story("channelChangedElsewhere");
+export const ChannelChangedElsewhereWithEdits = story("channelChangedElsewhereWithEdits");
+export const ChannelChangedElsewhereMerged = story("channelChangedElsewhereMerged");
 export const ChannelSavePending = { ...story("channelSavePending"), name: "Channel save pending" };
 export const ChannelSaveUnknown = {
   ...story("channelSaveUnknown"),
@@ -66,19 +79,3 @@ export const RevisionSecretsDenied = story("revisionSecretsDenied");
 export const RevisionSecretsMissing = story("revisionSecretsMissing");
 export const RevisionSecretsLoading = story("revisionSecretsLoading");
 export const RevisionSecretsAbsent = story("revisionSecretsAbsent");
-
-export const Teams = story("teams");
-export const TeamsEditor = story("teamsEditor");
-export const TeamsMissingSecret = story("teamsMissingSecret");
-export const TeamsUnsupported = story("teamsUnsupported");
-export const TeamsReadOnly = story("teamsReadOnly");
-export const TeamsSecretsLoading = story("teamsSecretsLoading");
-export const TeamsSaveDenied = story("teamsSaveDenied");
-export const TeamsSavePending = story("teamsSavePending");
-
-export const TeamsDirectoryChannels = story("teamsDirectoryChannels");
-export const TeamsDirectoryMembers = story("teamsDirectoryMembers");
-export const TeamsDirectoryDenied = story("teamsDirectoryDenied");
-export const TeamsDirectoryLoading = story("teamsDirectoryLoading");
-export const TeamsDirectoryEmpty = story("teamsDirectoryEmpty");
-export const TeamsDirectoryMissingSecret = story("teamsDirectoryMissingSecret");

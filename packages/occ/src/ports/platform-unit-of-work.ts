@@ -8,6 +8,7 @@ export function bindPlatformUnitOfWork(
   lifetime: RepositoryTransactionLifetime,
 ): PlatformUnitOfWork {
   return Object.freeze({
+    sandboxPolicies: bindRepository(repositories.sandboxPolicies, lifetime, ["find", "save"]),
     installations: bindRepository(repositories.installations, lifetime, [
       "findInstallation",
       "getInstallation",
@@ -99,6 +100,7 @@ export function bindPlatformUnitOfWork(
       "createAgent",
       "lockAgent",
       "updateConfiguration",
+      "setSandboxPolicyEditing",
       "compareAndSetActiveRevision",
       "compareAndClearActiveRevision",
       "transitionAgentDesiredRuntimeState",
@@ -122,7 +124,6 @@ export function bindPlatformUnitOfWork(
       "getAccessBinding",
       "listRestrictionsTargeting",
       "createAccessBinding",
-      "updateRuntimeRole",
       "deleteAccessBinding",
       "listServicePrincipals",
       "getServicePrincipal",

@@ -12,7 +12,6 @@ import { once } from "node:events";
 import { FilesystemConfigurationDriver } from "../../apps/controller/src/drivers/configuration/filesystem/index.ts";
 import { createControllerAuth } from "../../apps/controller/src/auth/index.ts";
 import { backendSummariesFromDefinitions } from "../../apps/controller/src/composition/installation-config.ts";
-import { nativeAdminOriginResolver } from "../../apps/controller/src/gateway/native-admin-origin.ts";
 import { resolveApprovedHarness } from "../../apps/controller/src/composition/production-harness.ts";
 import { createFastifyApp } from "../../apps/controller/src/index.ts";
 import { InMemoryAuditSink } from "../../packages/audit/src/index.ts";
@@ -40,15 +39,16 @@ export const backendFixtures = Object.freeze([
 function computeDriver({
   repositoryCredentials = false,
   channelRuntime = false,
-  gatewayOutbound,
-  gatewayRouting,
   discoverHarnessModels = async () => [],
+  agentProvisioning = false,
+  sandboxDriver,
+  credentialGatewayDriver,
 } = {}) {
   const driver = createTestKubernetesComputeDriver("console-compute", {
     repositoryCredentials,
+    sandboxDriver,
+    credentialGatewayDriver,
     channelRuntime,
-    ...(gatewayOutbound === undefined ? {} : { gatewayOutbound }),
-    ...(gatewayRouting === undefined ? {} : { gatewayRouting }),
   });
 
   return Object.assign(driver, {
@@ -58,8 +58,9 @@ function computeDriver({
     ...(channelRuntime && !repositoryCredentials
       ? { requiresAgentRuntimeCredentials: undefined }
       : {}),
-    // In-memory State has no durable provisioning queue; this fixture supports draft creation.
-    agentProvisioning: undefined,
+    // Most Console cases use drafts. Branch-selection tests can retain the actual
+    // Compute capability while verifying that their flow avoids the durable queue.
+    ...(agentProvisioning ? {} : { agentProvisioning: undefined }),
     // Catalog data is the external Compute boundary; Console/OCC/IAM routes remain real.
     discoverHarnessModels,
     async ensureNamespace(namespace) {
@@ -67,6 +68,10 @@ function computeDriver({
     },
     async deleteNamespace(namespace) {
       return { namespaceId: namespace.id, namespaceDeleted: true };
+    },
+    // The same fixture placement is shared by source management and the Sandbox.
+    async resolveSandboxNamespace(namespace) {
+      return { ...namespace, name: `console-${namespace.id}` };
     },
     async prepareRevision(revision) {
       return {
@@ -237,20 +242,20 @@ export async function createConsoleAppFixture(t, options = {}) {
   }
   const auditSink = options.auditSink ?? new InMemoryAuditSink();
   const policyUnit = new AsyncLocalStorage();
-  const stateOptions = {
-    auditSink,
-    resolveIAMIdentity: (identityId) =>
-      policy.identities.find((identity) => identity.id === identityId),
-  };
+  class ConsolePlatformState extends InMemoryPlatformState {
+    transact(work) {
+      // Authorization inside a transaction reads that actual unit, without waiting on itself.
+      return super.transact((unit) => policyUnit.run(unit, () => work(unit)));
+    }
+  }
   const platformState =
-    options.stateFactory?.(stateOptions) ??
     options.state ??
-    new InMemoryPlatformState(stateOptions);
-  // The real IAM evaluator reads the current transaction's policy, including when
-  // restart/history scenarios supply their own State. Never wait on that same unit.
-  const stateTransact = platformState.transact.bind(platformState);
-  platformState.transact = (work) =>
-    stateTransact((unit) => policyUnit.run(unit, () => work(unit)));
+    new ConsolePlatformState({
+      auditSink,
+      // Live lookup, so people enrolled after construction can be bound like in Postgres.
+      resolveIAMIdentity: (identityId) =>
+        policy.identities.find((identity) => identity.id === identityId),
+    });
   const iamDriver = new NativeIAMDriver(
     {
       async loadNativeIAMState() {
@@ -264,9 +269,8 @@ export async function createConsoleAppFixture(t, options = {}) {
           const bindings = [];
           const identities = [];
           for (const namespace of namespaces) {
-            roles.push(...(await view.iamPolicy.listRoles(namespace.id)));
-            bindings.push(...(await view.iamPolicy.listAccessBindings(namespace.id)));
-            // Agent creation persists this identity in PostgresPlatformState.agents.createAgent.
+            // Browser-created Agents must participate in the same live IAM evaluation
+            // as their browser-created credential grants.
             for (const agent of await view.agents.listAgents(namespace.id)) {
               identities.push({
                 id: agent.servicePrincipalId,
@@ -275,6 +279,8 @@ export async function createConsoleAppFixture(t, options = {}) {
                 agentId: agent.id,
               });
             }
+            roles.push(...(await view.iamPolicy.listRoles(namespace.id)));
+            bindings.push(...(await view.iamPolicy.listAccessBindings(namespace.id)));
           }
           return { roles, bindings, identities };
         };
@@ -328,13 +334,13 @@ export async function createConsoleAppFixture(t, options = {}) {
       computeDriver({
         repositoryCredentials: options.repositoryCredentials === true,
         channelRuntime: options.channelRuntime === true,
-        gatewayOutbound: options.gatewayOutbound,
-        gatewayRouting: options.gatewayRouting,
         discoverHarnessModels: options.discoverHarnessModels,
+        agentProvisioning: options.agentProvisioning,
+        sandboxDriver: options.sandboxDriver,
+        credentialGatewayDriver: options.credentialGatewayDriver,
       }),
     configurationDriver:
       configurationDriver ?? createTestConfigurationDriver({ id: "console-configuration" }),
-    ...(options.channelDriver === undefined ? {} : { channelDriver: options.channelDriver }),
     ...(options.sandboxDriver === undefined ? {} : { sandboxDriver: options.sandboxDriver }),
     ...(secretDriver === undefined || secretDriver === null ? {} : { secretDriver }),
     ...(publicOrigin === undefined ? {} : { publicOrigin }),
@@ -352,9 +358,9 @@ export async function createConsoleAppFixture(t, options = {}) {
     createController(installation) {
       controller = new OpenClawController(installation, {
         state: platformState,
+        sandboxNetworkPolicyCeiling: options.sandboxNetworkPolicyCeiling,
         ...(options.now === undefined ? {} : { now: options.now }),
         recordOperations: options.recordOperations ?? false,
-        nativeAdminOrigin: nativeAdminOriginResolver(options.nativeAdmin, publicOrigin),
         backends,
         defaultPresets: options.defaultPresets ?? [],
         bundledPresetVersions: options.bundledPresetVersions ?? [],
@@ -562,15 +568,13 @@ export async function createConsoleAppFixture(t, options = {}) {
   }
 
   function grantAgentSecretOperate(agent, source) {
-    const roleId = `auth-${agent.id}-${source.id}`;
-    if (!policy.identities.some((identity) => identity.id === agent.servicePrincipalId)) {
-      policy.identities.push({
-        id: agent.servicePrincipalId,
-        kind: "service_principal",
-        namespaceId: agent.namespaceId,
-        agentId: agent.id,
-      });
-    }
+    const roleId = `auth-${agent.id}`;
+    policy.identities.push({
+      id: agent.servicePrincipalId,
+      kind: "service_principal",
+      namespaceId: agent.namespaceId,
+      agentId: agent.id,
+    });
     policy.roles.push({
       id: roleId,
       namespaceId: agent.namespaceId,
@@ -607,6 +611,9 @@ export async function createConsoleAppFixture(t, options = {}) {
         configurationId: configuration.id,
         ...(options.backendId === undefined ? {} : { backendId: options.backendId }),
         harnessAuth,
+        ...(options.credentialSources === undefined
+          ? {}
+          : { credentialSources: options.credentialSources }),
         ...(options.executionMode === undefined ? {} : { executionMode: options.executionMode }),
       },
     });
@@ -676,7 +683,6 @@ export async function createConsoleAppFixture(t, options = {}) {
     memoryDatabase,
     provisionedAccounts,
     policy,
-    state: platformState,
     // The real Native IAM Driver, for tests that simulate an IAM outage at its boundary.
     iamDriver,
     rawRequest,

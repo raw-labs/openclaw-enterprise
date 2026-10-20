@@ -8,7 +8,6 @@ export interface NativeAdminProxyContext {
   readonly gatewayBase: string;
   readonly agentOrigin: string;
   readonly apiKey: string;
-  readonly runtimeHeaders: Readonly<Record<string, string>>;
 }
 
 export type NativeAdminWebSocketCloseReason =
@@ -17,7 +16,6 @@ export type NativeAdminWebSocketCloseReason =
   | "authorization_denied"
   | "agent_unavailable"
   | "revision_changed"
-  | "role_changed"
   | "disabled"
   | "dependency_timeout"
   | "dependency_failure"
@@ -66,8 +64,6 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   "x-forwarded-for",
   "x-real-ip",
   "x-occ-identity",
-  "x-occ-role",
-  "x-occ-role-policy",
   "x-occ-session-key",
   "x-openclaw-scopes",
 ]);
@@ -192,8 +188,7 @@ function requestHeaders(
       HOP_BY_HOP_HEADERS.has(lower) ||
       STRIPPED_REQUEST_HEADERS.has(lower) ||
       connectionHeaders.has(lower) ||
-      lower.startsWith("x-forwarded-") ||
-      Object.keys(context.runtimeHeaders).some((header) => header.toLowerCase() === lower)
+      lower.startsWith("x-forwarded-")
     ) {
       continue;
     }
@@ -205,7 +200,6 @@ function requestHeaders(
   if (typeof request.headers.origin === "string") {
     headers.origin = request.headers.origin;
   }
-  Object.assign(headers, context.runtimeHeaders);
   headers["x-api-key"] = context.apiKey;
   return headers;
 }
@@ -443,7 +437,7 @@ function cutClient(socket: Socket): void {
 // a close with unread browser bytes makes the kernel reset the connection and drop the tail.
 // So linger: discard what the browser sends, keep the socket until it has read everything and
 // closed its side, and cut it at `drainTimeoutMs`. Otherwise close it now. Same logic as
-// closeClientWhenDrained in gateway/outbound-proxy.mjs, which runs standalone and cannot share it.
+// closeClientWhenDrained in slack-proxy.mjs, which runs standalone and cannot share it.
 function closeClientWhenDrained(socket: Socket, drainTimeoutMs: number): void {
   if (socket.destroyed) {
     return;

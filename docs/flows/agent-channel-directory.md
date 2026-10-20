@@ -1,16 +1,15 @@
 ---
 created: 2026-09-27
-updated: 2026-10-16
-last_updated_session: authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584
+updated: 2026-10-14
+last_updated_session: authoring-run/a404e7a3-9acf-4b50-9307-31e50b1b3582
 ---
 
 # Agent Channel Directory Lookup Flow
 
 ## Overview
 
-An operator searches Slack users/channels or one Teams Team's standard channels
-and member roster while creating or editing an
-Agent. The Console uses the selected channel credential Secret to show names and workspace
+An operator searches Slack users or channels while creating or editing an
+Agent. The Console uses the selected bot Secret to show names and workspace
 identity, then saves only the selected IDs in channel Configuration. OpenClaw
 Control Plane (OCC) authorizes and reads the Secret; the selected ChannelDriver
 owns provider calls. This flow ends when the Console displays candidates or an
@@ -18,13 +17,13 @@ actionable error.
 
 ## Entry Points
 
-- Trigger: the Console Slack or Teams editor searches or resolves saved IDs, or an
+- Trigger: the Console Slack editor searches or resolves saved IDs, or an
   authorized caller posts to the Namespace channel directory route.
 - Assumptions: the caller can create an Agent or update the exact Agent or
   Configuration, and can operate the selected same-Namespace Secret.
 - Source: `apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`,
   `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`,
-  and `apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`.
+  and `apps/controller/src/drivers/channel/slack.ts:SlackChannelDriver.lookupDirectory`.
 
 ## Flow
 
@@ -37,13 +36,11 @@ graph TD
   P -->|yes| C["SecretDriver reads current value"]
   C --> D["OCC rechecks target, Secret grant, and backend identity"]
   D -->|changed| X
-  D -->|current| M{"API outbound transport?"}
-  M -->|managed| H["API-only proxy checks Driver destination and resolved IP"]
-  M -->|external| I["Tunnel through approved external proxy IP"]
-  M -->|no proxy| R["Use process HTTP transport"]
-  H --> E["Slack Driver reads workspace and bounded directory pages"]
+  D -->|current| M{"Managed Helm proxy?"}
+  M -->|yes| H["Tunnel through proxy Service DNS"]
+  M -->|no| I["Tunnel through external proxy IP"]
+  H --> E["Slack Driver reads workspace and directory pages"]
   I --> E
-  R --> E
   E -->|provider error| X
   E --> F["Console shows names and exact IDs"]
   F --> G["Configuration saves selected IDs"]
@@ -64,48 +61,25 @@ platform state. A missing or foreign target is rejected before provider I/O.
 
 `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`
 
-`apps/controller/src/composition/channel.ts:createBundledChannelDriver`
-selects the bundled Slack and Teams ChannelDriver for production API calls and
-the standalone control-plane proxy. With `OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL`,
-provider adapters tunnel management requests through that endpoint: Slack uses
-`slack.com:443`; Teams uses `login.microsoftonline.com:443` and
-`graph.microsoft.com:443`. Without it, the Driver uses the process HTTP transport;
-default-deny production egress provides no provider route and calls
-return unavailable. A missing selected ChannelDriver instead returns `501`
-before the Secret value is read.
-
-With Helm `outboundProxy.enabled`, the API uses
-`openclaw-enterprise-outbound-proxy.<namespace>.svc` and the matching
-`OCC_CONTROL_PLANE_OUTBOUND_PROXY_MANAGED_HOST`. Helm admits only the release's
-API Pods and grants them egress to that proxy. An external literal IPv4 endpoint
-uses an exact API egress IP and port grant instead.
-
-`apps/controller/src/gateway/control-plane-outbound-proxy.mjs:controlPlaneOutboundPolicy`
-reads infrastructure exclusions and derives exact management destinations from
-`controlPlaneNetworkRequirements()` on the same trusted Driver composition. The
-wrapper starts `runOutboundProxy`; its restricted policy admits only declared
-hosts on port 443 and denies private, reserved, and configured infrastructure
-addresses after DNS resolution. The proxy loads no Secret and works before any
-Agent deployment. Dedicated Gateways use separate revision-owned proxies, so
-this management service grants them no egress authority.
-
+Production composition selects the bundled Slack ChannelDriver only when the
+API has an approved `OCC_CHANNEL_DIRECTORY_PROXY_URL`. Without it, an authorized
+lookup returns `501` before the Secret value is read. Development selects the
+Driver directly. In production the Driver tunnels requests to `slack.com:443`
+through the configured proxy. With the managed proxy enabled, Helm points the
+API at the `openclaw-enterprise-slack-proxy.<namespace>.svc` Service, sets that
+exact host in `OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST`, and limits API egress
+to the proxy Pod selector. With an external literal IPv4 proxy, Helm limits API
+egress to that IP and port. The managed proxy accepts CONNECT only for Slack
+hostnames on port 443, while its NetworkPolicy allows upstream egress to public
+IPv4 addresses on TCP 443, excluding private and reserved ranges.
 The selected SecretDriver invokes `withValue` and verifies backend ownership.
 OCC rechecks grants and Secret backend identity after the read. It passes the
 token only in process to the ChannelDriver. The bundled Slack implementation
 requires a bot identity from `auth.test` and pages through `users.list` or
 `conversations.list`. Exact-ID searches and saved IDs use `users.info` or `conversations.info`.
-The response contains bounded candidates and pagination state, never the token.
+The response contains at most 100 candidates and pagination state, never the token.
 An incomplete page cannot establish that a name is absent or unique.
 
-`apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`
-selects the provider adapter inside the Driver boundary. Teams context contains
-nonsecret app, tenant and Entra group UUIDs. The Teams adapter exchanges the app
-password for a Graph token, resolves the native Team ID with `primaryChannel`,
-and reads only that Team's standard channels or member roster. Application RSC
-consent is checked by Microsoft, independently of OCC authorization. The Driver
-bounds requests, bodies and continuation, rejects redirects, and reconstructs
-Graph URLs from checked scope and pagination tokens. Missing Graph consent does
-not participate in bot deployment credential admission.
 `apps/controller/src/drivers/channel/slack.ts:SlackChannelDriver.call`
 cancels an unused response body on a non-success HTTP status before returning
 the safe rate-limit or unavailable error. This releases occupied transport
@@ -150,60 +124,28 @@ Those results are from the last authorized lookup. A new search rechecks the
 exact edit target and Secret `operate` grant, and denied Agent access removes the
 view.
 
-### 4. Select Teams names without changing native access semantics
-
-`apps/controller/src/console/channels/teams.mjs:support` first keeps native
-group access based only on sender allowlists outside the limited editor.
-Their JSON remains inspectable; no editor save can disable that existing policy.
-
-`apps/controller/src/console/channels/teams.mjs:appendFields`,
-`apps/controller/src/console/agents/teams-directory.mjs:createTeamsDirectoryField`
-
-The Teams editor accepts a native Team ID for manual setup, or a Team link/group
-UUID for lookup. A successful lookup resolves a bare group UUID to the native
-bot Team ID before channel access can be saved. Link/native ID mismatch rejects
-the result. Search and saved-name hydration use the selected app-password Secret
-and exact Configuration edit target. Context changes clear names and results,
-abort the browser request and discard stale responses. Selecting a candidate
-adds its exact ID to the editable ID list; names and search text are not saved.
-Result buttons and Load more retain search focus on pointer-down, so Safari does
-not hide them on blur before their click handlers run. Keyboard activation,
-Escape and focus leaving the field retain their existing behavior.
-The existing channel transaction persists separate channel and personal rules.
-Only native IDs persist, so reopening requires a Team link again for browsing.
-Manual IDs remain available after missing-consent or provider errors.
-
 ## Debugging and Verification
 
 - A denied lookup requires checking the exact edit permission and Secret
   `operate` grant. A token, scope, rate limit, or provider error returns a
   safe code without the token or upstream payload.
-- A `501` lookup means no ChannelDriver is selected. An unavailable lookup
-  requires checking the API route: Helm `outboundProxy.enabled` with actual
-  infrastructure `denyCidrs`, or the approved external endpoint in
-  `api.controlPlaneOutboundProxyUrl`. Check the selected provider's exact
-  management destinations above.
-- The standalone proxy writes `outbound_proxy.listening` to its own stderr after valid policy and
-  listener startup; `GET /readyz` returns `200`. A configuration failure emits
-  `control_plane_outbound_proxy.startup_failed` and exits before listening.
+- A `501` lookup in production means the API has no directory proxy configured.
+  Enable Helm `slackProxy.enabled` or set the approved
+  external proxy IP and port in `api.channelDirectoryProxyUrl`, then verify that
+  the proxy permits CONNECT to `slack.com:443`.
 - Directory conformance tests cover provider pagination, safe errors, and native
   HTTP connection recovery after unfinished 429 and 503 response bodies. The
   OCC API integration test covers both authorization checks and response
   projection. Browser checks cover name display and exact-ID saving.
 - The Agent plugin approver browser check holds the refocus access read and
   verifies that an open directory search remains available without a second lookup.
-- Teams API integration and browser checks exercise real controller and Driver
-  calls against a local HTTP Microsoft protocol fixture; live RSC consent remains
-  a separate [Teams verification](../testing/teams.md) requirement.
 - Fixture and simulated provider tests do not prove a live Slack token, bot
   visibility, or channel message delivery.
 
 ## Related docs
 
 - [ChannelDriver contract](../reference/drivers/channel.md)
-- [Bundled Teams Channel Driver](../reference/drivers/teams-channel.md)
 - [Bundled Slack Channel Driver](../reference/drivers/slack-channel.md)
-- [Gateway outbound access](../reference/gateway-outbound.md)
 - [SecretDriver contract](../reference/drivers/secret.md)
 - [Agent plugin deployment flow](agent-plugins.md)
 
@@ -212,14 +154,6 @@ Manual IDs remain available after missing-consent or provider errors.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
-
-- 2026-10-16 11:37: Preserve Teams picker results until pointer selection completes; cover WebKit selection and saved IDs in the accompanying change. (authoring-run/f0d20376-2b63-4a3d-a149-2bf2e44da769 - 17445a8c66ef)
-
-- 2026-10-15: Reconcile Slack and Teams trusted declarations in the combined integration (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - 523d3b623).
-
-- 2026-10-10 22:48: Keep sender-only native Teams policies outside the limited channel editor (authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9 - a2f7ad762117)
-- 2026-10-07 11:21: Add Team-scoped Graph lookup, native Team ID resolution and name selection alongside Slack in the accompanying implementation. (authoring-run/5acd9a8d-44df-4f9b-8daa-9269c2040340 - 948cb3e61636338be4692bd45114446d6c941890)
-- 2026-10-14 16:02: Trace the accompanying generic API-only proxy and trusted Driver requirements. (authoring-run/7bd4f79c-2e3a-40b6-b2e9-5e51b495a8f0 - bd8fe1f7b0b798dca84d6f90b7377ddda79d88a6)
 
 - 2026-10-14 12:23: Document streaming and decoded Slack response limits. (authoring-run/a404e7a3-9acf-4b50-9307-31e50b1b3582 - 4727e9b109a2127150e03e39e859d45e0668f82f)
 

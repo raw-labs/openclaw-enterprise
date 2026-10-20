@@ -3,12 +3,7 @@ import { join } from "node:path";
 
 // Callers own subprocess policy and cleanup: image tests remove the CA key,
 // while the first-Agent smoke retains it.
-export async function createModelProbeCertificates({
-  directory,
-  caName,
-  run,
-  dnsNames = ["api.openai.com"],
-}) {
+export async function createModelProbeCertificates({ directory, caName, run }) {
   const file = (name) => join(directory, name);
   await run("openssl", [
     "req",
@@ -35,7 +30,7 @@ export async function createModelProbeCertificates({
     "rsa:2048",
     "-nodes",
     "-subj",
-    `/CN=${dnsNames[0]}`,
+    "/CN=api.openai.com",
     "-keyout",
     file("key.pem"),
     "-out",
@@ -44,7 +39,7 @@ export async function createModelProbeCertificates({
   await writeFile(
     file("leaf.ext"),
     [
-      `subjectAltName=${dnsNames.map((name) => `DNS:${name}`).join(",")}`,
+      "subjectAltName=DNS:api.openai.com",
       "basicConstraints=critical,CA:FALSE",
       "extendedKeyUsage=serverAuth",
       "keyUsage=critical,digitalSignature,keyEncipherment",

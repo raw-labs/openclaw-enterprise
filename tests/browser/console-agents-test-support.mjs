@@ -6,7 +6,6 @@ import { validateGitHubRepositoryRegistry } from "../../apps/controller/src/driv
 import { UnixRepositoryCredentialControlClient } from "../../apps/controller/src/backends/repository-credentials/control-client.ts";
 import { createConsoleAppFixture, backendFixtures } from "../helpers/console-app.mjs";
 import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
-import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 import { nativeValues, pathRequests } from "./console-agents-browser-helpers.mjs";
 
 const defaultCodexPreset = JSON.parse(
@@ -67,16 +66,6 @@ export async function openAdvancedSettings(page) {
   }
 }
 
-// Tests that switch the Codex starter to an OpenClaw provider must grant it explicitly.
-export async function allowNativeProvider(page, provider) {
-  await openAdvancedSettings(page);
-  const configuration = page.getByLabel("Configuration JSON", { exact: true });
-  const values = JSON.parse(await configuration.inputValue());
-  assert.deepEqual(values.plugins.allow, ["codex"]);
-  values.plugins.allow.push(provider);
-  await configuration.fill(JSON.stringify(values, null, 2));
-}
-
 // Create Agent stays disabled while the form reads Installation capabilities and repository
 // choices. Waits until the live form has both; a retained preview of an earlier form is inert
 // and shows that form's settled reads. A capability retry keeps the failure text until it ends.
@@ -96,10 +85,13 @@ export async function waitForCreateFormReads(page) {
 
 export async function expectNativeAdminHidden(page) {
   assert.equal(
-    await page.getByRole("heading", { name: "OpenClaw", exact: true }).isVisible(),
+    await page.getByRole("heading", { name: "Gateway administration" }).isVisible(),
     false,
   );
-  assert.equal(await page.getByText("Open OpenClaw", { exact: true }).isVisible(), false);
+  assert.equal(
+    await page.getByRole("link", { name: "Open admin console", exact: true }).isVisible(),
+    false,
+  );
 }
 
 export function assertRevisionUrl(page, revisionId) {
@@ -131,6 +123,21 @@ export async function routeInstallationProvisioning(page, fixture, executionMode
       }),
     });
   });
+}
+
+// A Sandbox Driver that can provision dedicated OpenClaw. Without one, the Installation does not
+// report native worker support and the Console withholds Dedicated OpenClaw (finding 1608).
+export function nativeSandboxDriver(facets = ["networking", "filesystem", "process"]) {
+  return {
+    id: "console-native-sandbox",
+    capability: "sandbox",
+    implementation: "console-native",
+    facets,
+    async provisionHarness() {
+      assert.fail("provisioning admission must leave effects to the worker");
+    },
+    async cleanup() {},
+  };
 }
 
 export async function routeInstallationWithoutProvisioning(page, fixture, capabilities) {
@@ -221,7 +228,7 @@ export const repositoryBackendFixture = Object.freeze({
 export async function createRepositoryLaunchFixture(
   t,
   buildRepositories,
-  { reloadablePolicy = false } = {},
+  { reloadablePolicy = false, controlSocket } = {},
 ) {
   const fixture = await createConsoleAppFixture(t, {
     defaultPresets: [defaultCodexPreset],
@@ -230,7 +237,7 @@ export async function createRepositoryLaunchFixture(
   });
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Repository launch", { ready: true });
-  let currentPolicy = repositoryPolicyDriver(buildRepositories(namespace.id));
+  let currentPolicy = repositoryPolicyDriver(buildRepositories(namespace.id), controlSocket);
   // Simulate replacing mounted policy between requests while keeping all projection and resolution
   // decisions in the actual GitHub Driver. This does not prove production configuration reload.
   const repoDriver = reloadablePolicy
@@ -253,12 +260,15 @@ export async function createRepositoryLaunchFixture(
     namespace,
     replacePolicy(repositories) {
       assert.equal(reloadablePolicy, true);
-      currentPolicy = repositoryPolicyDriver(repositories);
+      currentPolicy = repositoryPolicyDriver(repositories, controlSocket);
     },
   };
 }
 
-function repositoryPolicyDriver(repositories) {
+function repositoryPolicyDriver(
+  repositories,
+  controlSocket = "/unused/console/repository-control.sock",
+) {
   const backend = repositoryBackendFixture;
   const registry = validateGitHubRepositoryRegistry(
     {
@@ -275,9 +285,7 @@ function repositoryPolicyDriver(repositories) {
   return new GitHubRepoDriver(
     {
       id: backend.id,
-      client: new UnixRepositoryCredentialControlClient({
-        controlSocket: "/unused/console/repository-control.sock",
-      }),
+      client: new UnixRepositoryCredentialControlClient({ controlSocket }),
       drivers: backend.drivers,
     },
     registry,
@@ -300,5 +308,79 @@ export async function waitForLiveControls(page, ids) {
 }
 
 export function nativeAdminValues(marker, origin) {
-  return nativeRolesGateway(nativeValues(marker), origin);
+  const values = nativeValues(marker);
+  return {
+    ...values,
+    gateway: {
+      ...(values.gateway ?? {}),
+      controlUi: {
+        ...(values.gateway?.controlUi ?? {}),
+        enabled: true,
+        allowedOrigins: [origin],
+      },
+      auth: {
+        mode: "trusted-proxy",
+        trustedProxy: {
+          userHeader: "x-occ-identity",
+          allowUsers: ["occ-workspace-files"],
+          deviceAutoApprove: { enabled: true, scopes: ["operator.admin"] },
+        },
+        identityScopes: {
+          "occ-workspace-files": ["operator.admin"],
+        },
+      },
+    },
+  };
 }
+
+// Without a caller-permission summary the console keeps controls enabled, so the API's own
+// denial is what the reader sees.
+export async function withholdPermissionSummary(page, fixture, namespaceId, agentId) {
+  await page.route(
+    `${fixture.origin}/namespaces/${namespaceId}/agents/${agentId}/permissions`,
+    async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "DEPENDENCY_UNAVAILABLE", message: "Unavailable." },
+          meta: { requestId: "req_test_permissions" },
+        }),
+      });
+    },
+  );
+}
+
+// Marks the rendered Agent page and records any loading state it shows again, so a test can
+// tell an in-place update from a page reload.
+export async function watchForReload(page) {
+  await page.evaluate(() => {
+    const doc = globalThis.document;
+    doc.querySelector(".agent-current-summary").dataset.saveMarker = "kept";
+    globalThis.reloadedText = [];
+    new globalThis.MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (/Loading (version details|configuration)/.test(node.textContent ?? "")) {
+            globalThis.reloadedText.push(node.textContent);
+          }
+        }
+      }
+    }).observe(doc.body, { childList: true, subtree: true });
+  });
+  return () =>
+    page.evaluate(() => ({
+      marker: globalThis.document.querySelector(".agent-current-summary")?.dataset.saveMarker,
+      reloadedText: globalThis.reloadedText,
+    }));
+}
+
+export const focusedText = (page) =>
+  page.evaluate(() => globalThis.document.activeElement?.textContent ?? null);
+
+// The saved status a focused control is described by, so a screen reader names it.
+export const focusedDescription = (page) =>
+  page.evaluate(() => {
+    const id = globalThis.document.activeElement?.getAttribute("aria-describedby");
+    return id ? globalThis.document.getElementById(id)?.textContent : null;
+  });

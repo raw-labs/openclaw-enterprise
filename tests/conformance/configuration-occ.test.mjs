@@ -11,12 +11,13 @@ import { admitLoggingConfiguration } from "../../packages/contracts/src/index.ts
 import {
   AuthorizationDeniedError,
   ConfigurationHarnessError,
+  DedicatedOpenClawSandboxError,
   DependencyUnavailableError,
   InMemoryPlatformState,
   NamespaceNotEmptyError,
-  NativeWorkerSupportError,
   OpenClawController,
   PINNED_OPENCLAW_RUNTIME_SUPPORTS_NATIVE_WORKERS,
+  ResourceStateConflictError,
   ScopeViolationError,
   resolveConfiguredHarnessId,
 } from "../../packages/occ/src/index.ts";
@@ -34,6 +35,27 @@ const installation = Object.freeze({
   id: "installation-configuration-occ",
   name: "Configuration OCC conformance",
   createdAt: "2026-08-19T00:00:00.000Z",
+});
+
+test("deployment freezes and persists the Compute Driver's admission decision", async () => {
+  const { agent, compute, controller, namespace, state } = await fixture();
+  let decision = "peer-one";
+  compute.admitRevision = (draft) => {
+    assert.equal(Object.isFrozen(draft), true);
+    assert.equal(Object.isFrozen(draft.configuration), true);
+    assert.equal(Object.isFrozen(draft.compute), true);
+    return decision;
+  };
+  const revision = await controller.deployAgent(
+    administrator,
+    { namespaceId: namespace.id, agentId: agent.id },
+    resolveApprovedDevelopmentHarness,
+  );
+  decision = "peer-two";
+  const stored = await state.read((view) =>
+    view.revisions.findRevision(namespace.id, agent.id, revision.id),
+  );
+  assert.equal(stored.compute.admission, "peer-one");
 });
 async function fixture(options = {}) {
   const iamState = principalIAMState([administrator, deployOnly], "configuration-conformance");
@@ -165,6 +187,35 @@ test("concurrent Configuration updates serialize into distinct server-managed ge
   const latest = await controller.getConfiguration(administrator, namespace.id, configuration.id);
   assert.equal(latest.generation, 3);
   assert.deepEqual(latest.values, { model: "second" });
+});
+
+// Two saves that read the same generation: the second is refused under the row lock instead of
+// silently replacing the first (finding 1505). An omitted expectedGeneration still replaces.
+test("concurrent Configuration updates from one read generation keep the first and refuse the second", async () => {
+  const { configuration, configurationDriver, controller, namespace } = await fixture();
+  const update = (model, expectedGeneration) =>
+    controller.updateConfiguration(administrator, {
+      namespaceId: namespace.id,
+      configurationId: configuration.id,
+      values: { model },
+      ...(expectedGeneration === undefined ? {} : { expectedGeneration }),
+    });
+
+  const results = await Promise.allSettled([update("first", 1), update("second", 1)]);
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[0].value.generation, 2);
+  assert.equal(results[1].status, "rejected");
+  assert.ok(results[1].reason instanceof ResourceStateConflictError, String(results[1].reason));
+  const latest = await controller.getConfiguration(administrator, namespace.id, configuration.id);
+  assert.equal(latest.generation, 2);
+  assert.deepEqual(latest.values, { model: "first" });
+  assert.deepEqual(
+    (await configurationDriver.read({ id: configuration.id, namespaceId: namespace.id })).values,
+    { model: "first" },
+  );
+
+  assert.equal((await update("current", 2)).generation, 3);
+  assert.equal((await update("unchecked")).generation, 4);
 });
 
 test("Configuration metadata and selected substrate generation divergence fails closed", async () => {
@@ -1424,6 +1475,10 @@ for (const scope of ["primary", "default-fallback", "entry-fallback", "provider-
 test("OCC rejects alternate selectable runtimes and unsupported Codex providers before admitting work", async () => {
   const defaultFallbackRefusal =
     "Configuration setting agents.defaults.model.fallbacks must use the primary model's provider.";
+  const selectedModelDefaults = (model, runtimeId) => ({
+    model,
+    models: { [model]: { agentRuntime: { id: runtimeId } } },
+  });
   const scenarios = [
     ...[null, "openai/gpt-4.1-mini", [42], ["/missing-provider"]].map((fallbacks) => ({
       name: `malformed fallback selection ${JSON.stringify(fallbacks)} cannot be admitted`,
@@ -1527,10 +1582,7 @@ test("OCC rejects alternate selectable runtimes and unsupported Codex providers 
         "Configuration setting agents.entries.primary.model.fallbacks must use the primary model's provider.",
       values: {
         agents: {
-          defaults: {
-            model: "openai/gpt-4.1",
-            models: { "openai/gpt-4.1": { agentRuntime: { id: "openclaw" } } },
-          },
+          defaults: selectedModelDefaults("openai/gpt-4.1", "openclaw"),
           entries: {
             primary: {
               model: { primary: "openai/gpt-4.1", fallbacks: ["codex/gpt-4.1"] },
@@ -1544,10 +1596,7 @@ test("OCC rejects alternate selectable runtimes and unsupported Codex providers 
       executionMode: "embedded",
       values: {
         agents: {
-          defaults: {
-            model: "openai/gpt-4.1",
-            models: { "openai/gpt-4.1": { agentRuntime: { id: "openclaw" } } },
-          },
+          defaults: selectedModelDefaults("openai/gpt-4.1", "openclaw"),
           entries: {
             primary: {
               models: {
@@ -1564,10 +1613,7 @@ test("OCC rejects alternate selectable runtimes and unsupported Codex providers 
       executionMode: "embedded",
       values: {
         agents: {
-          defaults: {
-            model: "openai/gpt-4.1",
-            models: { "openai/gpt-4.1": { agentRuntime: { id: "openclaw" } } },
-          },
+          defaults: selectedModelDefaults("openai/gpt-4.1", "openclaw"),
         },
         models: {
           providers: {
@@ -1586,10 +1632,7 @@ test("OCC rejects alternate selectable runtimes and unsupported Codex providers 
       executionMode: "embedded",
       values: {
         agents: {
-          defaults: {
-            model: "openai/gpt-4.1",
-            models: { "openai/gpt-4.1": { agentRuntime: { id: "openclaw" } } },
-          },
+          defaults: selectedModelDefaults("openai/gpt-4.1", "openclaw"),
         },
         models: { providers: { openai: { agentRuntime: { id: "codex" } } } },
       },
@@ -1599,10 +1642,7 @@ test("OCC rejects alternate selectable runtimes and unsupported Codex providers 
       executionMode: "embedded",
       values: {
         agents: {
-          defaults: {
-            model: "openai/gpt-4.1",
-            models: { "openai/gpt-4.1": { agentRuntime: { id: "openclaw" } } },
-          },
+          defaults: selectedModelDefaults("openai/gpt-4.1", "openclaw"),
         },
         models: {
           providers: {
@@ -1617,10 +1657,7 @@ test("OCC rejects alternate selectable runtimes and unsupported Codex providers 
       executionMode: "embedded",
       values: {
         agents: {
-          defaults: {
-            model: "openai/vendor/model",
-            models: { "openai/vendor/model": { agentRuntime: { id: "openclaw" } } },
-          },
+          defaults: selectedModelDefaults("openai/vendor/model", "openclaw"),
         },
         models: {
           providers: {
@@ -1634,10 +1671,7 @@ test("OCC rejects alternate selectable runtimes and unsupported Codex providers 
       executionMode: "embedded",
       values: {
         agents: {
-          defaults: {
-            model: "openai/gpt-4.1",
-            models: { "openai/gpt-4.1": { agentRuntime: { id: "openclaw" } } },
-          },
+          defaults: selectedModelDefaults("openai/gpt-4.1", "openclaw"),
           entries: {
             primary: {
               models: { "openai/gpt-4.1": { agentRuntime: { id: "codex" } } },
@@ -1651,10 +1685,7 @@ test("OCC rejects alternate selectable runtimes and unsupported Codex providers 
       executionMode: "dedicated",
       values: {
         agents: {
-          defaults: {
-            model: "openai/gpt-4.1",
-            models: { "openai/gpt-4.1": { agentRuntime: { id: "codex" } } },
-          },
+          defaults: selectedModelDefaults("openai/gpt-4.1", "codex"),
         },
       },
     },
@@ -1799,23 +1830,20 @@ test("Harness admission rejects conflicting selections, mode mismatches, and una
     configurationId: openclawConfiguration.id,
     executionMode: "dedicated",
   });
-  // The pinned runtime cannot run dedicated OpenClaw, so admission refuses it before
-  // any revision exists unless the Installation declares a native-worker runtime image.
-  assert.equal(PINNED_OPENCLAW_RUNTIME_SUPPORTS_NATIVE_WORKERS, false);
+  // Native runtime support does not waive the required Sandbox containment.
+  // Refusal leaves the existing embedded revision unchanged.
   await assert.rejects(
     controller.deployAgent(
       administrator,
       { namespaceId: namespace.id, agentId: agent.id },
       resolveApprovedProductionHarness,
     ),
-    (error) =>
-      error instanceof NativeWorkerSupportError &&
-      /cloudWorkers\.requiredProfile/.test(error.message) &&
-      /docs-enterprise\.openclaw\.org\/reference\/harness-execution\/#native-worker-support/.test(
-        error.message,
-      ),
+    dedicatedSandboxRefusal,
   );
-  assert.equal((await controller.getInstallation(administrator)).capabilities, undefined);
+  // Without that Sandbox Driver the Installation cannot admit dedicated OpenClaw (finding 1608).
+  assert.deepEqual((await controller.getInstallation(administrator)).capabilities, {
+    openclaw: { executionModes: ["embedded"] },
+  });
   // Listing returns the revision's summary: no saved settings.
   assert.deepEqual(
     (await controller.listRevisions(administrator, namespace.id, agent.id)).revisions,
@@ -1861,10 +1889,42 @@ test("Harness admission rejects conflicting selections, mode mismatches, and una
   );
 });
 
-test("Installation native worker support admits dedicated OpenClaw to Sandbox checks", async () => {
-  const { agent, controller, namespace } = await fixture({ nativeWorkerSupport: "custom-image" });
+// The fixed refusal for dedicated OpenClaw without a provisioning Sandbox Driver: a permanent
+// conflict (409) naming the Driver, not a dependency outage (503) with generic text (finding 1609).
+function dedicatedSandboxRefusal(error) {
+  return (
+    error instanceof DedicatedOpenClawSandboxError &&
+    error instanceof ResourceStateConflictError &&
+    !(error instanceof DependencyUnavailableError) &&
+    error.message ===
+      "Dedicated OpenClaw requires a provisioning SandboxDriver with networking, filesystem, and process containment."
+  );
+}
+
+function conformanceSandbox(id, facets, provisions = true) {
+  return {
+    id: `configuration-occ-sandbox-${id}`,
+    capability: "sandbox",
+    implementation: "configuration-conformance-sandbox",
+    facets,
+    ...(provisions
+      ? {
+          async provisionHarness() {
+            assert.fail("admission checks never provision");
+          },
+        }
+      : {}),
+    async cleanup() {},
+  };
+}
+
+test("The pinned runtime admits dedicated OpenClaw without waiving Sandbox containment", async () => {
+  const { agent, controller, namespace } = await fixture();
+  assert.equal(PINNED_OPENCLAW_RUNTIME_SUPPORTS_NATIVE_WORKERS, true);
+  // nativeWorkers promises that dedicated OpenClaw can be admitted, so runtime support alone
+  // does not report it (finding 1608).
   assert.deepEqual((await controller.getInstallation(administrator)).capabilities, {
-    nativeWorkers: { support: "custom-image" },
+    openclaw: { executionModes: ["embedded"] },
   });
   const openclawConfiguration = await controller.createConfiguration(administrator, {
     namespaceId: namespace.id,
@@ -1877,28 +1937,139 @@ test("Installation native worker support admits dedicated OpenClaw to Sandbox ch
     configurationId: openclawConfiguration.id,
     executionMode: "dedicated",
   });
-  // The declaration lifts only the runtime refusal: dedicated OpenClaw still fails closed
+  // Native runtime support does not grant containment: dedicated OpenClaw still fails closed
   // without a provisioning SandboxDriver that declares networking, filesystem, and process containment.
-  await assert.rejects(
+  const deploy = () =>
     controller.deployAgent(
       administrator,
       { namespaceId: namespace.id, agentId: agent.id },
       resolveApprovedProductionHarness,
-    ),
-    (error) =>
-      error instanceof DependencyUnavailableError &&
-      /requires a provisioning SandboxDriver with networking, filesystem, and process containment/.test(
-        error.message,
+    );
+  await assert.rejects(deploy(), dedicatedSandboxRefusal);
+  const facets = ["networking", "filesystem", "process"];
+  // A Sandbox Driver that cannot provision, or lacks any one facet, changes neither answer.
+  for (const sandbox of [
+    conformanceSandbox("contain-only", facets, false),
+    ...facets.map((missing) =>
+      conformanceSandbox(
+        `no-${missing}`,
+        facets.filter((facet) => facet !== missing),
       ),
-  );
+    ),
+  ]) {
+    registerAndSelectDrivers(controller, [sandbox]);
+    assert.deepEqual(
+      (await controller.getInstallation(administrator)).capabilities,
+      { openclaw: { executionModes: [] } },
+      sandbox.id,
+    );
+    await assert.rejects(deploy(), dedicatedSandboxRefusal, sandbox.id);
+  }
   assert.deepEqual(
     (await controller.listRevisions(administrator, namespace.id, agent.id)).revisions,
     [],
   );
+  // A qualifying Sandbox Driver is what makes the Installation report native worker support.
+  registerAndSelectDrivers(controller, [conformanceSandbox("full", facets)]);
+  assert.deepEqual((await controller.getInstallation(administrator)).capabilities, {
+    nativeWorkers: { support: "pinned-runtime" },
+    openclaw: { executionModes: ["dedicated"] },
+  });
   assert.throws(
     () => new OpenClawController(installation, { nativeWorkerSupport: "pinned-runtime" }),
     ScopeViolationError,
   );
+});
+
+// Admission refusals for an OpenClaw execution mode the Installation shape cannot run: Agent save
+// (embedded with a Sandbox Driver, or the Sandbox Driver unavailable) or deploy (dedicated).
+function openclawModeRefusal(error) {
+  return (
+    error instanceof ConfigurationHarnessError ||
+    error instanceof DedicatedOpenClawSandboxError ||
+    (error instanceof DependencyUnavailableError &&
+      error.message === "The selected Sandbox Driver is unavailable.")
+  );
+}
+
+test("The Installation lists exactly the OpenClaw execution modes Agent save and deploy admit", async () => {
+  const facets = ["networking", "filesystem", "process"];
+  const shapes = [
+    { name: "no Sandbox Driver", modes: ["embedded"] },
+    { name: "contain-only", sandbox: conformanceSandbox("contain-only", facets, false), modes: [] },
+    ...facets.map((missing) => ({
+      name: `no-${missing}`,
+      sandbox: conformanceSandbox(
+        `no-${missing}`,
+        facets.filter((facet) => facet !== missing),
+      ),
+      modes: [],
+    })),
+    { name: "full", sandbox: conformanceSandbox("full", facets), modes: ["dedicated"] },
+    {
+      name: "full but unavailable",
+      sandbox: conformanceSandbox("unavailable", facets),
+      unavailable: true,
+      modes: [],
+    },
+  ];
+  for (const shape of shapes) {
+    const { agent, controller, namespace } = await fixture();
+    const openclawConfiguration = await controller.createConfiguration(administrator, {
+      namespaceId: namespace.id,
+      kind: "agent",
+      values: {},
+    });
+    if (shape.sandbox !== undefined) {
+      registerAndSelectDrivers(controller, [shape.sandbox]);
+    }
+    if (shape.unavailable) {
+      // The registry no longer matches the selection, as after a Driver swap at runtime.
+      shape.sandbox.implementation = "replaced-sandbox";
+    }
+    const { capabilities } = await controller.getInstallation(administrator);
+    // Only an outage says so: an empty list from the Installation's shape needs an
+    // administrator, an outage only time (finding 1624).
+    assert.deepEqual(
+      capabilities.openclaw,
+      {
+        executionModes: shape.modes,
+        ...(shape.unavailable ? { sandboxDriverUnavailable: true } : {}),
+      },
+      shape.name,
+    );
+    // nativeWorkers promises dedicated admission, so it appears exactly with that mode.
+    assert.equal(
+      capabilities.nativeWorkers === undefined,
+      !shape.modes.includes("dedicated"),
+      shape.name,
+    );
+    for (const executionMode of ["embedded", "dedicated"]) {
+      const label = `${shape.name}: ${executionMode}`;
+      let admitted = true;
+      try {
+        await controller.updateAgent(administrator, {
+          namespaceId: namespace.id,
+          agentId: agent.id,
+          configurationId: openclawConfiguration.id,
+          executionMode,
+        });
+        await controller.deployAgent(
+          administrator,
+          { namespaceId: namespace.id, agentId: agent.id },
+          resolveApprovedProductionHarness,
+        );
+      } catch (error) {
+        if (!openclawModeRefusal(error)) {
+          // Admission passed; the conformance Sandbox Driver refuses to provision.
+          assert.equal(shape.modes.includes(executionMode), true, `${label}: ${error}`);
+          continue;
+        }
+        admitted = false;
+      }
+      assert.equal(admitted, shape.modes.includes(executionMode), label);
+    }
+  }
 });
 
 test("Agent deployment separately authorizes its exact Configuration", async () => {

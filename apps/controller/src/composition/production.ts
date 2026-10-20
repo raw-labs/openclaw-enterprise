@@ -1,4 +1,3 @@
-import { nativeAdminOriginResolver } from "../gateway/native-admin-origin.ts";
 import type { AuditEvent } from "@openclaw-enterprise/contracts";
 import {
   validateAuthAccountPrincipalSeed,
@@ -22,7 +21,7 @@ import {
   type PreparedAuthAccount,
 } from "../auth/index.ts";
 import { createFastifyApp } from "../index.ts";
-import { createBundledChannelDriver } from "./channel.ts";
+import { SlackChannelDriver } from "../drivers/channel/slack.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -62,8 +61,8 @@ export interface ProductionConfig {
   readonly serviceAccountDriverFactory?: ServiceAccountDriverFactory;
   readonly workspaceFilesAccess?: ControllerWorkspaceFilesAccess;
   readonly gatewayApiKeyPath?: string;
-  readonly controlPlaneOutboundProxyUrl?: string;
-  readonly controlPlaneOutboundProxyManagedHost?: string;
+  readonly channelDirectoryProxyUrl?: string;
+  readonly channelDirectoryManagedProxyHost?: string;
   readonly nativeAdmin?: NativeAdminAccessConfig;
   /** Default: enabled. `false` makes both runtime routes answer 501. */
   readonly agentRuntimeLogsEnabled?: boolean;
@@ -251,11 +250,9 @@ export async function composeProduction(config: ProductionConfig) {
 
     phaseCompleted("computePreflight");
     const controller = new OpenClawController(persistedInstallation, {
+      sandboxNetworkPolicyCeiling: config.drivers.installation.sandboxNetworkPolicyCeiling ?? [],
       state,
       recordOperations: true,
-      ...(config.nativeAdmin?.enabled === true
-        ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! }
-        : {}),
       backends: installation.backend,
       defaultPresets: config.drivers.defaultPresets ?? [],
       bundledPresetVersions: config.drivers.bundledPresetVersions ?? [],
@@ -272,14 +269,16 @@ export async function composeProduction(config: ProductionConfig) {
     controller.registerDriver(secretDriver);
     controller.selectDriver("secret", secretDriver.id);
     {
-      const channelDriver = createBundledChannelDriver({
-        ...(config.controlPlaneOutboundProxyUrl === undefined
-          ? {}
-          : { proxyUrl: config.controlPlaneOutboundProxyUrl }),
-        ...(config.controlPlaneOutboundProxyManagedHost === undefined
-          ? {}
-          : { managedProxyHost: config.controlPlaneOutboundProxyManagedHost }),
-      });
+      const channelDriver = new SlackChannelDriver(
+        globalThis.fetch,
+        config.channelDirectoryProxyUrl,
+        {
+          managedProxyHosts:
+            config.channelDirectoryManagedProxyHost === undefined
+              ? []
+              : [config.channelDirectoryManagedProxyHost],
+        },
+      );
       controller.registerDriver(channelDriver);
       controller.selectDriver("channel", channelDriver.id);
     }
