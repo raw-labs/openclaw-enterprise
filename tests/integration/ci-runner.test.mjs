@@ -533,6 +533,53 @@ test("run clears inherited selectors and keep flags while preserving explicit la
   assert.equal(result.status, 0, result.stderr);
 });
 
+test("native startup lane forwards its installed AppArmor profile to test subprocesses", async (t) => {
+  const root = await fixture(t);
+  const lane = JSON.parse(
+    await readFile(
+      join(repositoryRoot, "scripts/ci/test-suites/images-runtime-startup.json"),
+      "utf8",
+    ),
+  );
+  const file = "tests/integration/native-profile.test.mjs";
+  await writeFile(
+    join(root, file),
+    `import assert from "node:assert/strict";
+import test from "node:test";
+test("installed container profile reaches the native smoke", () => {
+  assert.equal(process.env.OCC_TEST_CODEX_APPARMOR_PROFILE, "oce-ci-codex-bwrap");
+});
+`,
+  );
+  await writeJson(join(root, "manifest.json"), {
+    version: 1,
+    lanes: {
+      "images-runtime-startup": { ...lane, files: [{ path: file }], parallelFiles: [file] },
+    },
+    groups: { ci: ["images-runtime-startup"] },
+  });
+  const result = run(
+    root,
+    [
+      "run",
+      "images-runtime-startup",
+      "--manifest",
+      "manifest.json",
+      "--root",
+      root,
+      "--state",
+      "state/native.json",
+      "--results",
+      "results/native.json",
+    ],
+    {
+      ...Object.fromEntries(lane.requiredEnv.map((name) => [name, "fixture-input"])),
+      OCC_TEST_CODEX_APPARMOR_PROFILE: "oce-ci-codex-bwrap",
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("QA lane forwards selected models and observer input and retains outcomes at the requested path", async (t) => {
   const root = await fixture(t);
   const lane = JSON.parse(
