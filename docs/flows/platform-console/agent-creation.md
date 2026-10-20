@@ -1,7 +1,7 @@
 ---
 created: 2026-10-20
 updated: 2026-10-20
-last_updated_session: authoring-run/763e9c69-84db-4150-9937-6713ed931906
+last_updated_session: Codex/01a12f94-4e1e-7df1-8b9d-1c7f305c2584
 ---
 
 # Console Agent creation
@@ -57,6 +57,11 @@ Credential, provider, and Harness changes clear results and invalidate pending r
 
 ### 2. Choose a model and starter Configuration
 
+`create.mjs:updateModelConfiguration` preserves `plugins.allow` and `plugins.deny`,
+changing only Codex’s runtime entry. `harnessPluginPolicyConflict` refuses blocked
+runtime/provider plugins before writes. Kubernetes Compute’s `validateHarnessAuth`
+enforces the same requirement for API callers.
+
 `create.mjs:MODEL_CHOICES` supplies unauthenticated static lists and manual entry.
 `renderAgentForm` toggles `manualModel`, invoking `updateModelConfiguration` and
 `updateControls`. Manual mode preserves `model.value` and clears the dropdown.
@@ -73,7 +78,7 @@ Compute supplies gateway authentication; Presets replace the starter unchanged.
 
 ### 3. Load repository options
 
-`agents/repositories.mjs:createRepositoryFields` loads `GET /namespaces/:namespaceId/agents/repository-options`,
+`apps/controller/src/console/agents/repositories.mjs:createRepositoryFields` loads `GET /namespaces/:namespaceId/agents/repository-options`,
 then requests optional descriptions for visible refs. [Repository admission](../agent-repository-credentials.md) resolves the
 submitted `repositoryAccess`. Retained drafts keep selections through failed
 discovery; retries recheck current policy. Only `503 REPOSITORY_OPTIONS_UNAVAILABLE`
@@ -81,6 +86,8 @@ permits creation without bindings, and only without retained selections; other
 failures block submission.
 
 ### 4. Submit provisioning or an ordinary draft
+
+`apps/controller/src/console/agents/create.mjs:renderAgentForm`
 
 Supported Dedicated runtimes submit inline Configuration, optional repository
 access, and Secret references to [provisioning](../agent-provisioning.md), even after
@@ -134,4 +141,6 @@ Switching methods hides that feedback without changing the lookup or saved choic
 ## Changelog
 
 - 2026-10-20 12:09: Trace saved Configuration Secret grants through the shared credential helper. (authoring-run/763e9c69-84db-4150-9937-6713ed931906 - 81ce5d06aebbf935b150cab6afb2227a320fb20f)
+- 2026-10-20 12:09: Preserve authored native plugin permissions across Harness selection and refuse conflicts before writes. (Codex/01a12fe8-d0c6-7df1-937d-364a1301566a - 61140f671)
+
 - 2026-10-20 05:00: Split from the platform console flow's step 3. (docs-split-1020)

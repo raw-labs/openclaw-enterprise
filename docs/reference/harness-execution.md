@@ -1,8 +1,7 @@
 # Harness execution
 
-A Harness calls models and runs Agent tools. Bundled deployments run OpenClaw
-inside the gateway or OpenClaw or Codex in a separate runtime. Select the Agent's
-execution mode and a compatible model and Harness in its Configuration.
+A Harness calls models and runs Agent tools. Select a compatible execution mode,
+model and Harness in Agent Configuration.
 
 ## Supported topology
 
@@ -56,10 +55,15 @@ built-in provider with no runtime policy, custom provider, or plugin routing.
 `openai`, `codex`, explicitly configured providers, and plugin-routed providers
 require an explicit supported runtime policy.
 
-Dedicated Codex accepts only the native `codex` provider, or `openai` when the
+Dedicated Codex accepts `codex`, or `openai` when the
 Codex plugin is explicitly enabled with `websocket` app-server transport.
 Its Gateway renders the main workspace as `/home/node/workspace`; Codex executes
 in the separate Harness workspace.
+
+Kubernetes Compute preserves policy, refusing Agent save, provisioning and deployment
+when required `codex` or OpenClaw `openai`/`anthropic` plugins are disabled, denied,
+excluded from nonempty allowlists, or duplicated after normalization.
+Missing/empty allowlists are unrestricted.
 
 Selectable model catalogs and fallbacks under Agent defaults or entries
 must retain the selected provider. Additional catalog models need an
@@ -95,8 +99,7 @@ revoked authority, or a missing required Driver fail closed; see
 
 ## Harness authentication
 
-The Agent's [harnessAuth binding](agents.md#harness-authentication) is the sole
-model-auth selector. Kubernetes supports these combinations:
+The Agent's [harnessAuth binding](agents.md#harness-authentication) selects model authentication. Kubernetes supports:
 
 | Binding                                     | Topology           | Credential consumer                                                                                               |
 | ------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------- |

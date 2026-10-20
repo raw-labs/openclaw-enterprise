@@ -39,6 +39,13 @@ allows manual entry but does not prove access. Execution mode follows the
 harness; saved tokens require Codex. **Experimental Dedicated OpenClaw** shows
 the runtime-build warning; Embedded OpenClaw does not.
 
+**Native Plugins Unrestricted**, **Native Plugins Empty Allowlist** and
+**Native Plugins Allowlist** preserve authored policy across Harness switches.
+**Native Plugins Codex Round Trip** retains the Codex-only allowlist and refuses
+OpenClaw until the operator adds its provider. **Native Plugins Deny Conflict**
+refuses Codex creation until the operator removes its denial. Edit Configuration
+JSON explicitly; selecting a Harness does not grant permission.
+
 In **Enter another model ID**, switch to **Choose a model from the list** and
 back: listed models survive both switches, focus moves to the active input, and
 other settings persist. Edit the manual ID to another listed model; returning

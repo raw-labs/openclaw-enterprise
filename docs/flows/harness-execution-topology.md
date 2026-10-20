@@ -1,7 +1,7 @@
 ---
 created: 2026-08-21
-updated: 2026-10-16
-last_updated_session: Codex/01a13654-be66-7741-b54f-f8ae80f2d496
+updated: 2026-10-20
+last_updated_session: Codex/01a12fe8-d0c6-7df1-937d-364a1301566a
 ---
 
 # Harness Execution Topology Flow
@@ -73,6 +73,11 @@ Pinned runtime support is automatic; custom images can declare it at startup.
 An associated
 `access_token` additionally requires dedicated Codex; the frozen account
 contains only its OCC identity, credential kind, and opaque Secret reference.
+
+`apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts:requireHarnessPluginPolicy`
+rejects policies that block Codex or OpenClaw’s selected provider during Harness
+admission, including provisioning replay, retry and worker checks before effects.
+Required-plugin aliases must be unique.
 
 ### 2. Claim work and realize the approved topology
 
@@ -297,6 +302,8 @@ owns claim sizes, mount paths, StorageClass requirements, and final teardown.
 
 ## Changelog
 
+- 2026-10-20 12:09: Preserve native plugin policy and reject required-plugin conflicts during Harness admission. (Codex/01a12fe8-d0c6-7df1-937d-364a1301566a - 61140f671)
+
 - 2026-10-16 17:02: Persist worktrees and Git sources. (Codex/01a13654-be66-7741-b54f-f8ae80f2d496 - 68b95a2514f183b194a478e72d734b719bf4c2e8)
 
 - 2026-10-14: Merge current contracts with native provisioning and retained-workspace preparation. (Codex/01a13654-be66-7741-b54f-f8ae80f2d496)
@@ -345,15 +352,5 @@ owns claim sizes, mount paths, StorageClass requirements, and final teardown.
 - 2026-10-02 14:00: End node pairing and ack waits early for claimable Work. (r7-d221)
 
 - 2026-10-02 12:00: Delete a replaced embedded predecessor's Secret and ConfigMap copies at activation re-render. (fix-d280-embedded-retire)
-
-- 2026-10-02 06:00: Budget the workspace node binding ack wait per binding across activation retries. (fix-deploy-node-pairing)
-
-- 2026-09-30 09:30: Include the Harness network profile in Service selectors for EKS policy resolution. (authoring-run/1373b7f3-e273-466a-b9da-bb197bdb469e - 0d00e8970b69)
-
-- 2026-09-30 21:00: Delete a repaired embedded predecessor's Secret and ConfigMap copies at repair time. (fix/dogfood3b-1)
-
-- 2026-09-30 10:30: Repair a never-served unready embedded Gateway during redeploy with pending workspace setup. (fix-dogfood-1)
-
-- 2026-09-30 09:54: Correct dedicated replacement: the worker stops the predecessor Gateway before preparation, so redeploys interrupt service. (authoring-run/a37a9c9b-9e94-4bd2-88c5-dfa5c5f94d12 - 90899dc55ab7)
 
 [Harness execution topology documentation history](harness-execution-topology/history.md) preserves the older dated entries.

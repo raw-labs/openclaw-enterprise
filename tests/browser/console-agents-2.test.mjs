@@ -30,6 +30,7 @@ import {
   waitForSettledFetches,
 } from "./console-agents-browser-helpers.mjs";
 import {
+  allowNativeProvider,
   openCreateSecretDialog,
   createModelCredentialSecret,
   enterManualModel,
@@ -1393,6 +1394,7 @@ test("Agent creation offers mainline Anthropic models before credentials and sav
     ],
   );
   assert.equal(await choice.inputValue(), "");
+  await allowNativeProvider(page, "anthropic");
   await choice.selectOption("claude-fable-5-1");
   const selectedConfiguration = await page.getByLabel("Configuration JSON").inputValue();
   await page.getByLabel("Agent name").fill("Anthropic Agent");
@@ -1427,6 +1429,7 @@ test("Agent creation offers mainline Anthropic models before credentials and sav
     `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
   );
   assert.equal(configuration.data.values.agents.defaults.model, "anthropic/claude-fable-5-1");
+  assert.deepEqual(configuration.data.values.plugins.allow, ["codex", "anthropic"]);
   assert.deepEqual(configuration.data.values.models.providers.anthropic, {
     baseUrl: "https://api.anthropic.com",
     api: "anthropic-messages",
