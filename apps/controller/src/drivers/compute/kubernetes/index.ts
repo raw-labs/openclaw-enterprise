@@ -3929,11 +3929,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
         : "Dedicated Codex";
     requireHarnessAuthMethod(kubernetesHarnessAuthMethods(topology), auth.method);
     if (
-      auth.method === "codex_pat" &&
       isServiceAccountHarnessAuth(auth) &&
       (auth.credential.kind !== "access_token" ||
         auth.credential.secretRef.name !==
-          `service-account-${sha256Hex(required(auth.source.id, "ServiceAccount ID"), 32)}` ||
+          this.serviceAccountSecretName(required(auth.source.id, "ServiceAccount ID")) ||
         auth.credential.secretRef.key !== SERVICE_ACCOUNT_TOKEN_KEY)
     ) {
       throw new OwnershipFailure(
@@ -4670,6 +4669,13 @@ export class KubernetesComputeDriver implements ComputeDriver {
     });
   }
 
+  private serviceAccountSecretName(serviceAccountId: string): string {
+    // This names a resource from its ID; it neither hashes nor verifies a password.
+    // codeql[js/insufficient-password-hash]
+    const suffix = createHash("sha256").update(serviceAccountId).digest("hex").slice(0, 32);
+    return `service-account-${suffix}`;
+  }
+
   async storeServiceAccountCredential(input: {
     readonly namespaceId: string;
     readonly serviceAccountId: string;
@@ -4687,7 +4693,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     this.verifyGatewayNamespace(observed, { namespaceId });
 
-    const name = `service-account-${sha256Hex(serviceAccountId, 32)}`;
+    const name = this.serviceAccountSecretName(serviceAccountId);
     const ownership = { namespaceId, serviceAccountId };
     const existing = await this.getOwned("Secret", name, namespace, ownership);
     if (existing !== undefined) {
@@ -4814,7 +4820,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   > {
     const namespaceId = required(input.namespaceId, "ServiceAccount Namespace ID");
     const serviceAccountId = required(input.serviceAccountId, "ServiceAccount ID");
-    const name = `service-account-${sha256Hex(serviceAccountId, 32)}`;
+    const name = this.serviceAccountSecretName(serviceAccountId);
     const namespace = await this.controlNamespace(namespaceId);
     const tenant = await this.getNamespace(namespace);
     if (tenant === undefined) {
@@ -4865,7 +4871,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         ? undefined
         : required(input.credentialId, "ServiceAccount provider credential ID");
     const exact = accessToken !== undefined || credentialId !== undefined;
-    const name = `service-account-${sha256Hex(serviceAccountId, 32)}`;
+    const name = this.serviceAccountSecretName(serviceAccountId);
     if (input.secretRef.name !== name || input.secretRef.key !== SERVICE_ACCOUNT_TOKEN_KEY) {
       throw new OwnershipFailure("Refusing another ServiceAccount's credential Secret.");
     }
