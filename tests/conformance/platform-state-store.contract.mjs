@@ -86,6 +86,7 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     backendId: null,
     harnessAuth: apiKeyBinding,
     executionMode: "embedded",
+    sandboxPolicyEditing: false,
     servicePrincipalId: identifier("service-agent"),
     desiredRuntimeState: "stopped",
     // Both adapters force a created Agent to `active` rather than honoring a
@@ -113,7 +114,11 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     },
     harnessAuth: { ...apiKeyBinding, secretDriverId: harnessSecret.driverId },
     harness: { id: "openclaw", version: "1.0.0", mode: "embedded" },
-    compute: { id: "compute-contract", implementation: "deterministic-contract" },
+    compute: {
+      id: "compute-contract",
+      implementation: "deterministic-contract",
+      admission: `driver-state:v1:${"a".repeat(64)}`,
+    },
     servicePrincipalId: agent.servicePrincipalId,
     createdAt: new Date().toISOString(),
   };
@@ -143,11 +148,32 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
       configuration.id,
     ]);
     await transaction.secrets.createSecret(harnessSecret);
-    assert.deepEqual(await transaction.agents.createAgent(agent), agent);
+    // Creation defaults editing to disabled; reloads must preserve the same Agent shape.
+    const { sandboxPolicyEditing: _editing, ...agentWithoutEditing } = agent;
+    assert.deepEqual(await transaction.agents.createAgent(agentWithoutEditing), agent);
     assertCreatedRevision(await transaction.revisions.createRevision(revision), revision);
     await transaction.audit.append(audit);
     await transaction.operations.append(operation);
   });
+
+  for (const admission of ["", "a".repeat(1025), "bad\nvalue"]) {
+    await assert.rejects(
+      store.transact((transaction) =>
+        transaction.revisions.createRevision({
+          ...revision,
+          id: identifier("rev"),
+          revision: 2,
+          compute: { ...revision.compute, admission },
+        }),
+      ),
+      storeRefusal(
+        "ScopeViolationError",
+        "An AgentRevision requires valid Configuration metadata, a native document, and pinned Harness and Compute descriptors.",
+        postgresOwnershipViolation,
+      ),
+      "malformed Compute admission must be rejected",
+    );
+  }
 
   // The draft binding and the pending deployment both reference the key: one Agent entry.
   await store.read(async (state) => {
@@ -231,7 +257,11 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
   };
   await store.transact(async (transaction) => {
     await transaction.configurations.createConfiguration(backendConfiguration);
-    await transaction.agents.createAgent(providerAgent);
+    // Creation cannot enable editing; the separately authorized setter owns that change.
+    assert.deepEqual(
+      await transaction.agents.createAgent({ ...providerAgent, sandboxPolicyEditing: true }),
+      providerAgent,
+    );
   });
   await assert.rejects(
     store.transact((transaction) =>
@@ -323,7 +353,9 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     ["fractional generation", { generation: 1.5 }],
     ["unsafe generation", { generation: Number.MAX_SAFE_INTEGER + 1 }],
   ]) {
-    // Both persistence adapters reject ownership metadata PostgreSQL cannot safely represent.
+    // Both persistence adapters refuse ownership metadata PostgreSQL cannot safely represent,
+    // with the same application check before any write (finding 1887: a fractional generation
+    // used to reach PostgreSQL's bigint cast and fail with a raw 22P02).
     await assert.rejects(
       store.transact((transaction) =>
         transaction.configurations.createConfiguration({
@@ -332,6 +364,7 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
           ...invalidOwnership,
         }),
       ),
+      { name: "ScopeViolationError", message: "The Configuration kind or generation is invalid." },
       description,
     );
   }
@@ -462,12 +495,71 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
           ...malformed,
         }),
       ),
+      storeRefusal(
+        "ScopeViolationError",
+        "An AgentRevision requires valid Configuration metadata, a native document, and pinned Harness and Compute descriptors.",
+        postgresOwnershipViolation,
+      ),
       description,
     );
   }
 
   await store.read(async (state) => {
-    assert.deepEqual(await state.revisions.listRevisions(namespace.id, agent.id), [revision]);
+    const listed = await state.revisions.listRevisions(namespace.id, agent.id);
+    assert.deepEqual(listed, [revision]);
+    // Revision metadata lists the same revisions, in the same order, without saved settings.
+    assert.deepEqual(
+      await state.revisions.listRevisionMetadata(namespace.id, agent.id),
+      listed.map(({ id, namespaceId, agentId, revision, backendId, createdAt }) => ({
+        id,
+        namespaceId,
+        agentId,
+        revision,
+        backendId,
+        createdAt,
+      })),
+    );
+    assert.deepEqual(await state.revisions.listRevisionMetadata(identifier("ns"), agent.id), []);
+    // A summary page carries metadata plus the fields that tell revisions apart, never the
+    // saved settings; `before` excludes the revision it names and everything newer.
+    assert.deepEqual(
+      await state.revisions.pageRevisionSummaries(namespace.id, agent.id, { limit: 1 }),
+      {
+        revisions: listed.map((item) => ({
+          id: item.id,
+          namespaceId: item.namespaceId,
+          agentId: item.agentId,
+          revision: item.revision,
+          backendId: item.backendId,
+          configurationId: item.configurationId,
+          configurationGeneration: item.configurationGeneration,
+          harness: item.harness,
+          createdAt: item.createdAt,
+        })),
+      },
+    );
+    assert.deepEqual(
+      await state.revisions.pageRevisionSummaries(namespace.id, agent.id, {
+        before: revision.revision,
+        limit: 1,
+      }),
+      { revisions: [] },
+    );
+    assert.deepEqual(
+      await state.revisions.pageRevisionSummaries(identifier("ns"), agent.id, { limit: 1 }),
+      { revisions: [] },
+    );
+    // Agent references carry only the identity of each Agent in a live Namespace.
+    const references = (await state.agents.listAgentReferences()).filter(
+      ({ namespaceId }) => namespaceId === namespace.id,
+    );
+    assert.deepEqual(
+      references.sort((left, right) => left.id.localeCompare(right.id)),
+      (await state.agents.listAgents(namespace.id))
+        .map(({ id, namespaceId }) => ({ id, namespaceId }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+    );
+    assert.ok(references.some(({ id }) => id === agent.id));
   });
 
   await store.transact(async (transaction) => {
@@ -827,6 +919,7 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     configurationId: accountConfiguration.id,
     backendId: null,
     executionMode: "dedicated",
+    sandboxPolicyEditing: false,
     servicePrincipalId: identifier("service-agent"),
     harnessAuth: {
       method: "codex_pat",
@@ -1031,6 +1124,11 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
           invalidCredential,
         ),
       ),
+      storeRefusal(
+        "ScopeViolationError",
+        "The ServiceAccount credential reference is invalid.",
+        postgresOwnershipViolation,
+      ),
       description,
     );
   }
@@ -1227,6 +1325,22 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
       await transaction.serviceAccounts.hasReferences(accountNamespace.id, account.id),
       false,
     );
+  });
+
+  // Revision summary pages run newest first; `nextBefore` continues below the page's last
+  // revision and is absent on the last page.
+  await store.read(async (state) => {
+    const page = (options) =>
+      state.revisions.pageRevisionSummaries(accountNamespace.id, accountAgent.id, options);
+    const numbers = (result) => result.revisions.map(({ revision }) => revision);
+    const first = await page({ limit: 1 });
+    assert.deepEqual([numbers(first), first.nextBefore], [[2], 2]);
+    assert.equal(Object.hasOwn(first.revisions[0], "configuration"), false);
+    assert.deepEqual(first.revisions[0].harness, accountRevision.harness);
+    const second = await page({ before: first.nextBefore, limit: 1 });
+    assert.deepEqual([numbers(second), Object.hasOwn(second, "nextBefore")], [[1], false]);
+    const whole = await page({ limit: 5 });
+    assert.deepEqual([numbers(whole), Object.hasOwn(whole, "nextBefore")], [[2, 1], false]);
   });
 
   const accountOnlyNamespace = {
@@ -1511,6 +1625,22 @@ async function verifyDuplicateNameContract(store) {
     await transaction.presets.createPreset(otherPreset);
     await transaction.serviceAccounts.createServiceAccount(account);
     await transaction.credentialSources.createCredentialSource(source);
+  });
+  // Preset summaries list the same Presets in the same order, without their templates.
+  await store.read(async (state) => {
+    assert.deepEqual(
+      await state.presets.listPresetSummaries(namespace.id),
+      (await state.presets.listPresets(namespace.id)).map(
+        ({ id, namespaceId, name, createdAt }) => ({
+          id,
+          namespaceId,
+          name,
+          createdAt,
+        }),
+      ),
+    );
+    assert.equal((await state.presets.listPresetSummaries(namespace.id)).length, 2);
+    assert.deepEqual(await state.presets.listPresetSummaries(identifier("ns")), []);
   });
 
   const nameConflict = (message) => ({ name: "ResourceStateConflictError", message });
@@ -2403,12 +2533,17 @@ async function verifyCredentialSourceContract(
     store.transact((transaction) =>
       transaction.revisions.createRevision({ ...toolRevision, credentialSources: undefined }),
     ),
+    { name: "ScopeViolationError", message: "The AgentRevision belongs to an unavailable Agent." },
     "A revision must freeze the Agent's non-model sources.",
   );
   await assert.rejects(
     store.transact((transaction) =>
       transaction.credentialSources.deleteCredentialSource(sourceNamespace.id, tokenSource.id),
     ),
+    {
+      name: "ScopeViolationError",
+      message: "The credential source is referenced by active platform state.",
+    },
     "An Agent draft's non-model source cannot be deleted.",
   );
   await store.transact(async (transaction) => {
@@ -2726,4 +2861,58 @@ async function verifyCredentialSourceContract(
       false,
     );
   });
+
+  // External auth snapshots retain a source reference and login mode, never workload metadata.
+  const externalSource = {
+    ...source,
+    id: identifier("cs"),
+    name: "External ChatGPT " + randomUUID(),
+    type: "chatgpt",
+    config: {},
+    secrets: {},
+  };
+  const externalAgent = {
+    ...sourceAgent,
+    id: identifier("agt"),
+    name: "External ChatGPT agent " + randomUUID(),
+    servicePrincipalId: identifier("service-agent"),
+    executionMode: "dedicated",
+    harnessAuth: { method: "credential_source", sourceId: externalSource.id },
+    credentialSources: [{ sourceId: externalSource.id }],
+  };
+  const externalRevision = {
+    ...sourceRevision,
+    id: identifier("rev"),
+    agentId: externalAgent.id,
+    servicePrincipalId: externalAgent.servicePrincipalId,
+    harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
+    sandboxDriverId: "sandbox-contract",
+    credentialSources: [
+      {
+        sourceId: externalSource.id,
+        credentialGatewayId: externalSource.driverId,
+        sourceType: externalSource.type,
+      },
+    ],
+    harnessAuth: {
+      ...externalAgent.harnessAuth,
+      credentialGatewayId: externalSource.driverId,
+      sourceType: externalSource.type,
+      loginMode: "chatgptAuthTokens",
+    },
+  };
+  await store.transact(async (transaction) => {
+    await transaction.credentialSources.createCredentialSource(externalSource);
+    await transaction.agents.createAgent(externalAgent);
+    assertCreatedRevision(
+      await transaction.revisions.createRevision(externalRevision),
+      externalRevision,
+    );
+  });
+  assert.deepEqual(
+    await store.read((state) =>
+      state.revisions.findRevision(sourceNamespace.id, externalAgent.id, externalRevision.id),
+    ),
+    externalRevision,
+  );
 }

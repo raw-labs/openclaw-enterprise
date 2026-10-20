@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
-updated: 2026-10-15
-last_updated_session: authoring-run/9cd1aeed-6fc1-4268-a37e-df389201d4db
+updated: 2026-10-18
+last_updated_session: authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d
 ---
 
 # Installation Profile Rendering Flow
@@ -144,14 +144,13 @@ follow their rule within 200 UTF-16 code units, as in the chart.
 253 characters; neither `.` nor a `..` prefix. Thus `..ca.pem` and 254-character
 keys fail preflight before Helm. Omission uses `ca.pem`.
 
-`validateDatabaseCaMount` checks the generated values against the chart's active
-database-client mounts. With a database CA Secret, `mountPath` cannot equal the
-Installation, worker runtime, bootstrap, gateway key, or private gateway CA mount.
-Repository mounts are reserved only when repository credentials are enabled;
-the ChatGPT mount is reserved only when managed service accounts are configured.
-Profiles do not enable execution-cluster mounts. No CA configuration adds no
-restriction; an omitted path keeps `/etc/openclaw/database-ca`. A collision adds
-a field-specific preflight error and prevents both deployable files.
+`validateDatabaseCaMount` compares Linux destinations with the chart's active
+mounts: Installation, worker runtime, bootstrap, gateway key and private gateway CA.
+Relative, dot-segment and trailing-slash aliases collide too. Repository and
+ChatGPT paths are reserved only when enabled; execution-cluster paths remain free.
+Without CA configuration no restriction applies; omission keeps
+`/etc/openclaw/database-ca`. A collision adds a field-specific error and withholds
+both deployment files. Noncolliding paths retain their supplied spelling.
 
 Helm values wire images, bootstrap, authentication, selected peers, metrics and
 optional integrations. Gateway routing is always enabled. Native admin is enabled
@@ -221,7 +220,7 @@ dot does not, because the suffix would start a new label with a hyphen.
 `scripts/render-installation-profile.mjs:resolveHostedDiscoveryCidrs`
 
 After validation, hosted `codex-plugin` with omitted `codex.modelDiscoveryCidrs`
-triggers bounded A queries for `auth.openai.com` and `chatgpt.com`. Sorted unique
+queries IPv4 addresses for `auth.openai.com` and `chatgpt.com` with a resolver timeout of 1.5 seconds and one try. Sorted unique
 IPv4 `/32` answers populate the existing API-only TCP 443 Helm policy; the driver
 mutates no Kubernetes resources.
 
@@ -293,6 +292,8 @@ activation, and repository registry creation need separate evidence.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-18 14:40: Compare database CA mount destinations with Helm. (authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d - bcf4fbcf0)
 
 - 2026-10-15 14:08: Carry the trusted embedded-channel trial through managed and external runtime proxy rendering. (authoring-run/9cd1aeed-6fc1-4268-a37e-df389201d4db - b0fa2a6a177be60ee7f62dede78a7578f8198785)
 

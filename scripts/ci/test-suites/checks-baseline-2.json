@@ -24,12 +24,14 @@
     "tests/integration/password-sign-in-audit.test.mjs",
     "tests/integration/ci-impact-gate.test.mjs",
     "tests/integration/workspace-setup-api.test.mjs",
+    "tests/integration/agent-create-validate-api.test.mjs",
     "tests/integration/repository-credentials-service-loss.test.mjs",
     "tests/integration/ci-runner.test.mjs",
     "tests/integration/k3d-launcher.test.mjs",
     "tests/integration/password-sign-in-admission.test.mjs",
     "tests/integration/google-login-transport.test.mjs",
     "tests/conformance/slack-channel-directory.test.mjs",
+    "tests/conformance/bounded-response-reads.test.mjs",
     "tests/conformance/repository-credentials-github.test.mjs",
     "tests/integration/repository-credentials-driver.test.mjs",
     "tests/integration/known-device-cookie.test.mjs",
@@ -41,6 +43,7 @@
     "tests/conformance/repository-runtime-material.test.mjs",
     "tests/integration/repository-credentials-server-timeout.test.mjs",
     "tests/integration/repository-credentials-http.test.mjs",
+    "tests/integration/public-github-read-http.test.mjs",
     "tests/conformance/repository-credentials-fixture-ownership.test.mjs",
     "tests/integration/repository-credentials-projected-inputs.test.mjs",
     "tests/integration/ci-image-pull.test.mjs",
@@ -119,9 +122,11 @@
     {
       "path": "tests/integration/first-agent-startup.test.mjs",
       "expectedTests": [
+        "first-Agent starts without installed workspace dependencies",
         "first-Agent accepts current Compose-backed Kubernetes development state",
         "first-Agent requires dedicated Codex for OpenShell before external calls",
         "first-Agent admits dedicated Codex with OpenShell development state",
+        "first-Agent control UI requires the launcher-owned native admin endpoint",
         "first-Agent runs psql through the k3d PostgreSQL StatefulSet"
       ]
     },
@@ -247,6 +252,9 @@
       "path": "tests/conformance/slack-channel-directory.test.mjs"
     },
     {
+      "path": "tests/conformance/bounded-response-reads.test.mjs"
+    },
+    {
       "path": "tests/conformance/slack-proxy-reset.test.mjs"
     },
     {
@@ -291,6 +299,9 @@
     },
     {
       "path": "tests/integration/workspace-setup-api.test.mjs"
+    },
+    {
+      "path": "tests/integration/agent-create-validate-api.test.mjs"
     },
     {
       "path": "tests/conformance/repository-credentials-source-boundary.test.mjs"
@@ -338,6 +349,9 @@
     },
     {
       "path": "tests/integration/repository-credentials-http.test.mjs"
+    },
+    {
+      "path": "tests/integration/public-github-read-http.test.mjs"
     },
     {
       "path": "tests/integration/repository-credentials-transport-bounds.test.mjs"

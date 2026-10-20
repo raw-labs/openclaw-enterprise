@@ -76,7 +76,7 @@ interface DockerContainerInspect {
   };
 }
 
-interface DockerNetworkInspect {
+interface DockerLabeledResourceInspect {
   readonly Labels?: Readonly<Record<string, string>>;
 }
 
@@ -135,6 +135,7 @@ const HARNESS_VERSION_LABEL = "org.openclaw.enterprise.harness-version";
 const VERSION_LABEL = "org.openclaw.enterprise.version";
 const SOCKET_PATH = "/var/run/docker.sock";
 const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_DOCKER_API_RESPONSE_BYTES = 4 * 1024 * 1024;
 const STARTUP_TIMEOUT_MS = 120_000;
 const GATEWAY_PORT = 8080;
 const AGENT_TRANSPORT_PORT = 18_790;
@@ -801,9 +802,7 @@ export class DockerComputeDriver implements ComputeDriver {
     const ownership = this.gatewayOwnership(revision);
     const mounts = this.workspaceMounts(ownership);
     for (const mount of new Map(mounts.map((mount) => [mount.Source, mount])).values()) {
-      let volume = await this.inspect<{ Labels?: Readonly<Record<string, string>> }>(
-        `/volumes/${encodeURIComponent(mount.Source)}`,
-      );
+      let volume = await this.volume(mount.Source);
       if (volume === undefined) {
         if (setup.completed) {
           throw new ConfigurationFailure("Initialized workspace storage is missing.");
@@ -941,19 +940,9 @@ ${WORKSPACE_SETUP_RUNTIME}`,
         continue;
       }
       // Reinspect immediately before deletion rather than trusting the list response.
-      let current: { Labels?: Readonly<Record<string, string>> };
-      try {
-        current = (await this.request(
-          "GET",
-          `/volumes/${encodeURIComponent(volume.Name)}`,
-          undefined,
-          [200],
-        )) as typeof current;
-      } catch (error) {
-        if (statusCode(error) === 404) {
-          continue;
-        }
-        throw error;
+      const current = await this.volume(volume.Name);
+      if (current === undefined) {
+        continue;
       }
       this.verifyOwnership(current.Labels, ownership, `volume ${volume.Name}`);
       if (current.Labels?.[ROLE_LABEL] !== "workspace") {
@@ -1335,8 +1324,8 @@ ${WORKSPACE_SETUP_RUNTIME}`,
     await this.request("GET", `/images/${encodeURIComponent(ref)}/json`, undefined, [200]);
   }
 
-  private async network(name: string): Promise<DockerNetworkInspect | undefined> {
-    return this.inspect<DockerNetworkInspect>(`/networks/${encodeURIComponent(name)}`);
+  private async network(name: string): Promise<DockerLabeledResourceInspect | undefined> {
+    return this.inspect<DockerLabeledResourceInspect>(`/networks/${encodeURIComponent(name)}`);
   }
 
   private async removeNetwork(name: string): Promise<void> {
@@ -1345,6 +1334,10 @@ ${WORKSPACE_SETUP_RUNTIME}`,
 
   private async container(name: string): Promise<DockerContainerInspect | undefined> {
     return this.inspect<DockerContainerInspect>(`/containers/${encodeURIComponent(name)}/json`);
+  }
+
+  private async volume(name: string): Promise<DockerLabeledResourceInspect | undefined> {
+    return this.inspect<DockerLabeledResourceInspect>(`/volumes/${encodeURIComponent(name)}`);
   }
 
   private async inspect<T>(path: string): Promise<T | undefined> {
@@ -1449,10 +1442,25 @@ ${WORKSPACE_SETUP_RUNTIME}`,
             },
             (response) => {
               const chunks: Buffer[] = [];
+              let responseBytes = 0;
               response.once("error", reject);
-              response.on("data", (chunk: Buffer | string) =>
-                chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
-              );
+              const contentLength = response.headers["content-length"];
+              if (
+                typeof contentLength === "string" &&
+                Number(contentLength) > MAX_DOCKER_API_RESPONSE_BYTES
+              ) {
+                response.destroy(new Error("Docker API response is too large."));
+                return;
+              }
+              response.on("data", (chunk: Buffer | string) => {
+                const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                responseBytes += buffer.length;
+                if (responseBytes > MAX_DOCKER_API_RESPONSE_BYTES) {
+                  response.destroy(new Error("Docker API response is too large."));
+                  return;
+                }
+                chunks.push(buffer);
+              });
               response.on("end", () => {
                 const status = response.statusCode ?? 0;
                 const text = Buffer.concat(chunks).toString("utf8");

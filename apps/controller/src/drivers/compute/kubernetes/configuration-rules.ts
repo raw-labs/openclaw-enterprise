@@ -10,7 +10,7 @@ import {
   PROVIDER_MODELS_LIST,
   quotedSettingKey,
 } from "@openclaw-enterprise/occ";
-import { asRecord } from "@openclaw-enterprise/utils";
+import { asRecord, splitModelRef } from "@openclaw-enterprise/utils";
 import type { HarnessAuthMethodRule } from "../harness-auth-method.ts";
 
 /**
@@ -289,8 +289,12 @@ const ROOT_MODEL_SETTINGS: readonly (readonly string[])[] = [
   ["hooks", "gmail", "model"],
 ];
 
-const settingValue = (record: Record<string, unknown> | undefined, keys: readonly string[]) =>
-  keys.reduce<unknown>((value, key) => asRecord(value)?.[key], record);
+// The keys of an agents.defaults or agents.entries entry under which a model setting sits.
+const SCOPE_MODEL_KEYS: ReadonlySet<string> = new Set([
+  ...[...AGENT_MODEL_SETTINGS, ...AGENT_CAPABILITY_MODEL_SETTINGS].map(([key]) => key!),
+  "models",
+  "modelPolicy",
+]);
 
 /** Where a selection sits in the document, so a projection can replace it. */
 type Assign = (value: unknown) => void;
@@ -388,41 +392,40 @@ function modelSelections(
     keys: readonly string[],
     capability = false,
   ) => {
-    const parent = asRecord(settingValue(record, keys.slice(0, -1)));
+    // The object that holds the setting. An absent setting yields nothing (`add`): it is skipped
+    // before its names are built, so a large roster of Agents without it stays cheap (finding
+    // 1321).
+    let parent = asRecord(record);
+    for (let index = 0; parent !== undefined && index < keys.length - 1; index += 1) {
+      parent = asRecord(parent[keys[index]!]);
+    }
+    const owner = parent;
     const key = keys[keys.length - 1];
-    if (parent !== undefined && key !== undefined) {
+    const value = key === undefined ? undefined : owner?.[key];
+    if (owner !== undefined && key !== undefined && value !== undefined && value !== null) {
       const setting = [path, ...keys].filter(Boolean).join(".");
       add(
         setting,
         [...at, ...keys],
-        parent[key],
-        (value) => {
-          parent[key] = value;
+        value,
+        (next) => {
+          owner[key] = next;
         },
         capability ? setting : undefined,
       );
     }
   };
-  const agents = asRecord(configuration.agents);
-  const scopes: [string, SettingLocation, Record<string, unknown> | undefined][] = [
-    ["agents.defaults", ["agents", "defaults"], asRecord(agents?.defaults)],
-    ...Object.entries(asRecord(agents?.entries) ?? {}).map(
-      ([id, entry]): [string, SettingLocation, Record<string, unknown> | undefined] => [
-        keyedSettingPath("agents.entries", id),
-        ["agents", "entries", id],
-        asRecord(entry),
-      ],
-    ),
-  ];
-  for (const [path, at, scope] of scopes) {
+  // The model settings of agents.defaults or one agents.entries entry, `scope`. A key read here
+  // belongs in SCOPE_MODEL_KEYS, or an entry that holds only it is skipped.
+  const addScope = (path: string, at: SettingLocation, scope: Record<string, unknown>): void => {
     for (const keys of AGENT_MODEL_SETTINGS) {
       addAt(path, at, scope, keys);
     }
     for (const keys of AGENT_CAPABILITY_MODEL_SETTINGS) {
       addAt(path, at, scope, keys, true);
     }
-    const policies = asRecord(scope?.models);
-    if (scope !== undefined && policies !== undefined) {
+    const policies = asRecord(scope.models);
+    if (policies !== undefined) {
       const keys = Object.keys(policies);
       const next = keys.map((reference) =>
         visit({
@@ -439,7 +442,7 @@ function modelSelections(
       }
     }
     // OpenClaw's explicit allowlist for /model, session overrides and --model (finding 1306).
-    const modelPolicy = asRecord(scope?.modelPolicy);
+    const modelPolicy = asRecord(scope.modelPolicy);
     const allow = modelPolicy?.allow;
     const allowSetting = `${path}.modelPolicy.allow`;
     const allowAt = [...at, "modelPolicy", "allow"];
@@ -453,6 +456,19 @@ function modelSelections(
     } else if (allow !== undefined) {
       // An allowlist that is not a list is yielded as null, as fallbacks are.
       visit({ setting: allowSetting, path: allowAt, reference: null, policy: "allow" });
+    }
+  };
+  const agents = asRecord(configuration.agents);
+  const defaults = asRecord(agents?.defaults);
+  if (defaults !== undefined) {
+    addScope("agents.defaults", ["agents", "defaults"], defaults);
+  }
+  for (const [id, entry] of Object.entries(asRecord(agents?.entries) ?? {})) {
+    const scope = asRecord(entry);
+    // An entry that holds no model setting yields nothing. It is skipped before its names are
+    // built, so a large roster of Agents without one stays cheap (finding 1321).
+    if (scope !== undefined && Object.keys(scope).some((key) => SCOPE_MODEL_KEYS.has(key))) {
+      addScope(keyedSettingPath("agents.entries", id), ["agents", "entries", id], scope);
     }
   }
   const root = configuration as Record<string, unknown>;
@@ -512,12 +528,13 @@ export function providerWaitsOnVariable(
 /**
  * Every model selection names `provider`, the one the Agent's Harness authentication binding
  * serves (finding 1291): a reference elsewhere would make the Gateway request another provider
- * directly. A bare name passes: OpenClaw resolves it through an alias on a policy key checked
- * here, or to a configured provider's model, whose apiKey Harness admission refuses. On
- * `dedicatedCodex`, which qualifies each policy selector (`models` keys and `modelPolicy.allow`
- * entries), a selector must be provider/model, and media and voice models are refused: OpenClaw
- * calls them directly as capability references, and Codex serves only chat models (finding
- * 1306). Refusals name the setting, never the reference. On a Preset save
+ * directly. OpenClaw's `openrouter:auto` and `openrouter:free` name the openrouter provider
+ * (`splitModelRef`, finding 1310). Any other bare name passes: OpenClaw resolves it through an
+ * alias on a policy key checked here, or to a configured provider's model, whose apiKey Harness
+ * admission refuses. On `dedicatedCodex`, which qualifies each policy selector (`models` keys and
+ * `modelPolicy.allow` entries), a selector must be provider/model, and media and voice models are
+ * refused: OpenClaw calls them directly as capability references, and Codex serves only chat
+ * models (finding 1306). Refusals name the setting, never the reference. On a Preset save
  * (`options.unresolved`), a reference whose provider waits on an unfilled variable is checked
  * once filled, on the Configuration a launch creates; one whose provider is written is checked
  * here.
@@ -547,15 +564,11 @@ export function requireSelectedModelProvider(
     if (providerWaitsOnVariable(options, path, policy === "key")) {
       continue;
     }
-    const separator = reference.indexOf("/");
-    if (separator < 0 && !(policy !== undefined && dedicatedCodex)) {
+    const { provider: selected, id } = splitModelRef(reference);
+    if (id === undefined && !(policy !== undefined && dedicatedCodex)) {
       continue;
     }
-    if (
-      separator < 0 ||
-      reference.slice(0, separator) !== provider ||
-      separator === reference.length - 1
-    ) {
+    if (id === undefined || selected !== provider || id === "") {
       throw createError(
         setting,
         policy === "key" ? `keys must select ${requirement}` : `must select ${requirement}`,
@@ -653,12 +666,12 @@ export type KubernetesHarnessTopology =
   "embedded OpenClaw" | "Dedicated OpenClaw" | "Dedicated Codex";
 
 // The Harness authentication methods Kubernetes Compute delivers to each topology. What a
-// method also needs from the Installation (oauth needs no Sandbox Driver, credential_source
-// its paired Sandbox) is checked after this, with a fixed refusal.
+// method also needs from the Installation (credential_source needs its paired Sandbox)
+// is checked after this, with a fixed refusal.
 const HARNESS_AUTH_METHODS: Readonly<Record<KubernetesHarnessTopology, readonly string[]>> = {
   "embedded OpenClaw": ["api_key"],
   "Dedicated OpenClaw": ["api_key", "credential_source"],
-  "Dedicated Codex": ["api_key", "codex_pat", "oauth", "credential_source"],
+  "Dedicated Codex": ["api_key", "codex_pat", "credential_source"],
 };
 
 /** The `requireHarnessAuthMethod` rule for an Agent's topology on Kubernetes Compute. */

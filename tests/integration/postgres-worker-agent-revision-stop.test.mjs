@@ -16,6 +16,7 @@ import { waitFor } from "../helpers/wait-for.mjs";
 import { createWorkerRevisionFixtures } from "../helpers/postgres-worker-revision-fixture.mjs";
 import {
   advanceCleanupRetries,
+  completedPasses,
   completion,
   removeAccessBindings,
   repositoryAttempts,
@@ -202,7 +203,9 @@ test(
 // ComputeStopYieldedError when the worker allows it and other Work is due, and a Harness is
 // stopped only after the drain. Kubernetes' own wait is in the Compute conformance tests. `busy`
 // names revisions that never become ready, so their deployments keep Work due; `onFirstStop` runs
-// once, inside an Agent's first stop. `record` is the first owner's.
+// once, inside an Agent's first stop. A record's `drainStartedAt` and `drainEndsAt` are its drain's
+// wall-clock window, set once `onFirstStop` returns, for same-run ordering checks. `record` is the
+// first owner's.
 function gatewayDrainCompute(fixture, owners, { drainMs, onFirstStop }) {
   const busy = new Set();
   const records = new Map(
@@ -215,6 +218,7 @@ function gatewayDrainCompute(fixture, owners, { drainMs, onFirstStop }) {
         harnessStops: [],
         pointers: new Set(),
         waitingWithoutYield: false,
+        drainStartedAt: undefined,
         drainEndsAt: undefined,
       },
     ]),
@@ -234,7 +238,8 @@ function gatewayDrainCompute(fixture, owners, { drainMs, onFirstStop }) {
       if (record.drainEndsAt === undefined) {
         record.drainEndsAt = Number.POSITIVE_INFINITY;
         await onFirstStop?.();
-        record.drainEndsAt = Date.now() + drainMs;
+        record.drainStartedAt = Date.now();
+        record.drainEndsAt = record.drainStartedAt + drainMs;
       }
       while (Date.now() < record.drainEndsAt) {
         currentComputeAbortSignal()?.throwIfAborted();
@@ -274,13 +279,30 @@ async function stopAudit(fixture, owner) {
   return audit.rows.map(({ reason_code: code }) => code);
 }
 
+// A provisioned caller that keeps every fixture grant except delete, so a refusal comes from the
+// delete-permission check itself rather than from an unknown identity (finding 1888).
+async function deleteDeniedCaller(fixture, label) {
+  const callerId = `${label}-${randomUUID()}`;
+  await fixture.copyActorGrants(callerId, { withoutActions: ["delete"] });
+  return callerId;
+}
+
+function deleteDenied(resource) {
+  return {
+    name: "AuthorizationDeniedError",
+    message: "No explicit scoped binding grants the exact action and resource.",
+    authorization: { action: "delete", resource },
+  };
+}
+
 test(
   "an Agent stop yields to due work during its Gateway drain, across a restart and a second stop",
   requiresPostgres,
   async (context) => {
     const fixture = await setup(context, { leaseDurationMs: 3_000 });
     const { owner, candidate } = await fixture.admitInitialRevision("drain-yield");
-    const { compute, record } = gatewayDrainCompute(fixture, [owner], { drainMs: 6_000 });
+    const drainMs = 6_000;
+    const { compute, record } = gatewayDrainCompute(fixture, [owner], { drainMs });
     const events = [];
     const emit = (event) => events.push({ ...event, at: Date.now() });
     await fixture.start(compute, { emit });
@@ -288,20 +310,23 @@ test(
     const busy = await fixture.revision(await fixture.agent("drain-yield-busy"), 1);
     record.busy.add(busy.id);
 
-    const requestedAt = Date.now();
+    // The stop's first pass yields, and the other Agent's deployment runs while the stop waits for
+    // the drain. The ordering checks below prove both, so a stop that does not yield fails there
+    // with its timeline. The 30 s waits only guard against a hang.
     const first = await fixture.requestStop(owner);
-    const yielded = await waitFor("the stop to yield", async () =>
-      stopPasses(events, first).find(({ code }) => code === "AGENT_STOP_YIELDED"),
+    const firstPass = await waitFor(
+      "the stop's first pass",
+      async () => stopPasses(events, first)[0],
+      30_000,
     );
-    assert.equal(yielded.outcome, "pending");
-    // The other Agent's deployment runs while the stop waits for the drain.
     await waitFor(
-      "another Agent's pass while the stop is deferred",
+      "another Agent's pass after the stop's first pass",
       async () =>
         events.some(
           ({ event, workId, at }) =>
-            event === "worker.completed" && workId === busy.idempotencyKey && at > yielded.at,
+            event === "worker.completed" && workId === busy.idempotencyKey && at > firstPass.at,
         ) || undefined,
+      30_000,
     );
     // A second stop while the first is deferred, and a controller restart. The restart lands
     // between passes or interrupts one (which then waits out its lease); either path must end.
@@ -312,10 +337,46 @@ test(
       fixture.work(first, "succeeded", 30_000),
       fixture.work(second, "succeeded", 30_000),
     ]);
+    await Promise.all([first, second].map((stop) => completedPasses(events, stop)));
 
-    // Bounded: the stops end soon after the drain (a pass cut short by the restart waits out
-    // its lease), not after full waits of their own.
-    assert.ok(Date.now() - requestedAt < 6_000 + 15_000, `${Date.now() - requestedAt} ms`);
+    // Same-run ordering, not a wall-clock total (finding 1344). The worker is serial, so another
+    // Agent's pass ends inside the drain only if a stop pass ended during it, which a yield does
+    // (no pass failed, checked below). The stops end after the drain, and less than another drain
+    // after its end: a pass cut short by the restart waits out its 3 s lease, and a deferred stop
+    // rechecks within about 1 s. A stop that waited out a drain, a default lease or a long retry
+    // backoff of its own would end later.
+    const { drainStartedAt, drainEndsAt } = record;
+    const offset = (time) => (time === undefined ? "none" : `${time - drainStartedAt}`);
+    const otherPasses = events
+      .filter(({ event, workId }) => event === "worker.completed" && workId === busy.idempotencyKey)
+      .map((event) => event.at);
+    const stopEnds = [first, second].map(
+      (stop) => stopPasses(events, stop).find(({ outcome }) => outcome === "success")?.at,
+    );
+    const timeline = [
+      `drain 0..${offset(drainEndsAt)} ms`,
+      ...[first, second].map(
+        (stop, index) =>
+          `stop ${index + 1} ${stopPasses(events, stop)
+            .map(({ code, at }) => `${code}@${offset(at)}`)
+            .join(" ")}`,
+      ),
+      `other Agent's passes @${otherPasses.map(offset).join(",")}`,
+    ].join("; ");
+    assert.ok(
+      otherPasses.some((time) => time > drainStartedAt && time < drainEndsAt),
+      `no other Agent's pass ended during the drain: ${timeline}`,
+    );
+    assert.ok(
+      stopEnds.every((time) => time >= drainEndsAt),
+      `a stop ended before the drain: ${timeline}`,
+    );
+    assert.ok(
+      Math.max(...stopEnds) - drainEndsAt < drainMs,
+      `the stops ended a drain or more after it: ${timeline}`,
+    );
+    assert.equal(firstPass.code, "AGENT_STOP_YIELDED", timeline);
+    assert.equal(firstPass.outcome, "pending");
     // Yields refund their attempt; only a pass cut short by the restart may count.
     assert.ok(firstWork.attempt_count <= 2, `attempts ${firstWork.attempt_count}`);
     assert.ok(secondWork.attempt_count <= 2, `attempts ${secondWork.attempt_count}`);
@@ -332,7 +393,7 @@ test(
       assert.ok(stopPasses(events, stop).every(({ code }) => code !== "DEPENDENCY_UNAVAILABLE"));
     }
     // The yield names the revision whose Gateway drains.
-    assert.equal(yielded.revisionId, candidate.id);
+    assert.equal(firstPass.revisionId, candidate.id);
   },
 );
 
@@ -362,12 +423,15 @@ revisionTest(
       fixture.work(stop, "succeeded", 30_000),
       fixture.work(replacement, "succeeded", 30_000),
     ]);
+    const [replacementPasses, stopWorkPasses] = await Promise.all(
+      [replacement, stop].map((work) => completedPasses(events, work)),
+    );
     // The replacement's own work stopped it as a stopped Agent's revision, and yielded while the
     // Gateway drained instead of spending its attempts.
-    const replacementPasses = stopPasses(events, replacement).map(({ code }) => code);
-    assert.ok(replacementPasses.includes("AGENT_STOP_YIELDED"), replacementPasses.join(", "));
-    assert.equal(replacementPasses.at(-1), "REVISION_STOPPED");
-    assert.ok(!replacementPasses.includes("DEPENDENCY_UNAVAILABLE"), replacementPasses.join(", "));
+    const replacementCodes = replacementPasses.map(({ code }) => code);
+    assert.ok(replacementCodes.includes("AGENT_STOP_YIELDED"), replacementCodes.join(", "));
+    assert.equal(replacementCodes.at(-1), "REVISION_STOPPED");
+    assert.ok(!replacementCodes.includes("DEPENDENCY_UNAVAILABLE"), replacementCodes.join(", "));
     // The stop's retries reached both revisions; Harnesses stop only after the drain.
     assert.ok(record.yields >= 1);
     assert.deepEqual(
@@ -376,10 +440,9 @@ revisionTest(
     );
     assert.deepEqual([...record.pointers], [candidate.id]);
     assert.equal((await fixture.currentAgent(owner)).activeRevisionId, undefined);
+    assert.equal(stopWorkPasses.at(-1).code, "AGENT_STOPPED");
     assert.deepEqual(
-      stopPasses(events, stop)
-        .map(({ code }) => code)
-        .filter((code) => code !== "AGENT_STOP_YIELDED"),
+      stopWorkPasses.map(({ code }) => code).filter((code) => code !== "AGENT_STOP_YIELDED"),
       ["AGENT_STOPPED"],
     );
   },
@@ -402,10 +465,24 @@ revisionTest(
       fixture.work(first.candidate, "succeeded"),
       fixture.work(second.candidate, "succeeded"),
     ]);
-    const requestedAt = Date.now();
     const stops = [await fixture.requestStop(first.owner), await fixture.requestStop(second.owner)];
     await Promise.all(stops.map((stop) => fixture.work(stop, "succeeded", 30_000)));
-    assert.ok(Date.now() - requestedAt < 6_000 + 10_000, `${Date.now() - requestedAt} ms`);
+    const passes = await Promise.all(stops.map((stop) => completedPasses(events, stop)));
+    // The drains overlap: one starts before the other ends. Drains taken in turn, each stop
+    // holding the serial worker for its whole drain, start the second only after the first ends.
+    // Same-run ordering, not a wall-clock total (finding 1344); 30 s only guards against a hang.
+    const drains = [first, second].map(({ owner }) => records.get(owner.id));
+    const origin = Math.min(...drains.map(({ drainStartedAt }) => drainStartedAt));
+    assert.ok(
+      Math.max(...drains.map(({ drainStartedAt }) => drainStartedAt)) <
+        Math.min(...drains.map(({ drainEndsAt }) => drainEndsAt)),
+      `the drains ran in turn: ${drains
+        .map(
+          ({ drainStartedAt, drainEndsAt }) =>
+            `${drainStartedAt - origin}..${drainEndsAt - origin} ms`,
+        )
+        .join(", ")}`,
+    );
     // Taking turns yields about once a second per stop (3 each in a CI mutation run); now only
     // the stop that runs first yields, once, to the other's first pass (2 tolerates one more).
     const yields = [first, second].map(({ owner }) => records.get(owner.id).yields);
@@ -419,11 +496,9 @@ revisionTest(
       assert.deepEqual([...record.pointers], [candidate.id]);
       assert.equal((await fixture.currentAgent(owner)).activeRevisionId, undefined);
     }
-    for (const stop of stops) {
+    for (const stopWorkPasses of passes) {
       assert.deepEqual(
-        stopPasses(events, stop)
-          .map(({ code }) => code)
-          .filter((code) => code !== "AGENT_STOP_YIELDED"),
+        stopWorkPasses.map(({ code }) => code).filter((code) => code !== "AGENT_STOP_YIELDED"),
         ["AGENT_STOPPED"],
       );
     }
@@ -447,7 +522,7 @@ revisionTest(
     const stop = await fixture.requestStop(owner);
     await fixture.work(stop, "succeeded", 30_000);
     assert.ok(record.yields >= 2, `yields ${record.yields}`);
-    const passes = stopPasses(events, stop);
+    const passes = await completedPasses(events, stop);
     // The completion carries the count of every yield, logged or not.
     assert.deepEqual(
       passes.map(({ code, stopYields }) => [code, stopYields]),
@@ -557,7 +632,7 @@ test(
     assert.equal(record.waitingWithoutYield, true);
     assert.equal(record.calls, 1);
     assert.deepEqual(
-      stopPasses(events, stop).map(({ code }) => code),
+      (await completedPasses(events, stop)).map(({ code }) => code),
       ["AGENT_STOPPED"],
     );
     assert.equal((await fixture.currentAgent(owner)).activeRevisionId, undefined);
@@ -623,7 +698,8 @@ for (const moment of ["preparation", "commit", "activation"]) {
       const done = await fixture.work(candidate, "succeeded", 30_000);
       assert.ok(stop !== undefined, "the stop was admitted during the pass");
       await fixture.work(stop, "succeeded", 30_000);
-      const passes = stopPasses(events, candidate).map(({ code }) => code);
+      // Both works drain the same Gateway, so the stop can finish first.
+      const passes = (await completedPasses(events, candidate)).map(({ code }) => code);
       assert.ok(passes.includes("AGENT_STOP_YIELDED"), passes.join(", "));
       assert.equal(passes.at(-1), "REVISION_STOPPED");
       assert.ok(!passes.includes("DEPENDENCY_UNAVAILABLE"), passes.join(", "));
@@ -981,6 +1057,15 @@ test(
       ],
     );
     assert.deepEqual(retainedCounts.rows, [{ attempts: 3, revisions: 0, work: 2 }]);
+    // Cleanup is still claimed behind the provider barrier. It must not be
+    // mistaken for a deployment merely because its live owners were deleted.
+    const whileClaimed = await fixture.controller.getInstallationDeploymentInventory(
+      fixture.actor.id,
+    );
+    assert.deepEqual(
+      whileClaimed.namespaces.find(({ id }) => id === fixture.namespace.id).agents,
+      [],
+    );
     cleanupBarrier.resolve();
     let missing;
     await waitFor("retained repository cleanup to run after Agent deletion", async () => {
@@ -1006,6 +1091,176 @@ test(
     assert.equal(missing.phase, "invalidated");
     assert.equal(missing.liveRevisionId, null);
     assert.equal(missing.sessionId, undefined);
+
+    // Deletion finished while cleanup remained unresolved. Inventory lists live
+    // Agents without settling or hiding the durable cleanup obligation.
+    await fixture.stop();
+    const readCleanup = async () => {
+      const { rows } = await fixture.observerPool.query(
+        "SELECT agent_id, revision_id, state FROM occ.controller_work WHERE idempotency_key = $1",
+        [retireCleanupKey],
+      );
+      return rows;
+    };
+    const cleanupBeforeInventory = await readCleanup();
+    assert.deepEqual(cleanupBeforeInventory, [
+      { agent_id: null, revision_id: null, state: "queued" },
+    ]);
+    const inventory = await fixture.controller.getInstallationDeploymentInventory(fixture.actor.id);
+    assert.deepEqual(inventory.namespaces.find(({ id }) => id === fixture.namespace.id).agents, []);
+    assert.deepEqual(await readCleanup(), cleanupBeforeInventory);
+  },
+);
+
+test(
+  "deployment inventory survives retained completed repository cleanup and preserves deployment guards",
+  requiresPostgres,
+  async (context) => {
+    const repository = repositoryBoundary();
+    const fixture = await setup(context, { repoDriver: repository.driver });
+    const { owner, candidate } = await fixture.admitInitialRevision("inventory-deleted", {
+      revision: { repositoryCredentials: repository.snapshot },
+    });
+    const sibling = await fixture.agent("inventory-live");
+    const live = await fixture.revision(sibling, 1);
+    await fixture.start(fixture.compute);
+    await Promise.all([fixture.work(candidate, "succeeded"), fixture.work(live, "succeeded")]);
+    const stop = await fixture.requestStop(owner);
+    await fixture.work(stop, "succeeded");
+    await waitFor("cleanup to complete while its revision still exists", async () => {
+      const cleanup = await fixture.observerPool.query(
+        `SELECT state FROM occ.controller_work WHERE revision_id = $1 AND idempotency_key LIKE $2`,
+        [candidate.id, `agent_revision:${candidate.id}:repository_cleanup:%`],
+      );
+      return cleanup.rowCount > 0 && cleanup.rows.every(({ state }) => state === "succeeded")
+        ? true
+        : undefined;
+    });
+    const beforeDeletion = await fixture.controller.getInstallationDeploymentInventory(
+      fixture.actor.id,
+    );
+    assert.deepEqual(
+      beforeDeletion.namespaces
+        .find(({ id }) => id === fixture.namespace.id)
+        .agents.map(({ id }) => id)
+        .sort(),
+      [owner.id, sibling.id].sort(),
+    );
+    await fixture.requestDeletion(owner);
+    await waitFor("Agent deletion and its independent cleanup to finish", async () => {
+      const cleanup = await fixture.observerPool.query(
+        `SELECT agent_id, revision_id, namespace_target, agent_target, state
+         FROM occ.controller_work WHERE namespace_id = $1 AND idempotency_key LIKE $2`,
+        [fixture.namespace.id, `agent_revision:${candidate.id}:repository_cleanup:%`],
+      );
+      return (await fixture.currentAgent(owner)) === undefined &&
+        cleanup.rowCount > 0 &&
+        cleanup.rows.every((row) => row.state === "succeeded")
+        ? cleanup.rows
+        : undefined;
+    });
+    await fixture.stop();
+
+    // The production deletion finalizer detaches both owners, retaining the
+    // immutable cleanup identity and completion. No historical row is fabricated.
+    const retained = await fixture.observerPool.query(
+      `SELECT idempotency_key, agent_id, revision_id, namespace_target, agent_target, state
+       FROM occ.controller_work WHERE namespace_id = $1 AND idempotency_key LIKE $2
+       ORDER BY idempotency_key`,
+      [fixture.namespace.id, `agent_revision:${candidate.id}:repository_cleanup:%`],
+    );
+    assert.ok(retained.rowCount > 0);
+    assert.ok(
+      retained.rows.every(
+        (row) =>
+          row.agent_id === null &&
+          row.revision_id === null &&
+          row.namespace_target === null &&
+          row.agent_target === null &&
+          row.state === "succeeded",
+      ),
+    );
+    assert.ok(
+      (await repositoryAttempts(fixture, candidate)).every(
+        ({ phase, liveRevisionId }) => phase === "disposed" && liveRevisionId === null,
+      ),
+    );
+    async function inventoryAgent() {
+      const inventory = await fixture.controller.getInstallationDeploymentInventory(
+        fixture.actor.id,
+      );
+      assert.equal(inventory.installationId, fixture.installation.id);
+      const namespace = inventory.namespaces.find(({ id }) => id === fixture.namespace.id);
+      assert.equal(namespace.status, "ready");
+      assert.equal(namespace.agents.length, 1);
+      return namespace.agents[0];
+    }
+    assert.deepEqual(await inventoryAgent(), {
+      id: sibling.id,
+      status: "active",
+      desiredRuntimeState: "running",
+      executionMode: "embedded",
+      activeRevisionId: live.id,
+      deploymentInProgress: false,
+    });
+
+    // Completed history must not mask a new deployment of a surviving Agent.
+    const replacement = await fixture.revision(sibling, 2);
+    assert.equal((await inventoryAgent()).deploymentInProgress, true);
+    let preparing = false;
+    const release = Promise.withResolvers();
+    context.after(() => release.resolve());
+    await fixture.start({
+      ...fixture.compute,
+      async prepareRevision(revision, deploymentContext) {
+        if (revision.id === replacement.id) {
+          preparing = true;
+          await release.promise;
+        }
+        return fixture.compute.prepareRevision(revision, deploymentContext);
+      },
+    });
+    try {
+      await waitFor("replacement deployment to enter Compute", async () =>
+        preparing ? true : undefined,
+      );
+      assert.equal((await inventoryAgent()).deploymentInProgress, true);
+    } finally {
+      release.resolve();
+    }
+    await fixture.work(replacement, "succeeded");
+    await fixture.stop();
+    assert.equal((await inventoryAgent()).activeRevisionId, replacement.id);
+    assert.equal((await inventoryAgent()).deploymentInProgress, false);
+    const afterInventory = await fixture.observerPool.query(
+      `SELECT idempotency_key, agent_id, revision_id, namespace_target, agent_target, state
+       FROM occ.controller_work WHERE namespace_id = $1 AND idempotency_key LIKE $2
+       ORDER BY idempotency_key`,
+      [fixture.namespace.id, `agent_revision:${candidate.id}:repository_cleanup:%`],
+    );
+    assert.deepEqual(afterInventory.rows, retained.rows);
+
+    // The schema permits this terminal failure state, although the worker
+    // normally retries cleanup indefinitely. Inject failure into the real
+    // retained record to prove that inventory leaves terminal failure intact.
+    const cleanupKey = retained.rows[0].idempotency_key;
+    try {
+      await fixture.observerPool.query(
+        "UPDATE occ.controller_work SET state = 'failed_permanent' WHERE idempotency_key = $1",
+        [cleanupKey],
+      );
+      assert.equal((await inventoryAgent()).deploymentInProgress, false);
+      const failed = await fixture.observerPool.query(
+        "SELECT state FROM occ.controller_work WHERE idempotency_key = $1",
+        [cleanupKey],
+      );
+      assert.equal(failed.rows[0].state, "failed_permanent");
+    } finally {
+      await fixture.observerPool.query(
+        "UPDATE occ.controller_work SET state = 'succeeded' WHERE idempotency_key = $1",
+        [cleanupKey],
+      );
+    }
   },
 );
 
@@ -1192,10 +1447,11 @@ test(
     // A rejected caller cannot replenish the worker's attempt budget.
     await assert.rejects(
       fixture.controller.deleteAgent(
-        `unprivileged-${randomUUID()}`,
+        await deleteDeniedCaller(fixture, "unprivileged"),
         fixture.namespace.id,
         owner.id,
       ),
+      deleteDenied({ kind: "agent", id: owner.id, namespaceId: fixture.namespace.id }),
     );
     assert.deepEqual(await observe(), exhausted);
 
@@ -1311,15 +1567,13 @@ test(
 
     const otherActor = `delete-successor-${randomUUID()}`;
     await fixture.copyActorGrants(otherActor);
+    const unprivileged = await deleteDeniedCaller(fixture, "unprivileged");
     // The initiator is offboarded: it no longer holds any access.
     await removeAccessBindings(fixture, fixture.actor.id);
     // A caller without delete permission still cannot take over.
     await assert.rejects(
-      fixture.controller.deleteAgent(
-        `unprivileged-${randomUUID()}`,
-        fixture.namespace.id,
-        owner.id,
-      ),
+      fixture.controller.deleteAgent(unprivileged, fixture.namespace.id, owner.id),
+      deleteDenied({ kind: "agent", id: owner.id, namespaceId: fixture.namespace.id }),
     );
     assert.deepEqual(await observe(), exhausted);
 
@@ -1404,7 +1658,11 @@ revisionTest(
 
     // A rejected caller cannot replenish the worker's attempt budget.
     await assert.rejects(
-      fixture.controller.deleteNamespace(`unprivileged-${randomUUID()}`, namespace.id),
+      fixture.controller.deleteNamespace(
+        await deleteDeniedCaller(fixture, "unprivileged"),
+        namespace.id,
+      ),
+      deleteDenied({ kind: "namespace", id: namespace.id, namespaceId: namespace.id }),
     );
     assert.deepEqual(await observe(), exhausted);
 
@@ -1733,6 +1991,7 @@ revisionTest(
 
     const otherActor = `delete-successor-${randomUUID()}`;
     await fixture.copyActorGrants(otherActor);
+    const unprivileged = await deleteDeniedCaller(fixture, "unprivileged");
     // While the initiator still holds delete permission, it keeps ownership.
     await assert.rejects(fixture.controller.deleteNamespace(otherActor, namespace.id), {
       name: "DeletionRetryOwnedError",
@@ -1749,7 +2008,8 @@ revisionTest(
     await removeAccessBindings(fixture, fixture.actor.id);
     // A caller without delete permission still cannot take over.
     await assert.rejects(
-      fixture.controller.deleteNamespace(`unprivileged-${randomUUID()}`, namespace.id),
+      fixture.controller.deleteNamespace(unprivileged, namespace.id),
+      deleteDenied({ kind: "namespace", id: namespace.id, namespaceId: namespace.id }),
     );
     assert.deepEqual(await observe(), exhausted);
 
@@ -2498,6 +2758,77 @@ revisionTest(
       code: "REVISION_STOPPED",
       message: "Deployment ended because the Agent was stopped.",
     });
+  },
+);
+
+revisionTest(
+  "a stop admitted after the last running check waits for the claimed revision work, then stops the Agent",
+  async (fixture) => {
+    const owner = await fixture.agent("stop-after-running-check");
+    const sibling = await fixture.agent("stop-after-running-check-sibling");
+    const candidate = await fixture.revision(owner, 1);
+    let releaseActivation;
+    const activationReleased = new Promise((resolve) => {
+      releaseActivation = resolve;
+    });
+    let activationStarted = false;
+    const stoppedRevisions = [];
+    const compute = {
+      ...fixture.compute,
+      // An after-commit Driver activates the published candidate after the worker's last check
+      // that the Agent runs. Holding it keeps the revision work claimed past that check.
+      async activateRevision(revision) {
+        if (revision.id === candidate.id && !activationStarted) {
+          activationStarted = true;
+          await activationReleased;
+        }
+      },
+      async stopRevision(revision) {
+        // Records whether the revision work had released its claim when the stop reached Compute.
+        const work = await fixture.observerPool.query(
+          "SELECT state FROM occ.controller_work WHERE idempotency_key = $1",
+          [candidate.idempotencyKey],
+        );
+        stoppedRevisions.push([revision.id, work.rows[0]?.state]);
+        return fixture.compute.stopRevision(revision);
+      },
+    };
+    await fixture.start(compute);
+    let stop;
+    try {
+      await waitFor("candidate activation to start", async () =>
+        activationStarted ? true : undefined,
+      );
+      // A second worker stands in for another controller replica: the first is busy activating,
+      // and only the one-claim-per-Agent rule (the claim query skips an Agent with claimed work,
+      // backed by controller_work_one_claim_per_resource) keeps this one from taking the stop.
+      await fixture.start(compute, { pool: fixture.createWorkerPool() });
+      stop = await fixture.requestStop(owner);
+      // Claimed in queue order, the sibling's later stop finishing shows the second worker has
+      // passed over the owner's stop while the revision work held its claim.
+      const siblingStop = await fixture.requestStop(sibling);
+      await fixture.work(siblingStop, "succeeded");
+      const held = await fixture.observerPool.query(
+        "SELECT idempotency_key, state FROM occ.controller_work WHERE idempotency_key = ANY($1::text[])",
+        [[candidate.idempotencyKey, stop.idempotencyKey]],
+      );
+      assert.deepEqual(
+        Object.fromEntries(held.rows.map((row) => [row.idempotency_key, row.state])),
+        { [candidate.idempotencyKey]: "claimed", [stop.idempotencyKey]: "queued" },
+      );
+    } finally {
+      releaseActivation();
+    }
+
+    // The revision work finishes its activation, then the stop runs and stops the active
+    // candidate, so the Agent ends stopped rather than serving after its owner stopped it.
+    await fixture.work(candidate, "succeeded");
+    await fixture.work(stop, "succeeded");
+    const stopped = await fixture.currentAgent(owner);
+    assert.equal(stopped.desiredRuntimeState, "stopped");
+    assert.equal(stopped.activeRevisionId, undefined);
+    assert.deepEqual(stoppedRevisions, [[candidate.id, "succeeded"]]);
+    assert.deepEqual(await stopAudit(fixture, owner), ["AGENT_STOPPED"]);
   },
 );
 
