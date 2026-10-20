@@ -1139,7 +1139,7 @@ test("full-integration runs kernel- and sandbox-sensitive same-SHA lanes on ci.y
   // otherwise the PR passes on one kernel while qualification queues on another.
   for (const lane of pinned) {
     const vars = { CI_LARGE_RUNNER: "configured-large-runner" };
-    const expected = lane === "images-runtime-startup" ? "ubuntu-22.04" : "configured-large-runner";
+    const expected = "configured-large-runner";
     assert.equal(runnerFor(lane, vars), expected);
     assert.equal(
       runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
