@@ -41,6 +41,7 @@ function computeDriver({
   repositoryCredentials = false,
   channelRuntime = false,
   gatewayOutbound,
+  gatewayRouting,
   discoverHarnessModels = async () => [],
   agentProvisioning = false,
   sandboxDriver,
@@ -52,6 +53,7 @@ function computeDriver({
     credentialGatewayDriver,
     channelRuntime,
     ...(gatewayOutbound === undefined ? {} : { gatewayOutbound }),
+    gatewayRouting,
   });
 
   return Object.assign(driver, {
@@ -338,6 +340,7 @@ export async function createConsoleAppFixture(t, options = {}) {
         repositoryCredentials: options.repositoryCredentials === true,
         channelRuntime: options.channelRuntime === true,
         gatewayOutbound: options.gatewayOutbound,
+        gatewayRouting: options.gatewayRouting,
         discoverHarnessModels: options.discoverHarnessModels,
         agentProvisioning: options.agentProvisioning,
         sandboxDriver: options.sandboxDriver,

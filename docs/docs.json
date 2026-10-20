@@ -437,7 +437,8 @@
                   {
                     "page": "guides/integrations/teams",
                     "label": "Microsoft Teams"
-                  }
+                  },
+                  { "page": "guides/integrations/embedded-channel-trial", "label": "Embedded Trial" }
                 ]
               }
             ],
@@ -1005,6 +1006,7 @@
               "flows/agent-plugins",
               "flows/agent-channel-directory",
               "flows/agent-channel-ingress",
+              "flows/agent-channel-runtime",
               "flows/agent-plugin-approvals",
               "flows/agent-provisioning",
               "flows/agent-native-admin",
@@ -1024,6 +1026,7 @@
               "testing/docker",
               "testing/ssh",
               "testing/kubernetes",
+              "testing/channel-runtime",
               "testing/slack",
               "testing/teams",
               "testing/plugins",

@@ -37,6 +37,21 @@ merge on `main`. These workflows do not gate each Agent/platform deployment.
 Set Actions variables/secrets under **Settings → Secrets and variables → Actions**
 or the named **Settings → Environments** entry. Keep provider credentials in
 their environments. GitHub supplies workflow/cache tokens automatically.
+
+For installations with different Actions runner labels, set `CI_RUNNER` for Suite
+Audit and Static Checks, and `CI_LARGE_RUNNER` for matrix lanes, advisory QA and
+same-source qualification. Unset variables retain the workflow defaults. Select
+ephemeral Linux runners with sufficient resources, enforcing NetworkPolicies for
+k3d and the required browser sandbox support. `CI_RUNNER_FILE_CONCURRENCY`
+optionally bounds ordinary CI/advisory test-file concurrency from 1 through 32.
+`CI_SANDBOX_RUNNER` optionally selects a separate runner for `images-runtime-startup`;
+otherwise it follows the large-runner selection. Ordinary CI and same-source
+qualification use the same selection. On AppArmor hosts, this lane installs the
+named [CI container profile](../../scripts/ci/codex-bwrap.apparmor) and removes it
+after container cleanup. It preserves Docker’s default process, `/proc` and `/sys`
+restrictions while permitting Bubblewrap’s nested mounts, bounded by the existing
+reviewed seccomp profile and dropped capabilities. It does not select an unconfined
+policy, modify host sysctls or change production container policy.
 Manual dispatch inputs are per-run values; use the commands below.
 
 ### Shared Settings

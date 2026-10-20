@@ -48,6 +48,7 @@ RBAC, storage, revision replacement and enforced network isolation. Enabled Slac
 provisioning uses the actual controller proxy with simulated provider/runtime
 responses; it proves policy and Secret delivery, not native Slack connectivity.
 See [CI image preparation](ci.md#setting-overrides).
+See [channel cases](channel-runtime.md) for embedded trial proof.
 
 External OAuth credentials use OpenShell rather than Kubernetes bootstrap Jobs or a
 native OAuth store. The [OpenShell OAuth proof](openshell-oauth.md) exercises real

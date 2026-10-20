@@ -1110,23 +1110,49 @@ test("full-integration runs kernel- and sandbox-sensitive same-SHA lanes on ci.y
   // NetworkPolicy. These lanes must run where ci.yml runs them.
   const job = loadYaml(".github/workflows/full-integration.yml").jobs["pr-safe-same-sha"];
   const expression = job["runs-on"].replace(/^\$\{\{\s*|\s*\}\}$/g, "");
-  const runnerFor = (lane) =>
+  const runnerFor = (lane, vars = {}) =>
     runInNewContext(expression, {
       matrix: { lane },
+      vars,
       startsWith: (value, prefix) => value.startsWith(prefix),
     });
   const ciRunners = new Map(laneTable().map((row) => [row.lane, row.runner]));
   const lanes = job.strategy.matrix.include.map((entry) => entry.lane);
   const pinned = lanes.filter(
     (lane) =>
-      lane === "postgres-auth" || lane.startsWith("k3d-fixture-") || lane === "k3d-observability",
+      lane === "postgres-auth" ||
+      lane === "images-runtime-startup" ||
+      lane.startsWith("k3d-fixture-") ||
+      lane === "k3d-observability",
   );
-  for (const lane of ["postgres-auth", "k3d-observability"]) {
+  for (const lane of ["postgres-auth", "images-runtime-startup", "k3d-observability"]) {
     assert.ok(pinned.includes(lane), lane);
   }
   for (const lane of pinned) {
     assert.equal(runnerFor(lane), ciRunners.get(lane), lane);
   }
+  const ciExpression = loadYaml(".github/workflows/ci.yml").jobs["pr-safe"]["runs-on"].replace(
+    /^\$\{\{\s*|\s*\}\}$/g,
+    "",
+  );
+  // Selecting an installed runner must also carry into same-source qualification;
+  // otherwise the PR passes on one kernel while qualification queues on another.
+  for (const lane of pinned) {
+    const vars = { CI_LARGE_RUNNER: "configured-large-runner" };
+    const expected = "configured-large-runner";
+    assert.equal(runnerFor(lane, vars), expected);
+    assert.equal(
+      runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
+      runnerFor(lane, vars),
+    );
+  }
+  const vars = { CI_LARGE_RUNNER: "configured-large-runner", CI_SANDBOX_RUNNER: "sandbox-runner" };
+  const lane = "images-runtime-startup";
+  assert.equal(runnerFor(lane, vars), "sandbox-runner");
+  assert.equal(
+    runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
+    "sandbox-runner",
+  );
 });
 
 test("Static Checks runs every check the CI lanes skip", () => {

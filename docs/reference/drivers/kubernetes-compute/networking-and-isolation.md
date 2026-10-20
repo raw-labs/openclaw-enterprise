@@ -148,6 +148,7 @@ Supported channels and approved Gateway HTTPS use a per-revision proxy. Direct
 public access remains denied. See [Gateway outbound](../../gateway-outbound.md).
 
 Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
+Default-off `runtime.channels.experimentalEmbeddedChannels` permits the [unsupported embedded trial](../../../guides/integrations/embedded-channel-trial.md).
 
 ## Explicit network profiles
 

@@ -467,6 +467,95 @@ test("an invalid explicit profile revokes prior outputs without falling back to 
   }
 });
 
+test(
+  "installation profiles carry the trusted embedded channel opt-in into paired controller rollouts",
+  { skip: helmSkip },
+  (t) => {
+    for (const profile of ["openclaw", "codex"]) {
+      for (const proxy of [
+        { managedSlackProxy: true },
+        { runtimeProxyUrl: "http://192.0.2.10:3128" },
+      ]) {
+        const checksums = [];
+        for (const enabled of [undefined, false, true]) {
+          const input = profile === "codex" ? codexInput() : baseInput();
+          input.channels = {
+            ...proxy,
+            ...(enabled === undefined ? {} : { experimentalEmbeddedChannels: enabled }),
+          };
+          const output = render(profile, input);
+          t.after(() => rmSync(output.directory, { recursive: true, force: true }));
+          const compute = loadYaml(output.installation).drivers.compute.configuration;
+          assert.equal(compute.runtime.channels.experimentalEmbeddedChannels, enabled);
+          assert.equal(
+            output.preflight.warnings.some((warning) =>
+              warning.includes("Experimental embedded channels"),
+            ),
+            enabled === true,
+          );
+          KubernetesComputeDriver.validateConfiguration(compute);
+          assert.equal(
+            compute.runtime.channels.proxyUrl,
+            proxy.runtimeProxyUrl ??
+              "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+          );
+
+          // The option changes trusted startup configuration, so both consumers
+          // must roll with the digest of exactly the same Installation bytes.
+          const checksum = createHash("sha256").update(output.installation).digest("hex");
+          assert.equal(loadYaml(output.values).controlPlane.installationChecksum, checksum);
+          const manifests = helmTemplate(output);
+          for (const component of ["api", "worker"]) {
+            assert.equal(deploymentChecksum(manifests, component), checksum);
+          }
+          checksums.push(checksum);
+        }
+        assert.notEqual(checksums[2], checksums[0]);
+        assert.notEqual(checksums[2], checksums[1]);
+      }
+    }
+  },
+);
+
+test("embedded channel profile inputs reject malformed authority and missing runtime proxies", () => {
+  for (const profile of ["openclaw", "codex"]) {
+    const input = profile === "codex" ? codexInput() : baseInput();
+    assertFieldRefusals(
+      profile,
+      input,
+      "channels.experimentalEmbeddedChannels",
+      ["true", "false", 0, 1, null, {}, []],
+      "must be a boolean.",
+    );
+    assertPreflightFailure(
+      profile,
+      { ...input, channels: { ...input.channels, experimentalEmbeddedChannel: true } },
+      /channels\.experimentalEmbeddedChannel is not supported/,
+    );
+    for (const proxy of [
+      {},
+      { managedSlackProxy: false },
+      { directoryProxyUrl: "http://192.0.2.10:3128" },
+    ]) {
+      assertPreflightFailure(
+        profile,
+        { ...input, channels: { ...proxy, experimentalEmbeddedChannels: true } },
+        /channels\.experimentalEmbeddedChannels requires channels\.runtimeProxyUrl or channels\.managedSlackProxy/,
+      );
+    }
+    // Explicit opt-out needs no runtime proxy and must not create channel runtime wiring.
+    const disabled = render(profile, {
+      ...input,
+      channels: { experimentalEmbeddedChannels: false },
+    });
+    assert.equal(
+      loadYaml(disabled.installation).drivers.compute.configuration.runtime.channels,
+      undefined,
+    );
+    rmSync(disabled.directory, { recursive: true, force: true });
+  }
+});
+
 // Tenant runtimes may burst to four cores; 100m requests keep the scheduling
 // reservation unchanged. The production example carries the same values.
 const containerDefaultResources = {

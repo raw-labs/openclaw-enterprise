@@ -1238,6 +1238,7 @@ function buildInput(rawInput, diagnostics) {
     ],
     diagnostics,
   );
+  closed(channels, "channels", ["experimentalEmbeddedChannels"], diagnostics);
   closed(
     gatewayOutbound,
     "gatewayOutbound",
@@ -1629,6 +1630,13 @@ function buildRendered(profile, parsed, diagnostics) {
     validate: (value) => isIpv4Cidr(value, 32),
     description: "an IPv4 /32 CIDR",
   });
+  const experimentalEmbeddedChannels = asBoolean(channels, ["channels", "experimentalEmbeddedChannels"], diagnostics, false);
+  if (experimentalEmbeddedChannels) {
+    if (!gatewayOutboundEnabled) {
+      diagnostics.errors.push("channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled.");
+    }
+    diagnostics.warnings.push("Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.");
+  }
   if (profile.name === "openclaw" && Object.keys(codex).length > 0) {
     diagnostics.errors.push("codex inputs are only consumed by the codex profile.");
   }
@@ -2008,6 +2016,7 @@ function buildRendered(profile, parsed, diagnostics) {
               : {}),
             ...(gatewayOutboundEnabled
               ? {
+                  ...(channels.experimentalEmbeddedChannels === undefined ? {} : { channels: { experimentalEmbeddedChannels } }),
                   gatewayOutbound: {
                     enabled: true,
                     allowPublicHttps: asBoolean(

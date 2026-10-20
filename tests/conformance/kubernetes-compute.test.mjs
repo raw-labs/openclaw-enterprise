@@ -5109,6 +5109,80 @@ test("sandbox routing keeps generated HTML off the administrative origin and bac
   );
 });
 
+test("Teams callback manifests preserve native authentication and cannot publish a candidate", async () => {
+  const driver = createKubernetesComputeDriver(
+    routedOptions({
+      gatewayRouting: { ...gatewayRouting, channels: { hostname: "channels.example.test" } },
+    }),
+  );
+  const revision = routedRevision(driver, {
+    configuration: { channels: { msteams: { enabled: true } } },
+  });
+  for (const msteams of [null, true, "enabled"]) {
+    assert.throws(
+      () => driver.validateConfiguration({ channels: { msteams } }),
+      /channels.msteams must be an object/,
+    );
+  }
+  const namespace = { name: kubernetesNamespaceName(tenant.id), plane: "execution" };
+  const ownership = { namespaceId: revision.namespaceId, agentId: revision.agentId };
+  const service = driver.service(
+    driver.gatewayRouteName(revision.agentId),
+    ownership,
+    namespace,
+    {},
+  );
+  let serving = "predecessor";
+  const objects = [];
+  // Only Kubernetes transport is simulated here. Assertions protect generated routing
+  // contracts; real cluster and native SDK enforcement require separate integration.
+  driver.getOwned = async () => ({
+    metadata: { annotations: { "openclaw.dev/agent-revision-id": serving } },
+    spec: {
+      template: { metadata: { labels: { "openclaw.dev/network-profile": "broad-egress-v1" } } },
+    },
+  });
+  driver.reconcile = async (object) => {
+    objects.push(object);
+  };
+  await driver.reconcileTeamsCallback(revision, ownership, namespace, service);
+  assert.equal(objects.length, 0, "candidate preparation cannot publish a predecessor's callback");
+  serving = revision.id;
+  await driver.reconcileTeamsCallback(revision, ownership, namespace, service);
+  const route = objects.find(({ kind }) => kind === "HTTPRoute");
+  assert.ok(route);
+  assert.equal(route.metadata.annotations["openclaw.dev/agent-revision-id"], revision.id);
+  assert.deepEqual(route.spec.hostnames, ["channels.example.test"]);
+  assert.equal(route.spec.parentRefs[0].sectionName, "channels");
+  const rule = route.spec.rules[0];
+  assert.deepEqual(rule.matches, [
+    {
+      method: "POST",
+      path: {
+        type: "Exact",
+        value: `/namespaces/${revision.namespaceId}/agents/${revision.agentId}/channels/msteams`,
+      },
+    },
+  ]);
+  assert.equal(rule.filters[0].urlRewrite.path.replaceFullPath, "/api/messages");
+  assert.equal(rule.filters[1].requestHeaderModifier.set, undefined);
+  assert.ok(rule.filters[1].requestHeaderModifier.remove.includes("x-occ-identity"));
+  assert.equal(rule.filters[1].requestHeaderModifier.remove.includes("authorization"), false);
+  const callbackService = objects.find(({ kind }) => kind === "Service");
+  assert.equal(rule.backendRefs[0].name, callbackService.metadata.name);
+  assert.equal(callbackService.spec.selector["openclaw.dev/revision"], revision.id);
+  const security = objects.find(({ kind }) => kind === "SecurityPolicy");
+  assert.deepEqual(Object.keys(security.spec), ["targetRefs"]);
+  const network = objects.find(({ kind }) => kind === "NetworkPolicy");
+  assert.deepEqual(network.spec.ingress[0].ports, [{ protocol: "TCP", port: 8080 }]);
+  assert.equal(
+    network.spec.ingress[0].from[0].podSelector.matchLabels[
+      "gateway.envoyproxy.io/owning-gateway-name"
+    ],
+    gatewayRouting.gatewayName,
+  );
+});
+
 test("two-cluster Compute refuses a harness routing hostname that parses as another address", () => {
   const twoCluster = twoClusterOptions();
   const harness = (hostname) => () =>
@@ -9490,6 +9564,66 @@ test("account-token authentication grants only the exact Codex revision outbound
   ]);
 });
 
+test("embedded channels require a trusted boolean and retain native provider selection", () => {
+  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
+  const channels = { proxyUrl: "http://10.42.0.15:3128" };
+  const embedded = { id: "openclaw", version: "1.0.0", mode: "embedded" };
+  const configuration = {
+    agents: { defaults: { model: "anthropic/claude-sonnet-4-5" } },
+    channels: { slack: { enabled: true } },
+  };
+  for (const flag of [undefined, false]) {
+    const driver = createKubernetesComputeDriver(
+      options({
+        runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: flag } },
+      }),
+    );
+    assert.throws(
+      () =>
+        driver.validateHarnessAuth(embedded, apiKeyAuth, {
+          ...configuration,
+          runtime: { channels: { experimentalEmbeddedChannels: true } },
+        }),
+      /channels require a dedicated Agent workload/,
+    );
+    assert.deepEqual(driver.agentProvisioning.executionModes, ["dedicated"]);
+  }
+  for (const flag of ["true", 1, null]) {
+    assert.throws(
+      () =>
+        createKubernetesComputeDriver(
+          options({
+            runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: flag } },
+          }),
+        ),
+      /Installation boolean/,
+    );
+  }
+  const trial = createKubernetesComputeDriver(
+    options({
+      runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: true } },
+    }),
+  );
+  assert.doesNotThrow(() => trial.validateHarnessAuth(embedded, apiKeyAuth, configuration));
+  assert.deepEqual(trial.agentProvisioning.executionModes, ["dedicated", "embedded"]);
+  assert.throws(
+    () =>
+      trial.validateHarnessAuth(embedded, apiKeyAuth, {
+        ...configuration,
+        agents: { defaults: { model: "codex/gpt-6-astra" } },
+      }),
+    /compatible model provider/,
+  );
+  assert.throws(
+    () =>
+      trial.validateHarnessAuth(embedded, apiKeyAuth, {
+        ...configuration,
+        agents: { defaults: { model: "openrouter/model" } },
+      }),
+    /compatible model provider/,
+  );
+});
+
 test("native channel providers require Secret bindings and project guarded proxy trust only to the gateway", async () => {
   const driver = createKubernetesComputeDriver(
     teamsOptions({
@@ -9560,6 +9694,12 @@ test("native channel providers require Secret bindings and project guarded proxy
     },
   });
 
+  const teams = {
+    enabled: true,
+    appId: "00000000-0000-4000-8000-000000000001",
+    tenantId: "00000000-0000-4000-8000-000000000002",
+    appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+  };
   for (const [channels, expectedSecrets] of [
     [{ slack: {} }, ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]],
     [{ msteams: { enabled: true } }, ["MSTEAMS_APP_PASSWORD"]],
@@ -9567,7 +9707,7 @@ test("native channel providers require Secret bindings and project guarded proxy
     [{ msteams: { enabled: true, webhook: {} } }, ["MSTEAMS_APP_PASSWORD"]],
     [{ msteams: { enabled: true, webhook: { path: "/api/messages" } } }, ["MSTEAMS_APP_PASSWORD"]],
     [
-      { slack: { enabled: true }, msteams: { enabled: true } },
+      { slack: { enabled: true }, msteams: teams },
       ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN", "MSTEAMS_APP_PASSWORD"],
     ],
     [
@@ -13280,7 +13420,19 @@ test("revision lifecycle rejects another driver or missing identity before clust
   };
 
   for (const provider of ["slack", "msteams"]) {
-    for (const configuration of [{ enabled: true }, { accounts: { support: { enabled: true } } }]) {
+    for (const configuration of [
+      { enabled: true },
+      { accounts: { support: { enabled: true } } },
+    ].map((value) =>
+      provider === "msteams"
+        ? {
+            ...value,
+            appId: "00000000-0000-4000-8000-000000000001",
+            tenantId: "00000000-0000-4000-8000-000000000002",
+            appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+          }
+        : value,
+    )) {
       await assert.rejects(
         driver.prepareRevision({
           ...revision,
@@ -13620,7 +13772,17 @@ test("revision lifecycle rejects another driver or missing identity before clust
         ...embeddedRevision,
         configuration: {
           ...embeddedRevision.configuration,
-          channels: { [provider]: { enabled: true } },
+          channels: {
+            [provider]:
+              provider === "msteams"
+                ? {
+                    enabled: true,
+                    appId: "00000000-0000-4000-8000-000000000001",
+                    tenantId: "00000000-0000-4000-8000-000000000002",
+                    appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+                  }
+                : { enabled: true },
+          },
         },
       }),
       /channels require a dedicated Agent workload\./i,
@@ -14765,7 +14927,10 @@ for (const cutover of ["already deployed", "during Deployment deletion", "during
         async listNamespacedPod() {
           return { items: [] };
         },
-        async readNamespacedService() {
+        async readNamespacedService({ name }) {
+          if (resources.get("Service")?.metadata.name !== name) {
+            throw missing();
+          }
           return read("Service");
         },
         async readNamespacedServiceAccount() {
@@ -16461,7 +16626,7 @@ test("retirement preserves active storage and node routing and deletes exact own
         if (name === agentName) {
           return structuredClone(agentService);
         }
-        if (observedService === undefined) {
+        if (observedService === undefined || observedService.metadata.name !== name) {
           return missing();
         }
         return structuredClone(observedService);

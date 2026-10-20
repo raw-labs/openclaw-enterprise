@@ -13,8 +13,9 @@ credentials, ChatGPT service accounts, repository registries, or Slack consumers
 
 Use `openclaw` for embedded OpenClaw Agents with the bundled OpenClaw
 PluginDriver. Operators select plugins manually or through the API. Embedded
-OpenClaw cannot enable external Slack channels; the Standard OpenClaw preset
-must leave channels disabled.
+OpenClaw refuses external channels by default. The unsupported-production
+[embedded-channel trial](../integrations/embedded-channel-trial.md#enable-the-trusted-option)
+accepts trusted `channels.experimentalEmbeddedChannels: true` with a runtime proxy.
 
 Use `codex` for dedicated Codex Agents with the bundled Codex PluginDriver. Its
 stock hosted catalog needs a PAT supplied later through a same-Namespace Secret
@@ -396,7 +397,7 @@ the install as ready:
   `controlPlaneOutbound.managedProxy` with its own exclusions for API directory
   lookup and credential validation, or supply an approved `proxyUrl`. The two
   instances have separate clients and policy. Enabling network support does not
-  enable Slack itself; Slack-enabled Agents require dedicated execution.
+  enable Slack itself; channel-enabled Agents require dedicated execution unless the embedded trial is enabled.
   See [Gateway outbound](../../reference/gateway-outbound.md) and
   [Slack setup](../integrations/slack.md#configure-both-slack-proxies).
 - For hosted `codex-plugin` discovery under either profile family, a PAT supplied

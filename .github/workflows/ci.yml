@@ -24,6 +24,7 @@ concurrency:
 
 env:
   CI: "1"
+  CI_RUNNER_FILE_CONCURRENCY: ${{ vars.CI_RUNNER_FILE_CONCURRENCY }}
   NODE_VERSION: "24.16.0"
   # CI Impact and CI Required only run the impact and aggregation scripts, so
   # they take the runner's cached Node 24 instead of downloading NODE_VERSION
@@ -260,7 +261,7 @@ jobs:
   audit:
     name: Suite Audit
     # 16vcpu rarely waits for a runner (see the CI Impact lane table).
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -284,7 +285,7 @@ jobs:
     # before Checks and Conformance 1's tests (about 40 s of its critical path).
     if: ${{ needs.impact.outputs.mode == 'docs' || needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests' }}
     # 16vcpu rarely waits for a runner (see the CI Impact lane table).
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -347,7 +348,7 @@ jobs:
     needs: impact
     if: ${{ needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.lane == 'images-runtime-startup' && vars.CI_SANDBOX_RUNNER || vars.CI_LARGE_RUNNER || matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
