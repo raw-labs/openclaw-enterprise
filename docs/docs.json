@@ -53,9 +53,7 @@
                 ]
               }
             ],
-            "hidden": [
-              "guides/README"
-            ]
+            "hidden": ["guides/README"]
           },
           {
             "tab": "Topics",
@@ -743,9 +741,7 @@
                 ]
               }
             ],
-            "hidden": [
-              "reference/postgres-auth-binding"
-            ]
+            "hidden": ["reference/postgres-auth-binding"]
           },
           {
             "tab": "Contribute",
@@ -1068,7 +1064,8 @@
               "testing/gateway-outbound",
               "reference/sandbox-policies",
               "guides/topics/agent-sandbox-policy",
-              "flows/agent-sandbox-policy"
+              "flows/agent-sandbox-policy",
+              "contributing/downstream-integration"
             ]
           }
         ]
