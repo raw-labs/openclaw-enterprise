@@ -228,7 +228,7 @@ are not required. A future archive reorganization requires a separate change.
 ## Renumbered RFCs
 
 The 18 existing RFCs were renumbered from `0001` through `0018`.
-This lookup maps their original paths to the current IDs. New RFCs take the next
+This lookup maps their original paths to the current IDs and records later proposal renumbering. New RFCs take the next
 number; unmerged proposals must reconcile their IDs before merging.
 Plan filenames and historical commit links retain their original names.
 
@@ -254,3 +254,6 @@ Plan filenames and historical commit links retain their original names.
 | `2026-09-28-installation-profiles-design`     | [RFC-0018](../../specs/rfcs/0018-installation-profiles-design/index.md)  |
 | `0021-driver-configuration-contributions.md`  | [RFC-0022](../../specs/rfcs/0022-driver-configuration-contributions.md)  |
 | `0021-native-admin-deployment-preparation.md` | [RFC-0023](../../specs/rfcs/0023-native-admin-deployment-preparation.md) |
+| -------------------------------------------- | ----------------------------------------------------------------------- |
+| `0020-gateway-outbound.md`                   | [RFC-0023](../../specs/rfcs/0023-gateway-outbound.md)                   |
+| `0021-gateway-outbound.md`                   | [RFC-0023](../../specs/rfcs/0023-gateway-outbound.md)                   |

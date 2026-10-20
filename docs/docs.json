@@ -294,6 +294,10 @@
                             "label": "Networking and Isolation"
                           },
                           {
+                            "page": "reference/gateway-outbound",
+                            "label": "Gateway Outbound"
+                          },
+                          {
                             "page": "reference/drivers/kubernetes-compute/storage-and-credentials",
                             "label": "Storage and Credentials"
                           },
@@ -1022,6 +1026,8 @@
               "flows/repository-credential-configuration",
               "testing/repository-credentials",
               "flows/agent-presets",
+              "flows/gateway-outbound",
+              "testing/gateway-outbound",
               "reference/sandbox-policies",
               "guides/topics/agent-sandbox-policy",
               "flows/agent-sandbox-policy"

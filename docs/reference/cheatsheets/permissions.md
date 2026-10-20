@@ -16,7 +16,7 @@ override grants, and one action never implies another. See
 | `delete`     | Request deletion of the exact resource.                                                                                                           |
 | `deploy`     | Create a new Agent revision.                                                                                                                      |
 | `operate`    | Stop an Agent, provision its runtime credentials, write its workspace files, read its runtime status, or use a bound Secret or credential source. |
-| `administer` | Run Installation administration or read the exact Agent’s runtime log text. It does not imply `read`, `deploy`, or other actions.                 |
+| `administer` | Run Installation administration, approve exact-Agent Gateway outbound access, or read the exact Agent’s runtime log text. It does not imply `read`, `deploy`, or other actions.                 |
 | `use`        | Enter an Agent runtime as a human with an exact runtime-role assignment. Does not imply OCE management permissions.                               |
 | `read_logs`  | Read the exact Agent’s runtime log text without `administer`. Not granted by bootstrap; grant it through a Namespace Role.                        |
 

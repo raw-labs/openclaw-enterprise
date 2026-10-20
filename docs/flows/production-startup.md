@@ -1,7 +1,7 @@
 ---
 created: 2026-08-25
-updated: "2026-10-18"
-last_updated_session: "authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d"
+updated: "2026-10-19"
+last_updated_session: "authoring-run/40820368-0ee7-4901-9224-041654014ae4"
 ---
 
 # Production Startup Flow
@@ -45,6 +45,7 @@ graph TD
         O -->|Yes| G["Apply migrations, bootstrap administrators and write protected key output"]
         G --> H["Start private API Deployment"]
         G --> I["Start independent worker Deployment"]
+        G -->|Outbound proxy enabled| V["Start API-only proxy"]
         I --> R{"Repository credentials enabled?"}
         R -->|Yes| S["Sidecar copies protected inputs and starts private control"]
         S --> Q["Sidecar probe gates worker Pod readiness"]
@@ -212,11 +213,14 @@ maintain those addresses for the optional
 [model-discovery API](../reference/console/create-and-deploy.md#create-an-agent);
 Console model selection and Harness egress do not depend on this policy.
 
-When `api.channelDirectoryProxyUrl` names an approved HTTP(S) proxy at a
-literal IPv4 address and port, the chart passes it to the API and grants only
-that Pod egress to the proxy's exact `/32` and TCP port. The proxy must permit
-CONNECT to `slack.com:443`. The empty default renders no rule and leaves
-production Slack directory lookup unavailable with manual exact-ID entry.
+`outboundProxy.enabled` starts an API proxy.
+`apps/controller/src/gateway/control-plane-outbound-proxy.mjs:controlPlaneOutboundPolicy`
+derives trusted Driver destinations; `runOutboundProxy` rejects private, reserved
+and infrastructure addresses (`denyCidrs`).
+
+Helm sets `OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL` and grants API
+traffic. External `api.controlPlaneOutboundProxyUrl` grants an IPv4 `/32` and port.
+[Gateway access](../reference/gateway-outbound.md) remains revision-owned.
 
 The Kubernetes Compute Driver queries the API server version and verifies
 authenticated Namespace access. Below the supported 1.35 baseline, the API logs
@@ -301,6 +305,8 @@ until tenant deployment/TUI procedures run.
   from the retrieved key file.
 - Changing an external startup Secret alone does not restart the API or worker;
   run an explicit rollout and repeat readiness plus authenticated proof.
+- `control_plane_outbound_proxy.startup_failed`: inspect proxy ConfigMap exclusions
+  and listener port. Verify proxy readiness.
 - `tests/integration/production-kubernetes-packaging.test.mjs` renders the
   chart; it does not prove deployment or model execution.
 
@@ -328,6 +334,8 @@ until tenant deployment/TUI procedures run.
 - 2026-10-15 22:24: Validate sandbox suffixes. (authoring-run/13774107-9c73-4561-8bb0-6e910588052a - 417cb2b7b57f)
 
 - 2026-10-14 21:02: Document hostname refusal and correction. (authoring-run/4a613194-6dc8-454f-9cf8-c2a6b46b25af - 44252f8544beb031bf9f9b4d5f9e8093d0b10176)
+
+- 2026-10-14 16:02: Trace accompanying API-only proxy startup. (authoring-run/7bd4f79c-2e3a-40b6-b2e9-5e51b495a8f0 - bd8fe1f7b0b798dca84d6f90b7377ddda79d88a6)
 
 - 2026-10-13: Trace OIDC CA assembly and the database trust preload.
 - 2026-10-11 18:29: Validate database URL Secret keys. (authoring-run/a5a228f3-a952-4e1f-bbba-1a113599bb93 - 19304cadb9a8b8c6473a22b183055ff7b5852e02)

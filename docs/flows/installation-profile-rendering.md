@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
-updated: 2026-10-19
-last_updated_session: authoring-run/d45560cc-1312-47a3-bc97-9e85137cdea9
+updated: 2026-10-20
+last_updated_session: Codex/01a12f94-4e1e-7df1-8b9d-1c7f305c2584
 ---
 
 # Installation Profile Rendering Flow
@@ -165,10 +165,10 @@ already checked in step 3 with the API's `parseCidr` rules
 IPv4-mapped address, and no range that covers every IPv4 peer. Like the chart,
 preflight also refuses a zone ID, which the API accepts.
 
-When `channels.managedSlackProxy` is true, the values also enable the
-chart-managed Slack proxy Service. The chart allows that proxy public IPv4 HTTPS
-egress, excluding private and reserved ranges, and the proxy authorizes Slack
-hostnames. Repository values render only when the input explicitly sets
+`gatewayOutbound` enables Compute's per-revision proxy using
+`controlPlane.controllerImage` and infrastructure exclusions.
+`controlPlaneOutbound.managedProxy` enables the separately restricted API proxy.
+Selected Drivers supply its management destinations; Agent settings cannot broaden it. Repository values render only when the input explicitly sets
 `repository.enabled: true`. Repository provider CIDRs pass through unchanged,
 so operators can keep their existing GitHub ranges without DNS snapshots. The
 renderer copies `repository.serviceName` only when the input sets it, and only
