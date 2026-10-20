@@ -23,6 +23,11 @@
         "operation": "Align refreshed feature/upstream fixtures and fork sandbox runner selection after exact-head CI evidence",
         "commit": "84d848fb96346418cdf4ddde4be7ade0e70c7bb2",
         "input": "27dc2e809dce380c2f00017c9f1f0f88c10fd448"
+      },
+      {
+        "operation": "Reuse proven CI sandbox host setup for nonpublishing native runtime qualification",
+        "commit": "a1a9a7c1caf3e2fbebfabe6a9f42b18d50125201",
+        "input": "be8c3013516a1825e588b0309a7ff28a74a9d7f3"
       }
     ],
     "retainedUnchanged": []
@@ -282,6 +287,13 @@
         "tests/browser/console-agents.test.mjs"
       ],
       "notes": "Keep Chromium and Codex sandbox probes enabled on a compatible configured runner. Restore the established real managed-proxy embedded scenario with Slack-only and Teams-only cutovers. Supply explicit provider/plugin/Secret/runtime prerequisites and scope provider-specific assertions; preserve current Teams credential readiness and proxy refusal behavior. No production code or migration changes in this repair."
+    },
+    {
+      "id": "native-image-ci-sandbox-setup",
+      "pullRequests": [],
+      "commits": ["a1a9a7c1caf3e2fbebfabe6a9f42b18d50125201"],
+      "paths": [".github/workflows/container-check.yml", "docs/testing/ci.md"],
+      "notes": "Nonpublishing native AMD64 runtime uses the configured compatibility runner; ARM64 stays native. Reuse the existing reviewed CI AppArmor profile setup/cleanup for both runtime jobs. Pin OS-packaged local OCI import tooling on Ubuntu22/24; preserve source/config digest checks, native architecture, all sandbox and startup tests, and separate publication gates. No product, recipe, source pin, migration or repository variable changed."
     }
   ],
   "publishedMigrationPrefix": {
@@ -418,6 +430,14 @@
         "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39430946127",
         "repairCommit": "84d848fb96346418cdf4ddde4be7ade0e70c7bb2",
         "notes": "Six failed lanes: two sandbox setup failures, one obsolete embedded shared-proxy fixture and composed provider/UI fixture or assertion mismatches. Targeted parity, controller and browser regressions pass locally; real sandbox and cluster outcomes require final-head CI."
+      },
+      {
+        "commit": "be8c3013516a1825e588b0309a7ff28a74a9d7f3",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39433464392",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39433458604",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39435308191",
+        "repairCommit": "a1a9a7c1caf3e2fbebfabe6a9f42b18d50125201",
+        "notes": "All22 source lanes, First Agent Smoke and CodeQL passed. Native AMD64 sandbox probe hit Ubuntu24 user-namespace restrictions. Native ARM64 passed142/144 cases but two nested Docker sandbox cases lacked the reviewed CI AppArmor profile. Repair only native workflow setup and its documentation; qualify the resulting SHA."
       }
     ]
   }
