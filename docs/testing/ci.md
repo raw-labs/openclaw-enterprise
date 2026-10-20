@@ -61,8 +61,10 @@ runtime job when configured; ARM64 retains its native runner. Both runtime jobs
 install the same named CI AppArmor profile when Docker enforces AppArmor, pass
 its name to the existing sandbox helpers, and remove it after smoke cleanup.
 The profile and production container security settings remain unchanged.
-The check imports local OCI exports with the selected runner's pinned Skopeo: 1.4.1 on Ubuntu 22.04
-or 1.13.3 on Ubuntu 24.04. It still verifies the export digest, loaded image identity,
+The check converts local OCI exports to a temporary Docker archive with the
+runner's pinned Skopeo: 1.4.1 on Ubuntu 22.04 or 1.13.3 on Ubuntu 24.04. Docker's
+CLI loads the archive and negotiates its daemon API; the temporary archive is
+removed before startup checks. It still verifies the export digest, loaded image identity,
 native architecture and complete startup suite. Registry publication keeps its
 separate Skopeo 1.13.3 gate and authorization.
 
