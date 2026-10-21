@@ -1,7 +1,7 @@
 ---
 created: 2026-09-04
-updated: 2026-10-14
-last_updated_session: authoring-run/d5130a41-8ae6-4a80-aef3-32d61a53348c
+updated: 2026-10-20
+last_updated_session: authoring-run/025b1d17-5ded-4263-b58b-345fbafcddbb
 ---
 
 # GitHub Actions testing flow
@@ -62,17 +62,25 @@ graph TD
 `scripts/ci/test-suites/<lane>.json` references for runners and preparation.
 Each lane owns its tests, environment, required inputs and preparation settings.
 
-CI uses the event checkout without external service credentials. Impact and Suite Audit start independently. In every mode, `static-checks` verifies checkout identity and runs workspace, lint, format, OpenAPI and docs checks (no product tests), alone in docs mode. The [coverage map](../testing/ci.md#tests-in-each-workflow) lists matrix jobs and the separate `runtime-image-fixture`; tests mode runs only selected lanes. Image startup, PostgreSQL Application and the `checks-baseline` and `checks-browser` parts use `blacksmith-32vcpu-ubuntu-2404` for its 8 CPUs, k3d fixture and observability for its NetworkPolicy-enforcing kernel; `runtime-image-fixture` uses `ubuntu-22.04`. Other lanes, Static Checks and audit use `blacksmith-16vcpu-ubuntu-2404`.
+CI uses the event checkout without external service credentials. Impact and Suite
+Audit start independently. Every mode runs workspace, lint, format, OpenAPI and
+docs checks; docs mode stops there. Tests mode selects lanes from the
+[coverage map](../testing/ci.md#tests-in-each-workflow).
+`runtime-image-fixture` uses `ubuntu-22.04`.
+
+Runner labels and concurrency follow [CI settings](../testing/ci.md). On AppArmor
+hosts, native startup uses `oce-ci-codex-bwrap`; the shared action removes it after
+container cleanup. It permits nested mounts under the reviewed seccomp policy
+and dropped capabilities, retaining Docker’s other restrictions. Production
+policy and host sysctls stay unchanged.
 
 For a PR, the selector verifies the tested checkout and that the event head is the merge's second parent, then compares the first parent (the current base) and tested trees. Git path decoding preserves a leading UTF-8 BOM as filename data; paths outside the allowlist select full. API reference outputs and Markdown under `docs/reference/api/` select full for `openapi:check`. Only nonempty changes to allowlisted regular Markdown files select docs mode. Registered test files (with documentation and their own lane manifest entries) select tests mode: their `ci` lanes in either tree (`checks-baseline-1` if only the fixture job would run). Other test-tree, code, configuration, workflow or unknown changes and non-PR events select full. Missing or unverifiable policy or source evidence selects full or fails closed. Policy comes from that first parent; a base without it selects full. `CI Required` re-verifies the mode (and tests mode's lane set) and requires impact, audit and every selected job to succeed and the rest skipped. Full and tests modes aggregate same-source results of their lanes; docs mode does not aggregate or invent test artifacts.
 
-The impact summary shows the mode, a fixed reason category, and accepted test
-lanes. Selector failures fail the job; unavailable evidence reports unavailable.
-The summary includes no changed paths or arbitrary selector output.
+Impact reports mode, reason and lanes without paths. Selector failures fail
+closed; unavailable evidence is reported.
 
-For full-mode PRs, `affected-packages` verifies merge identity and checkout
-cleanliness, then reports declared workspace dependents. It is advisory and does
-not select tests or gate `CI Required`.
+Full-mode `affected-packages` verifies merge identity and cleanliness, then
+reports workspace dependents without selecting tests or gating `CI Required`.
 
 A PR can change the workflow loaded from its merge checkout despite base-loaded
 policy. Separately trusted enforcement is a deployment decision, not an
@@ -233,6 +241,8 @@ External reconciliation awaits an approved resource ledger.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-20 12:14: Honor configured runner capacity while preserving coverage, default labels and same-source qualification. (authoring-run/025b1d17-5ded-4263-b58b-345fbafcddbb - a77594a92203b9da12690591554b385d9970d904)
 
 - 2026-10-14 22:31: Complete all selection. (authoring-run/d5130a41-8ae6-4a80-aef3-32d61a53348c - 9b50982b75a578d6967ee12befb1fa3904e20a38)
 

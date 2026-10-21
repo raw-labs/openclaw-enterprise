@@ -65,6 +65,14 @@ runs:
     - name: Set up CI tools
       shell: bash
       run: bash scripts/ci/setup-tools.sh "${{ inputs.profile }}"
+    - name: Install CI Codex AppArmor profile
+      if: inputs.lane == 'images-runtime-startup'
+      shell: bash
+      run: |
+        if docker info --format '{{json .SecurityOptions}}' | jq -e 'any(.[]; contains("apparmor"))' >/dev/null; then
+          sudo apparmor_parser --add scripts/ci/codex-bwrap.apparmor
+          echo 'OCC_TEST_CODEX_APPARMOR_PROFILE=oce-ci-codex-bwrap' >> "$GITHUB_ENV"
+        fi
     - name: Install registry transport for image publication test
       if: inputs.lane == 'images-packaging'
       shell: bash
@@ -218,6 +226,10 @@ runs:
       if: always()
       shell: bash
       run: node scripts/ci/cleanup.mjs --state "$RUNNER_TEMP/state/${{ inputs.lane }}.json"
+    - name: Remove CI Codex AppArmor profile
+      if: always() && inputs.lane == 'images-runtime-startup' && env.OCC_TEST_CODEX_APPARMOR_PROFILE == 'oce-ci-codex-bwrap'
+      shell: bash
+      run: sudo apparmor_parser --remove scripts/ci/codex-bwrap.apparmor
     - name: Export image cleanup reconciliation
       id: image_reconciliation
       if: always() && inputs.lane == 'images-packaging'

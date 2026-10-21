@@ -398,10 +398,19 @@ async function ciPreparedCodexSeccompProfile(ciStatePath) {
 // seccomp profile.
 export async function reviewedCodexSeccompSecurityOptions({
   profile = process.env.OCC_TEST_CODEX_SECCOMP_PROFILE,
+  appArmorProfile = process.env.OCC_TEST_CODEX_APPARMOR_PROFILE ?? "",
   ciStatePath = process.env.OPENCLAW_ENTERPRISE_CI_STATE,
   ci = process.env.CI,
 } = {}) {
   const securityOptions = ["--security-opt", "no-new-privileges"];
+  if (appArmorProfile !== "") {
+    assert.equal(
+      appArmorProfile,
+      "oce-ci-codex-bwrap",
+      "OCC_TEST_CODEX_APPARMOR_PROFILE must select the named CI Codex profile.",
+    );
+    securityOptions.push("--security-opt", `apparmor=${appArmorProfile}`);
+  }
   if (profile === undefined || profile.length === 0) {
     const inCi = ci !== undefined && ci !== "" && ci !== "false" && ci !== "0";
     if (inCi || (ciStatePath !== undefined && ciStatePath.length > 0)) {

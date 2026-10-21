@@ -205,6 +205,13 @@ gatewayRouting:
   remoteNodeCidrs: []
   tenantGatewayPort: 8080
   envoyHttpsTargetPort: 10443
+  channels:
+    enabled: false
+    hostname: ""
+    # Existing public certificate in the release namespace; independent of admin TLS.
+    tlsSecretName: ""
+    listenerPort: 8444
+    ingressPeers: []
   sandbox:
     enabled: false
     # A dedicated wildcard domain outside the OCE session cookie domain, at most
@@ -270,6 +277,8 @@ slackProxy:
   # Optional chart-managed HTTP CONNECT proxy for Slack channel traffic. It is
   # inert until enabled. HTTPS egress excludes private and reserved IPv4 ranges.
   enabled: false
+  # Explicit Microsoft Public cloud destinations; the default remains Slack only.
+  teamsEnabled: false
   serviceName: openclaw-enterprise-slack-proxy
   port: 3128
   resources:

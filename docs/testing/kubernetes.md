@@ -55,6 +55,7 @@ partial selectors fail. A missing database skips database cases. Run files
 sequentially: they share a database. The suite checks API, worker, Driver, RBAC,
 storage, lifecycle and network isolation, not live OAuth/models, cloud volume
 detach or node fencing.
+See [channel cases](channel-runtime.md).
 
 External OAuth credentials use OpenShell rather than Kubernetes bootstrap Jobs or a
 native OAuth store. The [OpenShell OAuth proof](openshell-oauth.md) exercises real
