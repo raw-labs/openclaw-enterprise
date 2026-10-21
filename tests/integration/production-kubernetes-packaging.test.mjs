@@ -22,6 +22,7 @@ import {
   parseProductionChart as resources,
   productionValues as values,
   productionCollectorValues,
+  goToolEnvironment,
 } from "../helpers/production-chart.mjs";
 
 const execute = promisify(execFile);
@@ -108,7 +109,7 @@ const render = (overrides = {}, options = {}) =>
 
 let tooling;
 try {
-  await execute(helm, ["version", "--short"], { cwd: repository });
+  await execute(helm, ["version", "--short"], { cwd: repository, env: goToolEnvironment() });
   await execute("yq", ["--version"], { cwd: repository });
   tooling = { skip: false };
 } catch {
@@ -170,7 +171,7 @@ test(
                 "routing.controlPlaneCidrs[0]=198.51.100.0/24",
                 ...dnsArguments,
               ],
-              { cwd: repository, maxBuffer: 2_000_000 },
+              { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
             )
           ).stdout,
         ),
@@ -195,7 +196,7 @@ test(
                 "grafana.adminSecretName=grafana-admin",
                 ...dnsArguments,
               ],
-              { cwd: repository, maxBuffer: 2_000_000 },
+              { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
             )
           ).stdout,
         ),
@@ -1097,7 +1098,7 @@ test("Helm refuses a Gateway name Compute refuses", tooling, async () => {
         "--set",
         "gatewayRouting.gatewayName=Bad_Name",
       ],
-      { cwd: repository },
+      { cwd: repository, env: goToolEnvironment() },
     ),
     /gatewayRouting\.gatewayName must be a DNS-safe Kubernetes resource name/,
   );
@@ -1115,7 +1116,7 @@ test("Helm refuses a Gateway name Compute refuses", tooling, async () => {
         "--set-string",
         "gatewayRouting.gatewayName= oce-agent-gateways ",
       ],
-      { cwd: repository },
+      { cwd: repository, env: goToolEnvironment() },
     ),
     /gatewayRouting\.gatewayName must be a DNS-safe Kubernetes resource name/,
   );
@@ -1134,7 +1135,7 @@ test("Helm refuses a Gateway name Compute refuses", tooling, async () => {
         "--set-string",
         `gatewayRouting.gatewayName=${sixtyFour}`,
       ],
-      { cwd: repository },
+      { cwd: repository, env: goToolEnvironment() },
     ),
     /gatewayRouting\.gatewayName must be a DNS-safe Kubernetes resource name/,
   );
@@ -1152,7 +1153,7 @@ test("Helm refuses a Gateway name Compute refuses", tooling, async () => {
       "--set-string",
       `gatewayRouting.gatewayName=${sixtyThree}`,
     ],
-    { cwd: repository, maxBuffer: 2_000_000 },
+    { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
   );
   const gateway = (await resources(stdout)).find((object) => object.kind === "Gateway");
   assert.equal(gateway?.metadata.name, sixtyThree);
@@ -1180,7 +1181,7 @@ test(
           "--set-string",
           `routing.${field}=${value}`,
         ],
-        { cwd: repository, maxBuffer: 2_000_000 },
+        { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
       );
     // Compute validateGatewayName: a DNS subdomain, at most 63 characters (a label value).
     for (const gatewayName of ["Bad_Name", "-gateways", "gateways-", "a..b", "a".repeat(64)]) {
@@ -1223,7 +1224,7 @@ test("production Helm values example renders the backendless default chart", too
       "--values",
       "deploy/examples/production/values.yaml",
     ],
-    { cwd: repository, maxBuffer: 2_000_000 },
+    { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
   );
   const objects = await resources(stdout);
   const selected = (kind, component) =>
@@ -1382,10 +1383,12 @@ test(
         ["package", "deploy/helm/openclaw-enterprise", "--destination", directory],
         {
           cwd: repository,
+          env: goToolEnvironment(),
         },
       );
       const { stdout: metadata } = await execute(helm, ["show", "chart", archive], {
         cwd: repository,
+        env: goToolEnvironment(),
       });
       const chart = loadYaml(metadata);
       assert.equal(chart.name, "openclaw-enterprise");
@@ -1402,10 +1405,11 @@ test(
       const source = await execute(
         helm,
         ["template", "oce", "deploy/helm/openclaw-enterprise", ...args],
-        { cwd: repository, maxBuffer: 2_000_000 },
+        { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
       );
       const packaged = await execute(helm, ["template", "oce", archive, ...args], {
         cwd: repository,
+        env: goToolEnvironment(),
         maxBuffer: 2_000_000,
       });
       assert.equal(packaged.stdout, source.stdout);
@@ -1564,7 +1568,13 @@ test(
       "routing.controlPlaneCidrs[0]=198.51.100.0/24",
     ];
     const execution = await resources(
-      (await execute(helm, executionArgs, { cwd: repository, maxBuffer: 2_000_000 })).stdout,
+      (
+        await execute(helm, executionArgs, {
+          cwd: repository,
+          env: goToolEnvironment(),
+          maxBuffer: 2_000_000,
+        })
+      ).stdout,
     );
     const executionPodReads = [
       { apiGroups: ["apps"], resources: ["deployments"], verbs: ["list"] },
@@ -1599,6 +1609,7 @@ test(
       (
         await execute(helm, [...executionArgs, "--set", "agentRuntimeLogs.enabled=false"], {
           cwd: repository,
+          env: goToolEnvironment(),
           maxBuffer: 2_000_000,
         })
       ).stdout,
@@ -2525,7 +2536,10 @@ test(
     assert.deepEqual(pod.nodeSelector, { "oce-role": "control" });
     assert.equal(pod.securityContext.fsGroupChangePolicy, "OnRootMismatch");
     assert.equal(pod.initContainers[0].name, "migration");
-    assert.deepEqual(pod.initContainers[0].args, ["scripts/migrate-production.mjs"]);
+    assert.deepEqual(pod.initContainers[0].args, [
+      "scripts/migrate-production.mjs",
+      "--expect-empty",
+    ]);
     assert.equal(pod.containers[0].name, "bootstrap");
     assert.deepEqual(pod.containers[0].args, ["scripts/bootstrap-installation.mjs"]);
     assert.ok(pod.initContainers[0].env.some(({ name }) => name === "OCC_MIGRATION_DATABASE_URL"));
@@ -4633,7 +4647,7 @@ test(
             "--set-string",
             "dns.namespace=true",
           ],
-          { cwd: repository, maxBuffer: 2_000_000 },
+          { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
         )
       ).stdout,
     );
@@ -5479,7 +5493,7 @@ test("execution chart refuses a harness hostname Compute refuses", tooling, asyn
         'routing.controlPlaneCidrs=["198.51.100.0/24"]',
         ...values,
       ],
-      { cwd: repository, maxBuffer: 2_000_000 },
+      { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
     );
   await assert.rejects(
     template("--set", "routing.hostname=Bad_Host"),
@@ -5538,7 +5552,7 @@ test(
           'routing.controlPlaneCidrs=["198.51.100.0/24"]',
           ...values,
         ],
-        { cwd: repository, maxBuffer: 2_000_000 },
+        { cwd: repository, env: goToolEnvironment(), maxBuffer: 2_000_000 },
       );
     const proxyPolicy = async (stdout) =>
       (await resources(stdout)).find(
