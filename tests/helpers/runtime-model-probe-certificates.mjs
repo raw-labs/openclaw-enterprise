@@ -1,8 +1,10 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { sharedRsaPrivateKeyPem } from "../fixtures/repository-credentials/shared-keys.mjs";
 
 // Callers own subprocess policy and cleanup: image tests remove the CA key,
-// while the first-Agent smoke retains it.
+// while the first-Agent smoke retains it. The CA and leaf keys are the process's
+// shared fixture keys (shared-keys.mjs); both certificates are minted per call.
 export async function createModelProbeCertificates({
   directory,
   caName,
@@ -10,12 +12,14 @@ export async function createModelProbeCertificates({
   dnsNames = ["api.openai.com"],
 }) {
   const file = (name) => join(directory, name);
+  await writeFile(file("ca-key.pem"), sharedRsaPrivateKeyPem("model-probe-ca"), { mode: 0o600 });
+  await writeFile(file("key.pem"), sharedRsaPrivateKeyPem("model-probe-leaf"), { mode: 0o600 });
   await run("openssl", [
     "req",
     "-x509",
-    "-newkey",
-    "rsa:2048",
-    "-nodes",
+    "-new",
+    "-key",
+    file("ca-key.pem"),
     "-days",
     "2",
     "-subj",
@@ -24,20 +28,16 @@ export async function createModelProbeCertificates({
     "basicConstraints=critical,CA:TRUE",
     "-addext",
     "keyUsage=critical,keyCertSign",
-    "-keyout",
-    file("ca-key.pem"),
     "-out",
     file("ca.pem"),
   ]);
   await run("openssl", [
     "req",
-    "-newkey",
-    "rsa:2048",
-    "-nodes",
+    "-new",
+    "-key",
+    file("key.pem"),
     "-subj",
     `/CN=${dnsNames[0]}`,
-    "-keyout",
-    file("key.pem"),
     "-out",
     file("leaf.csr"),
   ]);

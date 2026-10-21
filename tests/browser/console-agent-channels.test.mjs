@@ -1316,6 +1316,7 @@ async function teamsDirectorySelection(t, browserType) {
     { executionMode: "dedicated" },
   );
   const { page } = await newPage(t, fixture, { browserType });
+  assert.equal(page.context().browser().browserType().name(), browserType.name());
   await openDraft(page, fixture, agent, "Teams directory Agent");
   await page.getByRole("button", { name: "Configure Microsoft Teams" }).click();
   const dialog = page.getByRole("dialog", { name: "Configure Microsoft Teams" });
