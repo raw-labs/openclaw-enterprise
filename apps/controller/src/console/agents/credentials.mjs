@@ -1,12 +1,30 @@
-import { element, button } from "../dom.mjs";
-import { namespacePath } from "./list.mjs";
-import { ensureSecretOperateBinding } from "./secret-access.mjs";
+import { element, button, focusSaveOutcome, setStatusTone, validateFields } from "../dom.mjs";
+import {
+  configurationConflictMessage,
+  isStaleGeneration,
+  namespacePath,
+  refusedSave,
+} from "./list.mjs";
+import { ensureCredentialOperateBinding } from "./credential-access.mjs";
 import { createSecretReferenceField, secretBinding, secretIdForBinding } from "./secret-picker.mjs";
 
 export const SLACK_SECRET_BINDINGS = [
   { key: "SLACK_APP_TOKEN", label: "Slack app token", secretName: "Slack app token" },
   { key: "SLACK_BOT_TOKEN", label: "Slack bot token", secretName: "Slack bot token" },
 ];
+export const TEAMS_SECRET_BINDINGS = [
+  { key: "MSTEAMS_APP_PASSWORD", label: "Teams app password", secretName: "Teams app password" },
+];
+
+function channelSecretBindings(values) {
+  return [
+    ...(slackEnabled(values) && namedSlackAccountKeys(values) === null
+      ? SLACK_SECRET_BINDINGS
+      : []),
+    ...(teamsEnabled(values) ? TEAMS_SECRET_BINDINGS : []),
+  ];
+}
+
 function slackEnabled(values) {
   const slack = values?.channels?.slack;
   return (
@@ -56,28 +74,50 @@ function hasSlackBindings(configuration) {
   );
 }
 
-function slackBindingState(configuration, binding) {
-  return secretIdForBinding(configuration?.secretBindings?.[binding.key]) === null
-    ? "missing"
-    : "bound";
-}
-
 export function channelCredentialBlockReason(values) {
-  return teamsEnabled(values)
-    ? "Microsoft Teams credentials and readiness are operator-managed and cannot be confirmed by this Credentials tab. Use the operator deployment workflow for Teams, or disable Teams through the Configuration API to deploy here."
-    : null;
+  const teams = values?.channels?.msteams;
+  if (!teamsEnabled(values)) {
+    return null;
+  }
+  const ref = teams.appPassword;
+  if (
+    typeof teams.appId !== "string" ||
+    !teams.appId.trim() ||
+    typeof teams.tenantId !== "string" ||
+    !teams.tenantId.trim() ||
+    ref?.source !== "env" ||
+    ref.provider !== "default" ||
+    ref.id !== "MSTEAMS_APP_PASSWORD"
+  ) {
+    return "Configure the Teams app ID, tenant ID, and app password Secret reference in Channels before deploying.";
+  }
+  return null;
 }
 
 export function missingChannelCredentialGroups(values, configuration) {
-  if (!slackEnabled(values)) {
-    return [];
+  const missing = [];
+  if (slackEnabled(values)) {
+    const named = namedSlackAccountKeys(values);
+    if (named === null) {
+      if (!hasSlackBindings(configuration)) {
+        missing.push("Slack Secret bindings");
+      }
+    } else {
+      const unbound = named.filter(
+        (key) => !secretIdForBinding(configuration?.secretBindings?.[key]),
+      );
+      if (unbound.length) {
+        missing.push(`Slack Secret bindings (${unbound.join(", ")})`);
+      }
+    }
   }
-  const named = namedSlackAccountKeys(values);
-  if (named === null) {
-    return hasSlackBindings(configuration) ? [] : ["Slack Secret bindings"];
+  if (
+    teamsEnabled(values) &&
+    !secretIdForBinding(configuration?.secretBindings?.MSTEAMS_APP_PASSWORD)
+  ) {
+    missing.push("Teams app password Secret binding");
   }
-  const unbound = named.filter((key) => !secretIdForBinding(configuration?.secretBindings?.[key]));
-  return unbound.length ? [`Slack Secret bindings (${unbound.join(", ")})`] : [];
+  return missing;
 }
 
 export function hasRequiredChannelCredentials(values, configuration) {
@@ -90,9 +130,13 @@ export function hasRequiredChannelCredentials(values, configuration) {
 function credentialError(error, mutation = false) {
   let text;
   if (error.status === 403) {
-    text = "Access denied. You do not have permission for this credential operation.";
+    // A refused Configuration update names the grants it needs (finding 1839).
+    text =
+      error.refusal ?? "Access denied. You do not have permission for this credential operation.";
   } else if (error.status === 409) {
-    text = "Credential metadata conflicts with the saved Agent state or selected Secrets.";
+    text =
+      configurationConflictMessage(error, mutation) ??
+      "Credential metadata conflicts with the saved Agent state or selected Secrets.";
   } else if (error.status === 400) {
     text = "Check the selected Secrets and reload this Agent.";
   } else if (error.status === 429) {
@@ -111,10 +155,67 @@ function isDefinitiveRejection(error) {
   return [400, 403, 404, 409, 429].includes(error.status);
 }
 
-function renderSlackBindings(state) {
+// Reapplies the Secret choices a save conflict carried over the reread bindings, when they were
+// made on this Configuration. A choice another browser also changed is named (finding 1512).
+function applyCarriedSecrets(state, carried) {
+  if (!carried) {
+    return;
+  }
+  if (carried.configurationId !== state.configuration.id) {
+    state.carriedNote =
+      "Your channel Secret choices were not reapplied: this Agent now uses another Configuration.";
+    return;
+  }
+  if (!slackEnabled(state.values) && !teamsEnabled(state.values)) {
+    state.carriedNote =
+      "Your channel Secret choices were not reapplied: the selected channels are off in the reloaded Configuration.";
+    return;
+  }
+  if (namedSlackAccountKeys(state.values) !== null && !teamsEnabled(state.values)) {
+    state.carriedNote =
+      "Your channel Secret choices were not reapplied: the reloaded Configuration uses named Slack accounts.";
+    return;
+  }
+  const saved = state.configuration.secretBindings ?? {};
+  const sameSecret = (left, right) => secretIdForBinding(left) === secretIdForBinding(right);
+  const bindings = channelSecretBindings(state.values);
+  const keys = bindings
+    .map((binding) => binding.key)
+    .filter(
+      (key) =>
+        carried.changedSecrets?.[key] &&
+        !sameSecret(carried.secretBindings?.[key], carried.initialSecretBindings?.[key]) &&
+        !sameSecret(carried.secretBindings?.[key], saved[key]),
+    );
+  if (!keys.length) {
+    state.carriedNote = "The reloaded bindings already include your Secret choices.";
+    return;
+  }
+  state.draftSeed = {
+    secretBindings: {
+      ...saved,
+      ...Object.fromEntries(keys.map((key) => [key, carried.secretBindings[key]])),
+    },
+    changedSecrets: Object.fromEntries(keys.map((key) => [key, carried.changedSecrets[key]])),
+  };
+  const names = keys.map((key) => {
+    const label = bindings.find((binding) => binding.key === key).label;
+    return sameSecret(saved[key], carried.initialSecretBindings?.[key])
+      ? label
+      : `${label} (also changed in another browser)`;
+  });
+  state.carriedNote = `Your Secret choices are applied over the reloaded bindings: ${names.join(", ")}. Review them, then save.`;
+}
+
+function renderChannelBindings(state) {
   const list = element("dl", { className: "credential-status-list" });
   const named = namedSlackAccountKeys(state.values);
-  const bindings = named?.map((key) => ({ key, label: key })) ?? SLACK_SECRET_BINDINGS;
+  const bindings = [
+    ...(named === null
+      ? channelSecretBindings(state.values)
+      : named.map((key) => ({ key, label: key }))),
+    ...(named === null || !teamsEnabled(state.values) ? [] : TEAMS_SECRET_BINDINGS),
+  ];
   for (const binding of bindings) {
     const stored = Boolean(secretIdForBinding(state.configuration.secretBindings?.[binding.key]));
     list.append(
@@ -124,7 +225,7 @@ function renderSlackBindings(state) {
         {},
         element(
           "span",
-          { className: `credential-status ${stored ? "stored" : "missing"}` },
+          { className: "badge", "data-tone": stored ? "success" : "danger" },
           stored ? "Bound" : "Missing",
         ),
       ),
@@ -140,6 +241,7 @@ export function createChannelSecretsPanel({
   configuration,
   values,
   revisionsLoaded,
+  carried = null,
   onConfigurationChange,
   onChange,
   onReload,
@@ -150,23 +252,42 @@ export function createChannelSecretsPanel({
     values,
     saving: false,
     saveError: null,
-    saveErrorBeforeWrite: false,
+    saveErrorStep: null,
     saveMessage: "",
     saveGrantWarning: "",
     pendingSecretGrants: {},
     outcomeUnknown: false,
     reloadRequired: false,
+    // Unsaved Secret choices the form reopens with, and what a save conflict carries.
+    draftSeed: null,
+    // The form shows a Secret choice the saved bindings do not have (finding 1640).
+    unsavedSecrets: false,
+    carried: null,
+    carriedNote: "",
   };
+  applyCarriedSecrets(state, carried);
   const section = element("section", { className: "agent-card channel-secrets" });
 
   function saveErrorText() {
-    if (state.saveErrorBeforeWrite) {
-      return (
-        "Could not check the saved Configuration. Try again before saving channel Secrets." +
-        (state.saveError.requestId ? ` Request ID: ${state.saveError.requestId}` : "")
-      );
+    const { saveError, saveErrorStep, saveGrantWarning } = state;
+    if (saveErrorStep === "grant" && saveGrantWarning) {
+      return saveGrantWarning;
     }
-    return state.saveGrantWarning || credentialError(state.saveError, true);
+    const message =
+      saveErrorStep === "preflight"
+        ? "Could not check the saved Configuration. Try again before saving channel Secrets." +
+          (saveError.requestId ? ` Request ID: ${saveError.requestId}` : "")
+        : credentialError(saveError, true);
+    // Report this failed save first. A grant can still be outstanding from an earlier save.
+    return saveGrantWarning
+      ? `${message} Access to a previously saved Secret is still unconfirmed.`
+      : message;
+  }
+
+  // A refused save is danger. Secret grants left unconfirmed after a save are a warning, from
+  // the failed grant on: the Configuration itself saved (finding 2003).
+  function saveErrorTone() {
+    return state.saveError && state.saveErrorStep !== "grant" ? "danger" : "warning";
   }
 
   function canEnterChannelCredentials() {
@@ -175,7 +296,7 @@ export function createChannelSecretsPanel({
       !state.saving &&
       !state.outcomeUnknown &&
       !state.reloadRequired &&
-      slackEnabled(state.values) &&
+      (slackEnabled(state.values) || teamsEnabled(state.values)) &&
       servicePrincipalId(state.agent) !== null
     );
   }
@@ -186,9 +307,9 @@ export function createChannelSecretsPanel({
 
   function referencedSecretIds(secretBindings) {
     return new Set(
-      SLACK_SECRET_BINDINGS.map((binding) =>
-        secretIdForBinding(secretBindings?.[binding.key]),
-      ).filter((id) => id !== null),
+      channelSecretBindings(state.values)
+        .map((binding) => secretIdForBinding(secretBindings?.[binding.key]))
+        .filter((id) => id !== null),
     );
   }
 
@@ -212,7 +333,7 @@ export function createChannelSecretsPanel({
 
   function secretGrantTargets(secretBindings, changedSecrets) {
     prunePendingSecretGrants(secretBindings);
-    for (const binding of SLACK_SECRET_BINDINGS) {
+    for (const binding of channelSecretBindings(state.values)) {
       const secret = changedSecrets[binding.key];
       if (secret?.id && secretIdForBinding(secretBindings?.[binding.key]) === secret.id) {
         state.pendingSecretGrants[secret.id] = secret;
@@ -225,15 +346,21 @@ export function createChannelSecretsPanel({
     delete state.pendingSecretGrants[secret.id];
   }
 
-  function canDeploy() {
+  // Channel credentials are saved and complete: the next-step card's credentials step (UX spec
+  // 3.7). Deploy also needs the version history.
+  function credentialsReady() {
     return (
-      revisionsLoaded &&
       !state.saving &&
       !state.outcomeUnknown &&
       !state.reloadRequired &&
       !state.saveGrantWarning &&
+      !state.unsavedSecrets &&
       hasRequiredChannelCredentials(state.values, state.configuration)
     );
+  }
+
+  function canDeploy() {
+    return revisionsLoaded && credentialsReady();
   }
 
   function deployGateMessage() {
@@ -260,32 +387,58 @@ export function createChannelSecretsPanel({
     if (missing.length) {
       return `Complete these in Credentials before deploying: ${missing.join(", ")}.`;
     }
+    if (state.unsavedSecrets) {
+      // A member who cannot read a saved Secret cannot pick it again: the picker offers the
+      // unreadable binding only while the draft still holds it (finding 1649). A page reload
+      // drops unsaved choices for every reader, with the page's other unsaved edits.
+      return "Save the channel Secret choices before deploying, or reload the page to discard unsaved changes.";
+    }
     return "Ready to deploy.";
   }
 
+  // The last render's save outcome and next-step controls, for focus after a save.
+  const shown = {};
+
   function renderChannelForm(error) {
-    if (!slackEnabled(state.values)) {
+    state.unsavedSecrets = false;
+    if (!(slackEnabled(state.values) || teamsEnabled(state.values))) {
       return null;
     }
-    if (namedSlackAccountKeys(state.values) !== null) {
+    if (namedSlackAccountKeys(state.values) !== null && !teamsEnabled(state.values)) {
       return element(
-        "p",
-        { className: "hint" },
-        "Named Slack accounts use their own token keys. Bind them through the Configuration API.",
+        "div",
+        {},
+        element(
+          "p",
+          { className: "hint" },
+          "Named Slack accounts use their own token keys. Bind them through the Configuration API.",
+        ),
+        state.carriedNote
+          ? element("p", { className: "hint", role: "status" }, state.carriedNote)
+          : null,
       );
     }
     const formId = "runtime-channel-secrets-form";
     const draft = {
       secretBindings: { ...(state.configuration.secretBindings ?? {}) },
       changedSecrets: {},
+      ...structuredClone(state.draftSeed ?? {}),
     };
+    // Reopen the form with its unsaved choices after a refused write or a draft reload.
+    state.draftSeed = null;
     const pickers = [];
-    const status = element("p", { className: "hint", role: "status" }, state.saveMessage);
+    const status = element(
+      "p",
+      { className: "hint", role: "status" },
+      state.saveMessage || state.carriedNote,
+    );
     const save = element(
       "button",
-      { type: "submit", form: formId, className: "primary" },
+      { type: "submit", form: formId, className: "button button--primary" },
       "Save channel Secrets",
     );
+    shown.status = status;
+    shown.save = save;
     function createTokenPicker(binding) {
       const picker = createSecretReferenceField({
         context,
@@ -300,17 +453,20 @@ export function createChannelSecretsPanel({
           draft.changedSecrets = { ...draft.changedSecrets, [binding.key]: secret };
           state.saveError = null;
           state.saveMessage = "";
+          state.carriedNote = "";
           updateGrantWarning();
+          setStatusTone(error, "warning");
           error.textContent = state.saveGrantWarning;
           status.textContent = "";
           updateControls();
+          onChange();
         },
         createSecretName: () => `${state.agent.name} ${binding.secretName}`,
         createDialogTitle: `Create ${binding.label} Secret`,
         createFixedKey: {
           label: "Binding key",
           value: binding.key,
-          hint: "This environment key is fixed for Slack Socket Mode.",
+          hint: "This environment key is fixed for the selected channel.",
         },
         metadataLabel: `View ${binding.label.replace("Slack ", "")} Secret metadata`,
         required: true,
@@ -319,52 +475,57 @@ export function createChannelSecretsPanel({
       pickers.push({ binding, picker });
       return picker.field;
     }
+    const canSaveChannelSecrets = () =>
+      canEnterChannelCredentials() &&
+      channelSecretBindings(state.values).every(
+        (binding) => secretIdForBinding(draft.secretBindings[binding.key]) !== null,
+      ) &&
+      (Object.values(draft.changedSecrets).length > 0 || pendingSecretGrants().length > 0);
     const updateControls = () => {
-      const changedSecrets = Object.values(draft.changedSecrets);
-      const pendingSecrets = pendingSecretGrants();
-      const missing = SLACK_SECRET_BINDINGS.filter(
+      // Deploy delivers the saved bindings, so a choice shown here but not saved blocks it, as
+      // an unsaved authentication source does.
+      state.unsavedSecrets = channelSecretBindings(state.values).some(
         (binding) =>
-          slackBindingState({ secretBindings: draft.secretBindings }, binding) === "missing",
+          secretIdForBinding(draft.secretBindings[binding.key]) !==
+          secretIdForBinding(state.configuration.secretBindings?.[binding.key]),
       );
       for (const { picker } of pickers) {
         picker.setDisabled(state.saving || !canEnterChannelCredentials());
         picker.setRequired(true);
       }
-      save.disabled =
-        state.saving ||
-        !canEnterChannelCredentials() ||
-        state.outcomeUnknown ||
-        missing.length > 0 ||
-        (changedSecrets.length === 0 && pendingSecrets.length === 0);
+      save.disabled = !canSaveChannelSecrets();
     };
     const form = element(
       "form",
-      { id: formId, className: "credential-form" },
-      ...SLACK_SECRET_BINDINGS.map((binding) => createTokenPicker(binding)),
+      { id: formId, className: "credential-form", novalidate: "" },
+      namedSlackAccountKeys(state.values) === null
+        ? null
+        : element(
+            "p",
+            { className: "hint" },
+            "Named Slack accounts use their own token keys. Bind them through the Configuration API.",
+          ),
+      ...channelSecretBindings(state.values).map((binding) => createTokenPicker(binding)),
       status,
       element("div", { className: "form-actions" }, save),
     );
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (state.saving || !canEnterChannelCredentials() || state.outcomeUnknown) {
+      if (!canEnterChannelCredentials()) {
         return;
       }
-      if (!form.reportValidity()) {
+      // The console's own errors under each field, not the browser's bubble (UX plan C3).
+      if (!validateFields([...form.elements])) {
         return;
       }
-      const missing = SLACK_SECRET_BINDINGS.filter(
-        (binding) =>
-          slackBindingState({ secretBindings: draft.secretBindings }, binding) === "missing",
-      );
-      const changedSecrets = Object.values(draft.changedSecrets);
-      const pendingSecrets = pendingSecretGrants();
-      if (missing.length > 0 || (changedSecrets.length === 0 && pendingSecrets.length === 0)) {
+      if (!canSaveChannelSecrets()) {
         return;
       }
       state.saving = true;
       state.saveError = null;
-      state.saveErrorBeforeWrite = false;
+      state.saveErrorStep = null;
       state.saveMessage = "";
+      state.carriedNote = "";
       state.saveGrantWarning = "";
       status.textContent = "Saving channel Secret bindings...";
       error.textContent = "";
@@ -372,6 +533,16 @@ export function createChannelSecretsPanel({
       onChange();
       let mutationStarted = false;
       let configurationSaved = false;
+      // A conflict keeps these choices for Reload draft instead of dropping them (finding 1512).
+      const carryChoices = () => {
+        state.reloadRequired = true;
+        state.draftSeed = structuredClone(draft);
+        state.carried = {
+          configurationId: state.configuration.id,
+          initialSecretBindings: structuredClone(state.configuration.secretBindings ?? {}),
+          ...structuredClone(draft),
+        };
+      };
       try {
         const configurationPath = `${namespacePath(context.namespaceId)}/configurations/${encodeURIComponent(state.configuration.id)}`;
         const [freshAgent, freshConfiguration] = await Promise.all([
@@ -387,10 +558,10 @@ export function createChannelSecretsPanel({
           freshConfiguration.id !== state.configuration.id ||
           freshConfiguration.generation !== state.configuration.generation
         ) {
-          state.reloadRequired = true;
+          carryChoices();
           return;
         }
-        // The preflight cannot prevent a concurrent write before this PATCH.
+        // A write from another browser after the preflight is refused with 409 (finding 1505).
         mutationStarted = true;
         state.configuration = await context.request(
           `${namespacePath(context.namespaceId)}/configurations/${encodeURIComponent(
@@ -398,15 +569,21 @@ export function createChannelSecretsPanel({
           )}`,
           {
             method: "PATCH",
-            body: { values: state.values, secretBindings: draft.secretBindings },
+            body: {
+              values: state.values,
+              secretBindings: draft.secretBindings,
+              expectedGeneration: state.configuration.generation,
+            },
           },
         );
         configurationSaved = true;
+        state.draftSeed = null;
+        state.carriedNote = "";
         state.values = state.configuration.values;
         onConfigurationChange?.(state.configuration);
         const grantTargets = secretGrantTargets(draft.secretBindings, draft.changedSecrets);
         for (const secret of grantTargets) {
-          await ensureSecretOperateBinding(context, state.agent, secret);
+          await ensureCredentialOperateBinding(context, state.agent, secret);
           markSecretGrantConfirmed(secret);
         }
         if (!context.isCurrent()) {
@@ -425,13 +602,34 @@ export function createChannelSecretsPanel({
           context.onExpired();
           return;
         }
+        if (isStaleGeneration(cause) && mutationStarted && !configurationSaved) {
+          carryChoices();
+          return;
+        }
+        if (
+          mutationStarted &&
+          !configurationSaved &&
+          cause.status === 409 &&
+          cause.code === "RESOURCE_CONFLICT"
+        ) {
+          // The write was refused. Keep the choices in this form, without requesting a reload.
+          state.draftSeed = draft;
+        }
+        if (mutationStarted && !configurationSaved) {
+          refusedSave(cause, "configuration", true);
+        }
         state.saveError = cause;
-        state.saveErrorBeforeWrite = !mutationStarted;
+        state.saveErrorStep = configurationSaved
+          ? "grant"
+          : mutationStarted
+            ? "configuration"
+            : "preflight";
         state.saveMessage = "";
         state.outcomeUnknown =
           mutationStarted && !configurationSaved && !isDefinitiveRejection(cause);
         updateGrantWarning(state.configuration.secretBindings);
         status.textContent = "";
+        setStatusTone(error, saveErrorTone());
         error.textContent = saveErrorText();
       } finally {
         if (context.isCurrent()) {
@@ -439,6 +637,9 @@ export function createChannelSecretsPanel({
           updateControls();
           render();
           onChange();
+          // The rebuilt section replaced the pressed button: focus the next step, described
+          // by the outcome, or the outcome itself (finding 1481).
+          focusSaveOutcome(section, [shown.reload, shown.save], shown.outcome);
         }
       }
     });
@@ -454,10 +655,13 @@ export function createChannelSecretsPanel({
         "Credential entry requires readable version history.",
       );
     }
-    if (slackEnabled(state.values) && servicePrincipalId(state.agent) === null) {
+    if (
+      (slackEnabled(state.values) || teamsEnabled(state.values)) &&
+      servicePrincipalId(state.agent) === null
+    ) {
       return element(
         "p",
-        { className: "error", role: "alert" },
+        { className: "status", "data-tone": "danger", role: "alert" },
         "The API did not return this Agent's service principal, so the console cannot bind Secrets.",
       );
     }
@@ -467,50 +671,65 @@ export function createChannelSecretsPanel({
   function render() {
     const error = element(
       "p",
-      { className: "error", role: "alert" },
+      { className: "status", "data-tone": saveErrorTone(), role: "alert" },
       state.saveError ? saveErrorText() : state.saveGrantWarning,
     );
+    const reloadMessage = state.reloadRequired
+      ? element(
+          "p",
+          { className: "status", "data-tone": "danger", role: "alert" },
+          "Configuration changed. Reload this draft before saving channel Secrets.",
+        )
+      : null;
+    // An unknown outcome always comes with its save error, which the error line above shows as a
+    // danger alert ("Outcome unknown…"); the deploy gate names it too (finding 2014).
+    const reload =
+      state.outcomeUnknown || state.reloadRequired
+        ? button("Reload draft", (event) => {
+            // The page rebuilds this section from the reread draft, with the Secret choices a
+            // save conflict kept applied over it.
+            event.currentTarget.disabled = true;
+            void onReload(state.reloadRequired && !state.outcomeUnknown ? state.carried : null);
+          })
+        : null;
+    shown.save = null;
+    shown.status = null;
+    const form = renderChannelForm(error);
+    shown.reload = reload;
+    shown.outcome = state.saveError
+      ? error
+      : (reloadMessage ?? (shown.status?.textContent ? shown.status : null));
+    if (!slackEnabled(state.values) && state.carriedNote) {
+      // Shown only to say carried Secret choices were not reapplied (finding 1525).
+      section.replaceChildren(
+        element("h2", {}, "Channel Secrets"),
+        element("p", { className: "hint", role: "status" }, state.carriedNote),
+      );
+      return;
+    }
     section.replaceChildren(
       ...[
         element("h2", {}, "Channel Secrets"),
         element(
           "p",
           { className: "muted" },
-          "Save Slack tokens as Secrets, then deploy a new version to apply them. Saved bindings do not confirm live channel readiness.",
+          "Save channel credentials as Secrets, then deploy a new version to apply them. Saved bindings do not confirm live channel readiness.",
         ),
-        renderSlackBindings(state),
+        renderChannelBindings(state),
         error,
-        state.reloadRequired
-          ? element(
-              "p",
-              { className: "error", role: "status" },
-              "Configuration changed. Reload this draft before saving channel Secrets.",
-            )
-          : null,
-        state.outcomeUnknown && (!state.saveError || isDefinitiveRejection(state.saveError))
-          ? element(
-              "p",
-              { className: "error", role: "status" },
-              "Credential changes may have been saved. Reload this draft and inspect the saved state before deploying.",
-            )
-          : null,
-        state.outcomeUnknown || state.reloadRequired
-          ? element(
-              "div",
-              { className: "form-actions credential-actions" },
-              button("Reload draft", onReload),
-            )
-          : null,
+        reloadMessage,
+        reload ? element("div", { className: "form-actions credential-actions" }, reload) : null,
         renderUnavailableReason(),
-        renderChannelForm(error),
+        form,
       ].filter(Boolean),
     );
   }
 
   render();
   return {
-    section: slackEnabled(values) ? section : null,
+    section: slackEnabled(values) || teamsEnabled(values) || state.carriedNote ? section : null,
     canDeploy,
+    credentialsReady,
     deployGateMessage,
     isSaving: () => state.saving,
     mutationPending: () => state.saving || state.outcomeUnknown || state.reloadRequired,

@@ -73,6 +73,39 @@ within `values`, never the value. Unresolved references remain valid
 Configuration data; deployment separately rejects model credential selectors
 that compete with the Agent's binding.
 
+Writes and deployment also require a `${NAME}` reference or a SecretRef in the
+other key and credential header slots the Gateway sends: MCP server `headers`
+(also under `nodeHost`), `memory.search.remote.apiKey` and `.headers` (also
+under `agents.entries.<id>`), every `tools.media` request (`models[]` and each
+capability's defaults: `headers`, `request.headers`, `request.auth`, the TLS
+client keys and credential-named `providerOptions`, also in the per-capability
+`models` lists older releases read), speech (`tts`, personas, per-Agent and
+voice blocks) and Talk provider `apiKey`s, `tools.web.fetch.headers`,
+`diagnostics.otel.headers`, `gateway.remote.edgeAuth`,
+`skills.entries.<id>.apiKey` and `cron.webhookToken`. Headers follow the model
+provider's credential name rule, and a name that is not an HTTP field name is
+refused.
+
+The other slots OpenClaw marks sensitive need one too (`${NAME}` works in every
+slot, a SecretRef where OpenClaw takes one):
+`gateway.auth.token`, `gateway.remote.token` and `.password`,
+`gateway.controlUi.github.token`, `hooks.token`, `hooks.gmail.pushToken`, sandbox
+SSH `identityData`, `certificateData` and `knownHostsData` (under
+`agents.defaults` and `agents.entries.<id>`), and
+`storage.locations.<name>.encryption.passphrase`. Under `channels.<id>` and
+`plugins.entries.<id>.config`, a string whose key OpenClaw treats as secret needs
+one: a key ending in `token`, or naming a password, secret, API key, encryption
+or private key, or service account, such as `botToken` or `webSearch.apiKey`. A
+key naming where a credential is read from (ending in `File`, `Path`, `Dir` or
+`Env`) is not secret. Fields bundled manifests mark sensitive count too
+(`telnyx.publicKey`, Synology Chat `incomingUrl` and `webhookUrl`), and a
+`headers` map there follows the header rule. Environment maps keep their own
+rules, and a hook mapping's `sessionKey`, a routing key, stays as written. A
+literal `gateway.auth.password` is refused on Configuration and Preset saves.
+
+A stored document that predates one of these rules still reads, so its
+operator can replace it.
+
 OpenClaw owns SecretRef syntax, provider configuration, and validation. OCC,
 ConfigurationDriver, and Kubernetes Compute preserve native `env`, `file`, and
 `exec` SecretRefs as unresolved JSON. The selected SecretDriver only stores OCC
@@ -88,8 +121,8 @@ unimplemented.
 Configure channels directly in the Agent's complete native OpenClaw
 Configuration. Slack is the channel with live Enterprise integration coverage.
 The Kubernetes Compute Driver recognizes enabled `slack` and `msteams`
-configuration shapes; unknown enabled providers fail closed. Teams requires
-operator-provided ingress and remains unverified end to end.
+configuration shapes; unknown enabled providers fail closed. Teams uses a Compute-owned callback route when the operator enables its
+separate public listener; live Teams delivery remains unverified end to end.
 `channels.defaults` and `channels.modelByChannel` are shared settings, not
 providers. The recognized native channel configurations consume these
 gateway-only credential values:
@@ -208,7 +241,8 @@ dedicated gateway receives these admitted bindings; generated runtime
 credentials contain no channel tokens. See
 [Kubernetes credential ownership](../drivers/kubernetes-compute/storage-and-credentials.md#runtime-credentials).
 
-Teams message ingress requires a separately deployed and reviewed public Bot
-Framework `/api/messages` webhook. Enterprise does not provide that webhook;
-end-to-end Teams behavior remains unverified. See [Slack testing](../../testing/slack.md)
-for channel integration coverage.
+Teams message ingress uses the separate **channels** listener and an exact
+Agent-specific POST route to the native `/api/messages` handler. Its SDK validates
+Microsoft bearer tokens. Configure the public origin, certificate, and provider
+proxy before deployment; see [Teams setup](../../guides/integrations/teams.md)
+and [verification limits](../../testing/teams.md).

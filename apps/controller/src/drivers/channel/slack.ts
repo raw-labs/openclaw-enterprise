@@ -4,20 +4,14 @@ import type {
   ChannelDriver,
 } from "@openclaw-enterprise/contracts";
 import { ChannelCredentialError, ChannelDirectoryError } from "@openclaw-enterprise/occ";
-import { asRecord } from "@openclaw-enterprise/utils";
-import { isIP } from "node:net";
-import { fetch as undiciFetch, ProxyAgent } from "undici";
+import { asRecord, readCappedBody } from "@openclaw-enterprise/utils";
+import { channelRequest, type ChannelRequest } from "./transport.ts";
 
 const SLACK_API = "https://slack.com/api/";
 const PAGE_SIZE = 100;
 const SEARCH_PAGES = 3;
 const REQUEST_TIMEOUT_MS = 8_000;
 const INFO_BATCH_SIZE = 5;
-const PROXY_ENDPOINT =
-  /^https?:\/\/((?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}):([1-9][0-9]{0,4})$/;
-const MANAGED_SERVICE_PROXY_ENDPOINT =
-  /^https?:\/\/([a-z]([-a-z0-9]*[a-z0-9])?\.[a-z0-9]([-a-z0-9]*[a-z0-9])?\.svc):([1-9][0-9]{0,4})$/;
-
 type SlackRecord = Record<string, unknown>;
 
 function configuredValue(value: unknown): boolean {
@@ -74,35 +68,14 @@ export class SlackChannelDriver implements ChannelDriver {
   readonly capability = "channel" as const;
   readonly id = "slack-channel";
   readonly implementation = "occ/slack-channel";
-  private readonly request: typeof fetch;
-  private readonly proxy?: ProxyAgent;
+  private readonly request: ChannelRequest;
 
   constructor(
-    request: typeof fetch = globalThis.fetch,
+    request: ChannelRequest = globalThis.fetch,
     proxyUrl?: string,
     options: { readonly managedProxyHosts?: readonly string[] } = {},
   ) {
-    this.request = request;
-    if (proxyUrl !== undefined) {
-      const endpoint = PROXY_ENDPOINT.exec(proxyUrl);
-      const managedEndpoint = MANAGED_SERVICE_PROXY_ENDPOINT.exec(proxyUrl);
-      const address = endpoint?.[1];
-      const managedHost = managedEndpoint?.[1];
-      const managedService =
-        managedHost !== undefined && (options.managedProxyHosts ?? []).includes(managedHost);
-      const port = endpoint?.[2] ?? managedEndpoint?.[4];
-      if (port === undefined || Number(port) > 65535) {
-        throw new Error(
-          "Slack directory proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
-        );
-      }
-      if (!managedService && (address === undefined || isIP(address) !== 4)) {
-        throw new Error(
-          "Slack directory proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
-        );
-      }
-      this.proxy = new ProxyAgent(proxyUrl);
-    }
+    this.request = channelRequest(request, proxyUrl, options);
   }
 
   async validateCredentials(
@@ -161,7 +134,12 @@ export class SlackChannelDriver implements ChannelDriver {
             if (typeof identity.bot_id !== "string" || !/^B[A-Z0-9]+$/.test(identity.bot_id)) {
               throw new ChannelCredentialError("credentials_rejected", field);
             }
-            if (typeof identity.team_id !== "string" || !/^T[A-Z0-9]+$/.test(identity.team_id)) {
+            const validIdentity =
+              identity.is_enterprise_install === true
+                ? typeof identity.enterprise_id === "string" &&
+                  /^E[A-Z0-9]+$/.test(identity.enterprise_id)
+                : typeof identity.team_id === "string" && /^T[A-Z0-9]+$/.test(identity.team_id);
+            if (!validIdentity) {
               throw new ChannelCredentialError("unavailable", field);
             }
           } catch (error) {
@@ -191,23 +169,19 @@ export class SlackChannelDriver implements ChannelDriver {
     if (method !== "auth.test") {
       url.search = parameters.toString();
     }
-    let response: Pick<Response, "status" | "ok" | "text"> & {
-      readonly body: { cancel(): Promise<void> } | null;
-    };
+    let response: Awaited<ReturnType<ChannelRequest>>;
     try {
       const options = {
         method: method === "auth.test" ? "POST" : "GET",
         headers: { authorization: `Bearer ${token}` },
+        // Never send the bot token to a redirect target, even on slack.com (finding 1349).
+        redirect: "error" as const,
         signal:
           signal === undefined
             ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
             : AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
       };
-      // Node's built-in fetch does not use an external Undici dispatcher.
-      response =
-        this.proxy === undefined
-          ? await this.request(url, options)
-          : await undiciFetch(url, { ...options, dispatcher: this.proxy });
+      response = await this.request(url, options);
     } catch {
       throw new ChannelDirectoryError("unavailable");
     }
@@ -217,8 +191,14 @@ export class SlackChannelDriver implements ChannelDriver {
     }
     let body: SlackRecord | undefined;
     try {
-      const content = await response.text();
-      body = content.length <= 2_000_000 ? asRecord(JSON.parse(content)) : undefined;
+      // Each UTF-16 unit decodes from at most three UTF-8 bytes, so a body over 8,000,000
+      // bytes is always over the 2,000,000-character limit: stop reading there.
+      const bytes = await readCappedBody(response.body, 8_000_000);
+      const content = bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+      body =
+        content !== undefined && content.length <= 2_000_000
+          ? asRecord(JSON.parse(content))
+          : undefined;
     } catch {
       throw new ChannelDirectoryError("invalid_response");
     }

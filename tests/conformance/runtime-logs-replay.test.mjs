@@ -1,3 +1,4 @@
+import { openShellLogDecision } from "../../apps/controller/src/drivers/sandbox/openshell-log-decisions.ts";
 import assert from "node:assert/strict";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
@@ -85,7 +86,7 @@ async function replay(entry) {
     const chunk = JSON.parse(text);
     const { records, withheld } = sanitizeSandboxLogLines(
       { source: "sandbox", sandbox: chunk.sandbox },
-      chunk.lines,
+      chunk.lines.map(openShellLogDecision),
     );
     return { input: chunk.lines.length, withheld, records };
   }
@@ -122,6 +123,22 @@ async function replay(entry) {
 function serialize(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
+
+test("runtime descriptions reject invalid Driver timestamps instead of normalizing them", () => {
+  assert.throws(
+    () =>
+      validRuntimeDescription(
+        {
+          revisionId: "rev_fixture",
+          observedAt: "2026-02-30",
+          pods: [],
+          sources: [],
+        },
+        "rev_fixture",
+      ),
+    { name: "InvalidRuntimeDescriptionError" },
+  );
+});
 
 test("the replay manifest lists every fixture on disk and nothing else", async () => {
   const { count, fixtures } = await manifest();

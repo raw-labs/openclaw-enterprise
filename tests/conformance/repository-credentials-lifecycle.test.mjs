@@ -12,7 +12,6 @@ import {
   fixtureRepository,
   fixtureRepositoryId,
 } from "../fixtures/repository-credentials/github.mjs";
-import { temporaryDirectory } from "../fixtures/repository-credentials/process.mjs";
 import { createTestResourceScope } from "../fixtures/repository-credentials/resources.mjs";
 import {
   requestHead,
@@ -21,6 +20,7 @@ import {
 } from "../fixtures/repository-credentials/builders.mjs";
 import { createGitHubServiceFactory } from "../fixtures/repository-credentials/service-resources.mjs";
 import { eventually } from "../fixtures/repository-credentials/service.mjs";
+import { socketDirectory } from "../helpers/socket-directory.mjs";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -413,7 +413,7 @@ for (const [profile, permissions] of [
     const providerClock = createControlledClock(
       clock.wallNow() + (profile === "git-read" ? -5000 : 5000),
     );
-    const directory = await temporaryDirectory(resources, "rcs-lifecycle-");
+    const directory = await socketDirectory(resources, "rcs-lifecycle-");
     const config = validateServiceConfig(
       serviceConfigurationData({
         limits: profile === "git-full" ? { exchangeMs: 1000, credentialMarginMs: 1 } : {},
@@ -663,7 +663,7 @@ test("expiry-only acquisitions refused after capture free their slot for the nex
     const pending = lifecycle.acquire(1000, waiter.signal);
     await tick();
     waiter.abort();
-    await assert.rejects(pending);
+    await assert.rejects(pending, { message: "CANCELLED" });
     release();
     await tick();
     await tick();
