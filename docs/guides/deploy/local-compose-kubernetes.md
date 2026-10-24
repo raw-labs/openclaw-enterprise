@@ -140,14 +140,21 @@ For repositories, use the [standalone credential service](../repository-credenti
 
 Kubernetes consumers still require the [exact repository-service peer](../../reference/drivers/kubernetes-compute/networking-and-isolation.md#networking). Expose the Compose broker through a namespace-scoped Service and a TCP relay Pod in `oce-system`. The relay forwards encrypted bytes to the exact broker container IP and port; it receives no keys or bearer material. Use the Service DNS name in the broker certificate and `publicOrigin`. Apply default-deny policies, permit only the selected Agent namespaces to the relay port, and permit the relay only to the broker's `/32` and HTTPS port. Configure `network.repositoryCredentials` with that exact namespace and relay Pod selector. Register the repository Backend and Agent binding through the [normal repository workflow](../repository-credentials.md#create-and-deploy-an-agent).
 
-For Slack, run the bundled `apps/controller/src/slack-proxy.mjs` in a private container on the same owned Docker network, with no host-published port. Set both `runtime.channels.proxyUrl` in the Installation and `OCC_CHANNEL_DIRECTORY_PROXY_URL` on the Compose API to its exact literal IPv4 endpoint. Restart `controller` and `worker-kubernetes`, then deploy the Slack Agent. Follow [both proxy checks](../integrations/slack.md#configure-both-slack-proxies). Embedded OpenClaw does not support external channel credentials in this topology; use dedicated Codex for this supported Slack path.
+For Slack, enable Compute's `runtime.gatewayOutbound` with its approved controller
+image and actual infrastructure exclusions. Compute creates the Gateway route at
+deployment. Run the generic control-plane proxy in a private container on the owned
+Compose network, with no host-published port; configure its restricted exclusions
+and point `OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL` at that container's exact IPv4
+endpoint. Restart API and worker after changing Installation configuration. Follow
+[Slack setup](../integrations/slack.md#configure-both-slack-proxies) for its two
+consumers. Embedded channel credentials remain unsupported.
 
 ## Verify and recover
 
 The development console remains at its loopback HTTP URL. This profile does not provide the Kubernetes-only shared-session native-admin browser domain. For native access, use the [optional loopback gateway password](production-tui.md) and a local forward to the exact Agent gateway. A browser needs a trusted local HTTPS endpoint, its exact origin in `gateway.controlUi.allowedOrigins`, and that gateway password. Use a local TLS relay and import only its public CA; do not disable browser certificate verification. In the native connection screen, **Change** opens the credential field, then **Connect** authenticates the optional password.
 
-Clone repositories under the Agent's persistent workspace, not `/tmp`: the runtime's temporary volume is bounded to 64 MiB and exceeding it evicts the Pod. A shallow clone avoids downloading unnecessary history.
+Clone repositories under the Agent's persistent workspace, not `/tmp`: the runtime's temporary volume has a 64 MiB size limit and exceeding it evicts the Pod. A shallow clone avoids downloading unnecessary history.
 
-If a model/tool workload is `OOMKilled`, raise the Installation's Gateway or Harness memory limit (`resources.gateway` or `resources.agent`) and deploy a new revision; the 3 GiB and 6 GiB defaults are not a guarantee for repository workloads. Preserve the failed revision and actual error. If a persisted owner lease prevents restart after eviction, verify the previous owner has stopped and allow its lease to expire before retrying. The pinned runtime uses a five-minute lease; kubelet restart backoff can add delay. Do not delete lease records to force a pass.
+If a model/tool workload is `OOMKilled`, raise the Installation's Gateway or Harness memory limit (`resources.gateway` or `resources.agent`) and deploy a new version; the 3 GiB and 6 GiB defaults are not a guarantee for repository workloads. Preserve the failed version and actual error. If a persisted owner lease prevents restart after eviction, verify the previous owner has stopped and allow its lease to expire before retrying. The pinned runtime uses a five-minute lease; kubelet restart backoff can add delay. Do not delete lease records to force a pass.
 
 Before cleanup, stop repository-bound Agents and confirm their broker sessions are disposed. Keep the broker and state if any credential cleanup is pending or uncertain. See [local repository cleanup](local-repository-credentials.md). Then use the original profile's `dev down`; remove only additional services and public CA trust entries created for this installation.

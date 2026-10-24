@@ -1,19 +1,19 @@
 # Compute admission checks
 
 A [ComputeDriver](compute.md) can implement side-effect-free checks that let OCC
-refuse a request before it stores a Configuration or Agent, admits a revision,
+refuse a request before it stores a Configuration or Agent, creates an Agent revision,
 or stops a running one. The checks read only their arguments and the Driver's
 trusted Installation settings, never the backend.
 
 ## When OCC calls each check
 
-| Method                                                                            | Called at                                                                                                                                                                     | Refusal                                                                                                                                                              |
-| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `validateConfiguration(configuration, options?)`                                  | Configuration create and update, Agent provisioning, and Preset create and update (rendered with defaults; `options.unresolved` marks unfilled variables)                     | `ConfigurationHarnessError` answers `400` with its message. Use it for rules every topology applies; `validateHarnessAuth` applies them again at deployment.         |
-| `validateHarnessAuth(harness, auth, configuration, secretBindings?, sourceType?)` | Deployment and provisioning, which require it; Agent create and update, with `null` bindings, when the binding is `runtime` or a Secret and the Configuration selects a model | `ConfigurationHarnessError` answers `400` with its message; any other error becomes a fixed `409`. A missing method at deployment is a dependency-unavailable error. |
-| `validateGatewaySettings(configuration)`                                          | Deployment, after `validateHarnessAuth`                                                                                                                                       | `ComputeGatewaySettingError` answers `409` with its message. Leave other refusals to preparation.                                                                    |
-| `validateWorkspaceSetup(harness, configuration, sandboxDriverId?)`                | Agent create with initial workspace files, Agent update and deployment while that setup is pending, and provisioning with initial workspace files                             | `ConfigurationHarnessError` answers `400`; any other error becomes a fixed `409`. Preparation of the first deployment applies the same rule.                         |
-| `validateRepositoryCredentials(harness, sandboxDriverId?)`                        | Deployment with repository bindings, which requires it, Agent create and update, and the provisioning request, with repository bindings                                       | Any error becomes a fixed `409`.                                                                                                                                     |
+| Method                                                                            | Called at                                                                                                                                                                                    | Refusal                                                                                                                                                              |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validateConfiguration(configuration, options?)`                                  | Configuration create and update, Agent provisioning, and Preset create and update (rendered with defaults; `options.unresolved` marks unfilled variables)                                    | `ConfigurationHarnessError` answers `400` with its message. Use it for rules every topology applies; `validateHarnessAuth` applies them again at deployment.         |
+| `validateHarnessAuth(harness, auth, configuration, secretBindings?, sourceType?)` | Deployment and provisioning, which require it; Agent create and update, with `null` bindings, when the binding is `runtime` or a Secret and the Configuration selects a model                | `ConfigurationHarnessError` answers `400` with its message; any other error becomes a fixed `409`. A missing method at deployment is a dependency-unavailable error. |
+| `validateGatewaySettings(configuration)`                                          | Deployment, after `validateHarnessAuth`                                                                                                                                                      | `ComputeGatewaySettingError` answers `409` with its message. Leave other refusals to preparation.                                                                    |
+| `validateWorkspaceSetup(harness, configuration, sandboxDriverId?)`                | Agent create with initial workspace files, Agent update while that setup is pending, deployment of an Agent with a pending or completed setup, and provisioning with initial workspace files | `ConfigurationHarnessError` answers `400`; any other error becomes a fixed `409`. Preparation applies the same rule.                                                 |
+| `validateRepositoryCredentials(harness, sandboxDriverId?)`                        | Deployment with repository bindings, which requires it, Agent create and update, and the provisioning request, with repository bindings                                                      | Any error becomes a fixed `409`.                                                                                                                                     |
 
 A message names the setting and what the Driver accepts, never a submitted
 value, in at most 256 characters. Agent provisioning also calls
@@ -93,9 +93,10 @@ and refuses a `request.proxy.url` or model `baseUrl` with a user name or
 password.
 On Kubernetes a reference does not admit a credential header or a non-default
 `request.auth`: model credentials come only from the Agent's Harness
-authentication binding. Deployment runs `validateConfiguration` on the stored
-values before the Configuration Driver validates them, so a stored
-Configuration that predates a rule gets its save message.
+authentication binding. Deployment runs OCC's model provider settings rules
+(`baseUrl`, `api`, the `models` list, header names), then `validateConfiguration`,
+on the stored values before the Configuration Driver validates them, so a stored Configuration that predates a
+rule gets its save message.
 A credential under a header name the rule does not match, in
 `localService.env`, or as a literal in another `env` name that a reference
 reads, still passes: the binding cannot see what a name means.
@@ -109,7 +110,8 @@ dedicated OpenClaw model catalog settings. Whether the Installation supplies
 what a method needs (OAuth needs no Sandbox Driver; a credential source needs
 its paired Sandbox) stays a fixed `409`.
 The channel runtime rule stays at deployment: it depends on the execution mode
-and the Installation's `runtime.channels`.
+and the Installation's enabled `runtime.gatewayOutbound`. Additional Agent access
+is independently approved and frozen through [Gateway outbound](../gateway-outbound.md).
 
 [SSH Compute](ssh-compute.md) runs only embedded OpenClaw (other topologies get
 a fixed `409`) and names `harnessAuth.method` for any method but `runtime`,
@@ -119,15 +121,23 @@ through the same
 `validateWorkspaceSetup` needs an `agents.entries` roster of `main` alone, in
 any letter case (or none), and the managed workspace path (or
 `/home/node/workspace` on a dedicated Harness); preparation also needs runtime
-storage, an Installation setting. Kubernetes Compute first refuses any Harness
-in a Sandbox, with a `409` naming the Sandbox: its Sandbox carries no workspace
-initializer, and OpenShell moves the OpenClaw workspace to its mount.
+storage, an Installation setting. For a provisioning Sandbox, Compute approves only the managed workspace path
+returned by its selected `configureAgent` transform. It initializes the approved
+Harness PVC in a restricted private bootstrap Deployment, verifies completion,
+and removes all writer Pods before Sandbox handoff. The Harness checks the
+completion marker at its effective path, including OpenShell relocation. Other
+workspace paths fail; Sandbox repository bindings remain unsupported.
 [Docker Compute](../../../apps/controller/src/drivers/compute/docker/index.ts)
 applies the same
 [shared rule](../../../apps/controller/src/drivers/compute/workspace-setup-runtime.ts),
 with the same messages, at Agent save and in preparation. It accepts both paths on
 either topology, since one volume backs both, and also refuses `skipBootstrap`
 and `skipOptionalBootstrapFiles` on `agents.defaults` or `main`.
+SSH Compute applies the shared roster rule, with its message, at Agent save and
+when deploying an Agent with a setup, pending or completed. With initial
+workspace files it also refuses any `workspace` on `agents.defaults` or `main`
+there: the host always uses a workspace it derives under the Agent's own
+directory, and checks that path again at deployment.
 
 ## Related
 

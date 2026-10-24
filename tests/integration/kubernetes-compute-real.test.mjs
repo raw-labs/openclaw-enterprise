@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import test, { after } from "node:test";
+import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
 import { WORKSPACE_DEFAULTS_ID } from "../../packages/contracts/src/index.ts";
@@ -34,11 +34,8 @@ import {
   workloadPod,
   assertExecDenied,
   createDnsTrafficFixture,
-  createNamespaceReaper,
+  deleteNamespaces,
 } from "../helpers/kubernetes-compute-real.mjs";
-
-const { deleteNamespaces, waitForDeletedVolumes } = createNamespaceReaper();
-after(waitForDeletedVolumes);
 
 test(
   "authenticated PostgreSQL OCC API and worker deploy real Agent-owned gateways, Secret bindings, and revisions",
@@ -126,7 +123,6 @@ test(
                 "kubernetes.io/hostname": JSON.parse(await kubectl("get", "nodes", "-o", "json"))
                   .items[0].metadata.name,
               },
-              channels: { secretPrefix: "channel", proxyUrl: "http://10.42.0.15:3128" },
             },
           },
     );
@@ -542,7 +538,7 @@ test(
           `${label} before channel Secret bindings: ${JSON.stringify(missingBindings.error)}`,
         );
         assert.equal(missingBindings.error.code, "CHANNEL_CREDENTIAL_BINDING_REQUIRED");
-        // This k3d fixture has no runtime.channels proxy and uses the fixture image,
+        // Successful fixture deployments disable Slack and use the fixture image,
         // so successful deployment proves generic API/IAM/admission/gateway Secret
         // projection. Real Slack channel runtime proof belongs to the real-runtime suite.
         const updated = await request(

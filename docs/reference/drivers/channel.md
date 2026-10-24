@@ -5,7 +5,7 @@
 `ChannelDriver` validates configured credentials and looks up provider identities for an authorized Namespace edit.
 OpenClaw Control Plane (OCC) owns caller authorization, Secret access, and the
 saved Agent or Configuration. The Driver owns the provider request and returns
-bounded display candidates with stable provider IDs. It does not send messages
+display candidates with stable provider IDs. It does not send messages
 or grant channel access. The current controller selects the bundled Slack
 implementation for directory lookup; see [Driver selection](selection.md).
 
@@ -23,6 +23,14 @@ channel credentials before API provisioning or deployment. `withSecret(binding,
 path, validate)` authorizes the exact same-Namespace Secret and supplies its value
 only inside the SecretDriver callback. Provider calls run before the write
 transaction. Validation does not pin Secret versions or revalidate queued work.
+
+Optional `gatewayNetworkRequirements(configuration)` declares required native
+channel destinations from enabled saved settings. `controlPlaneNetworkRequirements()`
+declares independent management destinations before an Agent exists. Both return
+trusted host/subdomain declarations; they neither hold credentials nor approve
+additional Agent access. Worker provisioning receives only the pure Gateway
+declaration; API credential validation remains outside its admission transaction.
+See [Gateway outbound](../gateway-outbound.md).
 
 ## IAM
 
