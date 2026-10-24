@@ -1,16 +1,25 @@
+import { GitHubNativeRepositorySender } from "../../apps/controller/src/drivers/repo/github/driver.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createControlledClock } from "../fixtures/repository-credentials/clock.mjs";
 import test, { after } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { requiresPostgres } from "../helpers/postgres-backend-state.mjs";
+import {
+  ComputePreparationFailedError,
+  SandboxGatewayUnauthorizedError,
+} from "../../packages/occ/src/index.ts";
+import {
+  backendDefinition,
+  backendId,
+  requiresPostgres,
+} from "../helpers/postgres-backend-state.mjs";
 import { waitFor } from "../helpers/wait-for.mjs";
 import { createWorkerRevisionFixtures } from "../helpers/postgres-worker-revision-fixture.mjs";
 import { repositoryAttempts } from "../helpers/postgres-worker-revision-support.mjs";
+import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 
 // Worker health, readiness, leases and outages. Deployment and dispatch cases are in
 // postgres-worker-agent-revision.test.mjs, credential-source withdrawals in its
@@ -22,6 +31,511 @@ import { repositoryAttempts } from "../helpers/postgres-worker-revision-support.
 
 const { setup, cleanup } = createWorkerRevisionFixtures(import.meta.url);
 after(cleanup);
+
+const outboundAdmission = {
+  selection: { mode: "publicHttps" },
+  requirements: [],
+  denyCidrs: ["10.42.0.0/16"],
+};
+const withdrawalPending = "REVISION_ACCESS_WITHDRAWAL_PENDING";
+
+function withReplacementSecretDriver(drivers) {
+  return {
+    ...drivers,
+    installation: {
+      ...drivers.installation,
+      drivers: {
+        ...drivers.installation.drivers,
+        secret: { ...drivers.installation.drivers.secret, id: "secret-replacement" },
+      },
+    },
+    secretDriver: { ...drivers.secretDriver, id: "secret-replacement" },
+  };
+}
+
+for (const [cause, access] of [
+  ["authorization", "Gateway outbound"],
+  ["backend", "Gateway outbound"],
+  ["deadline", "Gateway outbound"],
+  ["authorization", "Compute-admitted"],
+  ["configuration", "Compute-admitted"],
+  ["secret-driver", "Gateway outbound"],
+  ["sandbox-permission", "Gateway outbound"],
+]) {
+  test(
+    `active ${access} withdrawal survives ${cause} refusal, restored authority and worker restart`,
+    { ...requiresPostgres, timeout: 60_000 },
+    async (context) => {
+      const fixture = await setup(context, { maxAttempts: 1 });
+      const owner = await fixture.agent(`outbound-${cause}`, {
+        executionMode: "dedicated",
+        ...(cause === "backend" ? { backendId } : {}),
+      });
+      // A Driver-owned admission can require withdrawal without a Gateway snapshot.
+      // The worker must persist and replay that obligation through the same contract.
+      const candidate = await fixture.revision(
+        owner,
+        1,
+        access === "Gateway outbound"
+          ? { gatewayOutbound: outboundAdmission }
+          : { computeAdmission: "revision-access:v1" },
+      );
+      let prepared = 0;
+      let withdrawn = 0;
+      let removalAvailable = false;
+      let accessCurrent = true;
+      let activationUnavailable = cause === "deadline";
+      let sandboxPermissionRefused = false;
+      const decisionsAtRemoval = [];
+      // This boundary Driver fails removal while the real worker, IAM and PostgreSQL
+      // decide its durable phase. The concrete Pod/tunnel failure is covered by k3d.
+      const compute = {
+        ...fixture.compute,
+        maintenanceIntervalMs: 60_000,
+        revisionAccessStatus: (revision) => {
+          if (revision.gatewayOutbound === undefined && revision.compute.admission === undefined) {
+            return "none";
+          }
+          return accessCurrent ? "current" : "withdrawn";
+        },
+        async prepareRevision(revision) {
+          prepared += 1;
+          if (sandboxPermissionRefused) {
+            throw new SandboxGatewayUnauthorizedError("The Sandbox gateway refused its identity.");
+          }
+          return fixture.compute.prepareRevision(revision);
+        },
+        async activateRevision() {
+          if (activationUnavailable) {
+            throw new Error("Runtime activation temporarily unavailable");
+          }
+        },
+        async withdrawRevisionAccess(revision) {
+          const evidence = await fixture.observerPool.query(
+            `SELECT details->>'refusal' AS refusal FROM occ.audit_events
+             WHERE resource_kind = 'agent_revision' AND resource_id = $1
+               AND kind = 'mutation' AND action = 'reconcile'
+               AND details->>'reasonCode' = $2`,
+            [revision.id, withdrawalPending],
+          );
+          decisionsAtRemoval.push(evidence.rows.length);
+          withdrawn += 1;
+          if (!removalAvailable) {
+            throw new Error("Runtime deletion temporarily unavailable");
+          }
+        },
+      };
+      const providers = cause === "backend" ? [backendDefinition()] : [];
+      await fixture.start(compute, { providers, convergenceTimeoutMs: 1_000 });
+      let workId;
+      if (cause === "deadline") {
+        // The regular workflow publishes before activation. Failure to finish that
+        // activation reaches the real convergence deadline with structured evidence.
+        await waitFor("published revision waiting on activation", async () =>
+          (await fixture.currentAgent(owner)).activeRevisionId === candidate.id ? true : undefined,
+        );
+        workId = candidate.idempotencyKey;
+      } else {
+        await fixture.work(candidate, "succeeded");
+        await fixture.stop();
+        const [maintenance] = (await fixture.advanceMaintenance(candidate)).rows;
+        assert.ok(maintenance);
+        workId = maintenance.idempotency_key;
+      }
+      const refusal = {
+        authorization: "AUTHORIZATION_DENIED",
+        backend: "BACKEND_UNAVAILABLE",
+        deadline: "CONVERGENCE_DEADLINE_EXCEEDED",
+        configuration: "REVISION_ACCESS_WITHDRAWN",
+        "secret-driver": "SECRET_DRIVER_MISMATCH",
+        "sandbox-permission": "SANDBOX_GATEWAY_UNAUTHORIZED",
+      }[cause];
+      const expectedData = cause === "deadline" ? { timeoutMs: 1_000 } : undefined;
+      const queue = new fixture.PostgresWorkQueue(fixture.observerPool, { maxAttempts: 1 });
+      const recoveryActorId = `${fixture.actor.id}-recovery`;
+      if (cause === "authorization") {
+        await fixture.copyActorGrants(recoveryActorId);
+        await fixture.observerPool.query(
+          "DELETE FROM occ.iam_access_bindings WHERE identity_subject_id = $1",
+          [fixture.actor.id],
+        );
+      }
+      const preparationsBeforeRefusal = prepared;
+      if (cause === "configuration") {
+        accessCurrent = false;
+      }
+      // A permanent Sandbox permission refusal must reach the same durable
+      // removal phase when the active revision still owns admitted access.
+      sandboxPermissionRefused = cause === "sandbox-permission";
+      if (cause !== "deadline") {
+        await fixture.start(compute, {
+          providers: [],
+          convergenceTimeoutMs: 1_000,
+          // A selected Driver change invalidates the admitted Secret binding without
+          // altering its PostgreSQL metadata or bypassing its reference safeguards.
+          ...(cause === "secret-driver" ? { transformDrivers: withReplacementSecretDriver } : {}),
+        });
+      }
+      await waitFor("failed removal after a committed refusal", async () => {
+        const current = await queue.findWork(workId);
+        if (cause === "configuration") {
+          assert.equal(
+            prepared,
+            preparationsBeforeRefusal,
+            "withdrawn access cannot enter preparation",
+          );
+        }
+        assert.notEqual(current.state, "failed_permanent", "removal must precede terminal refusal");
+        return withdrawn >= 1 ? true : undefined;
+      });
+      assert.ok(
+        decisionsAtRemoval.every((count) => count > 0),
+        "decision precedes deletion",
+      );
+      const decision = await queue.findWorkAttempt(workId, withdrawalPending);
+      assert.equal(decision.refusal, refusal);
+      assert.deepEqual(decision.refusalData, expectedData);
+      const originalPreparationCount = prepared;
+      await fixture.stop();
+
+      // Restoring the original authority must not re-enter preparation, even after a
+      // new worker reads the decision and the deployment convergence deadline has passed.
+      if (cause === "authorization") {
+        await fixture.observerPool.query(
+          `INSERT INTO occ.iam_access_bindings
+             (id, namespace_id, identity_subject_id, role_id, resource_kind, resource_id)
+           SELECT 'binding-' || gen_random_uuid(), namespace_id, $1, role_id,
+                  resource_kind, resource_id
+           FROM occ.iam_access_bindings WHERE identity_subject_id = $2`,
+          [fixture.actor.id, recoveryActorId],
+        );
+      }
+      activationUnavailable = false;
+      accessCurrent = true;
+      sandboxPermissionRefused = false;
+      const beforeRestart = withdrawn;
+      await fixture.start(compute, { providers, convergenceTimeoutMs: 1_000 });
+      await waitFor("removal-only retries after restart", async () =>
+        withdrawn >= beforeRestart + 2 ? true : undefined,
+      );
+      const waiting = await queue.findWork(workId);
+      assert.ok(["queued", "claimed"].includes(waiting.state));
+      assert.equal(waiting.reasonCode, undefined);
+      assert.equal(
+        prepared,
+        originalPreparationCount,
+        "restored authority cannot repair the route",
+      );
+      assert.equal((await fixture.currentAgent(owner)).activeRevisionId, candidate.id);
+      removalAvailable = true;
+      await fixture.work({ idempotencyKey: workId }, "failed_permanent");
+      const terminal = await queue.findWork(workId);
+      assert.equal(terminal.reasonCode, refusal);
+      assert.deepEqual(terminal.resultData, expectedData);
+      assert.equal(prepared, originalPreparationCount);
+      assert.equal((await fixture.currentAgent(owner)).activeRevisionId, candidate.id);
+      const successors = await fixture.observerPool.query(
+        "SELECT count(*)::integer AS count FROM occ.controller_work WHERE revision_id = $1 AND state IN ('queued', 'claimed')",
+        [candidate.id],
+      );
+      assert.equal(successors.rows[0].count, 0, "terminal removal cannot spawn repair maintenance");
+    },
+  );
+}
+
+test(
+  "active revision without access admission recovers after restoring its selected Secret Driver",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const fixture = await setup(context, { maxAttempts: 1 });
+    const { owner, candidate } = await fixture.admitInitialRevision("secret-driver-recovery", {
+      agent: { executionMode: "dedicated" },
+    });
+    let prepared = 0;
+    const compute = {
+      ...fixture.compute,
+      maintenanceIntervalMs: 60_000,
+      async prepareRevision(revision) {
+        prepared += 1;
+        return fixture.compute.prepareRevision(revision);
+      },
+    };
+    await fixture.start(compute);
+    await fixture.work(candidate, "succeeded");
+    await fixture.stop();
+    const [maintenance] = (await fixture.advanceMaintenance(candidate)).rows;
+    assert.ok(maintenance);
+    const originalPreparationCount = prepared;
+
+    // An ordinary active runtime has no admitted access to withdraw. Refusing its
+    // current Secret context must keep the maintenance chain available for recovery.
+    await fixture.start(compute, { transformDrivers: withReplacementSecretDriver });
+    await fixture.work({ idempotencyKey: maintenance.idempotency_key }, "failed_permanent");
+    await fixture.stop();
+    const queue = new fixture.PostgresWorkQueue(fixture.observerPool, { maxAttempts: 1 });
+    assert.equal(
+      (await queue.findWork(maintenance.idempotency_key)).reasonCode,
+      "SECRET_DRIVER_MISMATCH",
+    );
+    assert.equal(
+      await queue.findWorkAttempt(maintenance.idempotency_key, withdrawalPending),
+      undefined,
+    );
+    assert.equal(prepared, originalPreparationCount);
+    assert.equal((await fixture.currentAgent(owner)).activeRevisionId, candidate.id);
+    const [recovery] = (await fixture.advanceMaintenance(candidate)).rows;
+    assert.ok(recovery, "an ordinary active runtime retains its next maintenance pass");
+
+    await fixture.start(compute);
+    await fixture.work({ idempotencyKey: recovery.idempotency_key }, "succeeded");
+    assert.ok(prepared > originalPreparationCount);
+    assert.equal((await fixture.currentAgent(owner)).activeRevisionId, candidate.id);
+  },
+);
+
+test(
+  "active revision without access admission recovers after a Sandbox gateway permission refusal",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const fixture = await setup(context, { maxAttempts: 1 });
+    const { owner, candidate } = await fixture.admitInitialRevision("sandbox-permission-recovery", {
+      agent: { executionMode: "dedicated" },
+    });
+    let sandboxPermissionRefused = false;
+    const compute = {
+      ...fixture.compute,
+      maintenanceIntervalMs: 60_000,
+      async prepareRevision(revision) {
+        if (sandboxPermissionRefused) {
+          throw new SandboxGatewayUnauthorizedError("The Sandbox gateway refused its identity.");
+        }
+        return fixture.compute.prepareRevision(revision);
+      },
+    };
+    await fixture.start(compute);
+    await fixture.work(candidate, "succeeded");
+    await fixture.stop();
+    const [maintenance] = (await fixture.advanceMaintenance(candidate)).rows;
+    assert.ok(maintenance);
+
+    // Without admitted access, the existing active-runtime recovery policy
+    // retains maintenance through a provider refusal and never starts withdrawal.
+    sandboxPermissionRefused = true;
+    await fixture.start(compute);
+    await fixture.work({ idempotencyKey: maintenance.idempotency_key }, "failed_permanent");
+    await fixture.stop();
+    const queue = new fixture.PostgresWorkQueue(fixture.observerPool, { maxAttempts: 1 });
+    assert.equal(
+      (await queue.findWork(maintenance.idempotency_key)).reasonCode,
+      "REVISION_FINALIZATION_INCOMPLETE",
+    );
+    assert.equal(
+      await queue.findWorkAttempt(maintenance.idempotency_key, withdrawalPending),
+      undefined,
+    );
+    assert.equal((await fixture.currentAgent(owner)).activeRevisionId, candidate.id);
+    const [recovery] = (await fixture.advanceMaintenance(candidate)).rows;
+    assert.ok(recovery, "an ordinary active runtime retains its next maintenance pass");
+
+    sandboxPermissionRefused = false;
+    await fixture.start(compute);
+    await fixture.work({ idempotencyKey: recovery.idempotency_key }, "succeeded");
+    assert.equal((await fixture.currentAgent(owner)).activeRevisionId, candidate.id);
+  },
+);
+
+test(
+  "terminal active preparation retains retirement until outbound withdrawal survives restart and lease recovery",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const fixture = await setup(context, { maxAttempts: 1 });
+    const { candidate } = await fixture.admitInitialRevision("outbound-preparation-retirement", {
+      agent: { executionMode: "dedicated" },
+      revision: { gatewayOutbound: outboundAdmission },
+    });
+    const preparation = {
+      workload: {
+        kind: "Job",
+        name: "terminal-preparation-proof",
+        uid: "terminal-preparation-proof",
+        namespace: "tenant-proof",
+      },
+      reason: "retry_limit",
+      observedAt: "2026-10-14T12:00:00.000Z",
+      startedAt: null,
+      finishedAt: null,
+      pods: [],
+    };
+    let preparationFails = false;
+    let removalAvailable = false;
+    let removed = false;
+    let withdrawals = 0;
+    let preparations = 0;
+    let retired = 0;
+    const retirementRows = async () =>
+      (
+        await fixture.observerPool.query(
+          "SELECT state, created_at FROM occ.controller_work WHERE revision_id = $1 AND idempotency_key LIKE '%:repository_cleanup:retire:%'",
+          [candidate.id],
+        )
+      ).rows;
+    // The real error class carries the existing terminal preparation contract.
+    // PostgreSQL and the worker own the withdrawal and retirement handoff below.
+    const compute = {
+      ...fixture.compute,
+      maintenanceIntervalMs: 60_000,
+      revisionAccessStatus: (revision) =>
+        revision.gatewayOutbound === undefined ? "none" : "current",
+      async prepareRevision(revision) {
+        preparations += 1;
+        if (preparationFails) {
+          throw new ComputePreparationFailedError(
+            "HARNESS_CREDENTIAL_BOOTSTRAP_FAILED",
+            preparation,
+          );
+        }
+        return fixture.compute.prepareRevision(revision);
+      },
+      async withdrawRevisionAccess() {
+        withdrawals += 1;
+        assert.deepEqual(await retirementRows(), [], "retirement must wait for outbound removal");
+        if (!removalAvailable) {
+          throw new Error("Runtime deletion temporarily unavailable");
+        }
+        removed = true;
+      },
+      async stopRevision(revision) {
+        assert.equal(removed, true, "terminal cleanup cannot stop the runtime before withdrawal");
+        assert.equal(revision.id, candidate.id);
+        retired += 1;
+        return fixture.compute.stopRevision(revision);
+      },
+    };
+    await fixture.start(compute);
+    await fixture.work(candidate, "succeeded");
+    await fixture.stop();
+    const [maintenance] = (await fixture.advanceMaintenance(candidate)).rows;
+    preparationFails = true;
+    await fixture.start(compute);
+    await waitFor("terminal preparation's pending outbound removal", async () =>
+      withdrawals >= 1 ? true : undefined,
+    );
+    // Shutdown may leave an interrupted pass claimed. Finish its deferral before
+    // the next phase deliberately expires a separately acquired claim.
+    await fixture.work({ idempotencyKey: maintenance.idempotency_key }, "queued");
+    await fixture.stop();
+    const preparationCount = preparations;
+    const queue = new fixture.PostgresWorkQueue(fixture.observerPool, { maxAttempts: 1 });
+    const assertObligation = async () => {
+      const evidence = await queue.findWorkAttempt(maintenance.idempotency_key, withdrawalPending);
+      assert.equal(evidence.refusal, "HARNESS_CREDENTIAL_BOOTSTRAP_FAILED");
+      assert.equal(evidence.cleanupFailedPreparation, true);
+      assert.deepEqual(evidence.refusalData, { preparation });
+      assert.deepEqual(await retirementRows(), []);
+    };
+    await assertObligation();
+
+    // A real expired claim recovers the committed obligation before a new worker
+    // retries removal. This revision has no repository credentials to imply cleanup.
+    await fixture.advanceMaintenance(candidate);
+    const lost = await queue.claim();
+    assert.equal(lost.idempotencyKey, maintenance.idempotency_key);
+    await fixture.expireClaim({ idempotencyKey: maintenance.idempotency_key }, lost.claimToken);
+    assert.equal((await queue.recoverStale()).failedPermanent, 0);
+    await assertObligation();
+    const beforeRestart = withdrawals;
+    preparationFails = false;
+    await fixture.advanceMaintenance(candidate);
+    await fixture.start(compute);
+    await waitFor("removal-only retries retaining terminal retirement", async () =>
+      withdrawals >= beforeRestart + 2 ? true : undefined,
+    );
+    assert.equal(preparations, preparationCount, "recovery must not prepare the terminal runtime");
+    await assertObligation();
+    removalAvailable = true;
+    await fixture.work({ idempotencyKey: maintenance.idempotency_key }, "failed_permanent");
+    await waitFor("durable terminal preparation retirement to finish", async () =>
+      (await retirementRows())[0]?.state === "succeeded" ? true : undefined,
+    );
+    assert.equal(retired, 1);
+    assert.equal(preparations, preparationCount);
+    const terminal = await queue.findWork(maintenance.idempotency_key);
+    assert.equal(terminal.reasonCode, "HARNESS_CREDENTIAL_BOOTSTRAP_FAILED");
+    assert.deepEqual(terminal.resultData, { preparation });
+  },
+);
+
+test(
+  "PostgreSQL preserves outbound removal across reduced retry limits and repeated expired leases",
+  { ...requiresPostgres, timeout: 60_000 },
+  async (context) => {
+    const fixture = await setup(context, { maxAttempts: 3 });
+    const { candidate } = await fixture.admitInitialRevision("outbound-lease", {
+      agent: { executionMode: "dedicated" },
+      revision: { gatewayOutbound: outboundAdmission },
+    });
+    await fixture.start({
+      ...fixture.compute,
+      maintenanceIntervalMs: 60_000,
+      revisionAccessStatus: (revision) =>
+        revision.gatewayOutbound === undefined ? "none" : "current",
+      async withdrawRevisionAccess() {},
+    });
+    await fixture.work(candidate, "succeeded");
+    await fixture.stop();
+    const [maintenance] = (await fixture.advanceMaintenance(candidate)).rows;
+    const queue = new fixture.PostgresWorkQueue(fixture.observerPool, { maxAttempts: 3 });
+    // Two genuine queue retries precede the removal decision. A configuration change
+    // then lowers the budget below its persisted count without inventing invalid Work.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const claim = await queue.claim();
+      assert.equal(claim.idempotencyKey, maintenance.idempotency_key);
+      await queue.retry(claim, { code: "DEPENDENCY_UNAVAILABLE" });
+      await fixture.advanceMaintenance(candidate);
+    }
+    const last = await queue.claim();
+    assert.equal(last.attemptCount, 3);
+    const refusalData = { timeoutMs: 1_000 };
+    await queue.defer(
+      last,
+      {
+        code: withdrawalPending,
+        refusal: "CONVERGENCE_DEADLINE_EXCEEDED",
+        refusalData,
+      },
+      { delayMs: 1, repeatEvidence: true },
+    );
+    const restarted = new fixture.PostgresWorkQueue(fixture.observerPool, { maxAttempts: 1 });
+    const reduced = await restarted.recoverStale();
+    assert.equal(reduced.failedPermanent, 0);
+    assert.equal(reduced.requeued, 1);
+    assert.equal((await restarted.findWork(maintenance.idempotency_key)).attemptCount, 0);
+
+    for (let restart = 0; restart < 3; restart += 1) {
+      await fixture.advanceMaintenance(candidate);
+      const claim = await restarted.claim();
+      assert.equal(claim.idempotencyKey, maintenance.idempotency_key);
+      assert.equal(claim.attemptCount, 1);
+      // Expire the actual database lease while the removal pass owns the claim.
+      await fixture.expireClaim({ idempotencyKey: maintenance.idempotency_key }, claim.claimToken);
+      const recovery = await restarted.recoverStale();
+      assert.equal(recovery.failedPermanent, 0);
+      assert.equal(recovery.requeued, 1);
+      const recovered = await restarted.findWork(maintenance.idempotency_key);
+      assert.equal(recovered.state, "queued");
+      assert.equal(recovered.attemptCount, 0);
+      const evidence = await restarted.findWorkAttempt(maintenance.idempotency_key);
+      assert.equal(evidence.code, withdrawalPending);
+      assert.equal(evidence.refusal, "CONVERGENCE_DEADLINE_EXCEEDED");
+      assert.deepEqual(evidence.refusalData, refusalData);
+    }
+    const pending = await fixture.observerPool.query(
+      "SELECT count(*)::integer AS count FROM occ.controller_work WHERE revision_id = $1 AND state IN ('queued', 'claimed')",
+      [candidate.id],
+    );
+    assert.equal(pending.rows[0].count, 1, "recovery cannot create a competing repair successor");
+  },
+);
 
 test(
   "worker fixture disposal preserves another database's live claim and activation",
@@ -118,8 +632,7 @@ test(
 // needing no PostgreSQL, and returns its output once its process exits with `status`, or fails
 // after 30 s naming the file as still running.
 async function runFixtureFile(t, body, { fixtureOptions, status: expectedStatus = 0 } = {}) {
-  const directory = await mkdtemp(join(tmpdir(), "revision-fixture-exit-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "revision-fixture-exit-");
   const file = join(directory, "abandoned.test.mjs");
   const helper = new URL("../helpers/postgres-worker-revision-fixture.mjs", import.meta.url);
   await writeFile(
@@ -171,6 +684,11 @@ ${body}`,
   return output;
 }
 
+// The fixture's 2 s exit grace and 60 s backstop leave a real file's runner time to report. The
+// one-test files below take a shorter grace (and backstop) so their own waits stay short; each
+// wait they race stays longer than the grace, as the defaults are.
+const exitGraceMs = 500;
+
 // Finding 1223: a teardown step left running past its limit can hold its process open (a pool's
 // socket, a child), so the file sat idle after its last test until the runner's file timeout
 // killed it. A file that abandoned a step now exits once its own teardown is done. Runs the
@@ -180,7 +698,7 @@ test("an abandoned teardown step that holds its process open does not keep the f
     t,
     `// A root after hook registered after cleanup, slower than the exit grace, still finishes.
 after(async () => {
-  await new Promise((resolve) => setTimeout(resolve, 3_000));
+  await new Promise((resolve) => setTimeout(resolve, ${exitGraceMs * 2}));
   console.log("later after hook finished");
 });
 test("a stuck step is abandoned at its limit", async () => {
@@ -188,6 +706,7 @@ test("a stuck step is abandoned at its limit", async () => {
   await abandonStep();
 });
 `,
+    { fixtureOptions: { exitGraceMs } },
   );
   // Finding 1246: the exit grace starts once every root after hook has run, not at cleanup.
   assert.match(output, /later after hook finished/);
@@ -200,6 +719,7 @@ test("a teardown step abandoned by a later root after hook does not keep the fil
     `after(abandonStep);
 test("nothing is abandoned during the tests", () => {});
 `,
+    { fixtureOptions: { exitGraceMs } },
   );
 });
 
@@ -214,7 +734,7 @@ test("a later root after hook that fails after an abandoned step does not keep t
 });
 test("a stuck step is abandoned at its limit", abandonStep);
 `,
-    { fixtureOptions: { exitBackstopMs: 4_000 }, status: 1 },
+    { fixtureOptions: { exitGraceMs, exitBackstopMs: exitGraceMs * 2 }, status: 1 },
   );
   assert.match(output, /later after hook failed/);
 });
@@ -229,10 +749,55 @@ test("a later root after hook that abandons a step and fails does not keep the f
 });
 test("nothing is abandoned during the tests", () => {});
 `,
-    { fixtureOptions: { exitBackstopMs: 4_000 }, status: 1 },
+    { fixtureOptions: { exitGraceMs, exitBackstopMs: exitGraceMs * 2 }, status: 1 },
   );
   assert.match(output, /later after hook failed/);
 });
+
+// Runs a test's steps within `budgetMs`, kept under the test's own timeout. Each step waits only
+// for what is left of the budget, so a step that never ends fails by name, with the steps before
+// it, their times, and `describe()`, instead of the test timeout naming nothing (finding 1945).
+// A step's own failure (a waitFor limit or an assertion) keeps its message and gains the same.
+function stepBudget(budgetMs, describe = () => undefined) {
+  const started = Date.now();
+  const done = [];
+  const where = (name, stepStarted) => {
+    const detail = describe();
+    return [
+      `step "${name}" after ${Date.now() - stepStarted} ms (${Date.now() - started} ms into the budget)`,
+      `earlier steps: ${done.length > 0 ? done.join(", ") : "none"}`,
+      ...(detail === undefined ? [] : [detail]),
+    ].join("; ");
+  };
+  return async function step(name, run) {
+    const stepStarted = Date.now();
+    let timer;
+    let budgetError;
+    const expired = new Promise((resolve, reject) => {
+      timer = setTimeout(
+        () => {
+          budgetError = new Error(
+            `Timed out within the ${budgetMs} ms step budget at ${where(name, stepStarted)}.`,
+          );
+          reject(budgetError);
+        },
+        Math.max(0, started + budgetMs - stepStarted),
+      );
+    });
+    try {
+      const value = await Promise.race([Promise.resolve().then(run), expired]);
+      done.push(`${name} ${Date.now() - stepStarted} ms`);
+      return value;
+    } catch (error) {
+      if (error === budgetError) {
+        throw error;
+      }
+      throw new Error(`${error?.message ?? error} (${where(name, stepStarted)})`, { cause: error });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
 
 // The worker is serial. A Compute wait that only saves a later pass asks whether
 // other Work is waiting and ends early when it is, so another Agent's deploy
@@ -243,9 +808,16 @@ test(
   async (context) => {
     const { computeWorkWaiting } =
       await import("../../apps/controller/src/drivers/compute/operation-context.ts");
-    const fixture = await setup(context);
-    const first = await fixture.agent("waiting-first", { executionMode: "dedicated" });
-    const second = await fixture.agent("waiting-second", { executionMode: "dedicated" });
+    // Where the first Agent's pass is, for a step that runs out of time.
+    let pass = "not started";
+    const step = stepBudget(27_000, () => `first pass: ${pass}`);
+    const fixture = await step("revision fixture setup", () => setup(context));
+    const first = await step("the first Agent's creation", () =>
+      fixture.agent("waiting-first", { executionMode: "dedicated" }),
+    );
+    const second = await step("the second Agent's creation", () =>
+      fixture.agent("waiting-second", { executionMode: "dedicated" }),
+    );
     const prepared = [];
     let secondRevision;
     let wait;
@@ -258,11 +830,16 @@ test(
         }
         // The first Agent's pass waits, as for its node to pair; nothing else is
         // queued yet, so nothing is waiting for the worker.
+        pass = "asking whether Work waits before the second Agent's revision";
         const before = await computeWorkWaiting();
+        pass = "admitting the second Agent's revision";
         secondRevision = await fixture.revision(second, 1);
         const started = Date.now();
         let endedEarly = false;
+        let checks = 0;
         while (Date.now() - started < 10_000) {
+          checks += 1;
+          pass = `waiting for other Work (check ${checks}, ${Date.now() - started} ms)`;
           if (await computeWorkWaiting()) {
             endedEarly = true;
             break;
@@ -270,17 +847,26 @@ test(
           await delay(25);
         }
         wait = { before, endedEarly, ms: Date.now() - started };
-        return {
+        pass = `preparing after a ${wait.ms} ms wait (ended early: ${endedEarly})`;
+        const result = {
           ...(await fixture.compute.prepareRevision(revision, deploymentContext)),
           ready: false,
         };
+        pass = `ended pending after a ${wait.ms} ms wait (ended early: ${endedEarly})`;
+        return result;
       },
     };
-    await fixture.start(compute);
-    const firstRevision = await fixture.revision(first, 1);
-    await waitFor("the second Agent to deploy during the first pass", async () => secondRevision);
-    await fixture.work(secondRevision, "succeeded");
-    await fixture.work(firstRevision, "succeeded");
+    await step("worker start", () => fixture.start(compute));
+    const firstRevision = await step("the first Agent's revision admission", () =>
+      fixture.revision(first, 1),
+    );
+    await step("the second Agent's revision during the first pass", () =>
+      waitFor("the second Agent to deploy during the first pass", async () => secondRevision),
+    );
+    await step("the second Agent's Work to succeed", () =>
+      fixture.work(secondRevision, "succeeded"),
+    );
+    await step("the first Agent's Work to succeed", () => fixture.work(firstRevision, "succeeded"));
     assert.equal(wait.before, false, "the pass's own Agent is not other Work");
     assert.equal(wait.endedEarly, true);
     assert.ok(wait.ms < 5_000, `the wait ended early (${wait.ms} ms)`);
@@ -438,7 +1024,7 @@ test(
       },
     });
     const [
-      { GitHubRepoDriver },
+      { GitHubRepositoryPolicy },
       { UnixRepositoryCredentialControlClient },
       { startRegistryCredentialServiceFixture },
       { startRepositoryReceiptServer },
@@ -446,7 +1032,7 @@ test(
       { createResourceScope },
       { dirname },
     ] = await Promise.all([
-      import("../../apps/controller/src/drivers/repo/github/driver.ts"),
+      import("../../apps/controller/src/drivers/repo/github/policy.ts"),
       import("../../apps/controller/src/backends/repository-credentials/control-client.ts"),
       import("../fixtures/repository-credentials/registry.mjs"),
       import("../../apps/controller/src/backends/repository-credentials/receipt-server.ts"),
@@ -468,15 +1054,17 @@ test(
     });
     // Simulate the old broker's 404 while all other traffic still reaches the real service.
     relay.setCapabilitiesHidden(true);
-    const driver = new GitHubRepoDriver(
-      {
-        id: credentials.backendId,
-        client: new UnixRepositoryCredentialControlClient({ controlSocket: relay.socketPath }),
-        drivers: { repo: "repository-credentials" },
-      },
-      credentials.registry,
-      { sessionDurationSeconds: 60, publicCa: credentials.tls.ca },
-    );
+    const repositoryBackend = {
+      id: credentials.backendId,
+      client: new UnixRepositoryCredentialControlClient({ controlSocket: relay.socketPath }),
+      drivers: { repo: "repository-credentials" },
+    };
+    const sender = new GitHubNativeRepositorySender(repositoryBackend, {
+      publicCa: credentials.tls.ca,
+    });
+    const driver = new GitHubRepositoryPolicy(repositoryBackend, credentials.registry, {
+      sessionDurationSeconds: 60,
+    });
     const receiptServer = await startRepositoryReceiptServer({
       state: fixture.state,
       controlSocket: credentials.config.gateway.controlSocket,
@@ -487,7 +1075,7 @@ test(
     context.after(() => receiptServer.close());
     const resolution = driver.resolve({
       namespaceId: fixture.namespace.id,
-      bindings: [{ repositoryRef: "repo-a", profile: "git-read" }],
+      bindings: [{ repositoryRef: "repo-a", profile: "git-write" }],
     });
     const owner = await fixture.agent("repository-capability");
     const selection = {
@@ -503,7 +1091,11 @@ test(
       },
       {
         pool: fixture.workerPool,
-        transformDrivers: (drivers) => ({ ...drivers, repoDriver: driver }),
+        transformDrivers: (drivers) => ({
+          ...drivers,
+          repositoryPolicy: driver,
+          nativeRepositorySender: sender,
+        }),
       },
     );
     // Four jittered retry delays can total nearly 15 seconds before the fifth claim.
@@ -516,9 +1108,9 @@ test(
     await waitFor("worker readiness after compatible broker selection", async () =>
       healthy > 0 ? true : undefined,
     );
-    const open = driver.open.bind(driver);
+    const open = sender.open.bind(sender);
     let lostSessionId;
-    driver.open = async (input, signal) => {
+    sender.open = async (input, signal) => {
       const result = await open(input, signal);
       if (lostSessionId === undefined && result.kind === "created") {
         lostSessionId = result.session.sessionId;

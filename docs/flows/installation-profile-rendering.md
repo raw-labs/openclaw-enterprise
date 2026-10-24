@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
-updated: 2026-10-13
-last_updated_session: authoring-run/1e1d633d-329d-462f-b077-6cb27c43a6e4
+updated: "2026-10-19"
+last_updated_session: "authoring-run/40820368-0ee7-4901-9224-041654014ae4"
 ---
 
 # Installation Profile Rendering Flow
@@ -146,14 +146,13 @@ follow their rule within 200 UTF-16 code units, as in the chart.
 253 characters; neither `.` nor a `..` prefix. Thus `..ca.pem` and 254-character
 keys fail preflight before Helm. Omission uses `ca.pem`.
 
-`validateDatabaseCaMount` checks the generated values against the chart's active
-database-client mounts. With a database CA Secret, `mountPath` cannot equal the
-Installation, worker runtime, bootstrap, gateway key, or private gateway CA mount.
-Repository mounts are reserved only when repository credentials are enabled;
-the ChatGPT mount is reserved only when managed service accounts are configured.
-Profiles do not enable execution-cluster mounts. No CA configuration adds no
-restriction; an omitted path keeps `/etc/openclaw/database-ca`. A collision adds
-a field-specific preflight error and prevents both deployable files.
+`validateDatabaseCaMount` compares Linux destinations with the chart's active
+mounts: Installation, worker runtime, bootstrap, gateway key and private gateway CA.
+Relative, dot-segment and trailing-slash aliases collide too. Repository and
+ChatGPT paths are reserved only when enabled; execution-cluster paths remain free.
+Without CA configuration no restriction applies; omission keeps
+`/etc/openclaw/database-ca`. A collision adds a field-specific error and withholds
+both deployment files. Noncolliding paths retain their supplied spelling.
 
 The Helm values select the control-plane image, Better Auth base URL,
 bootstrap administrator, database and cluster egress CIDRs, API client
@@ -168,10 +167,10 @@ already checked in step 3 with the API's `parseCidr` rules
 IPv4-mapped address, and no range that covers every IPv4 peer. Like the chart,
 preflight also refuses a zone ID, which the API accepts.
 
-When `channels.managedSlackProxy` is true, the values also enable the
-chart-managed Slack proxy Service. The chart allows that proxy public IPv4 HTTPS
-egress, excluding private and reserved ranges, and the proxy authorizes Slack
-hostnames. Repository values render only when the input explicitly sets
+`gatewayOutbound` enables Compute's per-revision proxy using
+`controlPlane.controllerImage` and infrastructure exclusions.
+`controlPlaneOutbound.managedProxy` enables the separately restricted API proxy.
+Selected Drivers supply its management destinations; Agent settings cannot broaden it. Repository values render only when the input explicitly sets
 `repository.enabled: true`. Repository provider CIDRs pass through unchanged,
 so operators can keep their existing GitHub ranges without DNS snapshots. The
 renderer copies `repository.serviceName` only when the input sets it, and only
@@ -222,7 +221,7 @@ dot does not, because the suffix would start a new label with a hyphen.
 `scripts/render-installation-profile.mjs:resolveHostedDiscoveryCidrs`
 
 After validation, hosted `codex-plugin` with omitted `codex.modelDiscoveryCidrs`
-triggers bounded A queries for `auth.openai.com` and `chatgpt.com`. Sorted unique
+queries IPv4 addresses for `auth.openai.com` and `chatgpt.com` with a resolver timeout of 1.5 seconds and one try. Sorted unique
 IPv4 `/32` answers populate the existing API-only TCP 443 Helm policy; the driver
 mutates no Kubernetes resources.
 
@@ -294,6 +293,8 @@ activation, and repository registry creation need separate evidence.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-18 14:40: Compare database CA mount destinations with Helm. (authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d - bcf4fbcf0)
 
 - 2026-10-13 16:26: Merge current profile validation while retaining hosted discovery DNS snapshots and explicit network policy inputs. (authoring-run/1e1d633d-329d-462f-b077-6cb27c43a6e4 - da72ecf45a0989b857fd7f05d8238a38a979eb64)
 

@@ -76,7 +76,7 @@ export function requireWorkspaceNodePlugins(
 
 /**
  * Enabled channels need a dedicated Agent workload and an Installation channel runtime
- * (`runtime.channels`: isolated credentials and a reviewed proxy). `providers` lists the
+ * (`runtime.gatewayOutbound`: isolated credentials and a managed proxy). `providers` lists the
  * enabled channel providers, in Configuration order.
  */
 export function requireChannelTopology(
@@ -576,12 +576,12 @@ export type KubernetesHarnessTopology =
   "embedded OpenClaw" | "Dedicated OpenClaw" | "Dedicated Codex";
 
 // The Harness authentication methods Kubernetes Compute delivers to each topology. What a
-// method also needs from the Installation (oauth needs no Sandbox Driver, credential_source
-// its paired Sandbox) is checked after this, with a fixed refusal.
+// method also needs from the Installation (credential_source needs its paired Sandbox)
+// is checked after this, with a fixed refusal.
 const HARNESS_AUTH_METHODS: Readonly<Record<KubernetesHarnessTopology, readonly string[]>> = {
   "embedded OpenClaw": ["api_key"],
   "Dedicated OpenClaw": ["api_key", "credential_source"],
-  "Dedicated Codex": ["api_key", "codex_pat", "oauth", "credential_source"],
+  "Dedicated Codex": ["api_key", "codex_pat", "credential_source"],
 };
 
 /** The `requireHarnessAuthMethod` rule for an Agent's topology on Kubernetes Compute. */

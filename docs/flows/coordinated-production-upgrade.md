@@ -1,7 +1,7 @@
 ---
 created: 2026-09-23
-updated: "2026-10-12"
-last_updated_session: "authoring-run/ebb1c629-97b2-4b9a-aa67-a5e750346031"
+updated: "2026-10-23"
+last_updated_session: "authoring-run/3c1a4d88-d619-47e3-9eba-dbaf0988d2e9"
 ---
 
 # Production image upgrade flow
@@ -11,7 +11,7 @@ last_updated_session: "authoring-run/ebb1c629-97b2-4b9a-aa67-a5e750346031"
 `scripts/upgrade-production-images` updates the OpenClaw Control Plane (OCC),
 Agent runtimes, or both. The controller-only command ends after the OCC API and
 worker recover; it does not request Agent deployments. A runtime release deploys
-a new revision for every Agent that was running when the command began and ends
+a new version for every Agent that was running when the command began and ends
 after the selected Pods are ready and each replacement gateway passes read-only
 Doctor lint. Model and external integration checks remain operator tasks.
 
@@ -30,11 +30,14 @@ Doctor lint. Model and external integration checks remain operator tasks.
 
 ```mermaid
 graph TD
-    A["Validate inputs and freeze fleet"] --> Q{"Repository broker enabled?"}
+    A["Validate inputs"] --> Q{"Repository broker enabled?"}
     Q -->|Yes| P["Check image protocol and node architectures"]
-    Q -->|No| B["Render candidate and save recovery record"]
+    Q -->|No| B["Render and check candidate startup"]
     P --> B
-    B --> C["Read live Secret and Helm state"]
+    B --> R{"Preflight only?"}
+    R -->|Yes| S["Exit without prepared deployment"]
+    R -->|No| T["Save prepared recovery record"]
+    T --> C["Read live Secret and Helm state"]
     C --> D{"Candidate Helm release deployed?"}
     D -->|No| E["Stop API and worker Pods"]
     E --> F["Update Secret and run Helm migration"]
@@ -49,27 +52,28 @@ graph TD
     L --> M{"Dispatch response known?"}
     M -->|No| N["Read Agent and stop for reconciliation"]
     N --> L
-    M -->|Yes| O["Check revisions, Pods, and Doctor"]
+    M -->|Yes| O["Check versions, Pods, and Doctor"]
     O --> K
 ```
 
 ## Execution Trace
 
-### 1. Prepare and freeze the target
+### 1. Prepare the candidate
 
-`scripts/upgrade-production-images:245`
+`scripts/upgrade-production-images:prepare_upgrade`
 
-The script verifies the protected files, cluster, deployed Helm release, and
-matching OCC and Secret Installation IDs. It compares protected and live
-configuration in full, including selected image fields. It captures separate
-reviewed candidate files and accepts changes only to the Slack directory proxy
-and the curated Codex PluginDriver selection. All other Helm and Installation
-settings remain protected, including new fields. The guard compares broker
-resource references, not the contents of referenced ConfigMaps or Secrets.
-Image flags select images after this comparison.
+The script verifies protected files, cluster, Helm release, and matching OCC and
+Secret Installation IDs. It compares protected and live configuration, including
+selected images. Separate reviewed candidate files permit changes only to the
+control-plane outbound proxy (`api.controlPlaneOutboundProxyUrl`) and curated
+Codex PluginDriver selection. Other Helm and Installation
+settings, including new fields, remain protected. The guard compares broker
+references, not ConfigMap or Secret contents.
+Image flags then select images.
 A runtime release also reads complete authorized inventory and records every running Agent's baseline
-revision. Nonterminal deployment work, a missing active revision, or an unready
+version. Nonterminal deployment work, a missing selected version, or an unready
 Namespace stops preparation. Stopped and deleting Agents are excluded.
+Pending repository cleanup does not block preparation.
 
 For repository-enabled releases, the helper requires explicit immutable
 controller and broker images. It inventories every node matching the control
@@ -94,7 +98,11 @@ copies each rendered API and worker Pod template (selected controller image, env
 mounts, service account) into a one-shot Pod whose Installation volume reads a
 temporary Secret holding the candidate. The Pod runs `loadStartupConfigurationSnapshot`
 and `loadInstallationConfiguration`, which resolve Drivers and Preset files
-without the database. With the bundled Kubernetes Compute Driver it then runs
+without the database. On a typed configuration refusal,
+`apps/controller/src/startup-failure.ts:formatStartupConfigurationFailure` prints
+at most 32 filtered field diagnostics, using the API/worker log filter. The
+helper preserves these paths and messages in its component logs before stopping
+any writer. With the bundled Kubernetes Compute Driver it then runs
 `KubernetesComputeDriver.preflight` with the Pod's Kubernetes credentials (its
 service account in `inCluster` mode), as API and worker startup do; that check refuses, for example, single-cluster
 [split-layout Gateway storage](../reference/drivers/kubernetes-compute.md#existing-split-layout-installations).
@@ -110,20 +118,24 @@ the release-era tenant grant, SelfSubjectAccessReviews ask for the newer
 Event reads with runtime logs; worker: Pod `patch` and `batch` Job `get`, `create`,
 and `delete`). Worker Job grants are required even with runtime logs disabled.
 A missing rule refuses the candidate and points to
-[upgrading the execution chart](../testing/two-cluster-local.md#upgrade-the-execution-chart).
+[upgrading the execution chart](../testing/kubernetes.md#upgrade-the-execution-chart).
 Because the chart's default-deny NetworkPolicy also selects these Pods, the
 helper first creates a temporary NetworkPolicy carrying the rendered
 `openclaw-enterprise-dependency-egress` (and execution-cluster API) egress rules.
-A failure, a stuck image pull, or the timeout stops
-preparation before any writer stops. The script first reads both Pods and saves
-each status and log, so every failing component is reported; then the exit trap
-deletes the Pods, Secret and NetworkPolicy.
-It saves
-candidate inputs, inventory, target identity, and parameter hashes in the
-private evidence directory before marking preparation complete. A per-directory
-lock prevents two helpers from using that record at once. The operator must
-freeze other writers, autoscalers, Helm changes, and runtime draft edits as
-specified in the [production guide](../guides/deploy/production-upgrade.md).
+A failure, stuck pull, or timeout stops preparation before writers stop. The
+script saves both Pods' statuses and logs, reports each failure, and attempts
+to delete the Pods, Secret, and NetworkPolicy. Cleanup is best effort.
+
+With `--preflight-only`, the helper exits without marking preparation complete.
+It leaves serving writers running and retains private evidence. This evidence
+cannot be resumed; deployment repeats the checks with reviewed inputs in a fresh
+directory.
+
+For an upgrade, the script saves candidate inputs, inventory, target identity,
+and parameter hashes before marking preparation complete. A per-directory lock
+prevents two helpers from using that record at once. The operator must freeze
+other writers, autoscalers, Helm changes, and runtime draft edits as specified in
+the [production guide](../guides/deploy/production-upgrade.md).
 
 ### 2. Reconcile a prior attempt
 
@@ -132,13 +144,14 @@ specified in the [production guide](../guides/deploy/production-upgrade.md).
 On every attempt the script rereads Helm status and values and the Installation
 Secret. Only the recorded baseline or candidate values are accepted; the
 Secret's UID, Installation annotation, and other data must match the baseline.
-Resume also binds the original kubeconfig contents, inputs, OCC URL, scripts,
-flow, chart, and pair evidence. It requalifies the pair and rejects a changed
-eligible-node set. Candidate files must still match the saved reviewed inputs; the
+Without the prepared record, resume stops: inspect the evidence and any remaining
+preflight resources. Resume also binds the original kubeconfig contents,
+inputs, OCC URL, scripts, flow, chart, and pair evidence. It requalifies the pair
+and rejects a changed eligible-node set. Candidate files must still match the saved reviewed inputs; the
 helper applies the saved candidate. Unexpected drift or an in-progress Helm
 release stops the command.
 
-If a previously started Helm release is deployed at a newer revision with the
+If a previously started Helm release is deployed at a newer version with the
 candidate values, the script continues without repeating Helm. Otherwise it
 requires the operator's migration-history check and refuses a retry while an
 initialization Job or Pod remains active. A failed or disconnected migration may have
@@ -152,7 +165,7 @@ rollback. The guide describes the required attestation and recovery.
 Before changing the Secret or invoking Helm, the script scales the selected API
 and worker Deployments to zero, waits until their Pods disappear, and confirms
 both desired replica counts remain zero. Kubernetes requests in this phase share
-a bounded quiescence deadline. This covers the selected Helm release;
+the configured shutdown deadline. This covers the selected Helm release;
 it does not detect independent database writers, autoscalers, or partitioned
 nodes. The operator must stop those writers and keep nodes reachable.
 
@@ -164,8 +177,9 @@ If the candidate is already present after a lost response, it does not write it
 again. The candidate Installation checksum is included in both OCC Pod
 templates.
 
-A durable marker precedes `helm upgrade`. The candidate migrator and bootstrap
-run in the Helm initialization hook before API and worker rollout. If Helm
+A durable marker precedes `helm upgrade`. The Helm initialization hook checks
+the Installation, then runs the candidate migrator and bootstrap, before API and
+worker rollout. If Helm
 fails, resumption reads its current status and migration state before a retry;
 it does not start the old image to undo a committed schema change.
 
@@ -180,7 +194,7 @@ broker-enabled worker it also accepts a restartable init container, provided
 no worker exists in the ordinary container list. It rejects a non-restartable
 init worker or ambiguous placement. It retries authenticated OCC access and verifies the same Installation ID. A
 controller-only release then ends without requesting Agent deployments.
-An existing revision keeps the Pod specification of the controller that
+An existing version keeps the Pod specification of the controller that
 deployed it only until the worker prepares it again. Agents with repository
 credentials get a maintenance pass every 30 seconds (the repository Driver's
 `maintenanceIntervalMs`) until their repository session deadline. Other Agents
@@ -210,11 +224,11 @@ Before sending each ordinary exact-Agent deployment request, the script records
 an intent. Successful responses are saved atomically. On resume, existing
 responses are reused; an intent without a response triggers an Agent readback
 and stops for operator reconciliation. The helper does not infer rejection from
-an unchanged active revision or replay an unknown request. An operator can
+an unchanged selected version or replay an unknown request. An operator can
 record a verified accepted response and resume.
 
 The script polls each returned deployment through its authorized status
-operation, confirms active revision selection, and waits for all revision Pods
+operation, confirms the selected version, and waits for all version Pods
 to be `Running` and `Ready` on the candidate runtime digest. Before OpenClaw
 starts, `GATEWAY_RUNTIME_ENTRYPOINT` runs `openclaw doctor --fix
 --non-interactive` once when an agent database uses an older schema, such as a
@@ -253,13 +267,13 @@ checks the exported inventory before following the recovery procedure. Empty
   and `preflight-<api|worker>.log` and `-status.json` for a rejected candidate.
 - For OCC rollout failures, inspect `helm-upgrade.txt`, initialization Job logs,
   and API and worker rollout status.
-- For runtime failures, inspect `dispatch/*.error`, revision history, and
+- For runtime failures, inspect `dispatch/*.error`, version history, and
   `status/*.json` before retrying anything. Doctor failures are recorded in
   `status/*.doctor.json` and `status/*.doctor.error`.
 - Compare `before-workloads.json` and `after-workloads.json` for unexpected
   workload changes. The controller-only helper requests no Agent deployments;
   one same-image Pod template rollout per affected Agent is expected. Separately
-  check repository-bound revisions affected by broker restart.
+  check repository-bound versions affected by broker restart.
   Runtime proof should show the intended replacements.
 - Use the credentialed production Kubernetes integration with distinct baseline
   and candidate images for end-to-end proof. Mocked commands prove only script
@@ -280,6 +294,16 @@ checks the exported inventory before following the recovery procedure. Empty
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-23 09:50: Document preflight-only rehearsal and fresh checks at deployment. (authoring-run/3c1a4d88-d619-47e3-9eba-dbaf0988d2e9 - 4e9f5935d5fa4878a719e82db5e504ec6ae55d64)
+
+- 2026-10-20 01:48: Preserve field diagnostics before quiescence. (authoring-run/9d1ff825-b9f4-492a-9420-1e316d820e28 - e7e5f3321cb0a8471d74964eba56ddd069a4e4c5)
+- 2026-10-19 22:34: Document that pending repository cleanup does not block upgrade preparation. (authoring-run/d59b973b-1f0b-46bb-b16f-d67bd24ed6d3 - 57acafe81482a890b02ae530793246f2c2e7be79)
+- 2026-10-19 13:31: Retain proxy ownership alongside upstream upgrade preflight. (authoring-run/40820368-0ee7-4901-9224-041654014ae4 - b10157ca9)
+
+- 2026-10-18: The initialization hook checks the Installation before migration.
+
+- 2026-10-15 10:01: Name the canonical control-plane outbound proxy in candidate protection. (authoring-run/903d04fd-a3a7-4825-aca7-f94d828ab2d8 - 313a70262e432192306a2db431bf0b6f0459a957)
 
 - 2026-10-12 15:14: Record bootstrap Job grants required by the two-cluster upgrade preflight alongside the fixture correction. (authoring-run/ebb1c629-97b2-4b9a-aa67-a5e750346031 - 9578f6f7aaff9b8545346f43043cbc5b9bcf674e)
 
