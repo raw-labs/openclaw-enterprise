@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { ConfigurationValidationError } from "../../packages/contracts/src/index.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -14,6 +15,7 @@ import {
   createKubernetesComputeDriver,
   PLUGIN_RUNTIME_STATUS_PORT,
 } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
+import { MAX_TIMER_DELAY_MS } from "../../apps/controller/src/worker/timer-settings.ts";
 import { syntheticCredentialUrl } from "../fixtures/synthetic-credential-url.mjs";
 import { conformanceKubernetesOptions } from "../helpers/kubernetes-compute.mjs";
 
@@ -24,8 +26,55 @@ import {
   productionCollectorValues,
   goToolEnvironment,
 } from "../helpers/production-chart.mjs";
+import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 
 const execute = promisify(execFile);
+
+test("console themes mount only on the API and restart it when the checksum changes", async () => {
+  const defaults = await resources((await renderProductionChart()).stdout);
+  const themed = await resources(
+    (
+      await renderProductionChart({
+        "api.consoleTheme.configMapName": "console-branding",
+        "api.consoleTheme.checksum": "revision-two",
+      })
+    ).stdout,
+  );
+  for (const objects of [defaults, themed]) {
+    for (const component of ["api", "worker"]) {
+      const deployment = objects.find(
+        (item) =>
+          item.kind === "Deployment" && item.metadata.name === `openclaw-enterprise-${component}`,
+      );
+      const enabled = objects === themed && component === "api";
+      const pod = deployment.spec.template;
+      const container = [...(pod.spec.initContainers ?? []), ...pod.spec.containers].find(
+        (item) => item.name === component,
+      );
+      assert.equal(
+        container.env.some((item) => item.name === "OCC_CONSOLE_THEME_DIR"),
+        enabled,
+      );
+      assert.equal(
+        pod.spec.volumes.some((item) => item.name === "console-theme"),
+        enabled,
+      );
+      assert.equal(
+        pod.metadata.annotations?.["openclaw.dev/console-theme-checksum"],
+        enabled ? "revision-two" : undefined,
+      );
+      if (enabled) {
+        assert.deepEqual(pod.spec.volumes.find((item) => item.name === "console-theme").configMap, {
+          name: "console-branding",
+        });
+        assert.deepEqual(
+          container.volumeMounts.find((item) => item.name === "console-theme"),
+          { name: "console-theme", mountPath: "/etc/openclaw/console-theme", readOnly: true },
+        );
+      }
+    }
+  }
+});
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 const controllerRequire = createRequire(
   new URL("../../apps/controller/package.json", import.meta.url),
@@ -41,6 +90,8 @@ const slackProxyValues = {
   "slackProxy.enabled": "true",
 };
 const repositoryCredentialValues = {
+  "repositoryCredentials.authority": "prepared-git",
+  "repositoryCredentials.preparedCustodySecretName": "repository-custody",
   "repositoryCredentials.enabled": "true",
   "repositoryCredentials.image": `registry.example.invalid/repository-credentials@sha256:${"b".repeat(64)}`,
   "repositoryCredentials.backendId": "github-primary",
@@ -50,6 +101,15 @@ const repositoryCredentialValues = {
   "repositoryCredentials.tlsSecretName": "repository-tls",
   "repositoryCredentials.publicCaSecretName": "repository-public-ca",
   "repositoryCredentials.upstreamCidrs[0]": "198.51.100.0/24",
+};
+const protectedRepositoryValues = {
+  "repositoryCredentials.enabled": "false",
+  "repositoryCredentials.registryConfigMapName": "repository-registry-v1",
+  "repositoryCredentials.appKeySecretName": "repository-app-key",
+  "repositoryCredentials.upstreamCidrs[0]": "198.51.100.23/32",
+  "repositoryCredentials.preparedProviderCaConfigMapName": "git-provider-ca",
+  "repositoryCredentials.authority": "prepared-git",
+  "repositoryCredentials.preparedCustodySecretName": "git-custody",
 };
 const gatewayRoutingValues = {
   "gatewayRouting.enabled": "true",
@@ -117,6 +177,190 @@ try {
     skip: "Install Helm and yq, or set OCC_HELM_BIN, to verify the real rendered production chart.",
   };
 }
+
+test(
+  "console theme settings reject YAML booleans and invalid ConfigMap names",
+  tooling,
+  async (t) => {
+    const directory = await temporaryDirectory(t, "oce-console-theme-");
+    const writeValues = async (name, body) => {
+      const path = join(directory, name);
+      await writeFile(path, body);
+      return path;
+    };
+    await assert.rejects(
+      render(
+        {},
+        {
+          valuesFiles: [
+            await writeValues(
+              "yes.yaml",
+              "api:\n  consoleTheme:\n    configMapName: yes\n    checksum: rev\n",
+            ),
+          ],
+        },
+      ),
+      /api\.consoleTheme\.configMapName must be a string/,
+    );
+    await assert.rejects(
+      render(
+        {},
+        {
+          valuesFiles: [
+            await writeValues("no.yaml", "api:\n  consoleTheme:\n    configMapName: no\n"),
+          ],
+        },
+      ),
+      /api\.consoleTheme\.configMapName must be a string/,
+    );
+    await assert.rejects(
+      render(
+        {},
+        {
+          valuesFiles: [
+            await writeValues(
+              "checksum.yaml",
+              'api:\n  consoleTheme:\n    configMapName: "console-branding"\n    checksum: yes\n',
+            ),
+          ],
+        },
+      ),
+      /api\.consoleTheme\.checksum must be a string/,
+    );
+    const quoted = await writeValues(
+      "quoted.yaml",
+      'api:\n  consoleTheme:\n    configMapName: "no"\n    checksum: "rev"\n',
+    );
+    const objects = await resources((await render({}, { valuesFiles: [quoted] })).stdout);
+    const api = objects.find(
+      (item) => item.kind === "Deployment" && item.metadata.name === "openclaw-enterprise-api",
+    );
+    assert.equal(
+      api.spec.template.spec.volumes.find((item) => item.name === "console-theme").configMap.name,
+      "no",
+    );
+    assert.equal(
+      api.spec.template.metadata.annotations["openclaw.dev/console-theme-checksum"],
+      "rev",
+    );
+    await assert.rejects(
+      render({ "api.consoleTheme.configMapName": "false" }),
+      /api\.consoleTheme\.configMapName must be a string/,
+    );
+    await assert.rejects(
+      render({ "api.consoleTheme.configMapName": "Not_Valid" }),
+      /api\.consoleTheme\.configMapName must be a Kubernetes resource name/,
+    );
+    const named = await resources(
+      (
+        await render(
+          { "api.consoleTheme.checksum": "revision-two" },
+          { strings: { "api.consoleTheme.configMapName": "false" } },
+        )
+      ).stdout,
+    );
+    const deployment = named.find(
+      (item) => item.kind === "Deployment" && item.metadata.name === "openclaw-enterprise-api",
+    );
+    assert.equal(
+      deployment.spec.template.spec.volumes.find((item) => item.name === "console-theme").configMap
+        .name,
+      "false",
+    );
+  },
+);
+
+test(
+  "operator-named Secrets, keys and namespaces reject YAML booleans and numbers",
+  tooling,
+  async () => {
+    // --set reads true or 1 as a boolean or number, as YAML does for yes/on/1. Rendered as "true"
+    // or "1", the name would pass the name pattern and the Pod would wait for a Secret, key or
+    // Namespace that does not exist.
+    for (const [field, value, enabled = {}] of [
+      ["installation.secretName", "true"],
+      ["installation.key", "true"],
+      ["database.secretName", "123"],
+      ["database.caSecretName", "true"],
+      ["auth.secretKey", "true"],
+      ["dns.namespace", "true"],
+      ["api.clients[0].namespace", "1"],
+      ["database.appUrlKey", "2"],
+      ["bootstrap.password.claimName", "true"],
+      ["gatewayRouting.envoyNamespace", "true", gatewayRoutingValues],
+    ]) {
+      await assert.rejects(
+        render({ ...enabled, [field]: value }),
+        (error) => error.message.includes(`${field} must be a string`),
+        field,
+      );
+    }
+  },
+);
+
+test("execution peer label maps reject non-string values before rendering", tooling, async () => {
+  const renderExecution = (field, value, option = "--set-json") =>
+    execute(
+      helm,
+      [
+        "template",
+        "oce",
+        "deploy/helm/openclaw-execution",
+        "--set",
+        "routing.hostname=agents.example.invalid",
+        "--set",
+        "routing.gatewayClassName=private-envoy-gateway",
+        "--set",
+        "routing.tlsSecretName=agents-tls",
+        "--set",
+        "routing.controlPlaneCidrs[0]=198.51.100.0/24",
+        ...(field === undefined ? [] : [option, `${field}=${value}`]),
+      ],
+      { cwd: repository, maxBuffer: 2_000_000 },
+    );
+  const defaults = await resources((await renderExecution()).stdout);
+  const defaultPolicy = defaults.find(({ kind }) => kind === "NetworkPolicy");
+  for (const [field, peer] of [
+    ["dns.podLabels", 0],
+    ["routing.envoyGatewayPodLabels", 2],
+  ]) {
+    for (const value of [
+      "true",
+      "31",
+      "[]",
+      '"text"',
+      '{"probe":true}',
+      '{"probe":31}',
+      '{"probe":[]}',
+      '{"probe":{}}',
+    ]) {
+      await assert.rejects(renderExecution(field, value), ({ stderr }) => stderr.includes(field));
+    }
+    for (const value of [
+      '{"probe":"true"}',
+      '{"probe":"31"}',
+      '{"probe":""}',
+      '{"probe":null}',
+      "{}",
+      "null",
+    ]) {
+      const objects = await resources((await renderExecution(field, value)).stdout);
+      const policy = objects.find(({ kind }) => kind === "NetworkPolicy");
+      const labels = policy.spec.egress[peer].to[0].podSelector.matchLabels;
+      const requested = JSON.parse(value);
+      const defaultLabels = defaultPolicy.spec.egress[peer].to[0].podSelector.matchLabels;
+      assert.deepEqual(labels, requested === null ? null : { ...defaultLabels, ...requested });
+    }
+    const quoted = await resources(
+      (await renderExecution(`${field}.probe`, "true", "--set-string")).stdout,
+    );
+    const quotedPolicy = quoted.find(({ kind }) => kind === "NetworkPolicy");
+    assert.deepEqual(quotedPolicy.spec.egress[peer].to[0].podSelector.matchLabels, {
+      ...defaultPolicy.spec.egress[peer].to[0].podSelector.matchLabels,
+      probe: "true",
+    });
+  }
+});
 
 test(
   "Helm DNS grants preserve configured peers and admit OpenShift backend ports",
@@ -281,6 +525,27 @@ test("sandbox ingress uses a separate listener outside OCE cookie scope", toolin
     render({ ...sandboxValues, "gatewayRouting.sandbox.listenerPort": "10443" }),
     /distinct from private Envoy HTTPS/,
   );
+  // The public listener binds in the unprivileged Envoy container.
+  await assert.rejects(
+    render({ ...sandboxValues, "gatewayRouting.sandbox.listenerPort": "1023" }),
+    /gatewayRouting\.sandbox\.listenerPort must be an integer unprivileged port/,
+  );
+  const lowestListener = await resources(
+    (await render({ ...sandboxValues, "gatewayRouting.sandbox.listenerPort": "1024" })).stdout,
+  );
+  assert.equal(
+    lowestListener
+      .find((item) => item.kind === "Gateway")
+      .spec.listeners.find((item) => item.name === "sandbox").port,
+    1024,
+  );
+  // The sandbox route takes the port after the tenant Gateway port.
+  await assert.rejects(
+    render({ ...sandboxValues, "gatewayRouting.tenantGatewayPort": "65535" }),
+    /gatewayRouting\.tenantGatewayPort must leave room for the adjacent sandbox port/,
+  );
+  // 65534 leaves 65535 for the sandbox route, so it renders.
+  await render({ ...sandboxValues, "gatewayRouting.tenantGatewayPort": "65534" });
   // Dedicated Agent hostnames are agent-<32 hex>.<domain>, so the domain stops at 253 - 39.
   const longestLabel = "a".repeat(63);
   const longestDomain = [longestLabel, longestLabel, "a".repeat(22), longestLabel].join(".");
@@ -327,12 +592,25 @@ test("sandbox ingress uses a separate listener outside OCE cookie scope", toolin
   );
 });
 
+test("database and Kubernetes API egress refuse an empty host list", tooling, async (t) => {
+  // An empty list would render NetworkPolicies with no route to the database or API server.
+  const directory = await temporaryDirectory(t, "oce-empty-cidrs-");
+  for (const name of ["database", "cluster"]) {
+    const valuesFile = join(directory, `${name}.yaml`);
+    await writeFile(valuesFile, `${name}:\n  cidrs: []\n`);
+    await assert.rejects(
+      render({}, { valuesFiles: [valuesFile], omit: [`${name}.cidrs[0]`, `${name}.cidrs[1]`] }),
+      new RegExp(`${name}\\.cidrs must contain at least one explicit IPv4 /32 host`),
+      name,
+    );
+  }
+});
+
 test(
   "database routing refuses invalid ports before emitting NetworkPolicies",
   tooling,
   async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "oce-database-port-"));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    const directory = await temporaryDirectory(t, "oce-database-port-");
     const valuesFile = join(directory, "ports.yaml");
     for (const port of [5342.5, 65536, 0, -1, "05342", "postgresql", "9223372036854775808"]) {
       await writeFile(valuesFile, `database:\n  port: ${JSON.stringify(port)}\n`);
@@ -361,8 +639,7 @@ test(
   "gateway routing refuses fractional YAML ports before emitting resources",
   tooling,
   async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "oce-routing-ports-"));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    const directory = await temporaryDirectory(t, "oce-routing-ports-");
     const valuesFile = join(directory, "ports.yaml");
     const routingValues = {
       ...gatewayRoutingValues,
@@ -493,10 +770,25 @@ test(
     };
     // tenantGatewayPort must equal Compute's network.gatewayPort, so Helm refuses exactly
     // what controller startup refuses instead of installing a controller that cannot start.
-    for (const [gatewayPort, sandbox, refused] of [
-      [PLUGIN_RUNTIME_STATUS_PORT, false, true],
-      [PLUGIN_RUNTIME_STATUS_PORT, true, true],
-      [PLUGIN_RUNTIME_STATUS_PORT - 1, true, true],
+    for (const [gatewayPort, sandbox, refused, message] of [
+      [
+        PLUGIN_RUNTIME_STATUS_PORT,
+        false,
+        true,
+        `Gateway port cannot use the reserved runtime status port ${PLUGIN_RUNTIME_STATUS_PORT}.`,
+      ],
+      [
+        PLUGIN_RUNTIME_STATUS_PORT,
+        true,
+        true,
+        `Gateway port cannot use the reserved runtime status port ${PLUGIN_RUNTIME_STATUS_PORT}.`,
+      ],
+      [
+        PLUGIN_RUNTIME_STATUS_PORT - 1,
+        true,
+        true,
+        `Gateway sandbox port cannot use the reserved runtime status port ${PLUGIN_RUNTIME_STATUS_PORT}.`,
+      ],
       [PLUGIN_RUNTIME_STATUS_PORT - 1, false, false],
       [PLUGIN_RUNTIME_STATUS_PORT + 1, true, false],
       [8080, true, false],
@@ -507,7 +799,17 @@ test(
         "gatewayRouting.tenantGatewayPort": String(gatewayPort),
       };
       if (refused) {
-        assert.throws(() => compute(gatewayPort, sandbox), /reserved runtime status port/, row);
+        assert.throws(
+          () => compute(gatewayPort, sandbox),
+          (error) => {
+            assert.ok(error instanceof ConfigurationValidationError);
+            assert.deepEqual(error.error.details, [
+              { path: "/network/gatewayPort", code: "INVALID_VALUE", message },
+            ]);
+            return true;
+          },
+          row,
+        );
         await assert.rejects(
           render(chartValues),
           ({ code, stderr }) =>
@@ -627,6 +929,41 @@ test(
         !item.spec.template.spec.containers[0].ports?.some(({ name }) => name === "metrics"),
       );
     }
+    // The broker shares the worker Pod; reserve its fixed listener only while both are enabled.
+    for (const [overrides, metricsPort, brokerEnabled] of [
+      [{ "metrics.port": "8443" }, "8443", false],
+      [
+        { ...repositoryCredentialValues, "metrics.enabled": "false", "metrics.port": "8443" },
+        undefined,
+        true,
+      ],
+      [repositoryCredentialValues, "9464", true],
+    ]) {
+      const accepted = await resources((await render(overrides)).stdout);
+      const pod = accepted.find(
+        (item) => item.kind === "Deployment" && item.metadata.name === "openclaw-enterprise-worker",
+      ).spec.template.spec;
+      const worker = [...(pod.initContainers ?? []), ...pod.containers].find(
+        ({ name }) => name === "worker",
+      );
+      assert.equal(worker.env.find(({ name }) => name === "OCC_METRICS_PORT")?.value, metricsPort);
+      assert.equal(
+        worker.ports?.find(({ name }) => name === "metrics")?.containerPort,
+        metricsPort === undefined ? undefined : Number(metricsPort),
+      );
+      const broker = pod.containers.find(({ name }) => name === "repository-credentials");
+      assert.equal(broker !== undefined, brokerEnabled);
+      if (brokerEnabled) {
+        assert.equal(
+          broker.ports.find(({ name }) => name === "repository-tls").containerPort,
+          8443,
+        );
+      }
+    }
+    await assert.rejects(
+      render({ ...repositoryCredentialValues, "metrics.port": "8443" }),
+      /metrics\.port.*repository/,
+    );
     for (const override of [
       { "metrics.scraperNamespaceLabels.team": "monitoring" },
       { "metrics.scraperPodLabels.app": "prometheus" },
@@ -821,8 +1158,7 @@ test("production native examples satisfy the current Helm, Installation, and PVC
     await import("../../apps/controller/src/composition/installation-config.ts");
   // Operators must replace the trust placeholder with their observed proxy source.
   // A documentation-only address is never a runnable trust default.
-  const directory = await mkdtemp(join(tmpdir(), "occ-production-example-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "occ-production-example-");
   const example = await readFile(new URL("installation.yaml", productionExamples), "utf8");
   assert.match(example, /<actual-proxy-source-cidr>/);
   const installationPath = join(directory, "installation.yaml");
@@ -862,7 +1198,17 @@ test("production native examples satisfy the current Helm, Installation, and PVC
       mode: "production",
       environment: { OCC_CONFIG_PATH: unquotedPath },
     }),
-    /drivers\.compute\.configuration does not match its Driver configuration schema at \/resources\/gateway\/limits\/cpu: must be string/,
+    (error) => {
+      assert.ok(error instanceof ConfigurationValidationError);
+      assert.deepEqual(error.error.details, [
+        {
+          path: "/resources/gateway/limits/cpu",
+          code: "INVALID_TYPE",
+          message: "Configuration does not satisfy type.",
+        },
+      ]);
+      return true;
+    },
   );
   // Trusted Installation startup must reject a validly spelled request that
   // Kubernetes refuses against its smaller limit, before any cluster operation.
@@ -875,7 +1221,16 @@ test("production native examples satisfy the current Helm, Installation, and PVC
       mode: "production",
       environment: { OCC_CONFIG_PATH: impossiblePath },
     }),
-    /Gateway CPU request \(resources\.gateway\.requests\.cpu\) cannot exceed its limit/,
+    (error) => {
+      assert.ok(error instanceof ConfigurationValidationError);
+      assert.equal(error.error.details[0].path, "/resources/gateway/requests/cpu");
+      assert.equal(error.error.details[0].code, "INVALID_RANGE");
+      assert.match(
+        error.error.details[0].message,
+        /Gateway CPU request .* cannot exceed its limit/,
+      );
+      return true;
+    },
   );
   const values = loadYaml(await readFile(new URL("values.yaml", productionExamples), "utf8"));
   assert.equal(values.gatewayRouting.enabled, true);
@@ -901,8 +1256,7 @@ test(
   async (t) => {
     const { loadInstallationConfiguration } =
       await import("../../apps/controller/src/composition/installation-config.ts");
-    const directory = await mkdtemp(join(tmpdir(), "occ-control-hostname-"));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    const directory = await temporaryDirectory(t, "occ-control-hostname-");
     const example = loadYaml(
       (await readFile(new URL("installation.yaml", productionExamples), "utf8")).replace(
         "<actual-proxy-source-cidr>",
@@ -970,12 +1324,19 @@ test(
           ? render(helmValues, { strings: { "gatewayRouting.hostname": hostname } })
           : render(helmValues);
       if (invalid.includes(hostname)) {
-        await assert.rejects(
-          load(),
-          hostname === "api.123"
-            ? /Gateway routing hostname must be .*numeric or 0x last label parses as IPv4; use a DNS name resolving to the gateway that its TLS certificate covers/
-            : /Gateway routing hostname must be a DNS hostname without a port or path/,
-        );
+        await assert.rejects(load(), (error) => {
+          assert.ok(error instanceof ConfigurationValidationError);
+          assert.equal(error.error.details[0].path, "/gatewayRouting/hostname");
+          assert.equal(error.error.details[0].code, "INVALID_FORMAT");
+          assert.match(
+            error.error.details[0].message,
+            hostname === "api.123"
+              ? /Gateway routing hostname must be .*numeric or 0x last label parses as IPv4; use a DNS name resolving to the gateway that its TLS certificate covers/
+              : /Gateway routing hostname must be a DNS hostname without a port or path/,
+          );
+          assert.doesNotMatch(JSON.stringify(error.error.details), /Bad_Host/);
+          return true;
+        });
         await assert.rejects(
           renderHostname(),
           ({ stderr }) =>
@@ -1028,7 +1389,16 @@ test(
         });
       const rendered = () => render({ ...sandboxValues, "gatewayRouting.sandbox.domain": domain });
       if (domain === "192.0.2.1") {
-        await assert.rejects(load(), /Sandbox domain must be a DNS hostname.*Agent label/);
+        await assert.rejects(load(), (error) => {
+          assert.ok(error instanceof ConfigurationValidationError);
+          assert.equal(error.error.details[0].path, "/gatewayRouting/sandbox/domain");
+          assert.equal(error.error.details[0].code, "INVALID_FORMAT");
+          assert.match(
+            error.error.details[0].message,
+            /Sandbox domain must be a DNS hostname.*Agent label/,
+          );
+          return true;
+        });
         await assert.rejects(
           rendered(),
           /gatewayRouting\.sandbox\.domain must be a DNS hostname.*Agent label/,
@@ -1300,6 +1670,22 @@ test("production settings coexist in fresh and upgrade chart renders", tooling, 
       api.env.find(({ name }) => name === "OCC_AGENT_NATIVE_ADMIN_ENABLED"),
       { name: "OCC_AGENT_NATIVE_ADMIN_ENABLED", value: "true" },
     );
+    // Provisioning hands off revisions in the worker, so origin preparation must receive
+    // the same Installation inputs as ordinary API deployment on install and upgrade.
+    const workerPod = deployment("worker").spec.template.spec;
+    const worker = [...(workerPod.initContainers ?? []), ...workerPod.containers].find(
+      ({ name }) => name === "worker",
+    );
+    for (const name of [
+      "OCC_AGENT_NATIVE_ADMIN_ENABLED",
+      "OCC_AGENT_NATIVE_ADMIN_DOMAIN",
+      "OCC_AUTH_BASE_URL",
+    ]) {
+      assert.deepEqual(
+        worker.env.find((entry) => entry.name === name),
+        api.env.find((entry) => entry.name === name),
+      );
+    }
     const broker = deployment("worker").spec.template.spec.containers.find(
       ({ name }) => name === "repository-credentials",
     );
@@ -1308,6 +1694,8 @@ test("production settings coexist in fresh and upgrade chart renders", tooling, 
       "https://git.openclaw-system.svc.cluster.local",
       "--backend-id",
       "github-primary",
+      "--authority",
+      "prepared-git",
     ]);
     const proxyPolicy = objects.find(
       ({ kind, metadata }) =>
@@ -1406,10 +1794,13 @@ test("Installation checksum rolls both control-plane Deployments", tooling, asyn
       checksum,
     );
   }
-  await assert.rejects(
-    render({ "controlPlane.installationChecksum": "not-a-checksum" }),
-    /must be an empty string or a lowercase SHA-256 digest/,
-  );
+  for (const invalid of ["not-a-checksum", "c".repeat(63), "c".repeat(65), "C".repeat(64)]) {
+    await assert.rejects(
+      render({ "controlPlane.installationChecksum": invalid }),
+      /must be an empty string or a lowercase SHA-256 digest/,
+      invalid,
+    );
+  }
 });
 
 test(
@@ -1437,7 +1828,14 @@ test(
       apiEnvironment.filter(({ name }) => name === "OCC_AUTH_COOKIE_DOMAIN"),
       [{ name: "OCC_AUTH_COOKIE_DOMAIN", value: "example.invalid" }],
     );
-    assert.ok(!workerEnvironment.some(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")));
+    assert.deepEqual(
+      workerEnvironment.filter(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")),
+      apiEnvironment.filter(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")),
+    );
+    assert.deepEqual(
+      workerEnvironment.find(({ name }) => name === "OCC_AUTH_BASE_URL"),
+      apiEnvironment.find(({ name }) => name === "OCC_AUTH_BASE_URL"),
+    );
     assert.ok(!workerEnvironment.some(({ name }) => name === "OCC_AUTH_COOKIE_DOMAIN"));
     assert.ok(apiEnvironment.some(({ name }) => name === "OCC_GATEWAY_API_KEY_PATH"));
     assert.ok(objects.some(({ kind }) => kind === "Gateway"));
@@ -1577,7 +1975,7 @@ test(
 );
 
 test(
-  "repository credential Helm packaging keeps private inputs in its service",
+  "repository credential Helm packaging keeps App keys in the worker and TLS in the sender",
   tooling,
   async () => {
     const { stdout } = await render(repositoryCredentialValues);
@@ -1718,12 +2116,6 @@ test(
       },
       {
         secret: {
-          name: "repository-app-key",
-          items: [{ key: "private-key.pem", path: "private-key.pem" }],
-        },
-      },
-      {
-        secret: {
           name: "repository-tls",
           items: [
             { key: "tls.crt", path: "tls.crt" },
@@ -1746,6 +2138,8 @@ test(
       "https://git.openclaw-system.svc.cluster.local",
       "--backend-id",
       "github-primary",
+      "--authority",
+      "prepared-git",
     ]);
     assert.deepEqual(service.readinessProbe.exec.command, [
       "node",
@@ -1759,7 +2153,7 @@ test(
     assert.deepEqual(endpoint.spec.ports, [
       { name: "https", port: 443, targetPort: 8443, protocol: "TCP" },
     ]);
-    const ingress = named("NetworkPolicy", "openclaw-enterprise-repository-credentials-ingress");
+    const ingress = named("NetworkPolicy", "openclaw-enterprise-prepared-repository-ingress");
     assert.deepEqual(ingress.spec.podSelector.matchLabels, endpoint.spec.selector);
     const egress = named("NetworkPolicy", "openclaw-enterprise-repository-provider-egress");
     assert.deepEqual(egress.spec.podSelector.matchLabels, endpoint.spec.selector);
@@ -1781,6 +2175,83 @@ test(
           ["RoleBinding", "ClusterRoleBinding"].includes(kind) &&
           roleRef.name === tenantWorker.metadata.name,
       ),
+    );
+  },
+);
+
+test(
+  "prepared Git broker Helm selection omits App credentials and preserves TLS/control",
+  tooling,
+  async () => {
+    const { stdout } = await render({
+      ...repositoryCredentialValues,
+      "repositoryCredentials.authority": "prepared-git",
+      "repositoryCredentials.clusterDomain": "cluster.internal",
+      "repositoryCredentials.preparedCustodySecretName": "test-git-custody",
+      "repositoryCredentials.preparedProviderCaConfigMapName": "test-git-provider-ca",
+    });
+    const objects = await resources(stdout);
+    assert.equal(
+      objects.some(
+        ({ kind, metadata }) =>
+          kind === "NetworkPolicy" &&
+          metadata.name === "openclaw-enterprise-repository-credentials-ingress",
+      ),
+      false,
+      "ordinary repository ingress would add its broad peer grant to the prepared broker",
+    );
+    const preparedIngress = objects.find(
+      ({ kind, metadata }) =>
+        kind === "NetworkPolicy" &&
+        metadata.name === "openclaw-enterprise-prepared-repository-ingress",
+    );
+    assert.deepEqual(preparedIngress.spec.ingress, []);
+    const pod = objects.find(
+      (object) =>
+        object.kind === "Deployment" && object.metadata.name === "openclaw-enterprise-worker",
+    ).spec.template.spec;
+    const broker = pod.containers.find(({ name }) => name === "repository-credentials");
+    assert.deepEqual(broker.args.slice(-2), ["--authority", "prepared-git"]);
+    const service = objects.find(
+      ({ kind, metadata }) => kind === "Service" && metadata.name === "git",
+    );
+    const hostname = "git.openclaw-system.svc.cluster.internal";
+    assert.equal(
+      service.metadata.annotations["openclaw.dev/repository-credentials-hostname"],
+      hostname,
+    );
+    assert.equal(broker.args[broker.args.indexOf("--public-origin") + 1], `https://${hostname}`);
+    assert.deepEqual(service.spec.ports, [
+      { name: "https", port: 443, targetPort: 8443, protocol: "TCP" },
+    ]);
+    const owner = "prepared-repository-owner";
+    assert.deepEqual(
+      [...pod.containers, ...(pod.initContainers ?? [])]
+        .filter(({ volumeMounts }) => volumeMounts?.some(({ name }) => name === owner))
+        .map(({ name }) => name),
+      ["worker"],
+    );
+    assert.deepEqual(
+      pod.volumes
+        .find(({ name }) => name === owner)
+        .projected.sources.map(({ secret }) => secret.name),
+      [repositoryCredentialValues["repositoryCredentials.appKeySecretName"], "test-git-custody"],
+    );
+    assert.ok(broker.volumeMounts.some(({ name }) => name === "prepared-repository-ca"));
+    const inputs = pod.volumes.find(({ name }) => name === "repository-inputs");
+    assert.deepEqual(
+      inputs.projected.sources.map(({ secret }) => secret.name),
+      ["repository-config", "repository-tls"],
+    );
+    assert.ok(broker.volumeMounts.some(({ name }) => name === "repository-control"));
+    assert.ok(broker.volumeMounts.some(({ name }) => name === "repository-registry"));
+    assert.equal(
+      broker.volumeMounts.some(({ name }) => /issuer|app-key|custody/.test(name)),
+      false,
+    );
+    await assert.rejects(
+      render({ ...repositoryCredentialValues, "repositoryCredentials.authority": "unknown" }),
+      /signing gateway retired/,
     );
   },
 );
@@ -1848,6 +2319,8 @@ test(
         expectedOrigin,
         "--backend-id",
         "github-primary",
+        "--authority",
+        "prepared-git",
       ]);
     }
   },
@@ -1857,8 +2330,7 @@ test(
   "repository credential origin helper reports the rendered broker endpoint",
   tooling,
   async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "broker-origin-helper-"));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    const directory = await temporaryDirectory(t, "broker-origin-helper-");
     const valuesFile = join(directory, "values.json");
     await writeFile(
       valuesFile,
@@ -1885,6 +2357,8 @@ test(
         cluster: { cidrs: [values["cluster.cidrs[0]"]] },
         repositoryCredentials: {
           enabled: true,
+          authority: "prepared-git",
+          preparedCustodySecretName: "repository-custody",
           image: repositoryCredentialValues["repositoryCredentials.image"],
           serviceName: "broker",
           hostname: "broker.openclaw-system.svc",
@@ -1931,8 +2405,7 @@ test(
   "image upgrade helper preserves the live broker endpoint before rendering Helm",
   tooling,
   async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "broker-upgrade-"));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    const directory = await temporaryDirectory(t, "broker-upgrade-");
     const bin = join(directory, "bin");
     await mkdir(bin);
     const liveValues = join(directory, "live-values.yaml");
@@ -1973,12 +2446,16 @@ test(
         drivers: { repo: "repository-credentials" },
       },
     ];
-    installationDocument.drivers.repo = {
+    installationDocument.repository = {
       id: "repository-credentials",
-      configuration: {
+      configuration: { sessionDurationSeconds: 86400 },
+      nativeSender: {
         controlSocket: "/run/openclaw/repository-control/private/control.sock",
-        sessionDurationSeconds: 86400,
         publicCaPath: "/etc/openclaw/repository-ca/ca.crt",
+      },
+      preparedGitHub: {
+        custodyKeyPath: "/etc/openclaw/prepared-repository/custody.key",
+        privateKeyPath: "/etc/openclaw/prepared-repository/private-key.pem",
       },
     };
     installationDocument.drivers.compute.configuration.network.repositoryCredentials = {
@@ -2102,6 +2579,8 @@ esac
                       `https://${hostname}`,
                       "--backend-id",
                       "github-primary",
+                      "--authority",
+                      "prepared-git",
                     ],
                   },
                 ],
@@ -2201,7 +2680,7 @@ esac
 );
 
 test(
-  "repository credential ingress admits embedded and dedicated execution Pods only",
+  "repository credential ingress stays closed until Compute admits a prepared Harness revision",
   tooling,
   async () => {
     const objects = await resources((await render(repositoryCredentialValues)).stdout);
@@ -2215,30 +2694,34 @@ test(
     };
     const source = {
       namespace: "oce-tenant",
-      namespaceLabels: { "openclaw.dev/namespace": "tenant" },
+      namespaceLabels: {
+        "kubernetes.io/metadata.name": "oce-tenant",
+        "openclaw.dev/namespace": "tenant",
+      },
       labels: {
         "app.kubernetes.io/managed-by": "openclaw-enterprise",
         "openclaw.dev/workload-role": "agent",
+        "openclaw.dev/namespace": "tenant",
         "openclaw.dev/agent": "agent-one",
         "openclaw.dev/revision": "revision-one",
+        "openclaw.dev/service-principal": "principal-one",
         "openclaw.dev/network-profile": "broad-egress-v1",
       },
     };
     const allowed = (peer = source, port = 8443, protocol = "TCP", chart = objects) =>
       chartAllowsIngress(chart, destination, peer, port, protocol);
 
-    // Compute emits these ownership labels plus the ordinary network profile on
-    // every workload Pod template. The chart selector stays profile-agnostic: the
-    // tenant-side Compute policies already gate egress on the profile.
-    assert.equal(allowed(), true, "dedicated execution reaches the credential endpoint");
+    // Helm has no admitted revisions. Check all additive policies, since a broad
+    // grant elsewhere would bypass Compute's later admission of exact Harness peers.
+    assert.equal(allowed(), false, "dedicated revision has not been admitted by Compute");
     const embedded = {
       ...source,
       labels: { ...source.labels, "openclaw.dev/workload-role": "gateway" },
     };
     delete embedded.labels["openclaw.dev/revision"];
-    assert.equal(allowed(embedded), true, "embedded gateway access remains available");
+    assert.equal(allowed(embedded), false, "embedded gateways cannot use prepared native Git");
 
-    // Namespace and Pod selectors must match together; either alone is insufficient.
+    // Tenant ownership and workload labels alone must never grant broker access.
     for (const peer of [source, embedded]) {
       assert.equal(allowed({ ...peer, namespaceLabels: {} }), false, "unmanaged namespace");
       for (const key of ["app.kubernetes.io/managed-by", "openclaw.dev/agent"]) {
@@ -3064,6 +3547,23 @@ test(
 );
 
 test("database CA mounts stay distinct from active production volume mounts", tooling, async () => {
+  const authorityValues = {
+    "egressAuthority.enabled": "true",
+    "egressAuthority.tlsSecretName": "authority-server-tls",
+    "egressAuthority.issuerSecretName": "gateway-jwt-keys",
+    "egressAuthority.clients[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name":
+      "openshell-system",
+    "egressAuthority.clients[0].podSelector.matchLabels.app": "openshell-gateway",
+  };
+  const custodyValues = {
+    ...authorityValues,
+    "preparedGitHub.custodySecretName": "prepared-github-custody",
+    "preparedGitHub.issuerCidrs[0]": "192.0.2.3/32",
+  };
+  const issuerCaValues = {
+    ...custodyValues,
+    "preparedGitHub.issuerCaConfigMapName": "prepared-github-issuer-ca",
+  };
   const optionalFeatures = {
     ...repositoryCredentialValues,
     ...gatewayRoutingValues,
@@ -3076,6 +3576,7 @@ test("database CA mounts stay distinct from active production volume mounts", to
   for (const features of [
     {},
     optionalFeatures,
+    { ...issuerCaValues, "backend.openshell.clientSecretName": "dedicated-openshell-admin" },
     { "bootstrap.password.mountPath": "/custom/bootstrap" },
   ]) {
     const objects = await resources((await render(features)).stdout);
@@ -3127,6 +3628,11 @@ test("database CA mounts stay distinct from active production volume mounts", to
   }
   // Paths reserved by optional features remain available when those features are disabled.
   for (const mountPath of [
+    "/etc/openclaw/openshell",
+    "/etc/openclaw/egress/tls",
+    "/etc/openclaw/egress/issuer",
+    "/etc/openclaw/prepared-github",
+    "/etc/openclaw/prepared-github-issuer",
     "/etc/openclaw/execution",
     "/etc/openclaw/repository-registry",
     "/etc/openclaw/repository-ca",
@@ -3143,6 +3649,12 @@ test("database CA mounts stay distinct from active production volume mounts", to
   ]) {
     await render({ ...databaseCaValues, "database.caMountPath": mountPath });
   }
+  // Custody does not reserve an issuer CA directory unless the issuer CA is mounted.
+  await render({
+    ...custodyValues,
+    ...databaseCaValues,
+    "database.caMountPath": "/etc/openclaw/prepared-github-issuer",
+  });
   const ordinary = (await render()).stdout;
   await render({
     ...externalGatewayRoutingValues,
@@ -4989,9 +5501,40 @@ test("Helm rejects worker timings the worker process rejects", tooling, async ()
   assert.match(rendered.stdout, /name: OCC_WORKER_POLL_INTERVAL_MS\n\s+value: "010"/);
 });
 
+test("Helm refuses worker timer settings a Node.js timer cannot wait for", tooling, async (t) => {
+  // Node fires a longer timer after 1 ms; the chart shares the worker's bound (finding 2303).
+  const over = String(MAX_TIMER_DELAY_MS + 1);
+  for (const key of ["worker.pollIntervalMs", "worker.leaseDurationMs"]) {
+    await assert.rejects(
+      render({ [key]: over }),
+      new RegExp(`${key.replace(".", "\\.")} must be at most ${MAX_TIMER_DELAY_MS} milliseconds`),
+    );
+  }
+  const rendered = await render({
+    "worker.pollIntervalMs": String(MAX_TIMER_DELAY_MS),
+    "worker.leaseDurationMs": String(MAX_TIMER_DELAY_MS),
+    // Only compared with work age, never a timer delay: the safe-integer bound still applies.
+    "worker.convergenceTimeoutMs": over,
+  });
+  for (const name of ["OCC_WORKER_POLL_INTERVAL_MS", "OCC_WORKER_LEASE_DURATION_MS"]) {
+    assert.match(rendered.stdout, new RegExp(`name: ${name}\\n\\s+value: "${MAX_TIMER_DELAY_MS}"`));
+  }
+  assert.match(
+    rendered.stdout,
+    new RegExp(`name: OCC_WORKER_CONVERGENCE_TIMEOUT_MS\\n\\s+value: "${over}"`),
+  );
+  // A values file delivers a float64, which takes the helper's other parsing path.
+  const directory = await temporaryDirectory(t, "occ-worker-timer-");
+  const valuesFile = join(directory, "worker.yaml");
+  await writeFile(valuesFile, `worker:\n  leaseDurationMs: ${over}\n`, { mode: 0o600 });
+  await assert.rejects(
+    render({}, { valuesFiles: [valuesFile] }),
+    /worker\.leaseDurationMs must be at most 2147483647 milliseconds/,
+  );
+});
+
 test("Helm renders a values-file worker timeout of 1800000 as digits", tooling, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "occ-worker-timing-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "occ-worker-timing-");
   const valuesFile = join(directory, "worker.yaml");
   await writeFile(valuesFile, "worker:\n  convergenceTimeoutMs: 1800000\n", { mode: 0o600 });
   const rendered = await render({}, { valuesFiles: [valuesFile] });
@@ -5091,8 +5634,7 @@ test("production peer matchLabels keep the native Kubernetes map contract", tool
   }
   await render({ "api.clients[0].podLabels.empty": "null" });
   await render({ "metrics.scraperNamespaceLabels": "false", "metrics.scraperPodLabels": "false" });
-  const directory = await mkdtemp(join(tmpdir(), "occ-peer-labels-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "occ-peer-labels-");
   const path = join(directory, "values.json");
   const sandboxOptions = Object.fromEntries(
     Object.entries(sandbox).filter(([key]) => !key.includes("ingressPeers")),
@@ -5547,5 +6089,463 @@ test(
       policy?.spec.egress[0].to[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"],
       namespace,
     );
+  },
+);
+
+test(
+  "protected authority packaging confines keys and listener to the owning control plane",
+  tooling,
+  async () => {
+    const protectedValues = {
+      "backend.openshell.clientSecretName": "dedicated-openshell-admin",
+      "egressAuthority.enabled": "true",
+      "egressAuthority.tlsSecretName": "authority-server-tls",
+      "egressAuthority.issuerSecretName": "gateway-jwt-keys",
+      "egressAuthority.clients[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name":
+        "openshell-system",
+      "egressAuthority.clients[0].podSelector.matchLabels.app": "openshell-gateway",
+    };
+    const defaults = await resources((await render()).stdout);
+    assert.ok(
+      !defaults.some((object) => object.metadata?.name === "openclaw-enterprise-egress-authority"),
+    );
+    const issuerPolicyName = "openclaw-enterprise-prepared-github-issuer-egress";
+    assert.ok(!defaults.some((object) => object.metadata?.name === issuerPolicyName));
+    for (const workload of defaults.filter((object) => object.kind === "Deployment")) {
+      assert.ok(
+        !workload.spec.template.spec.volumes?.some(
+          ({ name }) => name.startsWith("egress-authority") || name === "openshell-client",
+        ),
+      );
+    }
+    const objects = await resources((await render(protectedValues)).stdout);
+    assert.ok(!objects.some((object) => object.metadata?.name === issuerPolicyName));
+    const service = objects.find(
+      ({ kind, metadata }) =>
+        kind === "Service" && metadata.name === "openclaw-enterprise-egress-authority",
+    );
+    assert.equal(service.spec.type, "ClusterIP");
+    assert.equal(service.spec.selector["app.kubernetes.io/component"], "api");
+    assert.deepEqual(service.spec.ports, [
+      { name: "egress-tls", port: 9444, targetPort: "egress-tls" },
+    ]);
+    const ingress = objects.find(
+      ({ kind, metadata }) =>
+        kind === "NetworkPolicy" &&
+        metadata.name === "openclaw-enterprise-egress-authority-ingress",
+    );
+    assert.equal(ingress.spec.podSelector.matchLabels["app.kubernetes.io/component"], "api");
+    assert.deepEqual(ingress.spec.ingress, [
+      {
+        from: [
+          {
+            namespaceSelector: {
+              matchLabels: { "kubernetes.io/metadata.name": "openshell-system" },
+            },
+            podSelector: { matchLabels: { app: "openshell-gateway" } },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 9444 }],
+      },
+    ]);
+    for (const component of ["api", "worker"]) {
+      const pod = objects.find(
+        ({ kind, metadata }) =>
+          kind === "Deployment" && metadata.name === `openclaw-enterprise-${component}`,
+      ).spec.template.spec;
+      const client = pod.volumes.find(({ name }) => name === "openshell-client");
+      assert.equal(client.secret.secretName, "dedicated-openshell-admin");
+      assert.deepEqual(client.secret.items.map(({ key }) => key).sort(), [
+        "ca.crt",
+        "tls.crt",
+        "tls.key",
+      ]);
+      const container = pod.containers.find(({ name }) => name === component);
+      assert.deepEqual(
+        container.volumeMounts.find(({ name }) => name === "openshell-client"),
+        { name: "openshell-client", mountPath: "/etc/openclaw/openshell", readOnly: true },
+      );
+      const issuer = pod.volumes.find(({ name }) => name === "egress-authority-issuer");
+      if (component === "api") {
+        assert.deepEqual(issuer.secret.items, [{ key: "public.pem", path: "issuer.pub" }]);
+        assert.equal(issuer.secret.secretName, "gateway-jwt-keys");
+        assert.equal(
+          pod.volumes.find(({ name }) => name === "egress-authority-tls").secret.secretName,
+          "authority-server-tls",
+        );
+        assert.ok(
+          container.ports.some(
+            ({ name, containerPort }) => name === "egress-tls" && containerPort === 9444,
+          ),
+        );
+      } else {
+        assert.equal(issuer, undefined);
+        assert.ok(!pod.volumes.some(({ name }) => name === "egress-authority-tls"));
+      }
+    }
+    // Initialization has only database/bootstrap duties; it never receives Gateway admin or issuer keys.
+    for (const job of objects.filter(({ kind }) => kind === "Job")) {
+      assert.ok(
+        !job.spec.template.spec.volumes?.some(
+          ({ name }) => name === "openshell-client" || name.startsWith("egress-authority"),
+        ),
+      );
+    }
+    for (const [override, diagnostic] of [
+      [{ "egressAuthority.tlsSecretName": "" }, /tlsSecretName is required/],
+      [{ "egressAuthority.issuerSecretName": "" }, /issuerSecretName is required/],
+      [{ "egressAuthority.clients": "null" }, /clients must select/],
+      [{ "egressAuthority.clients[0].podSelector": "null" }, /podSelector.matchLabels/],
+      [{ "egressAuthority.port": "8080" }, /distinct TCP port/],
+      [{ "egressAuthority.port": "65536" }, /distinct TCP port/],
+      // Sprig int read "09444" as 0 and startup refused the text, after the install.
+      [
+        { "egressAuthority.port": "09444" },
+        /egressAuthority.port must be a TCP port without leading/,
+      ],
+      [
+        { "backend.openshell.clientSecretName": "authority-server-tls" },
+        /egressAuthority.tlsSecretName must name a dedicated Secret.*backend.openshell.clientSecretName/,
+      ],
+      [
+        { "egressAuthority.issuerSecretName": "authority-server-tls" },
+        /egressAuthority.issuerSecretName must name a dedicated Secret.*egressAuthority.tlsSecretName/,
+      ],
+    ]) {
+      await assert.rejects(render({ ...protectedValues, ...override }), diagnostic);
+    }
+
+    const prepared = {
+      ...protectedValues,
+      "preparedGitHub.custodySecretName": "prepared-github-custody",
+      "preparedGitHub.issuerCidrs[0]": "192.0.2.19/32",
+    };
+    // Kubernetes interprets a null NetworkPolicyPort.port as every TCP port to this peer.
+    const portKey = "preparedGitHub.issuerPort";
+    for (const invalid of [null, "", "https", 0, 65536, "0443"]) {
+      await assert.rejects(
+        render({ ...prepared, [portKey]: invalid }),
+        /preparedGitHub.issuerPort must be/,
+      );
+    }
+    for (const override of [{}, { [portKey]: 10443 }]) {
+      const rendered = await resources((await render({ ...prepared, ...override })).stdout);
+      const { spec } = rendered.find(({ metadata }) => metadata?.name === issuerPolicyName);
+      assert.deepEqual(spec.egress, [
+        {
+          to: [{ ipBlock: { cidr: "192.0.2.19/32" } }],
+          ports: [{ protocol: "TCP", port: override[portKey] ?? 443 }],
+        },
+      ]);
+    }
+  },
+);
+
+test(
+  "protected OpenShell Git installs without a repository broker and refuses the retired trial",
+  tooling,
+  async () => {
+    const selected = {
+      ...protectedRepositoryValues,
+      "openshellGit.enabled": "true",
+      "openshellGit.tlsSecretName": "openshell-git-tls",
+      "openshellGit.issuerPublicKeyConfigMapName": "openshell-gateway-public",
+      "openshellGit.clients[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name":
+        "openshell-system",
+      "openshellGit.clients[0].podSelector.matchLabels.app": "openshell-supervisor",
+    };
+    const defaults = await resources((await render()).stdout);
+    assert.ok(!defaults.some(({ metadata }) => metadata?.name?.includes("openshell-git")));
+    const { stdout } = await render(selected);
+    // Check the entire installation, including Services, probes, ingress and broker-specific RBAC.
+    assert.doesNotMatch(
+      stdout,
+      /8443|repository-credentials|prepared-repository-ingress|repository-(?:public-ca|control|inputs|private)/,
+    );
+    const objects = await resources(stdout);
+    const workerRole = objects.find(
+      ({ kind, metadata }) => kind === "ClusterRole" && metadata.name.endsWith("-tenant-worker"),
+    );
+    assert.ok(
+      !workerRole.rules.some(
+        ({ resources, verbs }) => resources.includes("secrets") && verbs.includes("list"),
+      ),
+      "protected Git does not grant the broker's Secret enumeration privilege",
+    );
+    const issuer = objects.find(({ metadata }) =>
+      metadata.name.endsWith("-repository-provider-egress"),
+    );
+    assert.deepEqual(issuer.spec.egress, [
+      { to: [{ ipBlock: { cidr: "198.51.100.23/32" } }], ports: [{ protocol: "TCP", port: 443 }] },
+    ]);
+    const service = objects.find(
+      ({ kind, metadata }) =>
+        kind === "Service" && metadata.name === "openclaw-enterprise-openshell-git",
+    );
+    assert.equal(service.spec.type, "ClusterIP");
+    assert.equal(service.spec.selector["app.kubernetes.io/component"], "worker");
+    assert.deepEqual(service.spec.ports, [
+      { name: "openshell-git", port: 8445, targetPort: "openshell-git", protocol: "TCP" },
+    ]);
+    const policy = objects.find(
+      ({ kind, metadata }) =>
+        kind === "NetworkPolicy" && metadata.name === "openclaw-enterprise-openshell-git-ingress",
+    );
+    assert.equal(policy.spec.podSelector.matchLabels["app.kubernetes.io/component"], "worker");
+    assert.deepEqual(policy.spec.ingress, [
+      {
+        from: [
+          {
+            namespaceSelector: {
+              matchLabels: { "kubernetes.io/metadata.name": "openshell-system" },
+            },
+            podSelector: { matchLabels: { app: "openshell-supervisor" } },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 8445 }],
+      },
+    ]);
+    for (const object of objects.filter(({ kind }) => ["Deployment", "Job"].includes(kind))) {
+      const pod = object.spec.template.spec;
+      const volume = pod.volumes?.find(({ name }) => name === "openshell-git");
+      if (object.metadata.name !== "openclaw-enterprise-worker") {
+        assert.equal(volume, undefined);
+        assert.ok(!pod.volumes?.some(({ name }) => name.startsWith("prepared-repository-")));
+        continue;
+      }
+      assert.equal(volume.projected.defaultMode, 0o440);
+      assert.deepEqual(volume.projected.sources, [
+        {
+          secret: {
+            name: "openshell-git-tls",
+            items: [
+              { key: "tls.crt", path: "tls.crt" },
+              { key: "tls.key", path: "tls.key" },
+            ],
+          },
+        },
+        {
+          configMap: {
+            name: "openshell-gateway-public",
+            items: [{ key: "gateway-public.pem", path: "gateway-public.pem" }],
+          },
+        },
+      ]);
+      assert.deepEqual(
+        pod.containers.map(({ name }) => name),
+        ["worker"],
+      );
+      assert.equal(object.spec.strategy.type, "Recreate", "stop the old owner before replacement");
+      const worker = pod.containers[0];
+      assert.deepEqual(
+        pod.volumes
+          .find(({ name }) => name === "prepared-repository-owner")
+          .projected.sources.map(({ secret }) => secret.name),
+        ["repository-app-key", "git-custody"],
+      );
+      for (const name of [
+        "repository-registry",
+        "prepared-repository-owner",
+        "prepared-repository-ca",
+      ]) {
+        assert.ok(
+          worker.volumeMounts.some((mount) => mount.name === name && mount.readOnly),
+          name,
+        );
+      }
+      assert.deepEqual(
+        worker.volumeMounts.find(({ name }) => name === "openshell-git"),
+        { name: "openshell-git", mountPath: "/etc/openclaw/openshell-git", readOnly: true },
+      );
+      assert.ok(
+        worker.ports.some(
+          ({ name, containerPort }) => name === "openshell-git" && containerPort === 8445,
+        ),
+      );
+    }
+    const upgrade = await render(selected, { isUpgrade: true });
+    assert.doesNotMatch(upgrade.stdout, /8443|repository-public-ca|repository-control/);
+    const job = (await resources(upgrade.stdout)).find(({ kind }) => kind === "Job");
+    const check = job.spec.template.spec.initContainers.find(
+      ({ name }) => name === "installation-check",
+    );
+    assert.deepEqual(
+      check.volumeMounts.filter(({ name }) => /repository|openshell-git/.test(name)),
+      [
+        {
+          name: "repository-registry",
+          mountPath: "/etc/openclaw/repository-registry",
+          readOnly: true,
+        },
+      ],
+    );
+    // An older trial must drain on its original owner, not restart with this chart.
+    const oldTrial = {
+      ...selected,
+      ...repositoryCredentialValues,
+      "repositoryCredentials.serviceName": "git",
+    };
+    await assert.rejects(
+      render(oldTrial, { isUpgrade: true }),
+      /protected Git requires the repository broker disabled/,
+    );
+    await assert.rejects(
+      render({ ...oldTrial, "openshellGit.mode": "broker-trial" }, { isUpgrade: true }),
+      /drain the earlier broker trial on its original owner/,
+    );
+    const sealed = await resources(
+      (
+        await render({
+          ...selected,
+          ...gatewayRoutingValues,
+          "preprovisionedNamespace.namespaceId": "ns_fixture",
+          "preprovisionedNamespace.uid": "11111111-2222-3333-4444-555555555555",
+        })
+      ).stdout,
+    );
+    const namespaceRules = sealed.flatMap(({ kind, rules }) =>
+      kind === "ClusterRole" ? rules.filter((rule) => rule.resources?.includes("namespaces")) : [],
+    );
+    assert.equal(namespaceRules.length, 2, "named namespace access for API and worker");
+    for (const rule of namespaceRules) {
+      assert.deepEqual(rule.verbs, ["get"]);
+      assert.equal(rule.resourceNames.length, 1);
+    }
+    assert.ok(!sealed.some(({ kind }) => kind === "Job"), "do not bootstrap a sealed installation");
+    for (const [override, diagnostic] of [
+      [{ "repositoryCredentials.authority": "github-app" }, /authority prepared-git/],
+      [
+        { "openshellGit.mode": "broker-trial" },
+        /drain the earlier broker trial on its original owner/,
+      ],
+      [
+        { "repositoryCredentials.preparedCustodySecretName": "" },
+        /preparedCustodySecretName is required/,
+      ],
+      [{ "openshellGit.tlsSecretName": "" }, /openshellGit.tlsSecretName is required/],
+      [
+        { "openshellGit.issuerPublicKeyConfigMapName": "" },
+        /issuerPublicKeyConfigMapName is required/,
+      ],
+      [{ "openshellGit.clients": "null" }, /select trusted supervisor callers/],
+      [{ "openshellGit.clients[0].podSelector": "null" }, /podSelector.matchLabels/],
+      [{ "openshellGit.clients[0].namespaceSelector": "null" }, /namespaceSelector.matchLabels/],
+      [{ "openshellGit.port": "8443" }, /distinct from repository/],
+      [{ "openshellGit.port": "65536" }, /unprivileged TCP port/],
+      [{ "openshellGit.port": "8445.5" }, /positive safe integer/],
+      // Sprig int read "02000" as octal 1024 and startup refused the text, after the install.
+      [{ "openshellGit.port": "02000" }, /openshellGit.port must be a TCP port without leading/],
+      // The provider egress rule read "02000" as port 1024 and "0x7d0" as 2000.
+      [
+        { "repositoryCredentials.upstreamPort": "02000" },
+        /repositoryCredentials.upstreamPort must be a TCP port without leading/,
+      ],
+      [
+        { "repositoryCredentials.upstreamPort": "0x7d0" },
+        /repositoryCredentials.upstreamPort must be a positive safe integer/,
+      ],
+      [{ "openshellGit.tlsSecretName": "repository-app-key" }, /must name a dedicated Secret/],
+    ]) {
+      await assert.rejects(render({ ...selected, ...override }), diagnostic);
+    }
+  },
+);
+
+test(
+  "Helm supplies protected Git custody for a separately installed Credential Proxy",
+  tooling,
+  async () => {
+    const delivery = "repositoryCredentials.delivery";
+    const selected = { ...protectedRepositoryValues, [delivery]: "credential-proxy" };
+
+    // Staging the registry, issuer key and custody does not select a protected sender.
+    const inactive = (await render(protectedRepositoryValues)).stdout;
+    assert.equal(inactive, (await render()).stdout);
+
+    for (const isUpgrade of [false, true]) {
+      const { stdout } = await render(selected, { isUpgrade });
+      assert.doesNotMatch(
+        stdout,
+        /844[35]|openshell-git|repository-credentials|prepared-repository-ingress|repository-(?:public-ca|control|inputs|private)/,
+      );
+      const objects = await resources(stdout);
+      const policy = objects.find(({ metadata }) =>
+        metadata.name.endsWith("-repository-provider-egress"),
+      );
+      assert.equal(policy?.spec.podSelector.matchLabels["app.kubernetes.io/component"], "worker");
+      assert.deepEqual(policy.spec.egress, [
+        {
+          to: [{ ipBlock: { cidr: "198.51.100.23/32" } }],
+          ports: [{ protocol: "TCP", port: 443 }],
+        },
+      ]);
+
+      // The API and upgrade check can read the registry. Only the worker gets signing and custody keys.
+      const readers = {};
+      for (const { spec } of objects.filter(({ kind }) => ["Deployment", "Job"].includes(kind))) {
+        const pod = spec.template.spec;
+        for (const container of [...(pod.initContainers ?? []), ...pod.containers]) {
+          const mounts = (container.volumeMounts ?? [])
+            .filter(({ name }) => name.includes("repository"))
+            .map(({ name, readOnly }) => {
+              assert.equal(readOnly, true, name);
+              return name;
+            });
+          if (mounts.length) {
+            readers[container.name] = mounts;
+          }
+        }
+        if (!pod.containers.some(({ name }) => name === "worker")) {
+          continue;
+        }
+        assert.equal(spec.strategy.type, "Recreate");
+        const owner = pod.volumes.find(({ name }) => name === "prepared-repository-owner");
+        assert.deepEqual(
+          owner.projected.sources.map(({ secret }) => secret.name),
+          ["repository-app-key", "git-custody"],
+        );
+      }
+      const registry = ["repository-registry"];
+      assert.deepEqual(readers, {
+        api: registry,
+        worker: [...registry, "prepared-repository-owner", "prepared-repository-ca"],
+        ...(isUpgrade ? { "installation-check": registry } : {}),
+      });
+    }
+    for (const [override, diagnostic] of [
+      [{ [delivery]: "other" }, /delivery must be empty or credential-proxy/],
+      [{ "repositoryCredentials.enabled": true }, /requires the repository broker disabled/],
+      [{ "repositoryCredentials.authority": "github-app" }, /requires authority prepared-git/],
+      [
+        { "repositoryCredentials.upstreamCidrs": "null" },
+        /must contain approved provider IPv4 CIDRs/,
+      ],
+    ]) {
+      await assert.rejects(render({ ...selected, ...override }), diagnostic);
+    }
+  },
+);
+
+test(
+  "gateway routing service type is limited to the EnvoyProxy service types",
+  tooling,
+  async () => {
+    // EnvoyProxy envoyService.type accepts only these three. Any other value rendered, and the
+    // apply failed after the pre-install hooks had migrated and bootstrapped the Installation.
+    for (const serviceType of ["clusterIP", "ExternalName"]) {
+      await assert.rejects(
+        render({ ...gatewayRoutingValues, "gatewayRouting.serviceType": serviceType }),
+        /gatewayRouting\.serviceType must be ClusterIP, LoadBalancer or NodePort/,
+        serviceType,
+      );
+    }
+    for (const serviceType of ["LoadBalancer", "NodePort"]) {
+      const objects = await resources(
+        (await render({ ...gatewayRoutingValues, "gatewayRouting.serviceType": serviceType }))
+          .stdout,
+      );
+      const envoy = objects.find(({ kind }) => kind === "EnvoyProxy");
+      assert.equal(envoy.spec.provider.kubernetes.envoyService.type, serviceType);
+    }
   },
 );
