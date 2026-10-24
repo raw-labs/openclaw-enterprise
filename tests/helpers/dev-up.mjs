@@ -18,6 +18,7 @@ import { after } from "node:test";
 
 import { commandPath, composeConfigurationProvider } from "./compose.mjs";
 import { bashString, commandShim, startCommandServer } from "./fixture-command-server.mjs";
+import { temporaryDirectory } from "./temporary-directory.mjs";
 
 const repository = fileURLToPath(new URL("../..", import.meta.url));
 const serviceKey = "sk-test-secret-value";
@@ -579,15 +580,15 @@ function lifecycleCommand(fake, invocation, io) {
             ["openclaw-development/import-b9b4e5950649:occ-dev-owned", "c".repeat(64)],
             [
               "openclaw-development/openshell-gateway:occ-dev-owned",
-              "bdb4fe248070032c88be78f029dad9325cb698480e90486e1413a674a5d8edc8",
+              "ca0bc15a045017ee20bfab682f1a561eca6e6c6ed7d021d20641da24aaa6dfb6",
             ],
             [
               "openclaw-development/openshell-sandbox:occ-dev-owned",
-              "ca00c094aeaa60681b8196cda18ab3c5dd5f7d782d4c36798256427b67599070",
+              "e9adf9ecde328122414ad2ee8c6fc5d5b389e4cf168daf4357c46f5a77d55851",
             ],
             [
               "openclaw-development/openshell-supervisor:occ-dev-owned",
-              "aa681d8264af6ee860e38349ed3c76609a51778eb6d0f02743df03787b80a290",
+              "fabcd01f656e9d23df4386f82e80b4f48b90f3452d7d5c58889007643a069161",
             ],
           ]
             .map(
@@ -806,8 +807,7 @@ async function writeFakeCommand(fake, path, command) {
 }
 
 async function createFixture(t, options = {}) {
-  const directory = await mkdtemp(join(tmpdir(), "openclaw-dev-up-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "openclaw-dev-up-");
 
   const fixtureRepository = join(directory, "repository");
   await mkdir(join(fixtureRepository, "scripts"), { recursive: true });

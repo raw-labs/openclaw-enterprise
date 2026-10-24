@@ -11,9 +11,10 @@ import {
   ConfigurationValidationError,
 } from "../../apps/controller/src/drivers/configuration/kubernetes/index.ts";
 import {
+  isStaleGeneration,
   PROVISIONING_REFUSAL_CODES,
   preAdmissionRefusal,
-} from "../../apps/controller/src/console/agents/list.mjs";
+} from "../../apps/controller/src/console/agents/list.mts";
 import { ERROR_CODES, PresetValidationError } from "../../packages/contracts/src/index.ts";
 import { normalizeRequestSecretBindings } from "../../packages/occ/src/agent-provisioning.ts";
 import {
@@ -23,8 +24,10 @@ import {
   AuthorizationDeniedError,
   ChannelCredentialError,
   ChannelDirectoryError,
+  ConfigurationGenerationConflictError,
   ConfigurationHarnessError,
   CredentialGatewayNotConfiguredError,
+  CredentialTokenUnsettledError,
   CredentialWithdrawalInProgressError,
   DedicatedOpenClawSandboxError,
   DeletionRetryOwnedError,
@@ -40,10 +43,14 @@ import {
   NamespaceNotReadyError,
   NativeWorkerSupportError,
   NotImplementedError,
+  PersistedStateInvalidError,
   PluginDiscoveryError,
   PluginPolicyValidationError,
   PostgresCommitOutcomeUnknownError,
+  ProtectedExecutionNetworkPolicyError,
   ProvisioningSecretDriverError,
+  RepositoryGitProfileUnsupportedError,
+  RepositoryGitSenderUnqualifiedError,
   ResourceConflictError,
   ResourceStateConflictError,
   RuntimeCredentialsForbiddenByClusterError,
@@ -97,6 +104,17 @@ const cases = [
       status: 409,
       code: "RESOURCE_CONFLICT",
       message: "The requested platform resource already exists.",
+    },
+  ],
+  [
+    "a stale Configuration generation is marked by its expectedGeneration detail",
+    new ConfigurationGenerationConflictError(),
+    {
+      status: 409,
+      code: "RESOURCE_CONFLICT",
+      message:
+        "The Configuration changed since it was read. Read its current generation before updating it.",
+      details: [{ path: "/expectedGeneration", code: "INVALID_VALUE" }],
     },
   ],
   [
@@ -182,6 +200,46 @@ const cases = [
       code: "CREDENTIAL_WITHDRAWAL_IN_PROGRESS",
       message:
         "A credential withdrawal is still queued or running for an Agent revision that held the source. Wait for it to finish (it retries for up to about an hour), or delete that revision's Agent, then retry.",
+    },
+  ],
+  [
+    "a source delete blocked by a token that may still be valid names the retry time",
+    new CredentialTokenUnsettledError(new Date("2026-10-23T01:41:00.000Z")),
+    {
+      status: 409,
+      code: "CREDENTIAL_TOKEN_UNSETTLED",
+      message:
+        "A GitHub token issued for this credential source may still be valid, so it cannot be deleted yet. Retry the deletion after 2026-10-23T01:41:00.000Z, when GitHub's maximum token lifetime has passed.",
+    },
+  ],
+  [
+    "network policy additions refused at deploy under protected execution name the rule",
+    new ProtectedExecutionNetworkPolicyError("deploy"),
+    {
+      status: 409,
+      code: "SANDBOX_POLICY_PROTECTED_EXECUTION",
+      message:
+        "Protected execution keeps only the Credential Proxy egress policy, so this Agent's network policy additions are refused. Remove them, then deploy.",
+    },
+  ],
+  [
+    "a git-write deploy on a Credential Proxy with no qualified sender names the alternatives",
+    new RepositoryGitSenderUnqualifiedError(),
+    {
+      status: 409,
+      code: "REPOSITORY_GIT_SENDER_UNQUALIFIED",
+      message:
+        "The selected Credential Proxy cannot enforce the Agent's git-write repository binding: no OpenShell release is qualified for it. Use native prepared Git or a qualified installed sender, or remove the binding, then deploy again.",
+    },
+  ],
+  [
+    "a repository profile a Credential Proxy cannot deliver names the supported profiles",
+    new RepositoryGitProfileUnsupportedError(),
+    {
+      status: 409,
+      code: "REPOSITORY_GIT_PROFILE_UNSUPPORTED",
+      message:
+        "A Credential Proxy delivers repository Git only for one binding with the git-write or github-installation profile, so this Agent's repository access can never start. Use one such binding or native prepared Git, or remove the bindings, then deploy again.",
     },
   ],
   [
@@ -788,6 +846,16 @@ const cases = [
     },
   ],
   [
+    // #3313: an undecodable row fails closed like any unavailable dependency.
+    "a persisted row its reader cannot decode is an unavailable dependency, without its text",
+    new PersistedStateInvalidError(INTERNAL),
+    {
+      status: 503,
+      code: "DEPENDENCY_UNAVAILABLE",
+      message: "A required platform dependency is unavailable.",
+    },
+  ],
+  [
     "a Configuration Secret binding the selected Secret Driver cannot serve names the fix",
     new SecretBindingDriverError(),
     {
@@ -997,6 +1065,7 @@ test("every API error code that may answer 503 is classified for Create Agent's 
 const UNNAMED_503_CASES = [
   "an unknown commit outcome says not to retry automatically",
   "an unavailable dependency is not a denial",
+  "a persisted row its reader cannot decode is an unavailable dependency, without its text",
   "a Configuration ConfigMap OCC does not own",
   "an unavailable dependency from another module copy, matched by name",
   "a Kubernetes API 404",
@@ -1020,6 +1089,36 @@ test("Create Agent and Deploy show the API's reason only for a named 503 refusal
       serverMessage: failure.message,
     });
     assert.equal(shown, UNNAMED_503_CASES.includes(name) ? undefined : failure.message, name);
+  }
+});
+
+// Only the API's generation conflict, marked by its /expectedGeneration detail, offers Reload
+// draft; any other RESOURCE_CONFLICT, with or without details, meets the same refusal again
+// after a reread (finding 1511).
+test("only the Configuration generation conflict reads as a stale save in the console", () => {
+  // The console error fields isStaleGeneration reads. api-client.mts also drops detail paths
+  // outside its pattern and past 32 details; none of these errors have such paths.
+  const consoleError = (error) => {
+    const failure = requestFailure(error);
+    const detailPaths = failure.details?.map(({ path }) => path);
+    return { status: failure.status, code: failure.code, ...(detailPaths && { detailPaths }) };
+  };
+  const reserved =
+    "The Configuration is reserved for provisioning and is not available for this operation.";
+  const conflicts = [
+    ...cases.filter(([, , expected]) => expected.code === "RESOURCE_CONFLICT"),
+    ["a provisioning reservation", new ResourceStateConflictError(reserved)],
+    [
+      "a state conflict with another detail",
+      new ResourceStateConflictError(reserved, [{ path: "/name", code: "INVALID_VALUE" }]),
+    ],
+  ];
+  const stale = conflicts.filter(
+    ([, error]) => error instanceof ConfigurationGenerationConflictError,
+  );
+  assert.equal(stale.length, 1);
+  for (const [name, error] of conflicts) {
+    assert.equal(isStaleGeneration(consoleError(error)), stale[0][1] === error, name);
   }
 });
 

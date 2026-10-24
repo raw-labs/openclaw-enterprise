@@ -25,12 +25,12 @@ initializes private workspace files before Sandbox handoff; the Harness verifies
 their completion marker. [Sandbox limits](../../flows/openshell-sandbox-provisioning.md#3-validate-and-serialize-the-sandbox)
 block direct Secret-backed model and environment projection.
 
-1. Sign in, select the intended Namespace, open **Agents**, and select
+1. Sign in, select a Namespace, open **Agents**, and select
    **Create Agent**.
 2. Choose a [Preset](../presets.md), fill its variables, and select **Use Preset**.
    Review defaults and choose an existing or new model Secret.
-   **Start with default Preset** loads `default-codex`; **Start without Preset**
-   skips Presets.
+   **Start with default Preset** uses the [readable default selection](../presets.md#plain-console-default);
+   **Start without Preset** skips Presets.
 3. Enter a unique name within the Namespace. Choose **Provider**, then
    **Harness**. OpenAI offers **Codex** by default and **OpenClaw**;
    Anthropic offers only **OpenClaw**. Codex uses Dedicated **Execution mode**. OpenClaw
@@ -153,11 +153,21 @@ Successful draft saves retain IDs and freeze inputs, including authentication.
 Correct names or permissions, then retry failed resources.
 If model/Slack Secret grants fail after Agent creation,
 select **Retry credential access** or ask an administrator to check its grants.
+The same action is safe if the Console saved the Agent but could not confirm its service
+principal. It checks the saved Agent before granting access, without creating another Agent.
 A member without Installation administration gets no retry: open the saved Agent and
 ask an Installation administrator to grant it. If your permissions could not be checked,
 select **Retry permission check**.
-Uncertain responses block another attempt: check displayed IDs and the Agents list;
-give the request ID to your operator if the outcome remains unknown.
+If the configuration check times out, your entries stay in the form. Select
+**Create Agent** again to repeat the check and continue.
+If a create response is missing or identifies a different resource, the write may still
+have succeeded. Check the displayed IDs and the Agents list before starting again.
+For an uncertain Credential Source, select **Check credential registration** to look up
+that registration without creating another. Give your operator the request ID if the outcome is unclear.
+
+If the Console cannot confirm a ChatGPT OAuth sign-in started, it blocks another
+start in that form. Without the session reference it cannot poll or cancel the
+attempt. Follow [interrupted sign-in recovery](../../guides/deploy/credential-lifecycle.md#recover-an-interrupted-codex-sign-in).
 
 After a lost admission response, **Retry provisioning request** resubmits the same
 request ID and saved Secret references. Retry acknowledged jobs through their URL;
