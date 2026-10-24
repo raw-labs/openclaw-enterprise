@@ -25,6 +25,7 @@ import {
   retryKubectlRead,
   validateExplicitK3dLoopbackContext,
 } from "../helpers/kubernetes-real.mjs";
+import { kubectlGetJson } from "../helpers/kubernetes-api-read.mjs";
 
 export const execute = promisify(execFile);
 export const kubeconfigPath = process.env.OCC_TEST_KUBERNETES_KUBECONFIG;
@@ -62,6 +63,10 @@ export function hash(value, length = 12) {
 }
 
 export async function kubectl(...args) {
+  const answered = await kubectlGetJson({ kubeconfigPath, kubernetesContext }, args);
+  if (answered !== undefined) {
+    return answered;
+  }
   const { stdout } = await execute(
     "kubectl",
     ["--kubeconfig", kubeconfigPath, "--context", kubernetesContext, ...args],
@@ -115,43 +120,11 @@ export async function waitFor(description, operation, timeoutMs = 120_000) {
 
 // Test cleanup deletes its randomly named namespaces without waiting: no later step reads
 // them, and each deletion waits out namespace-controller passes (5 s each, longer while Pods
-// terminate). local-path removes a deleted claim's host directory with a helper Pod, which
-// lane cleanup cannot do itself, so a file registers `after(waitForDeletedVolumes)` to wait
-// once, at its end, for those volumes to be deleted. It reads only volumes claimed from the
-// file's own namespaces, so a file sharing the cluster does not delay it.
-export function createNamespaceReaper() {
-  const deletedNamespaces = new Set();
-  return {
-    deleteNamespaces(...names) {
-      for (const name of names) {
-        deletedNamespaces.add(name);
-      }
-      return kubectl("delete", "namespace", ...names, "--ignore-not-found=true", "--wait=false");
-    },
-    async waitForDeletedVolumes() {
-      if (deletedNamespaces.size === 0) {
-        return;
-      }
-      let remaining = [];
-      try {
-        await waitFor(
-          "local-path volumes of deleted namespaces to be removed",
-          async () => {
-            const volumes = JSON.parse(await kubectlRead("get", "persistentvolumes", "-o", "json"));
-            remaining = volumes.items
-              .filter(({ spec }) => deletedNamespaces.has(spec.claimRef?.namespace))
-              .map(({ metadata, status }) => `${metadata.name} (${status?.phase ?? "unknown"})`);
-            return remaining.length === 0;
-          },
-          180_000,
-        );
-      } catch (error) {
-        // Bound means a namespace is stuck; Released or Failed means local-path's helper failed.
-        error.message = `${error.message} Remaining: ${remaining.join(", ")}`;
-        throw error;
-      }
-    },
-  };
+// terminate). local-path removes a deleted claim's volume directory with a helper Pod, maybe
+// after the file ends; lane cleanup removes whatever such volumes leave in the shared storage
+// (scripts/ci/cleanup.mjs), so no file waits for them.
+export function deleteNamespaces(...names) {
+  return kubectl("delete", "namespace", ...names, "--ignore-not-found=true", "--wait=false");
 }
 
 export function provisioningRequestBody({
@@ -236,7 +209,12 @@ async function privateBootstrapDirectory(context) {
   return directory;
 }
 
-export async function createProvisioningApiFixture(context, computeDriver, authentication) {
+export async function createProvisioningApiFixture(
+  context,
+  computeDriver,
+  authentication,
+  { emit = () => {} } = {},
+) {
   // Exercise real admission with Kubernetes Secrets; fixture credentials never reach Slack.
   const originalFetch = globalThis.fetch;
   context.mock.method(globalThis, "fetch", async (url, init) => {
@@ -338,7 +316,7 @@ export async function createProvisioningApiFixture(context, computeDriver, authe
       pollIntervalMs: 25,
       leaseDurationMs: 30_000,
       maxAttempts: 3,
-      emit: () => {},
+      emit,
     });
     await worker.start();
   }
@@ -424,6 +402,7 @@ export function revision(driver, owner, agentId, number) {
     harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
     harnessAuth: harnessAuthentication.get(owner.id).snapshot,
     compute: { id: driver.id, implementation: driver.implementation },
+    executionAdmission: { version: 2, mode: "unprotected" },
     servicePrincipalId: `service-agent-${agentId}`,
     createdAt: new Date().toISOString(),
   };
@@ -474,6 +453,19 @@ export async function assertReadyGateway(namespaceName, agentId, namespaceId, sn
       ? undefined
       : {
           ...snapshot.configuration,
+          ...(snapshot.harness.id === "codex" && snapshot.harness.mode === "dedicated"
+            ? {
+                // The paired Harness owns the real filesystem; the Gateway
+                // keeps a writable local key for native chat preparation.
+                agents: {
+                  ...snapshot.configuration.agents,
+                  defaults: {
+                    ...snapshot.configuration.agents?.defaults,
+                    workspace: "/home/node/workspace",
+                  },
+                },
+              }
+            : {}),
           gateway: {
             ...snapshot.configuration.gateway,
             // Compute renders the all-interfaces listener for an omitted or auto bind.
@@ -1057,6 +1049,11 @@ export async function createScopedController(context, installationId, platformNa
     "--type=json",
     "--patch",
     JSON.stringify([
+      {
+        op: "add",
+        path: "/rules/-",
+        value: { apiGroups: ["batch"], resources: ["jobs"], verbs: ["get", "create", "delete"] },
+      },
       {
         op: "add",
         path: "/rules/-",

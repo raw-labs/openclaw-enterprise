@@ -4,6 +4,7 @@ import net from "node:net";
 import test from "node:test";
 import { deriveNativeAdminHost } from "../../apps/controller/src/gateway/native-admin.ts";
 import { createNativeAdminAccess } from "../../apps/controller/src/http/native-admin.ts";
+import { waitUntil } from "../helpers/wait-for.mjs";
 
 const require = createRequire(new URL("../../apps/controller/package.json", import.meta.url));
 const Fastify = require("fastify");
@@ -103,7 +104,7 @@ test("a client reset during a pending native-admin denial still records the deni
         async resolveAgentReference(predicate) {
           return predicate(agent) ? agent : undefined;
         },
-        getAdministerableActiveAgentRevision() {
+        getUsableActiveAgentRevision() {
           admissionEntered = true;
           return admissionGate;
         },
@@ -166,9 +167,9 @@ test("a client reset during a pending native-admin denial still records the deni
         socket.write(
           `GET / HTTP/1.1\r\nHost: ${host}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
         );
-        const waitUntil = Date.now() + 1000;
+        const admissionDeadline = Date.now() + 1000;
         const waitForAdmission = () => {
-          if (admissionEntered || Date.now() > waitUntil) {
+          if (admissionEntered || Date.now() > admissionDeadline) {
             socket.resetAndDestroy();
             setTimeout(resolve, 50);
             return;
@@ -185,10 +186,7 @@ test("a client reset during a pending native-admin denial still records the deni
       resource: { kind: "agent", id: agent.id, namespaceId: agent.namespaceId },
     };
     rejectAdmission(denied);
-    const auditDeadline = Date.now() + 1000;
-    while (audits.length === 0 && Date.now() < auditDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
+    await waitUntil("the denial audit", () => audits.length > 0, { timeoutMs: 1000 });
     assert.equal(admissionEntered, true);
     assert.equal(audits.length, 1);
     assert.equal(audits[0].kind, "authorization_denial");
@@ -227,6 +225,7 @@ for (const phase of ["admission", "gateway key"]) {
     };
     const revision = {
       id: "rev_a",
+      compute: { id: "compute_test", implementation: "native-admin-reset-test" },
       configuration: {
         gateway: {
           auth: {
@@ -242,7 +241,7 @@ for (const phase of ["admission", "gateway key"]) {
         },
       },
     };
-    const selection = { agent, revision };
+    const selection = { agent, revision, runtimeRole: "platform-administrator" };
     const crashes = [];
     const onUncaught = (error) => {
       crashes.push(error);
@@ -263,11 +262,18 @@ for (const phase of ["admission", "gateway key"]) {
           async resolveAgentReference(predicate) {
             return predicate(agent) ? agent : undefined;
           },
-          getAdministerableActiveAgentRevision() {
+          getUsableActiveAgentRevision() {
             return phase === "admission" ? gated("admission", selection) : selection;
           },
           selectedDriver() {
-            return { getGatewayEndpoint: () => `wss://127.0.0.1:${gateway.address().port}/` };
+            return {
+              id: "compute_test",
+              implementation: "native-admin-reset-test",
+              getAgentRuntimeAccess: () => ({
+                endpoint: `wss://127.0.0.1:${gateway.address().port}/`,
+                headers: {},
+              }),
+            };
           },
         };
       },
@@ -330,9 +336,9 @@ for (const phase of ["admission", "gateway key"]) {
               "Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n" +
               "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
           );
-          const waitUntil = Date.now() + 1000;
+          const phaseDeadline = Date.now() + 1000;
           const waitForPhase = () => {
-            if (entered[phase] || Date.now() > waitUntil) {
+            if (entered[phase] || Date.now() > phaseDeadline) {
               socket.resetAndDestroy();
               resolve();
               return;
@@ -344,10 +350,11 @@ for (const phase of ["admission", "gateway key"]) {
       });
       assert.equal(entered[phase], true, `the upgrade must reach the pending ${phase}`);
       // Release the gate only once the server has seen the reset.
-      const resetDeadline = Date.now() + 2000;
-      while (!serverSockets.every((socket) => socket.destroyed) && Date.now() < resetDeadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+      await waitUntil(
+        "the server to observe the reset",
+        () => serverSockets.every((socket) => socket.destroyed),
+        { timeoutMs: 2000, intervalMs: 10 },
+      );
       assert.equal(serverSockets.length, 1);
       assert.equal(serverSockets[0].destroyed, true, "the server must observe the reset");
       gates[phase]();

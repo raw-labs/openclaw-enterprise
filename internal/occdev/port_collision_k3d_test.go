@@ -16,7 +16,7 @@ func TestK3dStartupRejectsConflictingHostPortsBeforeSetup(t *testing.T) {
 		{"browser and Kubernetes API collision", "none", "3000", "6443", "6443"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, key := range []string{"OCC_DEVELOPMENT_CONTROLLER_IMAGE", "OCC_KUBERNETES_RUNTIME_IMAGE", "OCC_DEVELOPMENT_REPOSITORY_INPUT_DIRECTORY", "OCC_DEVELOPMENT_REPOSITORY_IMAGE"} {
+			for _, key := range []string{"OCC_DEVELOPMENT_CONTROLLER_IMAGE", "OCC_KUBERNETES_RUNTIME_IMAGE", "OCC_DEVELOPMENT_REPOSITORY_INPUT_DIRECTORY", "OCC_DEVELOPMENT_REPOSITORY_IMAGE", developmentImageRegistrySetting} {
 				t.Setenv(key, "")
 			}
 			t.Setenv("OPENCLAW_DEV_PORT", tc.api)
@@ -30,7 +30,7 @@ func TestK3dStartupRejectsConflictingHostPortsBeforeSetup(t *testing.T) {
 			t.Setenv("OCC_DEVELOPMENT_STATE_DIRECTORY", state)
 			// No external tools can run: invalid ports must be rejected first.
 			t.Setenv("PATH", t.TempDir())
-			err = upK3d(context.Background(), Options{Repository: parent}, tc.mode)
+			err = upK3d(context.Background(), Options{Repository: parent}, tc.mode, nil, nil)
 			if err == nil || !strings.Contains(err.Error(), "ports must differ") {
 				t.Fatalf("expected port rejection before setup, got %v", err)
 			}
