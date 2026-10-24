@@ -20,6 +20,17 @@ value, in at most 256 characters. Agent provisioning also calls
 `validateAgentProvisioning`; see
 [initial runtime credential provisioning](compute.md#optional-initial-runtime-credential-provisioning).
 
+## Deployment configuration
+
+At deployment, optional `configureAgent(configuration, {nativeAdminOrigin?})`
+transforms the frozen Sandbox-adjusted copy before logging policy, Configuration
+validation and immutable admission. Without the hook, OCC keeps the
+Sandbox-adjusted copy. It does not run during Agent save, when an Agent identity
+may not exist yet. Guided provisioning calls it at revision handoff after Agent
+allocation. Native policy conflicts throw `ComputeGatewaySettingError`; deployment
+answers `409` with the setting, and provisioning records the refusal without
+admitting a revision.
+
 ## Agent save
 
 Agent create and update read the named Configuration and check the Agent as it
@@ -132,6 +143,8 @@ applies the same
 with the same messages, at Agent save and in preparation. It accepts both paths on
 either topology, since one volume backs both, and also refuses `skipBootstrap`
 and `skipOptionalBootstrapFiles` on `agents.defaults` or `main`.
+SSH Compute applies the shared roster rule, with its message, at Agent save; the
+host checks the workspace path, under the Agent's own directory, at deployment.
 
 ## Related
 

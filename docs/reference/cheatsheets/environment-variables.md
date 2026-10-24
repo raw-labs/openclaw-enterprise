@@ -26,6 +26,8 @@ console uses the current origin and has no separate environment settings.
 - `NODE_ENV` — Required mode: `development` or `production`; shared with the worker and bootstrap.
 - `OCC_HOST` — API bind address: one explicit Pod IP in production; loopback for host-process development.
 - `OCC_PORT` — API listener port; no process default.
+- `OCC_CONSOLE_THEME_DIRECTORY` — Host directory consumed by the [Compose theme override](../../guides/deploy/console-theme.md#podman-or-docker-compose); not read by the API.
+- `OCC_CONSOLE_THEME_DIR` — Optional absolute directory for the API's public [console theme bundle](../console/theming.md); applied at startup.
 - `OCC_CONFIG_PATH` — Absolute path to trusted Installation YAML; required in production and shared with the worker.
 - `OCC_AUTH_SECRET` — Production requires a high-entropy session-signing secret; development has a local-only fallback.
 - `OCC_AUTH_BASE_URL` — Authentication, cookie, and exact development browser origin; required in production; default in development: `http://127.0.0.1:3000`.
@@ -45,15 +47,16 @@ console uses the current origin and has no separate environment settings.
 - `OCC_AUTH_TRUSTED_PROXY_CIDRS` — Production-only, off by default: comma-separated ingress or load balancer CIDRs. IPv4-mapped IPv6 counts as IPv4 (prefix 1–32); entries covering every IPv4 or every IPv6 address are refused. Trusted peers may report client addresses for sign-in limits; see [trusted proxies](../settings/production.md#github-sign-in-and-trusted-proxies).
 - `OCC_AUTH_TRUSTED_PROXY_PRESET` — `ingress-nginx` (default) or `aws` (Application Load Balancer), both reading `X-Forwarded-For`, or `generic`. A Network Load Balancer that preserves client addresses needs no trusted proxy.
 - `OCC_AUTH_CLIENT_IP_HEADER` — Lowercase header carrying the client address, such as `x-real-ip`; required by `generic` only.
-- `OCC_AGENT_NATIVE_ADMIN_ENABLED` — Enables the Agent native admin pilot; default: `false`.
+- `OCC_AGENT_NATIVE_ADMIN_ENABLED` — Enables the Agent native admin pilot and API/worker deployment preparation; default: `false`.
 - `OCC_AGENT_RUNTIME_LOGS_ENABLED` — `false` makes the Agent runtime status and log routes answer `501`; default: `true`. Set by the chart's `agentRuntimeLogs.enabled`.
-- `OCC_AGENT_NATIVE_ADMIN_DOMAIN` — Agent hostname suffix; required when the pilot is enabled.
+- `OCC_AGENT_NATIVE_ADMIN_DOMAIN` — Agent hostname suffix for API/worker origin derivation; required when the pilot is enabled.
 - `OCC_AUTH_COOKIE_DOMAIN` — Shared parent domain for console and Agent cookies; required when the pilot is enabled.
 - `OCC_GATEWAY_API_KEY_PATH` — API/worker absolute path to the private gateway service-key file for operator RPCs and dedicated node enrollment.
 - `OCC_CHANNEL_DIRECTORY_PROXY_URL` — Optional API-only HTTP(S) proxy endpoint for production Slack directory lookup and credential validation; set by Helm `slackProxy.enabled` or `api.channelDirectoryProxyUrl`.
 - `OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST` — Exact Kubernetes Service host accepted as a managed Slack directory proxy; set only by Helm `slackProxy.enabled`.
-- `NODE_EXTRA_CA_CERTS` — Additional process-wide Node.js PEM trust for private OCC, Gateway or IdP CAs; read at process startup. The chart combines IdP and Gateway roots for the API; see [OIDC CA settings](../settings/oidc.md).
+- `NODE_EXTRA_CA_CERTS` — Additional process-wide Node.js PEM trust, read at startup. The chart combines API roots ([OIDC CA settings](../settings/oidc.md)); Compute combines public [Sandbox endpoint](../drivers/sandbox.md#interface) and execution-cluster roots for the dedicated Gateway.
 - `OCC_GATEWAY_CA_PATH` — API-only path to the Gateway-only CA bundle that dedicated Harness nodes trust; empty means none. Unset, node enrollment uses `NODE_EXTRA_CA_CERTS`. Helm sets it with OIDC CA values.
+- `OCC_EGRESS_AUTHORITY_PORT`, `OCC_OPENSHELL_GIT_PORT` — Chart-set port of its `egressAuthority` and `openshellGit` listeners, or `disabled`. API and worker startup and the upgrade check refuse `CHART_LISTENER_MISMATCH` when the Installation authority uses another port, a host other than `0.0.0.0` or `::`, a disabled listener, or TLS or issuer file paths other than the chart's mounts. Not operator inputs.
 - `OCC_CA_SOURCES`, `OCC_DATABASE_CA_SOURCE` — Chart-set labels (value, Secret and key) that the OIDC CA startup checks print in their errors instead of mount paths. Helm sets them with OIDC CA values; not operator inputs.
 
 ## PostgreSQL and migrations
@@ -107,6 +110,9 @@ for supported engines, images, and security restrictions.
 - `OCC_DEVELOPMENT_COMPUTE_DRIVER` — `docker` (default) or `kubernetes`; the Docker preview cannot deploy Agents.
 - `OCC_DEVELOPMENT_SANDBOX_DRIVER` — `none` (default) or `openshell`; OpenShell requires Kubernetes Compute.
 - `OCC_DEVELOPMENT_CONTROL_PLANE` — `compose` (default) or `kubernetes`; Kubernetes control plane requires Kubernetes Compute. Compose mode keeps PostgreSQL and OCC in Compose while Kubernetes Compute runs in k3d.
+- `OCC_DEVELOPMENT_PROTECTED_EGRESS` — `0` or unset by default; `1` selects the [protected Kubernetes OpenShell profile](../../guides/deploy/local-openshell-images.md#select-the-protected-profile) with explicit candidate images and charts.
+- `OCC_DEVELOPMENT_OPENSHELL_HOST_GATEWAY_IP` — Optional verified private host IPv4 for the protected profile’s native OpenShell host alias; see [development settings](../settings/development.md).
+- `OCC_DEVELOPMENT_DATABASE_NAME` — Optional disposable `openclaw_k8s_` database for the Kubernetes control plane; see [development settings](../settings/development.md).
 - `OCC_DEVELOPMENT_CONTAINER_ENGINE` — `auto` (default), `docker`, or `podman`; Kubernetes-only mode uses it for k3d and image operations, while Compose mode also requires its Compose provider.
 - `OPENCLAW_DEV_PORT` — Published API port on host loopback; default: `3000`.
 - `OCC_DEVELOPMENT_BROWSER_PORT` — Published HTTPS browser port on host loopback; default: `8443`.
@@ -121,6 +127,7 @@ for supported engines, images, and security restrictions.
 - `OCC_DEVELOPMENT_CONTROLLER_IMAGE` — Existing local OCE controller digest matching the runtime and checkout commit for the Kubernetes-only profile.
 - `OCC_DEVELOPMENT_REPOSITORY_INPUT_DIRECTORY` — Private local repository registry, App key, and approved upstream IPv4 `/32` endpoint inputs.
 - `OCC_DEVELOPMENT_REPOSITORY_IMAGE` — Optional matching immutable repository service image for the Kubernetes-only profile.
+- `OCC_DEVELOPMENT_IMAGE_REGISTRY_CONTAINER` — Disposable loopback-only registry container the Kubernetes-only k3d node pulls digest-pinned selected images from, instead of archive imports.
 - `OCC_DEVELOPMENT_POSTGRES_IMAGE` — Existing local PostgreSQL image for the Kubernetes-only profile; defaults to the pinned PostgreSQL 18.6 image.
 - `OCC_DEVELOPMENT_NODE_BASE_IMAGE` — Immutable Node 24 base used when building the Kubernetes-only OCE controller image.
 - `OCC_DEVELOPMENT_STATE_DIRECTORY` — Private Kubernetes profile state. When unset, the launching process's temporary directory plus `openclaw-development` (`TMPDIR` if that process set it, otherwise `/tmp` on Linux). Use the same value for cleanup.
@@ -132,6 +139,8 @@ for supported engines, images, and security restrictions.
 - `OCC_DEVELOPMENT_K3D_DNS_RESOLVER` — Optional IPv4 resolver for either local k3d profile, or `k3d` for k3d's default; Linux Docker defaults to the host's upstream resolver.
 - `OCC_DEVELOPMENT_K3S_IMAGE` — K3s node image or channel for Compose control plane without OpenShell; default: `+v1.35`. Kubernetes-only and OpenShell profiles use their pinned image.
 - `OCC_DEVELOPMENT_KUBERNETES_DISK_THRESHOLD_PERCENT` — Disposable cluster disk-pressure threshold; default: `5`.
+- `OCC_DEVELOPMENT_OPENSHELL_GATEWAY_IMAGE`, `OCC_DEVELOPMENT_OPENSHELL_SANDBOX_IMAGE`, `OCC_DEVELOPMENT_OPENSHELL_SUPERVISOR_IMAGE` — Complete set of local SHA-256 image references for an explicit [OpenShell candidate](../../guides/deploy/local-openshell-images.md); requires the source revision selector.
+- `OCC_DEVELOPMENT_OPENSHELL_SOURCE_REVISION` — Full OpenShell commit that all three candidate image revision labels must match; consistency evidence, not build provenance.
 - `OCC_DEVELOPMENT_OPENSHELL_HELM_CHART` — Optional absolute OpenShell Gateway chart directory or archive; set it together with the workspace chart override.
 - `OCC_DEVELOPMENT_OPENSHELL_WORKSPACE_HELM_CHART` — Optional absolute OpenShell workspace chart directory or archive; set it together with the Gateway chart override.
 - `OCC_DEVELOPMENT_OPENSHELL_AGENT_SANDBOX_MANIFEST` — Optional absolute Agent Sandbox manifest; otherwise the helper downloads its checksum-verified pinned manifest.
