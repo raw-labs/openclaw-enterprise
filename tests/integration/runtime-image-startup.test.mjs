@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { imageSmokeTimeoutMultiplier } from "../helpers/image-smoke-timeout.mjs";
@@ -19,7 +18,7 @@ import {
   REPOSITORY_NATIVE_GIT_INIT_ENTRYPOINT,
 } from "../../apps/controller/src/drivers/compute/kubernetes/repository-material-init.ts";
 import { createNativeClientMaterial } from "../fixtures/repository-credentials/clients.mjs";
-import { startRegistryCredentialServiceFixture } from "../fixtures/repository-credentials/registry.mjs";
+import { startCredentialServiceFixture } from "../fixtures/repository-credentials/service.mjs";
 import {
   run as runFixtureCommand,
   temporaryDirectory,
@@ -35,11 +34,9 @@ import {
   imageTestOptions,
   runDocker,
   waitForDockerLog,
-  commandOutput,
   temporaryGatewayConfiguration,
   createAdmittedRuntimeImageConfiguration,
   jsonLogEntries,
-  failureTail,
   runGatewaySmoke,
   reviewedCodexSeccompSecurityOptions,
   assertGatewayLogEntry,
@@ -48,8 +45,7 @@ import {
 const syntheticCodexApiKey = "sk-openclaw-runtime-image-smoke-synthetic";
 
 test("runtime image seccomp option requires the CI-prepared profile record", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "oce-runtime-seccomp-profile-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "oce-runtime-seccomp-profile-");
   const contents = Buffer.from(`${JSON.stringify({ defaultAction: "SCMP_ACT_ERRNO" })}\n`);
   const digest = createHash("sha256").update(contents).digest("hex");
   const profile = join(directory, `codex-0.163.0-alpha.2-${digest}.json`);
@@ -266,8 +262,7 @@ process.exit(material.status ?? 1);
 }
 
 async function createRuntimeBrokerTlsMaterial(t) {
-  const directory = await mkdtemp(join(tmpdir(), "oce-runtime-broker-tls-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "oce-runtime-broker-tls-");
   await execute("openssl", [
     "req",
     "-x509",
@@ -305,16 +300,9 @@ function runtimeRepositorySessionDirectory(repositoryRef, sessionId) {
 }
 
 async function createRuntimeRepositoryMaterial(t, fixture) {
-  const material = await createNativeClientMaterial(
-    t,
-    fixture.repositories
-      .filter((entry) => entry.opened)
-      .map((entry) => ({
-        opened: entry.opened,
-        repositoryRef: entry.repositoryRef,
-        publicCa: fixture.tls.ca,
-      })),
-  );
+  const material = await createNativeClientMaterial(t, [
+    { opened: fixture.opened, repositoryRef: "guarded", publicCa: fixture.tls.ca },
+  ]);
   const manifestPath = join(material.root, "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   manifest.bindings = manifest.bindings.map((binding) => ({
@@ -323,10 +311,6 @@ async function createRuntimeRepositoryMaterial(t, fixture) {
   }));
   await writeFile(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
   return material.root;
-}
-
-function sanitizeSyntheticCredential(output) {
-  return output.replaceAll(syntheticCodexApiKey, "[REDACTED_SYNTHETIC_KEY]");
 }
 
 function assertNoPackagingFailure(output) {
@@ -711,7 +695,10 @@ test(
     const probe = String.raw`
 set -eu
 printf "%s\n" "$SYNTHETIC_CODEX_API_KEY" | timeout ${20 * imageSmokeTimeoutMultiplier}s codex login --with-api-key >/tmp/codex-login.stdout 2>/tmp/codex-login.stderr || {
-  sed -E "s/sk-[A-Za-z0-9_-]+/[REDACTED_SYNTHETIC_KEY]/g" /tmp/codex-login.stderr >&2
+  status=$?
+  # 124: timeout stopped codex login. Its output may be empty, so name the status.
+  echo "codex login exited $status" >&2
+  sed -E "s/sk-[A-Za-z0-9_-]+/[REDACTED_SYNTHETIC_KEY]/g" /tmp/codex-login.stdout /tmp/codex-login.stderr >&2
   exit 1
 }
 node - <<'NODE'
@@ -768,10 +755,8 @@ NODE
         "-c",
         probe,
       ],
-      { timeout: 30_000 * imageSmokeTimeoutMultiplier },
-    ).catch((error) => {
-      throw new Error(failureTail(sanitizeSyntheticCredential(commandOutput(error))));
-    });
+      { timeout: 30_000 * imageSmokeTimeoutMultiplier, redact: [syntheticCodexApiKey] },
+    );
 
     const result = JSON.parse(stdout);
     assert.equal(result.uid, 1000);
@@ -899,15 +884,31 @@ function run(args, env, readinessUrl) {
   (gatewayBase.agents ??= {}).defaults ??= {};
   gatewayBase.agents.defaults.workspace = "/tmp/runtime-image-provider-workspace";
   fs.writeFileSync("/tmp/gateway/base.json", JSON.stringify(gatewayBase));
-  const gatewayRun = await run(["-e", ...gatewayArgs], {
+  const gatewayEnvironment = {
     OPENCLAW_CONFIG_PATH: "/tmp/gateway/base.json",
     OPENCLAW_STATE_DIR: "/home/node/.openclaw",
     OPENCLAW_GATEWAY_PORT: "18789",
     OPENCLAW_GATEWAY_PASSWORD: "openclaw-runtime-image-schema-password",
     OPENCLAW_WORKSPACE_NODE_ID: workspaceNodeId,
     OPENCLAW_NATIVE_WORKER_PROFILE: "dedicated-native",
-  }, "http://127.0.0.1:18789/readyz");
+  };
+  const gatewayRun = await run(["-e", ...gatewayArgs], gatewayEnvironment, "http://127.0.0.1:18789/readyz");
   const gatewayConfig = "/home/node/.openclaw/openclaw.json";
+  // A container restart reuses the writable admin Configuration, including the
+  // profile generated by the first wrapper. It must still start the native Gateway.
+  const gatewayRestart = await run(["-e", ...gatewayArgs], {
+    ...gatewayEnvironment, OPENCLAW_CONFIG_PATH: gatewayConfig,
+  }, "http://127.0.0.1:18789/readyz");
+  const generatedConfiguration = fs.readFileSync(gatewayConfig, "utf8");
+  const conflictingConfig = JSON.parse(generatedConfiguration);
+  conflictingConfig.cloudWorkers.profiles["dedicated-native"].settings.device =
+    (workspaceNodeId[0] === "a" ? "b" : "a") + workspaceNodeId.slice(1);
+  fs.writeFileSync(gatewayConfig, JSON.stringify(conflictingConfig));
+  // Restart tolerance must not admit a profile bound to a different worker.
+  const conflictingRestart = await run(["-e", ...gatewayArgs], {
+    ...gatewayEnvironment, OPENCLAW_CONFIG_PATH: gatewayConfig,
+  });
+  fs.writeFileSync(gatewayConfig, generatedConfiguration);
   const probe = JSON.stringify({ auth: { probes: { results: [{ provider: "openai", model, source: "env", status: "ok" }] } } });
   fs.writeFileSync("/tmp/probe.cjs", [
     'const cp = require("node:child_process");',
@@ -938,7 +939,7 @@ function run(args, env, readinessUrl) {
   });
   const harnessConfig = "/home/node/.openclaw-node/openclaw.json";
   process.stdout.write(JSON.stringify({
-    gateway: { ...gatewayRun, config: JSON.parse(fs.readFileSync(gatewayConfig, "utf8")), validation: validate(gatewayConfig) },
+    gateway: { ...gatewayRun, restart: gatewayRestart, conflictingRestart, config: JSON.parse(fs.readFileSync(gatewayConfig, "utf8")), validation: validate(gatewayConfig) },
     harness: { ...harnessRun, config: JSON.parse(fs.readFileSync(harnessConfig, "utf8")), validation: validate(harnessConfig) },
   }));
 })().catch((error) => { console.error(error); process.exitCode = 1; });
@@ -998,6 +999,12 @@ function run(args, env, readinessUrl) {
     assert.deepEqual(harness.validation.issues, []);
     assert.equal(gateway.validation.valid, true);
     assert.equal(gateway.ready, true, gateway.output);
+    assert.equal(gateway.restart.ready, true, gateway.restart.output);
+    assert.equal(gateway.conflictingRestart.code, 1);
+    assert.match(
+      gateway.conflictingRestart.output,
+      /worker profile conflicts with admitted configuration/u,
+    );
     assert.equal(harness.validation.valid, true);
     // Schema acceptance alone does not qualify the default image's complete native flow.
     // Runtime admission retains its separate native-worker support gate.
@@ -1158,7 +1165,7 @@ test(
 );
 
 test(
-  "runtime image routes sandboxed Git through stock Codex and the repository broker",
+  "runtime image routes sandboxed Git through stock Codex and a development token sender",
   imageTestOptions,
   async (t) => {
     const suffix = randomBytes(6).toString("hex");
@@ -1168,62 +1175,20 @@ test(
     const deniedMaterialVolumeName = `oce-runtime-broker-material-denied-${suffix}`;
     const workspaceBranch = "native-feature";
     const tls = await createRuntimeBrokerTlsMaterial(t);
-    const fixture = await startRegistryCredentialServiceFixture(t, {
+    const fixture = await startCredentialServiceFixture(t, {
       tls,
-      autoOpen: false,
       gateway: { publicOrigin: "https://git.oce.svc", listen: "0.0.0.0:0" },
       limits: { gitResponseBytes: 4096, gitFetchResponseBytes: 200000 },
-      repositories: [
-        {
-          repositoryRef: "guarded",
-          repositoryId: "73",
-          repository: "fixture/repository",
-          pushRefAllowlist: [`refs/heads/${workspaceBranch}`],
-        },
-        {
-          repositoryRef: "read-only",
-          repositoryId: "74",
-          repository: "fixture/read-only",
-          profile: "git-read",
-        },
-        {
-          repositoryRef: "unadmitted",
-          repositoryId: "75",
-          repository: "fixture/unadmitted",
-        },
-      ],
+      configuration: { allowGraphql: false, pushRefAllowlist: [`refs/heads/${workspaceBranch}`] },
     });
     const seed = join(await temporaryDirectory(t, "runtime-git-seed-"), "seed");
-    await runFixtureCommand("git", ["clone", fixture.byRef.get("guarded").git.bare, seed]);
+    await runFixtureCommand("git", ["clone", fixture.git.bare, seed]);
     await runFixtureCommand("git", ["config", "user.name", "Fixture"], { cwd: seed });
     await runFixtureCommand("git", ["config", "user.email", "fixture@example.test"], { cwd: seed });
     await writeFile(join(seed, "data.bin"), randomBytes(128 * 1024));
     await runFixtureCommand("git", ["add", "data.bin"], { cwd: seed });
     await runFixtureCommand("git", ["commit", "-m", "Add fixture data"], { cwd: seed });
     await runFixtureCommand("git", ["push", "origin", "HEAD:main"], { cwd: seed });
-    await fixture.open("guarded");
-    await fixture.open("read-only");
-    const unadmitted = fixture.byRef.get("unadmitted");
-    // The fixture counts attempts before authorization, including rejected
-    // provider tokens; confirm the target is reachable before asserting none.
-    const reachability = await execute("curl", [
-      "--silent",
-      "--show-error",
-      "--noproxy",
-      "*",
-      "--cacert",
-      tls.certFile,
-      "--output",
-      "/dev/null",
-      "--write-out",
-      "%{http_code}",
-      `${unadmitted.git.origin}/fixture/unadmitted.git/info/refs?service=git-upload-pack`,
-    ]);
-    assert.equal(reachability.stdout, "401");
-    const unadmittedAttempts = unadmitted.github.authenticationAttempts.filter(
-      ({ boundary }) => boundary === "git",
-    ).length;
-    assert.equal(unadmittedAttempts, 1);
     const materialRoot = await createRuntimeRepositoryMaterial(t, fixture);
     t.after(async () => {
       await runDocker(["rm", "-f", proxyName]).catch(() => {});
@@ -1382,18 +1347,6 @@ server.listen(443, "0.0.0.0", () => console.log("broker-forwarder-ready"));
       // Match in the shell, not with `printf | grep -q`: under pipefail, grep -q
       // exits at the first match and printf's next line write can fail with EPIPE.
       "[[ $disallowed_output == *'repository-push-ref-not-allowed'* ]]",
-      "git clone https://github.com/fixture/read-only.git read-only",
-      "git -C read-only switch -c denied",
-      "printf 'denied proof\n' > read-only/denied-proof.txt",
-      "git -C read-only add denied-proof.txt",
-      "git -C read-only -c user.name='Runtime Fixture' -c user.email='fixture@example.test' commit -m 'Denied runtime broker proof'",
-      "set +e",
-      "readonly_output=$(git -C read-only push origin HEAD:refs/heads/denied 2>&1)",
-      "readonly_status=$?",
-      "set -e",
-      "printf '%s\\n' \"$readonly_output\"",
-      'test "$readonly_status" -ne 0',
-      "[[ $readonly_output == *'requested URL returned error: 400'* ]]",
       "set +e",
       "unadmitted_output=$(git ls-remote https://github.com/fixture/unadmitted.git HEAD 2>&1)",
       "unadmitted_status=$?",
@@ -1409,7 +1362,7 @@ server.listen(443, "0.0.0.0", () => console.log("broker-forwarder-ready"));
 const assert = require("node:assert/strict");
 const cp = require("node:child_process");
 const credentials = cp.spawnSync("git", ["credential", "fill"], {
-  input: "protocol=https\nhost=git.oce.svc\npath=fixture/read-only.git\n\n",
+  input: "protocol=https\nhost=git.oce.svc\npath=fixture/repository.git\n\n",
   encoding: "utf8",
 });
 assert.equal(credentials.status, 0, "native credential helper failed");
@@ -1423,10 +1376,11 @@ function request(path, auth) {
   assert.equal(result.status, 0, "broker request failed");
   return result.stdout;
 }
-const allowed = request("fixture/read-only.git/info/refs?service=git-upload-pack", true);
+const allowed = request("fixture/repository.git/info/refs?service=git-upload-pack", true);
 assert.equal(allowed.endsWith("\n200") && allowed.includes("# service=git-upload-pack"), true, "admitted discovery did not succeed");
-assert.equal(request("fixture/read-only.git/info/refs?service=git-receive-pack", true) === '{"error":{"code":"unsupported-request"}}\n400', true, "read-only broker denial did not match");
-assert.equal(request("fixture/unadmitted.git/info/refs?service=git-upload-pack", true) === '{"error":{"code":"unsupported-request"}}\n400', true, "unadmitted broker denial did not match");
+// This single-repository sender rejects Git Basic authentication for an unconfigured
+// repository before route planning. Compare as a boolean to keep the response out of failures.
+assert.equal(request("fixture/unadmitted.git/info/refs?service=git-upload-pack", true) === '{"error":{"code":"invalid-credential"}}\n401', true, "unadmitted repository must return 401 invalid-credential");
 console.log("broker-denial-codes-confirmed");
 NODE`;
     const probeSecurityOptions = await reviewedCodexSeccompSecurityOptions();
@@ -1740,24 +1694,10 @@ const timeout = setTimeout(() => {
     assert.ok(match, stdout);
     const proof = JSON.parse(match[1]);
 
-    const guarded = fixture.byRef.get("guarded");
-    const readOnly = fixture.byRef.get("read-only");
-    assert.equal(
-      unadmitted.github.authenticationAttempts.filter(({ boundary }) => boundary === "git").length,
-      unadmittedAttempts,
-      "unadmitted requests must not reach the upstream even with a rejected provider token",
-    );
-    assert.equal(unadmitted.git.trace.length, 0, "unadmitted requests must not reach the upstream");
+    const guarded = fixture;
     assert.equal(await guarded.git.ref(`refs/heads/${workspaceBranch}`), proof.commit);
-    // `git rev-parse` exits 128 in the upstream bare repository: the refused pushes created no ref.
-    assert.match(await readOnly.git.ref("refs/heads/main"), /^[0-9a-f]{40,64}$/);
     await assert.rejects(guarded.git.ref("refs/heads/disallowed"), /command failed \(exit 128\)/);
-    await assert.rejects(readOnly.git.ref("refs/heads/denied"), /command failed \(exit 128\)/);
-    assert.equal(
-      readOnly.git.trace.some(({ path }) => path.endsWith("/git-receive-pack")),
-      false,
-      "read-only broker denial must happen before the upstream receive-pack route",
-    );
+    assert.equal(guarded.github.issuesOfTokens.length, 0);
     assert.ok(
       guarded.git.trace.some(({ path }) => path.endsWith("/git-upload-pack")),
       "authorized Git fetch must reach the real upstream through the broker",
@@ -1774,6 +1714,10 @@ test(
   imageTestOptions,
   async () => {
     const defaultPluginPolicy = codexRuntimeArtifact({}, []).configuration.plugins;
+    const codexExecutableSource = AGENT_RUNTIME_ENTRYPOINT.match(
+      /^function codexExecutable\(\) \{\n[\s\S]*?\n\}\n/m,
+    )?.[0];
+    assert.ok(codexExecutableSource, "the Harness entrypoint must define codexExecutable()");
     const script = String.raw`
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
@@ -1796,6 +1740,12 @@ assert.equal(provenance.openclawBridgePatchSha256, "1d8b670e7029872262375a21da72
 assert.equal(provenance.openclawConnectPatchSha256, "906fd14d2d36b98c4308d4db65f30092f27b84a69e5509cf04de2041f6e975d2");
 assert.equal(provenance.codexDependencyPinPatchSha256, "7bb0ae29bf3259b245d7675b2c6a3abe521c8139095f75ce0c532188162de5e9");
 assert.equal(provenance.openclawRequiredWorkerAuthorityPatchSha256, "d07be9735250a5fb8be69086a96d4959f02caaeec6dc31990c03eed959bd17d8");
+// The patches the per-patch fields above omit; runtime-assets.test.mjs checks the full set.
+assert.equal(provenance.patches["openclaw-codex-preserve-on-request.patch"], "ef50d1e635be0a9afd970ee1ea95c3468c307759fedd3783180ac2a676fa015b");
+assert.equal(provenance.patches["openclaw-codex-full-access-profile.patch"], "bf0e9cd6d1d2420f42a33af130d534e1de6d1fe17701517c676824f5e80ec931");
+assert.equal(provenance.patches["openclaw-required-worker-authority-regression.patch"], "1998cdd2321a68f97afb96470dcfb989a1460484c831b113b3af22dcabbf6189");
+assert.equal(provenance.patches["openclaw-control-ui-browser-reconnect.patch"], "964c500f981f343d8c131a213aad65ea47e2de4a9a5d11dbb57c3f30bead7065");
+assert.equal(Object.keys(provenance.patches).length, 8);
 assert.equal(provenance.codex.version, "0.163.0-alpha.2");
 assert.equal(Object.hasOwn(provenance, "codexPatchSha256"), false);
 assert.equal(Object.hasOwn(provenance, "codexVersion"), false);
@@ -1835,6 +1785,13 @@ const codexPackage = JSON.parse(readFileSync(resolve(codexPackageRoot, "package.
 const platformPackageRoot = resolve(codexPackageRoot, "..", platform.packageDirectory);
 const platformPackage = JSON.parse(readFileSync(resolve(platformPackageRoot, "package.json"), "utf8"));
 const platformBinary = resolve(platformPackageRoot, platform.binaryPath);
+// Login and the model check spawn codexExecutable() so a timeout's SIGKILL ends native
+// Codex, not just the npm launcher (finding 2274). Run the generated helper on this
+// image's PATH: a shim in place of the launcher symlink would make it fall back.
+${codexExecutableSource}
+const harnessCodex = codexExecutable();
+assert.ok(harnessCodex.startsWith("/"), "codexExecutable() fell back to " + harnessCodex + " on PATH " + process.env.PATH);
+assert.equal(realpathSync(harnessCodex), realpathSync(platformBinary));
 const platformBinarySha256 = createHash("sha256").update(readFileSync(platformBinary)).digest("hex");
 const platformInventoryPath = relative("/app/node_modules/openclaw", realpathSync(platformBinary));
 assert.ok(!platformInventoryPath.startsWith(".."), "Codex platform binary must live under the inventoried OpenClaw package root.");

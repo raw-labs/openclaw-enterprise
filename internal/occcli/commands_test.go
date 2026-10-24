@@ -116,6 +116,64 @@ func TestAgentTableLabelsLifecycleSeparatelyFromDeploymentHealth(t *testing.T) {
 	}
 }
 
+// OCC does not restart a lost Harness Sandbox (finding 2152), so the Agent's lifecycle alone
+// reads active while nothing serves it. `agent get` follows the table with the Sandbox's
+// observed state and the next step; a status OCC cannot read is unknown, never lost.
+func TestAgentGetShowsTheObservedHarnessSandbox(t *testing.T) {
+	agentPath := "/namespaces/" + testNamespaceID + "/agents/" + testAgentID
+	agent := `{"id":"` + testAgentID + `","name":"a","status":"active","desiredRuntimeState":"running","activeRevisionId":"` + testRevision1ID + `"}`
+	observed := func(harness string) string {
+		return `{"status":"observed","revisionId":"` + testRevision1ID + `","harness":` + harness + `}`
+	}
+	for _, test := range []struct {
+		name, status, want string
+	}{
+		{"lost", observed(`{"state":"lost","code":"SANDBOX_STOPPED"}`), "Harness Sandbox: lost (SANDBOX_STOPPED). OCC will not restart it; deploy the Agent again to replace it."},
+		{"healthy", observed(`{"state":"running"}`), "Harness Sandbox: running"},
+		{"observation failed", observed(`{"state":"unknown","code":"UNAVAILABLE"}`), "Harness Sandbox: unknown (UNAVAILABLE)"},
+		{"read failed", `raw:503 {"error":{"code":"DEPENDENCY_UNAVAILABLE","message":"unavailable"}}`, "Harness Sandbox: unknown (the status could not be read)."},
+		// The logs hint names the observed revision, so a later deployment cannot redirect it.
+		{"restarting", observed(`{"state":"starting","code":"HARNESS_RESTARTING","exitCode":1,"restarts":2}`), "Harness Sandbox: starting (HARNESS_RESTARTING, last exit code 1, restart 2). The Harness process exited and OpenShell is restarting it; if this persists, read its Sandbox logs (occ --namespace " + testNamespaceID + " agent logs " + testAgentID + " --source sandbox --revision " + testRevision1ID + ")."},
+		// A revision ID OCC would not issue is not echoed into the logs hint.
+		{"odd revision", `{"status":"observed","revisionId":"rev_1 --source gateway","harness":{"state":"starting","code":"HARNESS_RESTARTING","exitCode":1,"restarts":2}}`, "Harness Sandbox: starting (HARNESS_RESTARTING, last exit code 1, restart 2). The Harness process exited and OpenShell is restarting it; if this persists, read its Sandbox logs (occ --namespace " + testNamespaceID + " agent logs " + testAgentID + " --source sandbox)."},
+		// A stopped Agent, an embedded Harness or a Driver without a Sandbox record adds nothing.
+		{"unobserved", `{"status":"unobserved"}`, ""},
+	} {
+		responses := map[string]string{"GET " + agentPath: agent, "GET " + agentPath + "/harness-status": test.status}
+		out, requested, err := runOCC(t, responses, "--namespace", testNamespaceID, "agent", "get", testAgentID)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		table, line, _ := strings.Cut(out, "\n\n")
+		if !strings.Contains(table, testAgentID) || strings.TrimSuffix(line, "\n") != test.want {
+			t.Errorf("%s: agent get printed:\n%s", test.name, out)
+		}
+		if !slices.Equal(requested, []string{"GET " + agentPath, "GET " + agentPath + "/harness-status"}) {
+			t.Errorf("%s: requests = %q", test.name, requested)
+		}
+		if test.name == "healthy" && strings.Contains(out, "deploy") {
+			t.Errorf("a healthy Harness Sandbox must carry no warning:\n%s", out)
+		}
+	}
+	// Structured output is the Agent resource alone, and a stopped Agent has no Sandbox to
+	// read, so neither reads the status.
+	for _, test := range []struct {
+		name, agent string
+		args        []string
+	}{
+		{"json", agent, []string{"-o", "json"}},
+		{"stopped", strings.Replace(agent, `"running"`, `"stopped"`, 1), nil},
+		{"deleting", strings.Replace(agent, `"active"`, `"deleting"`, 1), nil},
+		{"no active revision", strings.Replace(agent, testRevision1ID, "", 1), nil},
+	} {
+		args := append(append([]string{"--namespace", testNamespaceID}, test.args...), "agent", "get", testAgentID)
+		out, requested, err := runOCC(t, map[string]string{"GET " + agentPath: test.agent}, args...)
+		if err != nil || strings.Contains(out, "Harness") || len(requested) != 1 {
+			t.Fatalf("%s: err = %v, requests = %q:\n%s", test.name, err, requested, out)
+		}
+	}
+}
+
 func TestResourceCommandsRejectNamesWithAHintBeforeCallingOCC(t *testing.T) {
 	cases := []struct {
 		args []string
@@ -698,11 +756,23 @@ func TestDeploymentStatusTableShowsErrorAsCodeAndMessage(t *testing.T) {
 func TestDeploymentStatusWithoutRevisionsExplainsHowToDeploy(t *testing.T) {
 	// A stale environment scope must not replace the explicitly selected Namespace in the hint.
 	t.Setenv("OCC_NAMESPACE", "ns_55555555-5555-4555-8555-555555555555")
+	agentPath := "GET /namespaces/" + testNamespaceID + "/agents/" + testAgentID
 	_, _, err := runOCC(t, map[string]string{
-		"GET /namespaces/" + testNamespaceID + "/agents/" + testAgentID + "/revisions": `[]`,
+		agentPath + "/revisions":   `[]`,
+		agentPath + "/permissions": `{"update":true,"deploy":true,"operate":true,"delete":true}`,
 	}, "--namespace", testNamespaceID, "agent", "deployment-status", testAgentID)
 	if err == nil || !strings.Contains(err.Error(), `run "occ --namespace `+testNamespaceID+` agent deploy `+testAgentID+`" first`) {
 		t.Fatalf("expected a deploy hint, got %v", err)
+	}
+	// The list is filtered by revision read, so a caller who cannot deploy hears
+	// which grant lists revisions instead (finding 522).
+	_, _, err = runOCC(t, map[string]string{
+		agentPath + "/revisions":   `[]`,
+		agentPath + "/permissions": `{"update":false,"deploy":false,"operate":false,"delete":false}`,
+	}, "--namespace", testNamespaceID, "agent", "deployment-status", testAgentID)
+	want := "agent " + testAgentID + " has no revision you can read; listing revisions needs revision read (ask an administrator to grant it)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("reader error = %v, want %q", err, want)
 	}
 }
 
@@ -1014,13 +1084,8 @@ func TestAgentRevisionsPagesWithCursor(t *testing.T) {
 	if !strings.Contains(notices, "agent revisions "+testAgentID+" --limit 1 --cursor v1.2") {
 		t.Fatalf("expected a next-page hint that keeps --limit: %q", notices)
 	}
-	_, continuation, found := strings.Cut(notices, `older revisions may exist; run "`)
-	if !found {
-		t.Fatalf("missing next-page command: %q", notices)
-	}
-	continuation, _, _ = strings.Cut(continuation, `"`)
 	responses["GET "+agentPath+"/revisions"] = `raw:200 {"data":[{"id":"` + testRevision1ID + `","revision":1,"createdAt":"2026-09-30T00:00:00.000Z"}],"meta":{"requestId":"req_test","nextCursor":null}}`
-	nextOut, nextRequested, err := runOCC(t, responses, strings.Fields(continuation)[1:]...)
+	nextOut, nextRequested, err := runOCC(t, responses, nextPageCommand(t, notices)...)
 	if err != nil {
 		t.Fatalf("advertised next-page command failed: %v", err)
 	}
@@ -1032,6 +1097,33 @@ func TestAgentRevisionsPagesWithCursor(t *testing.T) {
 			t.Fatalf("--limit %s must be refused locally", limit)
 		}
 	}
+}
+
+// Without --limit, the next-page hint must not add one: "--limit 0" is refused
+// locally, so the advertised command would fail.
+func TestAgentRevisionsNextPageHintOmitsAnUnsetLimit(t *testing.T) {
+	responses := agentRevisionResponses()
+	agentPath := "/namespaces/" + testNamespaceID + "/agents/" + testAgentID
+	responses["GET "+agentPath+"/revisions"] = `raw:200 {"data":[{"id":"` + testRevision2ID + `","revision":2,"createdAt":"2026-09-30T01:00:00.000Z"}],"meta":{"requestId":"req_test","nextCursor":"v1.2"}}`
+	_, notices, _, err := runOCCWithNotices(t, responses, "--namespace", testNamespaceID, "agent", "revisions", testAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next := nextPageCommand(t, notices); slices.Contains(next, "--limit") {
+		t.Fatalf("next-page command adds a --limit the caller did not pass: %q", next)
+	}
+}
+
+// nextPageCommand returns the arguments of the "occ ..." command that an
+// agent revisions notice advertises for the next page, without "occ".
+func nextPageCommand(t *testing.T, notices string) []string {
+	t.Helper()
+	_, continuation, found := strings.Cut(notices, `older revisions may exist; run "`)
+	if !found {
+		t.Fatalf("missing next-page command: %q", notices)
+	}
+	continuation, _, _ = strings.Cut(continuation, `"`)
+	return strings.Fields(continuation)[1:]
 }
 
 // Subject IDs are opaque and can match across identities and groups. Tables
