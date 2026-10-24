@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { Agent, request as httpRequest } from "node:http";
@@ -22,6 +21,7 @@ import {
   startController,
   verifyPlatformStateStoreContract,
 } from "../helpers/postgres-platform-state.mjs";
+import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 
 async function ensureInstallation(state, name) {
   const existing = await state.loadInstallation();
@@ -127,6 +127,7 @@ test(
         id: "compute-local-development",
         implementation: "deterministic-local-development",
       },
+      executionAdmission: { version: 2, mode: "unprotected" },
       servicePrincipalId: agent.servicePrincipalId,
       createdAt,
     };
@@ -579,6 +580,7 @@ test(
         configuration: { agents: { defaults: { model: "test/model" } } },
         harness: { id: "openclaw", version: "1.0.0", mode: "embedded" },
         compute: { id: "compute-provisioning-success", implementation: "deterministic-test" },
+        executionAdmission: { version: 2, mode: "unprotected" },
         harnessAuth: { method: "runtime" },
         servicePrincipalId: `service-agent-${agentId}`,
         createdAt,
@@ -916,6 +918,9 @@ test(
     );
     for (const [offset, invalid] of [
       null,
+      "api_key",
+      false,
+      2,
       {},
       { ...fixture.revision.harnessAuth, secretDriverId: "" },
       { ...fixture.revision.harnessAuth, secretValue: "sentinel-not-a-reference" },
@@ -1899,6 +1904,7 @@ test(
           id: "compute-local-development",
           implementation: "deterministic-local-development",
         },
+        executionAdmission: { version: 2, mode: "unprotected" },
         harnessAuth: { method: "runtime" },
         servicePrincipalId: agent.servicePrincipalId,
         plugins: { driver: { id: "occ-plugin", implementation: "occ/openclaw-plugin" }, plugins },
@@ -1997,8 +2003,7 @@ test(
 
     // The compiled CLI consumes the same supported metadata/error variants over
     // the shipped API's real HTTP listener. A retired saved enum is not a runtime.
-    const cliDirectory = await mkdtemp(join(tmpdir(), "oce-cli-browsing-"));
-    context.after(() => rm(cliDirectory, { recursive: true, force: true }));
+    const cliDirectory = await temporaryDirectory(context, "oce-cli-browsing-");
     const cli = join(cliDirectory, "occ");
     const execute = promisify(execFile);
     await execute("go", ["build", "-trimpath", "-o", cli, "./cmd/occ"]);
@@ -2196,6 +2201,7 @@ test(
             id: "compute-local-development",
             implementation: "deterministic-local-development",
           },
+          executionAdmission: { version: 2, mode: "unprotected" },
           harnessAuth: { method: "runtime" },
           servicePrincipalId: agent.servicePrincipalId,
           plugins: { driver: { id: "occ-plugin", implementation: "occ/openclaw-plugin" }, plugins },

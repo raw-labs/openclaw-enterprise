@@ -39,6 +39,7 @@ import { DependencyUnavailableError } from "../../packages/occ/src/errors.ts";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import { runOpenClawRuntimeHelper } from "../helpers/plugin-runtime.mjs";
 import { conformanceKubernetesOptions } from "../helpers/kubernetes-compute.mjs";
+import { waitForResult } from "../helpers/wait-for.mjs";
 
 const CODEX_LINEAR_NATIVE_ID = "linear@openai-curated-remote";
 const CODEX_LINEAR_REMOTE_ID = "plugin_asdk_app_69a089a326dc8191b32a3f2553f5be2c";
@@ -72,16 +73,8 @@ function pluginAppServerToken(baseToken, revisionId, startupId) {
     .digest("hex");
 }
 
-async function waitForCondition(description, condition, timeoutMs = 1_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const result = await condition();
-    if (result !== undefined && result !== false) {
-      return result;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for ${description}.`);
+function waitForCondition(description, condition, timeoutMs = 1_000) {
+  return waitForResult(description, condition, { timeoutMs, intervalMs: 10 });
 }
 
 async function readStatusFromHandlerAsync(handler, path) {
@@ -144,6 +137,7 @@ function revision(overrides = {}) {
   delete native.gateway.auth;
   return {
     id: "revision-plugin-compute-1",
+    executionAdmission: { version: 2, mode: "unprotected" },
     namespaceId: tenant.id,
     agentId: agent.id,
     revision: 1,
@@ -2924,7 +2918,8 @@ test("gateway runtime status maps native Slack channel status without provider d
   let holdChannelStatusResponse = false;
   let pendingChannelSignal;
   let rpcTimeout;
-  let gatewayReadyStatus = 503;
+  // Native /startupz and /readyz answers.
+  const nativeProbeStatus = { "/startupz": 503, "/readyz": 503 };
   const sandbox = {
     AbortController,
     AbortSignal,
@@ -2962,8 +2957,8 @@ test("gateway runtime status maps native Slack channel status without provider d
             statusHandler = handler;
             return { listen() {} };
           },
-          get(_options, callback) {
-            callback({ statusCode: gatewayReadyStatus, resume() {} });
+          get(options, callback) {
+            callback({ statusCode: nativeProbeStatus[options.path], resume() {} });
             return { on() {}, destroy() {} };
           },
         };
@@ -3033,7 +3028,11 @@ test("gateway runtime status maps native Slack channel status without provider d
   assert.equal(ready.revisionId, revisionId);
   assert.equal(channelStatusCalls, 0);
   assert.deepEqual(await readReadyStatusFromHandler(statusHandler), { status: 503, body: "" });
-  gatewayReadyStatus = 200;
+  // Native /readyz admits a Gateway while its agent databases are still in
+  // startup inspection, when turns fail (finding 2185): /startupz holds it.
+  nativeProbeStatus["/readyz"] = 200;
+  assert.deepEqual(await readReadyStatusFromHandler(statusHandler), { status: 503, body: "" });
+  nativeProbeStatus["/startupz"] = 200;
   assert.deepEqual(await readReadyStatusFromHandler(statusHandler), { status: 200, body: "" });
   const assertSlackDiagnostics = async (status, expected, description) => {
     channelStatus = status;
