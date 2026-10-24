@@ -2,6 +2,7 @@ import type { AuditEventFactory, AuditSink } from "@openclaw-enterprise/audit";
 import type {
   Agent,
   AgentRevision,
+  AgentRuntimeAccessUnavailableReason,
   AuthorizationEvidence,
   ComputeDriver,
   IAMDriver,
@@ -48,6 +49,7 @@ import {
   isDependencyUnavailable,
   requestFailure,
 } from "./errors.ts";
+import { RequestRateLimiter } from "./request-rate-limiter.ts";
 import type { RequestContext } from "./types.ts";
 
 interface NativeAdminOptions {
@@ -76,6 +78,8 @@ interface NativeAdminProxyResolution {
   readonly revisionId: string;
   readonly target: NativeAdminTarget;
   readonly gatewayBase: string;
+  readonly runtimeRole: string;
+  readonly runtimeHeaders: Readonly<Record<string, string>>;
 }
 
 interface NativeAdminProxyDenial {
@@ -101,13 +105,21 @@ export const nativeAdminStatusOperation = {
   method: "GET",
   path: "/namespaces/:namespaceId/agents/:agentId/native-admin",
   action: "openclaw.agents.native_admin.read",
-  iamAction: "administer",
+  iamAction: "use",
   resourceKind: "agent",
   authorizationTarget: "agent",
-  summary: "Resolve native admin UI launch availability for one Agent",
+  summary: "Resolve OpenClaw launch availability with an assigned runtime role",
   tags: ["Agents"],
   schema: {},
 } as unknown as OccApiRoute;
+export const nativeAdminReturnOperation = {
+  ...nativeAdminStatusOperation,
+  operationId: "resolveAgentNativeAdminReturn",
+  path: "/native-admin/return/:agentKey",
+  action: "openclaw.agents.native_admin.return",
+  summary: "Resolve an authorized Agent from a copied native chat link",
+} as unknown as OccApiRoute;
+
 const nativeAdminParamsSchema = {
   type: "object",
   additionalProperties: false,
@@ -133,6 +145,15 @@ const nativeAdminStatusDataSchema = {
       type: "string",
       enum: ["available", "disabled", "stopped", "unavailable", "unsupported"],
     },
+    reason: {
+      type: "string",
+      enum: [
+        "ui_configuration",
+        "role_unavailable",
+        "device_approval_required",
+        "transport_unsupported",
+      ],
+    },
     host: { type: "string" },
     origin: { type: "string", format: "uri" },
     activeRevisionId: { type: "string" },
@@ -143,10 +164,10 @@ export const nativeAdminStatusSchema = {
   operationId: nativeAdminStatusOperation.operationId,
   summary: nativeAdminStatusOperation.summary,
   description:
-    "Requires a human session with administer permission on the exact Agent. Service API keys cannot launch or inspect native admin UI access.",
+    "Requires a human session. When native admin UI is disabled, requires exact Agent administer permission without a runtime assignment; when enabled, requires exact Agent use permission and one explicit runtime assignment. Service API keys cannot launch or inspect OpenClaw access.",
   tags: [...nativeAdminStatusOperation.tags],
   security: [{ sessionCookie: [] }],
-  "x-openclaw-permissions": [{ action: "administer", resourceKind: "agent", scope: "requested" }],
+  "x-openclaw-permissions": [{ action: "use", resourceKind: "agent", scope: "requested" }],
   params: nativeAdminParamsSchema,
   response: {
     200: {
@@ -161,7 +182,68 @@ export const nativeAdminStatusSchema = {
     404: { description: "Not Found", ...nativeAdminErrorSchema },
     503: { description: "Service Unavailable", ...nativeAdminErrorSchema },
   },
+};
+
+export const nativeAdminReturnSchema = {
+  operationId: nativeAdminReturnOperation.operationId,
+  summary: nativeAdminReturnOperation.summary,
+  description:
+    "Requires a human session with use permission and an assigned runtime role on the exact Agent. Unknown and inaccessible Agents both return 404. This lookup does not launch or start the Agent.",
+  tags: [...nativeAdminReturnOperation.tags],
+  security: [{ sessionCookie: [] }],
+  "x-openclaw-permissions": [{ action: "use", resourceKind: "agent", scope: "requested" }],
+  params: {
+    type: "object",
+    required: ["agentKey"],
+    properties: { agentKey: { type: "string", pattern: "^[0-9a-f]{32}$" } },
+  },
+  response: {
+    ...nativeAdminStatusSchema.response,
+    200: {
+      description: "OK",
+      type: "object",
+      required: ["data", "meta"],
+      properties: { data: nativeAdminParamsSchema, meta: nativeAdminMetaSchema },
+    },
+    400: { description: "Invalid Agent key", ...nativeAdminErrorSchema },
+    429: { description: "Too many requests; wait for Retry-After", ...nativeAdminErrorSchema },
+  },
 } as FastifySchema;
+
+export function limitNativeAdminReturn(
+  rateLimit: RequestRateLimiter,
+  key: string,
+  reply: FastifyReply,
+) {
+  const retryAfter = rateLimit.consume(key);
+  if (retryAfter !== undefined) {
+    reply.header("retry-after", String(retryAfter));
+    throw failure(
+      429,
+      "NATIVE_ADMIN_RETURN_RATE_LIMITED",
+      "Too many Agent return requests. Wait before retrying.",
+    );
+  }
+}
+
+function acceptsHtml(accept: string | undefined): boolean {
+  return (accept ?? "").split(",").some((entry) => {
+    const [mediaType, ...parameters] = entry.trim().toLowerCase().split(";");
+    if (mediaType?.trim() !== "text/html") {
+      return false;
+    }
+    const quality = parameters
+      .map((parameter) => parameter.trim())
+      .find((parameter) => parameter.startsWith("q="));
+    return (
+      quality === undefined ||
+      (/^q=(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/.test(quality) && Number(quality.slice(2)) > 0)
+    );
+  });
+}
+
+/** Bounds the once-per-revision Compute-owner mismatch warnings kept in memory. */
+const MAX_LOGGED_COMPUTE_OWNER_MISMATCHES = 1024;
 
 /** Owns native-host admission, proxy sockets and their shutdown audits. */
 export function createNativeAdminAccess(options: NativeAdminOptions) {
@@ -207,6 +289,48 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
   const nativeAdminSockets = new Set<Socket>();
   const nativeAdminCloseAudits = new Set<Promise<void>>();
   let nativeAdminShuttingDown = false;
+  // Status polls, proxied requests and WebSocket lease renewals all re-check ownership, and a
+  // Compute-owner mismatch lasts until a new deployment: warn once per revision and owner pair.
+  const loggedComputeOwnerMismatches = new Set<string>();
+
+  function warnComputeOwnerMismatch(
+    revision: Readonly<AgentRevision>,
+    compute: Readonly<Pick<ComputeDriver, "id" | "implementation">>,
+  ): void {
+    const key = JSON.stringify([
+      revision.namespaceId,
+      revision.agentId,
+      revision.id,
+      compute.id,
+      compute.implementation,
+    ]);
+    if (loggedComputeOwnerMismatches.has(key)) {
+      return;
+    }
+    if (loggedComputeOwnerMismatches.size >= MAX_LOGGED_COMPUTE_OWNER_MISMATCHES) {
+      // A Set iterates in insertion order: forget the oldest pair, not every live one.
+      const [oldest] = loggedComputeOwnerMismatches;
+      if (oldest !== undefined) {
+        loggedComputeOwnerMismatches.delete(oldest);
+      }
+    }
+    loggedComputeOwnerMismatches.add(key);
+    app.log.warn(
+      {
+        event: "native_admin.compute_owner_mismatch",
+        namespaceId: revision.namespaceId,
+        agentId: revision.agentId,
+        revisionId: revision.id,
+        revisionCompute: {
+          id: revision.compute.id,
+          implementation: revision.compute.implementation,
+        },
+        selectedCompute: { id: compute.id, implementation: compute.implementation },
+      },
+      "Native admin UI is refused: the active revision was recorded under another Compute Driver. Select that Compute Driver again (same ID and implementation) to restore access; OCC does not move revisions between Compute Drivers.",
+    );
+  }
+
   function requireNativeAdminHumanSession(request: FastifyRequest, context: RequestContext) {
     const admitted = getAdmission(request);
     if (admitted?.method !== "session") {
@@ -214,7 +338,7 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
       throw failure(
         403,
         "FORBIDDEN",
-        "Native admin UI requires a signed-in console session; service API keys cannot open it.",
+        "OpenClaw requires a signed-in console session; service API keys cannot open it.",
       );
     }
     const session = admitted.session;
@@ -246,7 +370,7 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
         iamDriverId: selectedIAMDriver().id,
         authorization: {
           principalId: resolution.actorId,
-          action: "administer",
+          action: "use",
           resource: {
             kind: "agent",
             id: resolution.agentId,
@@ -269,6 +393,7 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
               : { closeReason: socketEvent.closeReason }),
             parentSessionId: resolution.parentSessionId,
             revisionId: resolution.revisionId,
+            runtimeRole: resolution.runtimeRole,
             host: resolution.target.host,
           },
         },
@@ -278,6 +403,7 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
 
   async function appendNativeAdminProxyDenialAudit(
     admission: NativeAdminProxyAdmission | undefined,
+    input: { readonly action?: string; readonly requestId?: string } = {},
   ): Promise<void> {
     if (
       admission === undefined ||
@@ -305,7 +431,8 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
         },
         iamDriverId: selectedIAMDriver().id,
         authorization: { principalId: admission.actorId, ...admission.authorization },
-        action: "openclaw.agents.native_admin.proxy.authorize",
+        action: input.action ?? "openclaw.agents.native_admin.proxy.authorize",
+        ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
         resource: {
           kind: "agent",
           id: admission.agentId,
@@ -470,6 +597,7 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
         gatewayBase: resolution.gatewayBase,
         agentOrigin: resolution.target.origin,
         apiKey,
+        runtimeHeaders: resolution.runtimeHeaders,
       };
     } catch {
       return undefined;
@@ -483,8 +611,17 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
   };
   type NativeAdminAvailability =
     | { readonly status: "disabled" | "stopped" | "unavailable" }
-    | ({ readonly status: "stopped" | "unsupported" } & NativeAdminTargetStatus)
-    | ({ readonly status: "available"; readonly gatewayBase: string } & NativeAdminTargetStatus);
+    | ({ readonly status: "stopped" } & NativeAdminTargetStatus)
+    | ({
+        readonly status: "unsupported";
+        readonly reason: AgentRuntimeAccessUnavailableReason | "ui_configuration";
+      } & NativeAdminTargetStatus)
+    | ({
+        readonly status: "available";
+        readonly gatewayBase: string;
+        readonly runtimeRole: string;
+        readonly runtimeHeaders: Readonly<Record<string, string>>;
+      } & NativeAdminTargetStatus);
 
   // An exclusive Compute Driver stops the active revision's workload before a newer
   // revision starts, so nothing serves until that revision activates. If it fails, the
@@ -522,13 +659,13 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
     }
     let selection;
     try {
-      selection = await controller.getAdministerableActiveAgentRevision(
+      selection = await controller.getUsableActiveAgentRevision(
         input.actorId,
         input.namespaceId,
         input.agentId,
       );
     } catch (error) {
-      // This administering lookup conflicts only when the authorized Agent is stopped without an active revision.
+      // This lookup conflicts only when the authorized Agent is stopped without an active revision.
       if (error instanceof ResourceConflictError) {
         return { status: "stopped" };
       }
@@ -554,7 +691,7 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
       return { status: "unavailable" };
     }
     if (!nativeAdminConfigurationSupported(revision, target.origin)) {
-      return { status: "unsupported", agent, revision, target };
+      return { status: "unsupported", reason: "ui_configuration", agent, revision, target };
     }
     let compute: ComputeDriver;
     try {
@@ -562,11 +699,31 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
     } catch {
       throw dependencyUnavailable();
     }
-    const gatewayBase = nativeAdminGatewayHttpBase(compute.getGatewayEndpoint?.(revision) ?? "");
-    if (gatewayBase === undefined) {
-      return { status: "unsupported", agent, revision, target };
+    if (
+      compute.id !== revision.compute.id ||
+      compute.implementation !== revision.compute.implementation
+    ) {
+      // Callers keep their generic refusals; the log names both owners and the recovery.
+      warnComputeOwnerMismatch(revision, compute);
+      throw dependencyUnavailable();
     }
-    return { status: "available", agent, revision, target, gatewayBase };
+    const access = compute.getAgentRuntimeAccess?.(revision, input.actorId, selection.runtimeRole);
+    if (access !== undefined && "reason" in access) {
+      return { status: "unsupported", reason: access.reason, agent, revision, target };
+    }
+    const gatewayBase = nativeAdminGatewayHttpBase(access?.endpoint ?? "");
+    if (gatewayBase === undefined) {
+      return { status: "unsupported", reason: "transport_unsupported", agent, revision, target };
+    }
+    return {
+      status: "available",
+      agent,
+      revision,
+      target,
+      gatewayBase,
+      runtimeRole: selection.runtimeRole,
+      runtimeHeaders: access!.headers,
+    };
   }
 
   async function resolveNativeAdminAgentHost(
@@ -588,6 +745,7 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
     }
     return {
       status: availability.status,
+      ...(availability.status === "unsupported" ? { reason: availability.reason } : {}),
       host: availability.target.host,
       origin: availability.target.origin,
       activeRevisionId: availability.revision.id,
@@ -630,6 +788,80 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
       throw failure(403, "FORBIDDEN", "The exact platform operation was not authorized.");
     }
     return availability;
+  }
+
+  // The lookup visits Agent references, so bound its cost per principal, independent of the key.
+  const returnRateLimit = new RequestRateLimiter(6, 0.25);
+  async function resolveNativeAdminReturn(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<void> {
+    const context = getContext(request);
+    if (!context) {
+      throw dependencyUnavailable();
+    }
+    requireNativeAdminHumanSession(request, context);
+    limitNativeAdminReturn(returnRateLimit, context.actorId, reply);
+    const missing = () =>
+      failure(404, "NOT_FOUND", "The requested platform resource was not found.");
+    const key = (request.params as { agentKey: string }).agentKey;
+    if (
+      options.nativeAdmin?.enabled !== true ||
+      nativeAdminDomain === undefined ||
+      publicOrigin === undefined ||
+      nativeAdminAuthority(request.headers.host) !== new URL(publicOrigin).host.toLowerCase()
+    ) {
+      throw missing();
+    }
+    const hostname = `agent-${key}.${nativeAdminDomain}`;
+    const agent = await resolveNativeAdminAgentHost(hostname);
+    if (!agent) {
+      throw missing();
+    }
+    try {
+      const controller = getController();
+      if (!controller) {
+        throw dependencyUnavailable();
+      }
+      const authorized = await controller.getUsableAgent(
+        context.actorId,
+        agent.namespaceId,
+        agent.id,
+      );
+      if (deriveNativeAdminHost(installationId, authorized, nativeAdminDomain) !== hostname) {
+        throw missing();
+      }
+    } catch (error) {
+      if (isDependencyUnavailable(error)) {
+        throw error;
+      }
+      if (isAuthorizationDenied(error)) {
+        await appendNativeAdminProxyDenialAudit(
+          nativeAdminProxyDenial("authorization_denied", {
+            actorId: context.actorId,
+            actorIssuer: context.issuer,
+            actorSubject: context.subject,
+            namespaceId: agent.namespaceId,
+            agentId: agent.id,
+            host: hostname,
+            actualAuthorizationDenied: true,
+            ...(error.evidence === undefined ? {} : { evidence: error.evidence }),
+            ...(error.authorization === undefined ? {} : { authorization: error.authorization }),
+          }),
+          { action: "openclaw.agents.native_admin.return.authorize", requestId: request.id },
+        );
+        throw missing();
+      }
+      const mapped = requestFailure(error);
+      if (mapped.status === 403 || mapped.status === 404) {
+        throw missing();
+      }
+      throw error;
+    }
+    reply.header("cache-control", "no-store").send({
+      data: { namespaceId: agent.namespaceId, agentId: agent.id },
+      meta: { requestId: request.id },
+    });
   }
 
   async function getNativeAdminStatus(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -778,6 +1010,8 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
         revisionId: resolved.revision.id,
         target: resolved.target,
         gatewayBase: resolved.gatewayBase,
+        runtimeRole: resolved.runtimeRole,
+        runtimeHeaders: resolved.runtimeHeaders,
       };
     } catch (error) {
       // A dependency outage (IAM or State) is not a denial, though its error class extends
@@ -826,6 +1060,29 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
         await appendNativeAdminProxyDenialAudit(admission);
       } catch {
         canonicalFailure(reply, dependencyUnavailable());
+        return true;
+      }
+      const agentKey = /^agent-([0-9a-f]{32})\./.exec(hostname)?.[1];
+      if (
+        agentKey !== undefined &&
+        hostname === `agent-${agentKey}.${nativeAdminDomain}` &&
+        admission?.reason === "session_invalid" &&
+        options.nativeAdmin?.enabled === true &&
+        publicOrigin !== undefined &&
+        request.method === "GET" &&
+        /^\/(?:chat\/main(?:\/[0-9a-f]{32})?)?$/.test(nativeAdminPathname(request.url)) &&
+        request.headers["sec-fetch-mode"] === "navigate" &&
+        request.headers["sec-fetch-dest"] === "document" &&
+        request.headers["sec-fetch-user"] === "?1" &&
+        acceptsHtml(request.headers.accept)
+      ) {
+        const consoleUrl = new URL("/console/", publicOrigin);
+        consoleUrl.hash = `native-agent=${agentKey}`;
+        reply
+          .header("cache-control", "no-store")
+          .header("referrer-policy", "no-referrer")
+          .header("x-request-id", request.id)
+          .redirect(consoleUrl.href, 302);
         return true;
       }
       canonicalFailure(
@@ -908,6 +1165,18 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
           }
           return renewed.reason;
         }
+        if (
+          renewed.parentSessionId !== admission.parentSessionId ||
+          renewed.actorId !== admission.actorId
+        ) {
+          return "session_invalid";
+        }
+        if (
+          renewed.runtimeRole !== admission.runtimeRole ||
+          JSON.stringify(renewed.runtimeHeaders) !== JSON.stringify(admission.runtimeHeaders)
+        ) {
+          return "role_changed";
+        }
         return undefined;
       },
       onConnect: async () => {
@@ -951,5 +1220,9 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
     nativeAdminSockets.clear();
     await drainNativeAdminCloseAudits();
   });
-  return { interceptHttp: interceptNativeAdminHttp, status: getNativeAdminStatus };
+  return {
+    interceptHttp: interceptNativeAdminHttp,
+    status: getNativeAdminStatus,
+    resolveReturn: resolveNativeAdminReturn,
+  };
 }

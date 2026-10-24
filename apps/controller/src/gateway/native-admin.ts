@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
 import { asRecord, isNonEmptyString } from "@openclaw-enterprise/utils";
 import type { Agent, AgentRevision } from "@openclaw-enterprise/contracts";
-import { unsupportedNativeGatewayAuthFields } from "./auth-fields.ts";
+import { deriveNativeAdminHost } from "./native-admin-host.mjs";
+
+export { deriveNativeAdminHost } from "./native-admin-host.mjs";
 
 export interface NativeAdminAccessConfig {
   readonly enabled: boolean;
@@ -27,18 +28,6 @@ export function normalizeNativeAdminDomain(domain: string | undefined): string |
     throw new Error("Native admin Agent domain must be a DNS hostname.");
   }
   return normalized;
-}
-
-export function deriveNativeAdminHost(
-  installationId: string,
-  agent: Pick<Agent, "namespaceId" | "id">,
-  domain: string,
-): string {
-  const digest = createHash("sha256")
-    .update(`${installationId}\0${agent.namespaceId}\0${agent.id}`)
-    .digest("hex")
-    .slice(0, 32);
-  return `agent-${digest}.${domain}`;
 }
 
 export function nativeAdminGatewayHttpBase(endpoint: string): string | undefined {
@@ -86,22 +75,9 @@ export function nativeAdminConfigurationSupported(
   origin: string,
 ): boolean {
   const gateway = asRecord(revision.configuration.gateway);
-  const auth = asRecord(gateway?.auth);
-  const proxy = asRecord(auth?.trustedProxy);
   const ui = asRecord(gateway?.controlUi);
-  const approval = asRecord(proxy?.deviceAutoApprove);
-  const scopes = asRecord(auth?.identityScopes)?.["occ-workspace-files"];
+  // Transport authentication and native role support belong to Compute's runtime-access contract.
   return (
-    auth?.mode === "trusted-proxy" &&
-    unsupportedNativeGatewayAuthFields(auth).length === 0 &&
-    proxy?.userHeader === "x-occ-identity" &&
-    Array.isArray(proxy.allowUsers) &&
-    proxy.allowUsers.includes("occ-workspace-files") &&
-    Array.isArray(scopes) &&
-    scopes.includes("operator.admin") &&
-    approval?.enabled === true &&
-    Array.isArray(approval.scopes) &&
-    approval.scopes.includes("operator.admin") &&
     ui?.enabled === true &&
     Array.isArray(ui.allowedOrigins) &&
     ui.allowedOrigins.includes(origin) &&
