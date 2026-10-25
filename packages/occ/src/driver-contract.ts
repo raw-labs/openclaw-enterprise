@@ -116,6 +116,7 @@ export function driverHasCapabilityContract(driver: Driver): boolean {
     return (
       sandboxFacets(candidate.facets) &&
       sandboxPolicyContract(candidate) &&
+      sandboxApplicationContract(candidate.application) &&
       (candidate.repositoryAccess === undefined ||
         [
           "verifyExecution",
@@ -172,6 +173,20 @@ export function driverHasCapabilityContract(driver: Driver): boolean {
       typeof candidate.readAgentRuntimeLogs === "function") &&
     (candidate.deleteAgentRuntimeCredentials === undefined ||
       typeof candidate.deleteAgentRuntimeCredentials === "function")
+  );
+}
+
+function sandboxApplicationContract(value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+  const application = asRecord(value);
+  return (
+    application?.ingress === "authenticated-loopback" &&
+    typeof application.embedded === "boolean" &&
+    ["provision", "cleanup", "readStatus"].every(
+      (operation) => typeof application[operation] === "function",
+    )
   );
 }
 

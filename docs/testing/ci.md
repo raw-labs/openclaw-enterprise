@@ -186,6 +186,12 @@ preview, and the real OpenShell network-policy lifecycle. It requires a prepared
 OpenShell file environment; see [policy proof setup](openshell-coverage.md#qa-matrix-selector).
 The OpenShell advisory job covers the same workflow automatically.
 
+The fork's experimental `application-sandbox` selector is detached from the
+advisory jobs. Its [opt-in lane](../../scripts/ci/test-suites/application-sandbox.json)
+uses a separately prepared native cluster, PostgreSQL and genuine model credentials;
+see [application containment checks](application-sandbox.md). Ordinary CI and a
+skipped case do not qualify that workflow.
+
 The matrix creates disposable Compose and Kubernetes control planes, both with
 Kubernetes compute, and separate OpenClaw/Codex Agents for each scenario. It does
 not use existing clusters or change the default kubeconfig. The exact test list

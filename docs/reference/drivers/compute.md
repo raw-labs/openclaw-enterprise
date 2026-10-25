@@ -260,12 +260,12 @@ downtime without automatic rollback: deploy a higher Agent revision number.
 
 ### SandboxDriver coordination
 
-A selected Sandbox works only with bundled Kubernetes Compute. Compute isolates
-the Namespace, calls the Sandbox's optional Namespace setup, and either passes
-[prepared workload inputs](sandbox.md#provisioning-inputs) to a Sandbox that
-creates the dedicated Harness or creates it itself. It waits for the workload,
-activates its route and calls Sandbox cleanup before removing provider
-resources. See the [Sandbox lifecycle](sandbox.md#admission-and-lifecycle).
+Only bundled Kubernetes Compute selects Sandbox. Compute owns isolation,
+identity, routing, and activation. It calls optional Namespace setup and supplies
+[prepared inputs](sandbox.md#provisioning-inputs) for the Harness or optional
+[application provider](sandbox.md#application-workload-provider). Compute waits
+for readiness and completes [Sandbox cleanup](sandbox.md#admission-and-lifecycle)
+before releasing provider resources.
 
 ### Optional selected-driver hooks
 

@@ -1,19 +1,19 @@
 # OpenShell SandboxDriver
 
-The OpenShell SandboxDriver pairs its Gateway, dedicated Codex/native OpenClaw
-Harnesses, and [Kubernetes Compute](kubernetes-compute.md). OCC owns Agents,
-Agent revisions, Namespaces, routing, credentials, and authorization.
+The OpenShell SandboxDriver pairs dedicated Codex/native OpenClaw Harnesses with
+[Kubernetes Compute](kubernetes-compute.md). OCC owns Agents, Namespaces, routing,
+credentials, and authorization.
 
-Development supports native OpenClaw and plugin-free Codex with
-[`v0.1.5`](https://github.com/NVIDIA/OpenShell/tree/v0.1.5). The pinned
-OCE runtime declares native Dedicated support. The paired
+This page describes default Harness mode with
+[`v0.1.5`](https://github.com/NVIDIA/OpenShell/tree/v0.1.5): native OpenClaw and
+plugin-free Codex in development. The paired
 [Credential Gateway](openshell-credential-gateway.md) delivers model credentials;
-each Agent revision's providers supply node enrollment and Codex files. These experimental APIs are
-unqualified for production.
+revision providers supply node enrollment and runtime files. Production remains
+unqualified; see [qualification](#qualification-contract).
 
-Embedded OpenClaw is unsupported. The Driver supplies native OpenClaw's three
-containment facets; see
-[qualification](#qualification-contract).
+Harness mode rejects embedded OpenClaw. The separate
+[application experiment](application-sandbox.md) contains a dedicated Gateway or
+combined embedded OpenClaw without selecting an OpenShell Harness.
 
 ## Ownership model
 

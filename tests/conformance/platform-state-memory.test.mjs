@@ -393,3 +393,43 @@ test("memory state refuses an Agent backendId outside the API's Backend ID rule"
     );
   }
 });
+
+test("memory state retains embedded outbound drafts and requires a Sandbox for their admitted revisions", async () => {
+  const store = new InMemoryPlatformState();
+  const { namespace, configuration, agent, revision } = await seedSessionRevision(store);
+  const selection = { mode: "restricted", hosts: ["clawhub.ai"] };
+  const saved = await store.transact((unit) =>
+    unit.agents.updateConfiguration(
+      namespace.id,
+      agent.id,
+      configuration.id,
+      "embedded",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      selection,
+    ),
+  );
+  assert.deepEqual(saved.gatewayOutbound, selection);
+  const admitted = {
+    ...revision,
+    id: `rev_${randomUUID()}`,
+    revision: 2,
+    gatewayOutbound: { selection, requirements: [], denyCidrs: [] },
+  };
+  await assert.rejects(
+    store.transact((unit) => unit.revisions.createRevision(admitted)),
+    /An AgentRevision requires valid Configuration metadata/,
+  );
+  const contained = { ...admitted, sandboxDriverId: "application-boundary" };
+  await store.transact((unit) => unit.revisions.createRevision(contained));
+  assert.deepEqual(
+    (await store.read((view) => view.revisions.findRevision(namespace.id, agent.id, contained.id)))
+      .gatewayOutbound,
+    admitted.gatewayOutbound,
+  );
+});

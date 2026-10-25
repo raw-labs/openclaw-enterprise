@@ -13,6 +13,7 @@ import {
   ConfigurationHarnessError,
   DedicatedOpenClawSandboxError,
   DependencyUnavailableError,
+  DriverSelectionError,
   InMemoryPlatformState,
   NamespaceNotEmptyError,
   OpenClawController,
@@ -1927,6 +1928,48 @@ function conformanceSandbox(id, facets, provisions = true) {
     async cleanup() {},
   };
 }
+
+test("Sandbox application registration requires authenticated ingress and its complete lifecycle", () => {
+  const controller = new OpenClawController(installation);
+  const application = {
+    ingress: "authenticated-loopback",
+    embedded: true,
+    async provision() {
+      assert.fail("registration must not launch an application");
+    },
+    async cleanup() {
+      assert.fail("registration must not stop an application");
+    },
+    async readStatus() {
+      assert.fail("registration must not observe an application");
+    },
+  };
+  const invalidCapabilities = [
+    null,
+    [],
+    {},
+    { ...application, ingress: "unprotected-loopback" },
+    { ...application, ingress: undefined },
+    { ...application, embedded: "true" },
+    { ...application, embedded: undefined },
+    { ...application, provision: undefined },
+    { ...application, cleanup: undefined },
+    { ...application, readStatus: undefined },
+  ];
+  for (const [index, invalid] of invalidCapabilities.entries()) {
+    const sandbox = conformanceSandbox(`application-contract-${index}`, ["networking"], false);
+    // An incomplete provider must never be selectable as evidence that loopback
+    // proxy identity is authenticated or that payload access can be withdrawn.
+    assert.throws(
+      () => controller.registerDriver({ ...sandbox, application: invalid }),
+      DriverSelectionError,
+    );
+    const valid = { ...sandbox, application: { ...application, embedded: index % 2 === 0 } };
+    controller.registerDriver(valid);
+    controller.selectDriver("sandbox", valid.id);
+    assert.equal(controller.selectedDriver("sandbox"), valid);
+  }
+});
 
 test("The pinned runtime admits dedicated OpenClaw without waiving Sandbox containment", async () => {
   const { agent, controller, namespace } = await fixture();

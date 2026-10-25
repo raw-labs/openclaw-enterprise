@@ -16,6 +16,11 @@ import {
   ConfigurationValidationError,
 } from "@openclaw-enterprise/contracts";
 import { openShellLogDecision } from "./openshell-log-decisions.ts";
+import { sameOpenShellSandboxSpec } from "./openshell-sandbox-spec.ts";
+import {
+  OpenShellApplicationProvider,
+  type OpenShellApplicationOptions,
+} from "./openshell-application.ts";
 import {
   AGENT_POLICY_PREFIX,
   openShellAgentNetworkRules,
@@ -143,6 +148,8 @@ export interface OpenShellNetworkBinary {
 }
 
 export interface OpenShellSandboxDriverOptions {
+  readonly workloadTarget?: "harness" | "application";
+  readonly application?: OpenShellApplicationOptions;
   readonly egress?: OpenShellProxyOptions;
   /** Workspace and readiness policy; the `openshell` Backend owns the gateway connection. */
   readonly gateway: {
@@ -523,19 +530,6 @@ function harnessPort(requirements: HarnessWorkloadRequirements): number {
 // down. Stop and delete discard the exit, so the policy never fights a revision shutdown.
 // A deleted or evicted Pod is an infrastructure error that OpenShell never restarts.
 const SANDBOX_RESTART_POLICY = "SANDBOX_RESTART_POLICY_ALWAYS";
-// Adoption compares specs exactly. Sandboxes created before OCC set the policy were stored as
-// NEVER (OpenShell normalizes an unset policy), and they stay adoptable for their revision.
-// GetSandbox never returns UNSPECIFIED; it and an absent field are accepted defensively.
-const ADOPTABLE_RESTART_POLICIES: ReadonlySet<string | number | undefined> = new Set([
-  undefined,
-  "SANDBOX_RESTART_POLICY_UNSPECIFIED",
-  0,
-  "SANDBOX_RESTART_POLICY_NEVER",
-  1,
-  SANDBOX_RESTART_POLICY,
-  3,
-]);
-
 // A Sandbox in one of these phases never serves the revision again.
 const STOPPED_SANDBOX_PHASES: ReadonlySet<string | number> = new Set([
   "SANDBOX_PHASE_STOPPING",
@@ -2169,7 +2163,7 @@ function validateOptions(options: OpenShellSandboxDriverOptions): void {
   nonempty(options.policy.process.runAsGroup, "OpenShell process runAsGroup");
   if (
     !Array.isArray(options.policy.networkPolicies) ||
-    options.policy.networkPolicies.length === 0
+    (options.policy.networkPolicies.length === 0 && options.workloadTarget !== "application")
   ) {
     throw new OpenShellSandboxConfigurationFailure(
       "OpenShell requires at least one sandbox network policy.",
@@ -2226,6 +2220,29 @@ export const configurationSchema = Object.freeze({
   required: ["gateway", "kubernetes", "policy"],
   additionalProperties: false,
   properties: {
+    workloadTarget: { enum: ["harness", "application"] },
+    application: {
+      type: "object",
+      additionalProperties: false,
+      required: ["developmentOnly", "servicePeer"],
+      properties: {
+        developmentOnly: { const: true },
+        servicePeer: {
+          type: "object",
+          additionalProperties: false,
+          required: ["namespace", "podLabels", "port"],
+          properties: {
+            namespace: { type: "string", minLength: 1 },
+            podLabels: {
+              type: "object",
+              minProperties: 1,
+              additionalProperties: { type: "string" },
+            },
+            port: { type: "integer", minimum: 1, maximum: 65535 },
+          },
+        },
+      },
+    },
     gateway: {
       type: "object",
       additionalProperties: false,
@@ -2258,7 +2275,7 @@ export const configurationSchema = Object.freeze({
         landlockCompatibility: { const: "hard_requirement" },
         networkPolicies: {
           type: "array",
-          minItems: 1,
+          minItems: 0,
           items: {
             type: "object",
             additionalProperties: false,
@@ -2403,72 +2420,6 @@ function exactStringMapWithReservedPrefix(
   );
 }
 
-const PROTOBUF_VALUE_KINDS = new Set([
-  "nullValue",
-  "numberValue",
-  "stringValue",
-  "boolValue",
-  "structValue",
-  "listValue",
-]);
-
-function canonicalProtobufValues(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(canonicalProtobufValues);
-  }
-  const record = asRecord(value);
-  if (record === undefined) {
-    return value;
-  }
-  const discriminator = record.kind;
-  return Object.fromEntries(
-    Object.entries(record)
-      .filter(
-        ([key]) =>
-          key !== "kind" ||
-          typeof discriminator !== "string" ||
-          !PROTOBUF_VALUE_KINDS.has(discriminator) ||
-          !Object.hasOwn(record, discriminator),
-      )
-      .map(([key, entry]) => [key, canonicalProtobufValues(entry)]),
-  );
-}
-
-/**
- * Decoding with `oneofs: true` adds a virtual `_field` property naming each set proto3
- * `optional` field, for example `_user_namespaces: "user_namespaces"`. A request never
- * carries those markers, so they are not Sandbox content.
- */
-function withoutSyntheticOneofs(
-  record: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(record).filter(
-      ([key, value]) => !(key.startsWith("_") && value === key.slice(1)),
-    ),
-  );
-}
-
-function canonicalSandboxSpec(spec: Readonly<Record<string, unknown>> | undefined): unknown {
-  const template = asRecord(spec?.template);
-  if (spec === undefined || template === undefined) {
-    return spec;
-  }
-  // The Gateway assigns this epoch. Git continuity verifies it against the supervisor receipt.
-  const { provider_attachment_epoch: _epoch, restart_policy: restartPolicy, ...rest } = spec;
-  return {
-    ...withoutSyntheticOneofs(rest),
-    ...(spec.policy === undefined ? {} : { policy: canonicalProtobufValues(spec.policy) }),
-    ...(ADOPTABLE_RESTART_POLICIES.has(restartPolicy as string | number | undefined)
-      ? {}
-      : { restart_policy: restartPolicy }),
-    template: {
-      ...withoutSyntheticOneofs(template),
-      driver_config: canonicalProtobufValues(template.driver_config),
-    },
-  };
-}
-
 function verifyRuntimeProvider(
   provider: OpenShellProviderResponse,
   name: string,
@@ -2576,7 +2527,7 @@ function verifyExistingSandbox(
       request.annotations,
       "internal.openshell.ai/",
     ) ||
-    !isDeepStrictEqual(canonicalSandboxSpec(existing.spec), canonicalSandboxSpec(request.spec))
+    !sameOpenShellSandboxSpec(existing.spec, request.spec)
   ) {
     throw new OpenShellSandboxConfigurationFailure(
       `Refusing OpenShell Sandbox ${request.name} without exact AgentRevision ownership and content.`,
@@ -4439,4 +4390,45 @@ export class OpenShellSandboxDriver implements SandboxDriver {
       revisionId: context.revision.id,
     });
   }
+}
+
+/** Select one explicit workload owner; application mode does not relax the separate Codex Harness. */
+export function createOpenShellSandboxDriver(
+  options: OpenShellSandboxDriverOptions,
+  selection: OpenShellSandboxDriverSelection,
+): SandboxDriver {
+  const namespaceOwner = new OpenShellSandboxDriver(options, selection);
+  if (options.workloadTarget !== "application") {
+    if (options.application !== undefined) {
+      throw new OpenShellSandboxConfigurationFailure(
+        "Application configuration requires workloadTarget: application.",
+      );
+    }
+    return namespaceOwner;
+  }
+  if (!options.application || selection.openShellGit !== undefined) {
+    throw new OpenShellSandboxConfigurationFailure(
+      "Application containment requires its own explicit profile without protected Harness composition.",
+    );
+  }
+  const application = new OpenShellApplicationProvider(
+    selection.backend.client,
+    options,
+    options.application,
+  );
+  return {
+    id: namespaceOwner.id,
+    capability: "sandbox",
+    implementation: namespaceOwner.implementation,
+    facets: namespaceOwner.facets,
+    application,
+    ensureNamespace: namespaceOwner.ensureNamespace.bind(namespaceOwner),
+    async cleanup(context) {
+      if (context.revision) {
+        await application.cleanup({ ...context, revision: context.revision });
+      } else {
+        await namespaceOwner.cleanup(context);
+      }
+    },
+  };
 }

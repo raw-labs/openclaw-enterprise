@@ -2,15 +2,15 @@
 
 ## Overview
 
-`SandboxDriver` confines an Agent Harness's network, filesystem, or processes.
-OpenClaw Control Plane (OCC) selects the Driver, authorizes deployment, and
-saves the immutable Agent revision. [ComputeDriver](compute.md) owns the gateway, workload
-identity, baseline isolation, routing, and activation. Sandbox can create a
-dedicated Harness while Compute keeps those responsibilities.
+`SandboxDriver` confines Harness or application networking, filesystem, and
+processes. OpenClaw Control Plane (OCC) authorizes deployment and freezes the
+Agent revision. [ComputeDriver](compute.md) retains workload identity, baseline
+isolation, routing, and activation.
 
-Selection is optional and currently works only with bundled Kubernetes Compute
-and dedicated execution. Choosing an installed Sandbox does not enable Docker,
-SSH, or installed Compute combinations. See [Driver selection](selection.md).
+Selection requires bundled Kubernetes Compute. Dedicated Harness containment is
+the default; the optional application provider can admit embedded execution.
+Installed Sandbox packages do not enable other Compute combinations. See
+[Driver selection](selection.md).
 
 ## Interface
 
@@ -30,7 +30,7 @@ required `facets` and `cleanup` members, an optional `harnessHome`, and optional
 | `cleanup(context)`                               | Required for Agent revision stop, retirement, and Namespace cleanup. Agent revision cleanup receives the immutable Agent revision; Namespace cleanup omits it.                                                                                                                                                                                                                                    |
 | `harnessResource(context)`                       | Optional. Returns the Sandbox reference `provisionHarness` creates for an Agent revision, without side effects. Compute needs it to [withdraw a credential source](credential-gateway.md#optional-additions) from a running Agent revision.                                                                                                                                                       |
 | `workspaceNodePeerLabels(context)`               | Optional. Exact Pod labels of the provider Pods that open the Agent revision's workspace-node connection, or `undefined` before its Sandbox exists. Compute admits only these Pods to that Agent's Gateway port, plus those of the serving Agent revision while a successor prepares, so the labels must select that Sandbox alone. OpenShell returns the supervisor's `openshell.ai/sandbox-id`. |
-| `readSandboxLogs(context, request)`              | Optional read of the Agent revision's Sandbox log: at most `lines` raw lines at or after `sinceTime`, plus how many lines the source examined. It must use a read-only interface and derive the Sandbox from the Agent revision. OCC classifies and redacts every line. See [Agent logs](../../guides/topics/agent-logs.md#sandbox-source).                                                       |
+| `readSandboxLogs(context, request)`              | Optional read-only Sandbox log lookup derived from the Agent revision. Return at most `lines` raw lines from `sinceTime` and the examined count. OCC classifies and redacts them; see [Agent logs](../../guides/topics/agent-logs.md#sandbox-source).                                                                                                                                             |
 
 Two optional methods serve a provider-owned Harness transport.
 `harnessEndpoint(context)` returns the transport for the provisioned Harness, and
@@ -87,6 +87,20 @@ restart). A first start is plain `starting`. Diagnostics report a restarting
 Harness as a failed `sandbox` check. Only Sandboxes created before that policy
 existed report `HARNESS_EXITED`.
 
+### Application workload provider
+
+Optional `application` exposes `ingress: "authenticated-loopback"`, `embedded`,
+`provision`, `readStatus`, and `cleanup`. Compute passes the immutable revision
+and prepared process, environment references, volumes, initialization, identity,
+and network requirements in `SandboxApplicationContext`. Providers must preserve
+these inputs or refuse them.
+
+`provision` returns `pending` or fixed Gateway/status origins, public CA trust,
+and a transport Secret reference. `readStatus` identifies the actual payload Pod
+and container, not the frontend. Compute retains activation and calls cleanup
+on stop/retirement. Embedded selection requires `embedded: true`; absence keeps
+existing Harness behavior. See the [application experiment](application-sandbox.md).
+
 ### Harness Sandbox status
 
 `GET /namespaces/:namespaceId/agents/:agentId/harness-status` requires Agent
@@ -133,18 +147,13 @@ paired Sandbox can consume them. The Sandbox must apply every attachment and
 reject any it did not issue. After the Harness is ready, Compute asks the
 gateway whether each attachment is applied before activating the Agent revision.
 
-A private WSS Harness endpoint may supply public CA trust in `tls.caBundle`. Compute
-projects that bundle through an immutable revision ConfigMap into only this Gateway; Node
-verifies the peer certificate and hostname, activation checks the same trust, and
-retirement removes it after the workloads.
-
 ### Sandbox resource identity
 
 `SandboxResourceRef` contains `namespaceName`, `resourceName`, `agentId`, and
 `revisionId`. It stays stable when a controller replaces the underlying Pod;
 retirement must find the provider resource even if that Pod is already gone.
 
-## Optional network policy operations
+### Optional network policy operations
 
 `networkPolicy` declares `wildcards`, `portRanges`, and `live` support. An
 implementation advertising it must declare the configuration contribution
@@ -262,8 +271,8 @@ as the `reason`. OpenShell throws it for gRPC `PERMISSION_DENIED` and
 
 - Supported facets are `networking`, `filesystem`, and `process`; there is no
   `exec` facet, per-tool Sandbox creation, or Sandbox-owned command authorization.
-- Sandbox selection currently requires bundled Kubernetes Compute and dedicated
-  Harness execution. An installed Sandbox package does not broaden that support.
+- Sandbox selection requires bundled Kubernetes Compute; embedded placement
+  requires an application provider that explicitly admits it.
 - The shared interface does not offer a separate readiness or activation method;
   Compute owns both and retains its baseline isolation rules.
 

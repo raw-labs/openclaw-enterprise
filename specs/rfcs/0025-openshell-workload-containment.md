@@ -1,6 +1,6 @@
 ---
 status: Proposed
-implementation_status: Not implemented
+implementation_status: Partially implemented
 author: miguelbranco80
 ---
 
@@ -31,10 +31,10 @@ integrations outside its OpenShell boundary. A proxy can permit HTTPS without
 containing local filesystem or process effects. Embedded OpenClaw combines those
 roles and currently has broader external connectivity.
 
-| Mode              | Contained payload                          | Policy consequence                                                                |
-| ----------------- | ------------------------------------------ | --------------------------------------------------------------------------------- |
-| Dedicated Codex   | Gateway Sandbox; separate Harness retained | Gateway destination grants do not grant Harness access.                           |
-| Embedded OpenClaw | Combined Gateway/Harness Sandbox           | Model-directed subprocesses and integrations share the effective workload policy. |
+| Mode              | Contained payload                                           | Policy consequence                                                                |
+| ----------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Dedicated Codex   | Gateway Sandbox; ordinary Kubernetes Codex Harness retained | Gateway grants do not change the Harness's configured internal policy.            |
+| Embedded OpenClaw | Combined Gateway/Harness Sandbox                            | Model-directed subprocesses and integrations share the effective workload policy. |
 
 ## Contract and lifecycle
 
@@ -48,11 +48,18 @@ prepares exact-owner storage and configuration, waits for application readiness,
 activates routing, and stops the exact previous workload before releasing its
 resources. Provider identities include role and revision to avoid Harness
 collisions. Adoption must verify both. Supervisor readiness alone is insufficient.
+Compute records application placement in the revision's durable admission fact.
+A changed Installation cannot silently move an old revision into or out of it.
+Cleanup still fences the Compute-owned Harness if its application provider is
+unavailable, then reports the unresolved native cleanup.
 
 An application frontend may be required because OpenShell exposes services
 through its supervisor. Its target is fixed by admitted provider output. It has
-no integration or model credentials and cannot turn caller URLs or Host headers
+only a revision transport credential, no integration or model credentials, and cannot turn caller URLs or Host headers
 into management requests. It preserves existing authenticated routing.
+It strips asserted OCE identity headers from callers outside the original trusted
+proxy ranges before crossing the private loopback hop. Device authentication
+remains separate.
 
 ## Configurable restrictions
 
@@ -78,12 +85,20 @@ environment references or ConfigMap mounts. Its managed provider files are
 nonsecret. Never put credential bytes in Sandbox specs, provider configuration,
 image layers, logs, or command arguments.
 
-The adapter needs private, exact-revision delivery. A staging Job can materialize
-admitted Secret references and configuration on a private revision volume mounted
-read-only into the payload. It has no network or Kubernetes API credentials and
-cannot access unrelated bindings. Do not share a writable bootstrap directory
-with serving payloads. Delete delivery material only after payload termination;
-persistent application state retains its Agent-owned lifetime.
+The adapter uses nonsecret preparation Deployments for configuration and state
+paths. They terminate before native environment delivery and never mount its
+separate private PVC. The controller resolves admitted environment references and
+sends values through native `ExecSandbox` stdin into owner-only files in the
+payload Pod. Retry verifies the generation, Pod identity and unchanged values;
+it does not rewrite serving material. This preserves controller credential
+custody without adding a credential-bearing staging Pod. Delete delivery material
+only after payload termination; persistent state retains its Agent-owned lifetime.
+
+The released binary reserves `/run`, so private mounts use `/oce-application-*`.
+The adapter remaps the prepared workspace-node path without changing Secret
+values. Native process identity is verified against the actual Pod, not assumed
+from the policy strings. State owned by an incompatible earlier UID is refused,
+not recursively reassigned.
 
 Preserve required identity and secure routing or refuse admission. Shared
 ServiceAccounts and development service listeners do not establish production
@@ -112,6 +127,19 @@ Record missing infrastructure or runtime support as a gap, not mock proof. The
 plan owns execution details and results.
 
 ## Alternatives and limits
+
+The first profile does not stack OpenShell-owned Gateway and Harness Sandboxes.
+The stock manager shares management and application listeners. Granting a payload
+that listener could expose unauthenticated management RPCs in the development
+fixture. The fixed-target frontend and in-Sandbox transport guard protect the
+application hop, not the manager from a compromised frontend. This is a development
+limit and prevents a production qualification claim.
+
+Remote execution, protected credential composition, projected workload identity,
+repository delivery, initial workspace files, Secret file volumes and additional
+application listeners are refused in this profile. Public grants support named
+HTTPS hosts, not `publicHttps`; both A and AAAA answers must pass exclusions.
+IPv6 transport remains unqualified.
 
 RFC-0024's proxy is sufficient for destination control with less integration cost.
 A standalone OpenShell proxy reuses forwarding code but adds no workload boundary.

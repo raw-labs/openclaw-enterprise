@@ -189,6 +189,7 @@ async function serviceDocument(
   bearer: string,
   signal: AbortSignal,
   body?: string,
+  applicationTransportToken?: string,
 ): Promise<OpenShellServiceDocument> {
   if (body !== undefined && Buffer.byteLength(body) > 4096) {
     throw new OpenShellGatewayFailure("OpenShell service request exceeds its size bound.");
@@ -200,7 +201,13 @@ async function serviceDocument(
     options,
     serviceUrl,
     path,
-    { authorization: bearerHeader(bearer), accept: "application/json" },
+    {
+      authorization: bearerHeader(bearer),
+      accept: "application/json",
+      ...(applicationTransportToken === undefined
+        ? {}
+        : { "x-oce-application-transport": applicationTransportToken }),
+    },
     signal,
     (request, resolve) => {
       request.on("upgrade", (_response: IncomingMessage, socket: Socket) => {
@@ -245,8 +252,17 @@ export function getServiceDocument(
   path: string,
   bearer: string,
   signal: AbortSignal,
+  applicationTransportToken?: string,
 ): Promise<OpenShellServiceDocument> {
-  return serviceDocument(options, serviceUrl, path, bearer, signal);
+  return serviceDocument(
+    options,
+    serviceUrl,
+    path,
+    bearer,
+    signal,
+    undefined,
+    applicationTransportToken,
+  );
 }
 
 export function postServiceDocument(

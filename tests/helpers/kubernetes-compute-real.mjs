@@ -205,17 +205,25 @@ export async function createProvisioningApiFixture(
   context,
   computeDriver,
   authentication,
-  { emit = () => {} } = {},
+  {
+    emit = () => {},
+    sandboxDriver,
+    pluginDriver = new CodexPluginDriver(),
+    backendDefinitions = [],
+    mockSlackCredentials = true,
+  } = {},
 ) {
   // Exercise real admission with Kubernetes Secrets; fixture credentials never reach Slack.
   const originalFetch = globalThis.fetch;
-  context.mock.method(globalThis, "fetch", async (url, init) => {
-    if (String(url) === "https://slack.com/api/auth.test") {
-      assert.match(init.headers.authorization, /^Bearer xoxb-/);
-      return Response.json({ ok: true, bot_id: "B0123456789", team_id: "T0123456789" });
-    }
-    return originalFetch(url, init);
-  });
+  if (mockSlackCredentials) {
+    context.mock.method(globalThis, "fetch", async (url, init) => {
+      if (String(url) === "https://slack.com/api/auth.test") {
+        assert.match(init.headers.authorization, /^Bearer xoxb-/);
+        return Response.json({ ok: true, bot_id: "B0123456789", team_id: "T0123456789" });
+      }
+      return originalFetch(url, init);
+    });
+  }
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 6 });
   let workerPool;
   const state = new PostgresPlatformState(pool);
@@ -252,8 +260,17 @@ export async function createProvisioningApiFixture(
   let worker;
   const drivers = {
     ...runtimeDrivers({ computeDriver, configurationDriver, secretDriver }),
-    pluginDriver: new CodexPluginDriver(),
+    pluginDriver,
+    ...(sandboxDriver === undefined ? {} : { sandboxDriver }),
   };
+  drivers.installation.backend = backendDefinitions;
+  if (sandboxDriver !== undefined) {
+    drivers.installation.drivers.sandbox = {
+      id: sandboxDriver.id,
+      implementation: sandboxDriver.implementation,
+      configuration: {},
+    };
+  }
   const app = await composePostgresDevelopment(
     {
       mode: "development",

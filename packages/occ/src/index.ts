@@ -1357,7 +1357,11 @@ function requireSandboxExecutionMode(
   sandbox: SandboxDriver | undefined,
   executionMode: HarnessExecutionMode,
 ): void {
-  if (sandbox !== undefined && executionMode !== "dedicated") {
+  if (
+    sandbox !== undefined &&
+    executionMode !== "dedicated" &&
+    sandbox.application?.embedded !== true
+  ) {
     throw new ConfigurationHarnessError(
       `The selected Sandbox Driver supports only dedicated Harness execution; this Agent uses ${executionMode} execution. Set executionMode to dedicated.`,
     );

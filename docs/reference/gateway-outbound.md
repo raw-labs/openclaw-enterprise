@@ -38,8 +38,10 @@ Saving updates the draft. Deployment freezes the selection, channel requirements
 and admitted Installation exclusions into the immutable revision. An existing
 version keeps its selection when the draft or channel settings change. Deploy
 a new version to apply those changes. Admission rechecks the current Installation
-ceiling. Additional modes require dedicated execution; embedded execution is
-unchanged.
+ceiling. Additional modes normally require dedicated execution. The explicit
+[application-containment experiment](drivers/application-sandbox.md) also accepts
+restricted grants for embedded OpenClaw and replaces its proxy with OpenShell
+policy. Other embedded placements remain unchanged.
 
 ## Installation setup
 
