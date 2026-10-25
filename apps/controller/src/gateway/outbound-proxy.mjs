@@ -18,7 +18,7 @@ const HOST_PATTERN =
 // Conservative public-address boundary, including shared, documentation and transition
 // ranges. Public exceptions within a special-purpose prefix are deliberately excluded.
 // https://www.iana.org/assignments/iana-ipv4-special-registry/
-const FORBIDDEN_IPV4 = [
+export const FORBIDDEN_IPV4 = Object.freeze([
   "0.0.0.0/8",
   "10.0.0.0/8",
   "100.64.0.0/10",
@@ -34,12 +34,12 @@ const FORBIDDEN_IPV4 = [
   "203.0.113.0/24",
   "224.0.0.0/4",
   "240.0.0.0/4",
-];
+]);
 
 // IPv6 answers are vetted even though this delivery only connects over IPv4. A
 // public AAAA answer may coexist with a vetted A answer; a private one rejects both.
 // https://www.iana.org/assignments/iana-ipv6-special-registry/
-const FORBIDDEN_IPV6 = [
+export const FORBIDDEN_IPV6 = Object.freeze([
   "::/96",
   "::ffff:0:0/96",
   "64:ff9b::/96",
@@ -53,7 +53,7 @@ const FORBIDDEN_IPV6 = [
   "fe80::/10",
   "fec0::/10",
   "ff00::/8",
-];
+]);
 
 function record(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);

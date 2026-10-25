@@ -338,6 +338,10 @@
                       {
                         "page": "reference/drivers/openshell-sandbox",
                         "label": "OpenShell"
+                      },
+                      {
+                        "page": "reference/drivers/application-sandbox",
+                        "label": "Application Containment"
                       }
                     ]
                   },
@@ -1041,6 +1045,7 @@
               "flows/harness-execution-topology",
               "flows/compute-driver-lifecycle-hooks",
               "flows/openshell-sandbox-provisioning",
+              "flows/application-sandbox-provisioning",
               "flows/credential-source-lifecycle",
               "flows/credential-source-refresh",
               "flows/driver-plugin-loading",
@@ -1068,6 +1073,7 @@
               "testing/slack",
               "testing/plugins",
               "testing/openshell",
+              "testing/application-sandbox",
               "testing/openshell-oauth",
               "testing/openshell-coverage",
               "flows/agent-repository-credentials",

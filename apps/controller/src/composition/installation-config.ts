@@ -339,7 +339,7 @@ export async function loadStartupConfigurationSnapshot(options: {
 }
 
 interface BundledOpenShellSandboxDriverModule extends DriverImplementation {
-  readonly OpenShellSandboxDriver: new (
+  readonly createOpenShellSandboxDriver: (
     configuration: ConfigurationRecord,
     selection: OpenShellSandboxDriverSelection,
   ) => SandboxDriver;
@@ -1177,7 +1177,7 @@ export async function loadInstallationConfiguration(options: {
         backend: openShell!,
         operatorOwnedKubernetesResources: preprovisionedNamespace !== undefined,
         createSandbox: (configuration, selection) =>
-          new bundledSandboxPackage!.OpenShellSandboxDriver(configuration, selection),
+          bundledSandboxPackage!.createOpenShellSandboxDriver(configuration, selection),
         repository: repositoryDelivery,
         proxy: {
           id: proxySelection.id,
@@ -1222,7 +1222,7 @@ export async function loadInstallationConfiguration(options: {
                   backend: openShell!,
                   operatorOwnedKubernetesResources: preprovisionedNamespace !== undefined,
                   createSandbox: (configuration, selection) =>
-                    new bundledSandboxPackage!.OpenShellSandboxDriver(configuration, selection),
+                    bundledSandboxPackage!.createOpenShellSandboxDriver(configuration, selection),
                   repository: repositoryDelivery,
                 });
                 repositoryTransport = capabilities.repositoryTransport;
@@ -1333,6 +1333,7 @@ async function loadBundledOpenShellSandboxDriver(): Promise<BundledOpenShellSand
   const module = object(imported, "drivers.sandbox bundled OpenShell exports");
   if (
     typeof module.OpenShellSandboxDriver !== "function" ||
+    typeof module.createOpenShellSandboxDriver !== "function" ||
     typeof module.validateConfiguration !== "function" ||
     typeof module.configurationSchema !== "object" ||
     module.configurationSchema === null

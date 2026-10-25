@@ -46,6 +46,7 @@ from each trace; for commands to run locally, see [Testing](../testing/README.md
 
 - [Installation Driver package loading](../flows/driver-plugin-loading.md)
 - [Compute Driver lifecycle hooks](../flows/compute-driver-lifecycle-hooks.md)
+- [Application Sandbox provisioning](../flows/application-sandbox-provisioning.md): experimental Gateway/embedded containment, native private delivery, and Compute routing
 - [Existing Kubernetes namespace placement](../flows/kubernetes-existing-namespace-placement.md)
 - [SSH Compute lifecycle](../flows/pr-24-ssh-compute.md)
 

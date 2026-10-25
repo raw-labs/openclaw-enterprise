@@ -866,7 +866,7 @@ function assertAdmittedAgentRevision(revision: AgentRevision): void {
     !validCredentialSourceSnapshots(revision.credentialSources) ||
     (revision.gatewayOutbound !== undefined &&
       (!validGatewayOutboundSnapshot(revision.gatewayOutbound) ||
-        revision.harness.mode !== "dedicated")) ||
+        (revision.harness.mode === "embedded" && revision.sandboxDriverId === undefined))) ||
     !validPluginRevisionState(revision.plugins) ||
     !validPluginApprovers(revision.pluginApprovers) ||
     (revision.repositoryCredentials !== undefined &&
@@ -2749,10 +2749,7 @@ function repositories(
       );
       assertHarnessCredentialSourceListed(agent.harnessAuth, agent.credentialSources);
       const gatewayOutbound = agent.gatewayOutbound ?? { mode: "channelsOnly" as const };
-      if (
-        !validGatewayOutboundSelection(gatewayOutbound) ||
-        (gatewayOutbound.mode !== "channelsOnly" && agent.executionMode !== "dedicated")
-      ) {
+      if (!validGatewayOutboundSelection(gatewayOutbound)) {
         throw new ScopeViolationError("The Agent Gateway outbound selection is invalid.");
       }
       const key = agentKey(agent.namespaceId, agent.id);
@@ -2894,25 +2891,8 @@ function repositories(
           harnessAuth,
         );
       }
-      if (
-        gatewayOutbound !== undefined &&
-        (!validGatewayOutboundSelection(gatewayOutbound) ||
-          (gatewayOutbound.mode !== "channelsOnly" &&
-            (executionMode ?? current.executionMode) !== "dedicated"))
-      ) {
-        throw new ScopeViolationError(
-          "The Gateway outbound selection is invalid for this topology.",
-        );
-      }
-      if (
-        gatewayOutbound === undefined &&
-        current.gatewayOutbound?.mode !== undefined &&
-        current.gatewayOutbound.mode !== "channelsOnly" &&
-        (executionMode ?? current.executionMode) !== "dedicated"
-      ) {
-        throw new ScopeViolationError(
-          "The Gateway outbound selection requires dedicated execution.",
-        );
+      if (gatewayOutbound !== undefined && !validGatewayOutboundSelection(gatewayOutbound)) {
+        throw new ScopeViolationError("The Agent Gateway outbound selection is invalid.");
       }
       const association = harnessAuth === undefined ? current.harnessAuth : harnessAuth;
       await assertAgentCredentialSourcesAvailable(

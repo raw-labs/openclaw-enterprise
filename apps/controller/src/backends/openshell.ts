@@ -69,6 +69,12 @@ export class OpenShellGateway {
     return created;
   }
 
+  /** Public routing address only; never returns the operator's authentication material. */
+  serviceConnectOrigin(namespace: string): string {
+    const endpoint = this.clientOptions(namespace).endpoint;
+    return new URL(endpoint.includes("://") ? endpoint : `http://${endpoint}`).origin;
+  }
+
   /** Export uses a distinct operator identity without broadening ordinary RPC authority. */
   credentialClientForNamespace(
     namespace: string,

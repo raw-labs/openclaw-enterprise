@@ -21472,3 +21472,54 @@ test("Kubernetes embedded setup uses a Main roster entry's workspace", async () 
     false,
   );
 });
+
+test("application admission pins placement and fences the ordinary Harness when its provider is unavailable", async () => {
+  const sandboxDriver = {
+    id: "application-sandbox",
+    application: { ingress: "authenticated-loopback", embedded: true },
+  };
+  const configured = options();
+  configured.servicePrincipalCredentials = { mode: "disabled" };
+  const driver = new KubernetesComputeDriver(configured, { sandboxDriver });
+  const revision = routedRevision(driver, { sandboxDriverId: sandboxDriver.id });
+  revision.compute.admission = driver.admitRevision(revision);
+  assert.equal(typeof revision.compute.admission, "string");
+  const embedded = { ...revision, harness: { id: "openclaw", version: "1.0.0", mode: "embedded" } };
+  assert.equal(driver.requiresStoppedPredecessors(embedded), true);
+  const ordinary = structuredClone(embedded);
+  delete ordinary.compute.admission;
+  assert.equal(driver.requiresStoppedPredecessors(ordinary), false);
+  // A Driver replacement must neither move an old revision nor prevent Compute
+  // from shutting down the dedicated Harness it already owns.
+  for (const replacement of [undefined, { id: sandboxDriver.id, provisionHarness() {} }]) {
+    const fixture = stopOrderFixture("revision-contained-provider-withdrawal");
+    fixture.revision.sandboxDriverId = sandboxDriver.id;
+    fixture.revision.compute.admission = revision.compute.admission;
+    fixture.driver.sandboxDriver = replacement;
+    await assert.rejects(fixture.driver.stopRevision(fixture.revision), /SandboxDriver/);
+    assert.equal(fixture.deploymentPresent, false);
+    assert.ok(
+      fixture.events.indexOf("delete Agent Deployment") <
+        fixture.events.lastIndexOf("list agent Pods"),
+    );
+  }
+  driver.sandboxDriver = undefined;
+  assert.equal(
+    await driver.privateStatusReadback(
+      revision,
+      { name: "tenant", plane: "control" },
+      "gateway",
+      "/openclaw/runtime/image",
+    ),
+    undefined,
+  );
+  driver.sandboxDriver = sandboxDriver;
+  await assert.rejects(
+    driver.reconcileApplicationDeployment(ordinary, {}, {}, { name: "tenant", plane: "control" }),
+    /newly admitted/,
+  );
+  assert.throws(
+    () => driver.admitRevision({ ...revision, repositoryCredentials: {} }),
+    /supported local/,
+  );
+});

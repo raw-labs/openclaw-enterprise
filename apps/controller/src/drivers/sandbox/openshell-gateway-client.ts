@@ -471,6 +471,7 @@ export interface OpenShellGatewayClient
     path: string,
     bearer: string,
     signal: AbortSignal,
+    applicationTransportToken?: string,
   ): Promise<OpenShellServiceDocument>;
   postServiceDocument(
     serviceUrl: string,
@@ -1304,8 +1305,16 @@ export class GrpcOpenShellGatewayClient implements OpenShellGatewayClient {
     path: string,
     bearer: string,
     signal: AbortSignal,
+    applicationTransportToken?: string,
   ): Promise<OpenShellServiceDocument> {
-    return getServiceDocument(this.serviceTransportOptions(), serviceUrl, path, bearer, signal);
+    return getServiceDocument(
+      this.serviceTransportOptions(),
+      serviceUrl,
+      path,
+      bearer,
+      signal,
+      applicationTransportToken,
+    );
   }
 
   async postServiceDocument(

@@ -244,6 +244,9 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 63) {
     return "preGatewayOutbound";
   }
+  if (count === 64) {
+    return "preApplicationContainment";
+  }
   if (count === 62) {
     return "prePreparedAttemptSettlement";
   }

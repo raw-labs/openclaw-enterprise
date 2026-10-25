@@ -60,6 +60,14 @@ Workspace reconciliation, and cleanup. They use a synthetic credential and
 do not create an Agent or make a model call. They default to Docker; set
 `OCC_TEST_DEV_UP_CONTAINER_ENGINE=podman` to use Podman.
 
+## Application-containment experiment
+
+The [application experiment checks](application-sandbox.md) cover a dedicated
+Gateway or combined embedded OpenClaw. Select its explicit development profile;
+the Harness suite below does not prove application containment. The checks
+separate real remote catalog access, package installation, network/filesystem
+denial, private routing, and model execution.
+
 ## OpenShell Sandbox
 
 The real Sandbox suite tests a dedicated Codex Agent, including authenticated

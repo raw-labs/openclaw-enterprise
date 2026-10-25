@@ -1,3 +1,14 @@
+export type {
+  SandboxApplicationContext,
+  SandboxApplicationEndpoint,
+  SandboxApplicationMount,
+  SandboxApplicationProcess,
+  SandboxApplicationProvider,
+  SandboxApplicationRequirements,
+  SandboxApplicationRole,
+  SandboxApplicationVolume,
+} from "./sandbox-application.ts";
+
 import type {
   GatewayOutboundSelection,
   GatewayOutboundSnapshot,
@@ -1846,6 +1857,8 @@ export interface SandboxRepositoryAccess {
 }
 
 export interface SandboxDriver extends Driver {
+  /** Optional confinement of the Gateway or combined embedded application. */
+  readonly application?: import("./sandbox-application.ts").SandboxApplicationProvider;
   readonly repositoryAccess?: SandboxRepositoryAccess;
   /** Explicit support; a networking facet alone never grants editable policy. */
   readonly networkPolicy?: {

@@ -226,8 +226,32 @@ test("QA selection keeps prerequisite credentials and reports omitted coverage",
     sandbox.cells.every((cell) => cell.scenarios.length === 0),
     "OpenShell uses its prepared enforcement lane, not Sandbox-free installations",
   );
+  const application = selectQaMatrix({
+    OCC_TEST_QA_SCENARIOS: "application-sandbox",
+    OCC_TEST_QA_PRESET: "OpenClaw",
+    OCC_TEST_QA_INSTALLATION: "kubernetes",
+  });
+  assert.equal(application.applicationSandbox, true);
+  assert.deepEqual(application.applicationSandboxModes, ["embedded"]);
+  assert.deepEqual(application.requiredEnv, [
+    "OCC_TEST_QA_APPLICATION_SANDBOX_ENV",
+    "OCC_TEST_QA_OPENAI_KEY_FILE",
+  ]);
+  assert.ok(
+    application.cells.every((cell) => cell.scenarios.length === 0),
+    "application containment must not silently run the ordinary Sandbox-free QA installation",
+  );
+  assert.throws(
+    () =>
+      selectQaMatrix({
+        OCC_TEST_QA_SCENARIOS: "application-sandbox",
+        OCC_TEST_QA_INSTALLATION: "compose",
+      }),
+    /requires Kubernetes/,
+  );
   const full = selectQaMatrix({});
   assert.equal(full.scope, "full");
+  assert.equal(full.applicationSandbox, false, "experimental native coverage remains opt-in");
   assert.ok(full.repository);
   const isolated = selectQaMatrix({
     OCC_TEST_QA_SCENARIOS: "git-write",

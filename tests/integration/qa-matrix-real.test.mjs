@@ -63,6 +63,15 @@ test(
         () => verifyQaSandboxPolicy(artifacts),
       );
     }
+    if (selection.applicationSandbox) {
+      const { verifyQaApplicationSandbox } = await import("../helpers/qa-application-sandbox.mjs");
+      await stage(
+        context,
+        "kubernetes/OpenShell/application",
+        "real Gateway application containment",
+        () => verifyQaApplicationSandbox(artifacts, selection.applicationSandboxModes),
+      );
+    }
     for (const installation of selection.installations.filter((value) =>
       selection.cells.some((cell) => cell.installation === value && cell.scenarios.length > 0),
     )) {

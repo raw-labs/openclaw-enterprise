@@ -632,6 +632,33 @@ test("startup composes both OpenShell members from one Backend", async (t) => {
   });
 });
 
+test("startup admits explicit application containment without applying Harness policy or full-access settings", async (t) => {
+  const configuration = sandboxInstallation();
+  const sandbox = configuration.drivers.sandbox.configuration;
+  sandbox.workloadTarget = "application";
+  sandbox.application = {
+    developmentOnly: true,
+    servicePeer: { namespace: "openshell-system", podLabels: { app: "openshell" }, port: 8080 },
+  };
+  sandbox.policy.networkPolicies = [];
+  const loaded = await loadInstallationFile(t, configuration);
+  assert.equal(loaded.sandboxDriver.application.ingress, "authenticated-loopback");
+  assert.equal(loaded.sandboxDriver.application.embedded, true);
+  assert.equal(loaded.sandboxDriver.provisionHarness, undefined);
+  assert.equal(
+    loaded.sandboxDriver.configureAgent,
+    undefined,
+    "Application placement cannot apply the OpenShell Harness's full-access transform",
+  );
+
+  const harness = sandboxInstallation();
+  harness.drivers.sandbox.configuration.policy.networkPolicies = [];
+  await assert.rejects(
+    loadInstallationFile(t, harness),
+    /at least one sandbox network policy|Configuration validation/,
+  );
+});
+
 test("startup pairs the Credential Refresh Driver with its gateway on one OpenShell Backend", async (t) => {
   const refreshing = () => {
     const configuration = sandboxInstallation();
@@ -6402,3 +6429,31 @@ test(
     );
   },
 );
+
+// The released manager omits proto3 defaults in its actual GetSandbox response.
+// A retry must adopt that response without adopting a changed filesystem/network grant.
+test("OpenShell adoption normalizes omitted protobuf defaults without accepting changed grants", async () => {
+  const { sameOpenShellSandboxSpec } =
+    await import("../../apps/controller/src/drivers/sandbox/openshell-sandbox-spec.ts");
+  const requested = {
+    template: { driver_config: {} },
+    environment: {},
+    providers: [],
+    policy: { filesystem: { include_workdir: false, read_only: ["/app"] }, network_policies: {} },
+  };
+  const observed = {
+    template: { driver_config: {} },
+    policy: { filesystem: { read_only: ["/app"] } },
+  };
+  assert.equal(sameOpenShellSandboxSpec(observed, requested), true);
+  for (const policy of [
+    { filesystem: { include_workdir: true, read_only: ["/app"] } },
+    { filesystem: { read_only: ["/app", "/private"] } },
+    {
+      filesystem: { read_only: ["/app"] },
+      network_policies: { internet: { endpoints: [{ host: "example.com", port: 443 }] } },
+    },
+  ]) {
+    assert.equal(sameOpenShellSandboxSpec({ ...observed, policy }, requested), false);
+  }
+});

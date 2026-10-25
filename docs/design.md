@@ -26,7 +26,10 @@ The API, console, durable worker, PostgreSQL persistence, and Kubernetes packagi
 are implemented. Single-cluster Kubernetes execution places Gateway and Harness in one tenant
 namespace with separate Pods, identities and storage. External access-gateway admission, workload
 token authentication to OCC, and general credential-free model inference remain
-planned. The two-cluster profile is experimental.
+planned. The two-cluster profile is experimental. The separate
+[application-containment experiment](reference/drivers/application-sandbox.md)
+places a dedicated Gateway or combined embedded OpenClaw inside OpenShell; it is
+not production-qualified.
 
 <a id="openclaw-as-the-open-enterprise-agent-platform"></a>
 Kubernetes Compute supports [protected execution](reference/credential-sources/protected-inference.md)
@@ -182,8 +185,9 @@ retain authorization, persistence, and save/apply lifecycle; see
 Compute owns Namespace infrastructure and each Agent's gateway and workload
 lifecycle: preparation, readiness, activation, stop, retirement, and deletion.
 An optional SandboxDriver participates through Compute and can provision a
-dedicated Harness. Its cleanup for each Agent revision and Namespace must complete before
-Compute releases the corresponding infrastructure.
+dedicated Harness or an application through its optional application provider.
+Compute retains activation and routing. Cleanup must complete before Compute
+releases the corresponding infrastructure.
 
 A CredentialGatewayDriver holds registered model credentials and supplies
 attachments for each Agent revision to its paired Sandbox; activation waits for applied
@@ -206,9 +210,11 @@ mounting the Harness workspace. Only the model-executing consumer receives its
 model credential; a dedicated Gateway does not.
 
 Dedicated Gateway integration access is an Agent approval enforced by the selected
-Compute Driver. Kubernetes uses a separate proxy for each admitted revision;
-the control plane uses a separate restricted management instance. Proxy policy
-contains no credentials and does not change Harness/Sandbox networking. See
+Compute Driver. Kubernetes normally uses a separate proxy for each admitted
+revision; the application experiment instead compiles its grants into the outer
+Sandbox policy. The control plane uses a separate restricted management proxy.
+Gateway grants do not widen a dedicated Harness's policy; embedded application
+code shares one policy. See
 [Gateway outbound HTTPS](reference/gateway-outbound.md) for supported modes and
 verification limits.
 

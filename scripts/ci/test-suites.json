@@ -45,7 +45,8 @@
     "keycloak-oidc": "./test-suites/keycloak-oidc.json",
     "egress-connected": "./test-suites/egress-connected.json",
     "skipper-prepared-git-installed": "./test-suites/skipper-prepared-git-installed.json",
-    "egress-custody-installed": "./test-suites/egress-custody-installed.json"
+    "egress-custody-installed": "./test-suites/egress-custody-installed.json",
+    "application-sandbox": "./test-suites/application-sandbox.json"
   },
   "groups": {
     "ci": [
@@ -106,6 +107,7 @@
       "qa-matrix",
       "dev-up-k3d",
       "skipper-prepared-git-installed"
-    ]
+    ],
+    "application-sandbox": ["application-sandbox"]
   }
 }

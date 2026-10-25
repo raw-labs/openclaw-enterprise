@@ -310,10 +310,6 @@ export const agents = occSchema.table(
       "agents_gateway_outbound_valid",
       sql`occ.gateway_outbound_selection_valid(${table.gatewayOutbound})`,
     ),
-    check(
-      "agents_gateway_outbound_topology",
-      sql`${table.gatewayOutbound}->>'mode' = 'channelsOnly' OR ${table.executionMode} = 'dedicated'`,
-    ),
     check("agents_execution_mode_valid", sql`${table.executionMode} IN ('embedded', 'dedicated')`),
     check(
       "agents_desired_runtime_state_valid",
@@ -804,7 +800,12 @@ export const agentRevisions = occSchema.table(
           NOT (${table.admittedSpec} ? 'secret_bindings')
           OR occ.secret_bindings_are_valid(${table.admittedSpec}->'secret_bindings', ${table.namespaceId})
         )
-        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound') AND ${table.admittedSpec} #>> '{harness,mode}' = 'dedicated'))
+        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (
+          occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound')
+          AND (${table.admittedSpec} #>> '{harness,mode}' = 'dedicated'
+            OR (${table.admittedSpec} #>> '{harness,mode}' = 'embedded'
+              AND ${table.admittedSpec} ? 'sandbox_driver_id'))
+        ))
         AND CASE WHEN jsonb_typeof(${table.admittedSpec}->'harness_auth') = 'object' THEN
           occ.harness_auth_is_valid((${table.admittedSpec}->'harness_auth') - 'protectedExecutionVersion', ${table.namespaceId}, true)
         ELSE false END

@@ -283,8 +283,8 @@ acceptance remains incomplete.
 ## Optional sandbox provisioning
 
 A [SandboxDriver](drivers/sandbox.md#overview) requires bundled Kubernetes
-Compute, which retains ownership, identity, gateway, and routing while the Driver
-provisions the dedicated Harness. Dedicated native OpenClaw requires this and
+Compute. Compute retains identity and routing; Sandbox can provision the Harness
+or [application](drivers/application-sandbox.md). Dedicated native OpenClaw requires Harness provisioning and
 all three [facets](drivers/sandbox.md#containment-facets) (`networking`,
 `filesystem`, `process`). Without a qualifying SandboxDriver, `GET /installation`
 omits `capabilities.nativeWorkers`, and deploy and new provisioning requests answer

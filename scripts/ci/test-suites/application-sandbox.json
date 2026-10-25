@@ -1,0 +1,32 @@
+{
+  "env": {
+    "OCC_TEST_APPLICATION_SANDBOX_REAL": "1"
+  },
+  "requiredEnv": [
+    "OCC_TEST_APPLICATION_SANDBOX_ENV",
+    "OCC_TEST_DATABASE_URL",
+    "OCC_MIGRATION_DATABASE_URL",
+    "OCC_TEST_KUBERNETES_GATEWAY_IMAGE",
+    "OCC_TEST_KUBERNETES_AGENT_IMAGE",
+    "OCC_TEST_OPENAI_MODEL"
+  ],
+  "optionalEnv": [
+    "OCC_TEST_APPLICATION_SANDBOX_MODES",
+    "OCC_TEST_APPLICATION_GATEWAY_API_KEY_FILE",
+    "OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS",
+    "OPENAI_API_KEY",
+    "CODEX_ACCESS_TOKEN"
+  ],
+  "prepare": {},
+  "serialFiles": {
+    "tests/integration/application-sandbox-k3d-real.test.ts": "Owns its API and worker database and exact native Workspaces in an explicitly selected disposable cluster."
+  },
+  "files": [
+    {
+      "path": "tests/integration/application-sandbox-k3d-real.test.ts",
+      "expectedTests": [
+        "application Sandbox enforces Agent-approved connectivity through the real API and worker"
+      ]
+    }
+  ]
+}

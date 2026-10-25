@@ -2626,24 +2626,8 @@ test(
     const installation = await ensureInstallation(state, "Gateway outbound persistence");
     const fixture = await verifyPlatformStateStoreContract(state, { installation });
     const selection = { mode: "restricted", hosts: ["backend.composio.dev"] };
-    // The database boundary independently rejects grants on embedded execution and
-    // malformed hosts, even when an application caller bypasses OCC admission.
-    await assert.rejects(
-      pool.query("UPDATE occ.agents SET gateway_outbound = $1 WHERE id = $2", [
-        JSON.stringify(selection),
-        fixture.agent.id,
-      ]),
-      ({ code, constraint }) =>
-        code === "23514" && constraint === "agents_gateway_outbound_topology",
-    );
-    await state.transact((unit) =>
-      unit.agents.updateConfiguration(
-        fixture.namespace.id,
-        fixture.agent.id,
-        fixture.configuration.id,
-        "dedicated",
-      ),
-    );
+    // Draft storage checks policy shape; OCC and the selected Compute Driver own
+    // whether an embedded application boundary can admit this authority.
     for (const invalid of [
       { mode: "restricted", hosts: ["127.0.0.1"] },
       { mode: "restricted", hosts: ["example.com", "example.com"] },
@@ -2663,7 +2647,7 @@ test(
         fixture.namespace.id,
         fixture.agent.id,
         fixture.configuration.id,
-        "dedicated",
+        "embedded",
         undefined,
         undefined,
         undefined,
@@ -2695,8 +2679,8 @@ test(
       ],
       denyCidrs: ["10.42.0.0/16"],
     };
-    // A dedicated revision can own both policies. Adding Gateway authority must
-    // preserve the separately admitted Sandbox snapshot in the database CHECK.
+    // Both topologies can own an admitted outbound snapshot, but an embedded
+    // revision must identify its external Sandbox boundary at the storage edge.
     const sandboxPolicy = {
       driverId: "sandbox-contract",
       implementation: "openshell",
@@ -2704,16 +2688,36 @@ test(
       defaults: {},
       additions: [],
     };
-    const revision = await state.transact((unit) =>
-      unit.revisions.createRevision({
-        ...fixture.revision,
-        id: `rev_${randomUUID()}`,
-        revision: nextNumber,
-        harness: { ...fixture.revision.harness, mode: "dedicated" },
-        gatewayOutbound,
-        sandboxDriverId: sandboxPolicy.driverId,
-        sandboxPolicy,
-      }),
+    const revisions = [];
+    for (const [offset, mode] of ["dedicated", "embedded"].entries()) {
+      revisions.push(
+        await state.transact((unit) =>
+          unit.revisions.createRevision({
+            ...fixture.revision,
+            id: `rev_${randomUUID()}`,
+            revision: nextNumber + offset,
+            harness: { ...fixture.revision.harness, mode },
+            gatewayOutbound,
+            sandboxDriverId: sandboxPolicy.driverId,
+            sandboxPolicy,
+          }),
+        ),
+      );
+    }
+    const revision = revisions[1];
+    // Exercise the database CHECK directly as the restricted application role;
+    // application-side validation alone would not prove this persisted invariant.
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO occ.agent_revisions
+        (id, namespace_id, agent_id, revision_number, backend_id, admitted_spec, admitted_at)
+        SELECT $1, namespace_id, agent_id, revision_number + 1, backend_id,
+          admitted_spec - 'sandbox_driver_id', admitted_at
+        FROM occ.agent_revisions WHERE id=$2`,
+        [`rev_${randomUUID()}`, revision.id],
+      ),
+      ({ code, constraint }) =>
+        code === "23514" && constraint === "agent_revisions_admitted_snapshot",
     );
     await state.transact((unit) =>
       unit.agents.updateConfiguration(
