@@ -54,23 +54,35 @@ and the dynamically selected Socket Mode destination. Check private Harness
 endpoints, OCC callbacks, DNS and required plugin/package traffic. Record the
 actual executable paths, host patterns, ports and private-address allowances.
 Successful egress under a permissive policy is not proof of destination isolation.
+Exercise direct private-IP dials separately from wildcard DNS destinations; a
+broad hostname grant is not evidence that private addresses are denied. Record
+UDP/QUIC as unsupported unless separately demonstrated. Verify enabled named
+and implicit-default Slack accounts; do not claim full media-host coverage.
 
 Ordinary upstream TLS must remain verified end to end. Containment must not
 introduce request rewriting, a new interception CA, placeholder credentials or
-model-key projection into the Gateway. Do not disable certificate checks to make
-a probe succeed.
+model-key projection into the Gateway. Verify explicit OpenShell `tls: skip`
+(non-interception), not omission of the TLS setting. Do not disable certificate
+checks to make a probe succeed.
 
 ### Authenticated ingress
 
 Complete an operator request through the existing authenticated route. Then
 try an unauthenticated request with `x-occ-identity: occ-workspace-files` through
 each reachable direct or provider-relayed endpoint. The forged header must not
-grant operator access. Node routes must not inherit operator identity.
+grant operator access. Repeat from a sandbox-local process. Reject invalid,
+expired, replayed and wrong-Gateway/revision evidence; verify key-policy changes
+revoke old authority. Test HTTP and main/auxiliary WS, original Origin, rewritten
+paths and Host handling. Native-admin, workspace-file and enrollment operator
+callers must retain intended scopes. Node/bootstrap/device and transfer routes
+must not inherit operator identity.
 
 Inspect the source address and identity that the Gateway actually accepts.
 Do not enable loopback trust, widen trusted proxy ranges or remove route
 authentication to make the contained Gateway respond. A refused legitimate
 request is an ingress compatibility failure, not a reason to weaken the check.
+Verify private port-18791 status/readiness through the selected Sandbox mapping;
+do not expose it on the public operator route.
 
 ### Separate Harness and credentials
 
@@ -115,10 +127,10 @@ commands, pass/fail/skip counts, artifact locations and remaining gaps. Distingu
 source checks, Kubernetes fixtures, real containment, model execution and live
 channel proof. No item can be marked passed because its prerequisite was absent.
 
-The initial October 28, 2026 preflight found no project dependencies, Go, k3d,
-kubectl, Helm, built CLI, runtime images, prepared cluster/database or authorized
-model/channel credentials on the task host. Runtime verification is blocked
-until those prerequisites are deliberately supplied. No Linux containment,
+The [plan's prerequisite record](../../specs/plans/0024-dedicated-gateway-containment.md#current-linux-prerequisites)
+tracks the October 28, 2026 preflight and later tooling changes. Native verified
+ingress is unavailable at the pin; genuine runtime images, an owned prepared
+environment and authorized credentials remain missing. No Linux containment,
 model-turn or live-channel success is recorded.
 
 ## Related

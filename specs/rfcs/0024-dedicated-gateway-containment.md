@@ -16,10 +16,10 @@ author: miguelbranco80
 OpenClaw Enterprise (OCE) must let native Gateway plugins, channels and
 integrations make outbound HTTPS and long-lived WebSocket connections. The
 dedicated Harness's network policy does not control those Gateway connections:
-the two processes run separately. A
-Gateway that cannot reach its enabled integrations is not a usable Agent.
+the two processes run separately. A Gateway that cannot reach its enabled
+integrations is not a usable Agent.
 
-Run the dedicated Gateway inside the Installation-selected Sandbox, using
+Run the dedicated Gateway inside a separately selected Gateway Sandbox, using
 OpenShell first, so its native outbound connections reach OpenShell's existing
 enforcement path. Keep the dedicated Harness separate, with its existing
 placement, workspace, authentication and model-credential delivery unchanged.
@@ -121,8 +121,8 @@ flowchart TB
    policy and opens an authorized upstream connection. The integration adds no
    OCE data-plane forwarder.
 4. The Gateway authenticates the remote TLS peer and supplies its normal native
-   credentials. HTTPS and WSS remain end-to-end TLS; OpenShell's non-intercepting
-   TLS policy mode does not disable the application's certificate validation.
+   credentials. HTTPS and WSS remain end-to-end TLS. Select OpenShell's explicit
+   `tls: skip` mode to skip interception, not application certificate validation.
 
 The Linux experiment must exercise this path from the real Gateway, not merely
 inspect a rendered policy. Confirm the actual executable identities used by
@@ -139,17 +139,19 @@ No contribution carries a credential or authorizes request rewriting.
 
 Start with Slack HTTPS API access and its Socket Mode WebSocket destinations.
 Socket Mode can return a dynamic hostname; do not claim that one API hostname
-covers the live socket. The implementation must validate the provider's host
-pattern or retain explicit compatibility access until narrower policy works.
+covers the live socket. Propose `slack.com:443` and `**.slack.com:443`, with
+explicit compatibility access for unverified integration/media destinations.
+Native SDK source does not guarantee a Slack-only socket hostname; Sandbox
+policy must enforce the admitted destination patterns.
 Other enabled channels without a destination contributor must be identified,
 not silently treated as restricted and functional.
 
 Keep three policy inputs distinct: Gateway runtime needs, channel contributions,
 and operator-selected compatibility access. Runtime needs include DNS, the
-existing private Harness endpoint, OCC callbacks and required plugin/package
-traffic. Record actual executables, destination patterns, ports and private-IP
-allowances. Permissive compatibility access is acceptable, but is not evidence
-of destination isolation. Removing a channel removes its contribution on
+existing private Harness endpoint, configured OCC callbacks and required
+plugin/package traffic. Record actual executables, destination patterns, ports
+and private-IP allowances. Permissive compatibility access is acceptable, but
+is not evidence of destination isolation. Removing a channel removes its contribution on
 replacement; a wider compatibility rule can still permit that destination.
 
 ## Minimal deployment integration
@@ -184,13 +186,21 @@ loopback trusted-proxy authentication. OpenShell's current service relay
 presents a loopback peer, while direct Pod-IP ingress is excluded by its socket
 confinement.
 
-Use the smallest supported integration that preserves authenticated operator
-access and node authorization over that final hop. Do not enable ordinary
-loopback trust, trust caller-supplied identity, disable socket confinement, or
-build a new ingress platform to work around it. If a provider or native Gateway
-change is unavoidable, the plan must name the exact change and why existing
-interfaces cannot supply it. That dependency remains unresolved until the
-supported path is implemented and exercised.
+Recommend reusing the service relay and adding native verification of OCE-signed
+ingress evidence. Existing authenticated OCE callers issue fresh evidence; the
+Gateway receives verification material, not signing authority. This requires
+native attribution, authentication, schema and policy-revalidation changes,
+not a new forwarding service. Keep node credentials and role admission
+separate from operator identity. Private status/readiness also needs a mapping
+through the selected Sandbox because the current Pod proxy cannot reach loopback.
+
+The [plan](../plans/0024-dedicated-gateway-containment.md#minimum-ingress-dependency)
+names exact source owners, existing-auth alternatives, and unresolved node
+attribution and proof-binding requirements. This is a recommendation pending
+authority for native-repository changes and authentication design review, not
+an approved wire protocol. Do not enable ordinary loopback identity trust,
+accept raw identity headers or disable confinement. Ingress remains incomplete
+until the supported path is implemented and exercised.
 
 ## Completion evidence
 
