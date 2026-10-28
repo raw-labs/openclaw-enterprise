@@ -60,6 +60,39 @@ Workspace reconciliation, and cleanup. They use a synthetic credential and
 do not create an Agent or make a model call. They default to Docker; set
 `OCC_TEST_DEV_UP_CONTAINER_ENGINE=podman` to use Podman.
 
+## Experimental embedded acceptance
+
+The explicit `embedded-containment` QA selector exercises the normal Agent API
+and worker, authenticated Gateway model/tool turns, retained workspace and native
+session, replacement, stop and deletion. It does not use compatibility bridges
+or a manually started Sandbox. It binds an actual native model key, not a
+substituted CredentialSource. Channel delivery and plugin/integration installation
+remain separate, unverified outcomes.
+
+**This scenario is not passing on the pinned provider.** OpenShell v0.1.5 refuses
+the required storage and initializer semantics; see the
+[implementation blocker](../../specs/plans/0024-embedded-runtime-containment.md#provider-implementation-blocker).
+The scenario expects successful deployment and does not count that refusal as
+success. It is excluded from default QA and the default OpenShell run.
+
+After a provider implementation is qualified, prepare disposable infrastructure
+using the existing setup below. Set `OCC_TEST_QA_SANDBOX_ENV` to its private
+environment file, and supply authorized `OPENAI_API_KEY` and
+`OCC_TEST_OPENAI_MODEL` in the process environment without printing them. Then run:
+
+```sh
+OCC_TEST_QA_MATRIX=1 \
+  OCC_TEST_QA_INSTALLATION=kubernetes \
+  OCC_TEST_QA_PRESET=OpenClaw \
+  OCC_TEST_QA_SCENARIOS=embedded-containment \
+  node --test tests/integration/qa-matrix-real.test.mjs
+```
+
+The selected child must report one passing case and zero failures or skips.
+Its redacted `embedded-containment-runtime.log` and the matrix report record
+the outcome. Authored assertions are not deployment proof; record the actual
+source commit, images and runtime result when this scenario can run.
+
 ## OpenShell Sandbox
 
 The real Sandbox suite tests a dedicated Codex Agent, including authenticated

@@ -241,9 +241,13 @@ the worker stops predecessors before starting the new Harness. This permits RWO
 workspace storage with deployment downtime; restore previous
 configuration through a new version instead of restarting its old snapshot.
 
-Enabled external channels require dedicated execution. Unsupported Harness and
-execution-mode combinations fail deployment. Embedded OpenClaw is never
-delegated to OpenShell.
+External-channel deployments still require dedicated execution. Native embedded
+channel delivery remains unimplemented; it must not inherit the dedicated
+channel proxy as a substitute. Experimental
+[embedded Sandbox placement](sandbox.md#experimental-embedded-runtime-placement)
+passes the combined Gateway/Harness requirements to the selected Driver. The
+pinned OpenShell Driver refuses them because it cannot preserve storage and
+startup semantics. No contained embedded deployment has been established.
 
 Stopping an Agent first deletes its exact gateway route and gateway runtime,
 then removes the dedicated Harness Deployment or delegates provider-owned

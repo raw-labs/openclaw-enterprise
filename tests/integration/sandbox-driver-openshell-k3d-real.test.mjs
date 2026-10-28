@@ -68,6 +68,11 @@ import {
 } from "../helpers/envoy-workspace-gateway.mjs";
 import { availablePort } from "../helpers/available-port.mjs";
 import {
+  assertEmbeddedContainmentWorkflow,
+  embeddedContainmentTestName,
+} from "../helpers/qa-embedded-containment.mjs";
+import { redactQaError, registerQaSecret } from "../helpers/qa-secrets.mjs";
+import {
   defaultKeycloakImage,
   issueServingCertificate,
   keycloakServiceClient,
@@ -77,7 +82,11 @@ import {
 
 const executeFile = promisify(execFile);
 const selectedScenario = process.env.OCC_TEST_OPENSHELL_SCENARIO ?? "full";
-assert.ok(["full", "network-policy"].includes(selectedScenario), "Unknown OpenShell scenario.");
+assert.ok(
+  ["full", "network-policy", "embedded-containment"].includes(selectedScenario),
+  "Unknown OpenShell scenario.",
+);
+const embeddedContainmentOnly = selectedScenario === "embedded-containment";
 const networkPolicyOnly = selectedScenario === "network-policy";
 
 const kubeconfigPath = process.env.OCC_TEST_KUBERNETES_KUBECONFIG;
@@ -426,9 +435,9 @@ function nativeCodexConfiguration(gatewayAuth) {
   return configuration;
 }
 
-function nativeOpenClawConfiguration(gatewayAuth, controlUiOrigins = []) {
+function nativeOpenClawConfiguration(gatewayAuth, controlUiOrigins = [], baseUrl = modelBaseUrl) {
   const configuration = createHarnessConfiguration("openclaw", providerModel);
-  configuration.models.providers.openai.baseUrl = modelBaseUrl;
+  configuration.models.providers.openai.baseUrl = baseUrl;
   configuration.models.providers.openai.models[0].input = ["text", "image"];
   configuration.secrets = {
     providers: {
@@ -1880,6 +1889,47 @@ function createIntegrationSandboxDriverFactory(
           existingEndpointForNamespace(context),
         ).readSandboxLogs(context, query);
       },
+      ...(configurationDriver.embeddedRuntime === undefined
+        ? {}
+        : {
+            embeddedRuntime: {
+              async provision(context) {
+                assert.equal(
+                  enableCompatibilityBridges,
+                  false,
+                  "embedded runtime proof cannot use compatibility bridges",
+                );
+                const endpoint = await endpointForNamespace(context, {
+                  sandboxServiceAccountName: agentSandboxServiceAccount(context),
+                  exact: context.requirements.workloadIdentity !== undefined,
+                });
+                try {
+                  return await delegate(
+                    context.requirements,
+                    context.namespace.name,
+                    endpoint,
+                  ).embeddedRuntime.provision(context);
+                } catch (error) {
+                  provisioningFailures.set(context.revision.id, error);
+                  throw error;
+                }
+              },
+              async podSelector(context) {
+                return await delegate(
+                  undefined,
+                  context.namespace.name,
+                  existingEndpointForNamespace(context),
+                ).embeddedRuntime.podSelector(context);
+              },
+              async observe(context) {
+                return await delegate(
+                  undefined,
+                  context.namespace.name,
+                  existingEndpointForNamespace(context),
+                ).embeddedRuntime.observe(context);
+              },
+            },
+          }),
       harnessHome: configurationDriver.harnessHome,
       configureAgent(configuration, harness) {
         return configurationDriver.configureAgent(configuration, harness);
@@ -2205,6 +2255,8 @@ async function prepareProductionInstallation(
   context,
   {
     harnessId = "codex",
+    executionMode = "dedicated",
+    initialWorkspaceFiles,
     controllerPort,
     controlUiOrigin,
     gatewayManagedMode,
@@ -2212,6 +2264,19 @@ async function prepareProductionInstallation(
     enableCompatibilityBridges = harnessId === "openclaw",
   } = {},
 ) {
+  assert.ok(["embedded", "dedicated"].includes(executionMode));
+  assert.ok(
+    executionMode !== "embedded" || (harnessId === "openclaw" && !enableCompatibilityBridges),
+  );
+  const credentialVariable =
+    harnessId === "openclaw" || openShellModelBaseUrl !== undefined
+      ? "OPENAI_API_KEY"
+      : "CODEX_ACCESS_TOKEN";
+  const credential = process.env[credentialVariable];
+  assert.ok(credential, `${credentialVariable} is required for the selected real Agent`);
+  const sourceType = credentialVariable === "CODEX_ACCESS_TOKEN" ? "codex-pat" : "openai";
+  const secretField = sourceType === "codex-pat" ? "access_token" : "api_key";
+  const nativeBaseUrl = openShellModelBaseUrl ?? "https://api.openai.com/v1";
   const kubeconfig = await validateOpenShellPrerequisites();
   const policyFixtureUrl = process.env.OCC_TEST_OPENSHELL_POLICY_MIGRATION_DATABASE_URL;
   if (harnessId === "codex") {
@@ -2634,28 +2699,33 @@ async function prepareProductionInstallation(
   );
   const modelSecret = await request("POST", `/namespaces/${namespaceId}/secrets`, {
     name: `openshell-model-${randomUUID()}`,
-    value: modelCredential,
+    value: credential,
   });
   assert.equal(modelSecret.status, 201, JSON.stringify(modelSecret.error));
-  assert.equal(JSON.stringify(modelSecret).includes(modelCredential), false);
-  // Registration copies the Secret value into the Namespace's OpenShell gateway through the
-  // regular API. The Secret stays the source of record; the Harness never receives it.
-  const modelSource = await request("POST", `/namespaces/${namespaceId}/credential-sources`, {
-    name: `openshell-openai-${randomUUID()}`,
-    type: modelSourceType,
-    ...(openShellModelBaseUrl === undefined ? {} : { config: { base_url: openShellModelBaseUrl } }),
-    secrets: { [modelSecretField]: modelSecret.data.ref },
-  });
-  assert.equal(modelSource.status, 201, JSON.stringify(modelSource.error));
-  assert.equal(modelSource.data.state, "ready");
-  assert.deepEqual(modelSource.data.status, { state: "ready" });
-  assert.equal(JSON.stringify(modelSource).includes(modelCredential), false);
-  const observedSource = await request(
-    "GET",
-    `/namespaces/${namespaceId}/credential-sources/${modelSource.data.id}`,
-  );
-  assert.equal(observedSource.status, 200, JSON.stringify(observedSource.error));
-  assert.deepEqual(observedSource.data.status, { state: "ready" });
+  assert.equal(JSON.stringify(modelSecret).includes(credential), false);
+  // Embedded containment preserves the actual native API key. CredentialSource
+  // substitution belongs only to the existing dedicated proof.
+  let modelSource;
+  if (executionMode === "dedicated") {
+    // Registration copies the Secret value into the Namespace's OpenShell gateway through the
+    // regular API. The Secret stays the source of record; the Harness never receives it.
+    modelSource = await request("POST", `/namespaces/${namespaceId}/credential-sources`, {
+      name: `openshell-openai-${randomUUID()}`,
+      type: sourceType,
+      ...(sourceType === "openai" ? { config: { base_url: nativeBaseUrl } } : {}),
+      secrets: { [secretField]: modelSecret.data.ref },
+    });
+    assert.equal(modelSource.status, 201, JSON.stringify(modelSource.error));
+    assert.equal(modelSource.data.state, "ready");
+    assert.deepEqual(modelSource.data.status, { state: "ready" });
+    assert.equal(JSON.stringify(modelSource).includes(credential), false);
+    const observedSource = await request(
+      "GET",
+      `/namespaces/${namespaceId}/credential-sources/${modelSource.data.id}`,
+    );
+    assert.equal(observedSource.status, 200, JSON.stringify(observedSource.error));
+    assert.deepEqual(observedSource.data.status, { state: "ready" });
+  }
   // Two tool sources reach the same echo service on separate paths with separate variables.
   const toolSources =
     tokenEcho === undefined
@@ -2689,11 +2759,18 @@ async function prepareProductionInstallation(
           controllerPort === undefined
             ? []
             : [`http://127.0.0.1:${demoControlUiPort}`, `http://localhost:${demoControlUiPort}`],
+          nativeBaseUrl,
         )
       : nativeCodexConfiguration(workspaceGateway.nativeOptions.gatewayAuth);
   if (controlUiOrigin !== undefined) {
     nativeConfiguration.gateway.controlUi = { enabled: true, allowedOrigins: [controlUiOrigin] };
   }
+  if (executionMode === "embedded") {
+    nativeConfiguration.agents.defaults.workspace = workspaceMountPath;
+  }
+  const workspaceFiles =
+    initialWorkspaceFiles ??
+    (harnessId === "codex" ? { "AGENTS.md": "# Initialized OpenShell workspace\n" } : undefined);
   const agentConfiguration = await request("POST", `/namespaces/${namespaceId}/configurations`, {
     kind: "agent",
     values: nativeConfiguration,
@@ -2702,17 +2779,18 @@ async function prepareProductionInstallation(
   const agent = await request("POST", `/namespaces/${namespaceId}/agents`, {
     name: `openshell-${randomUUID()}`,
     configurationId: agentConfiguration.data.id,
-    executionMode: "dedicated",
+    executionMode,
     ...(gatewayManagedMode === undefined ? {} : { gatewayManagedMode }),
-    harnessAuth: { method: "credential_source", sourceId: modelSource.data.id },
+    harnessAuth:
+      executionMode === "embedded"
+        ? { method: "api_key", source: modelSecret.data.ref }
+        : { method: "credential_source", sourceId: modelSource.data.id },
     // Console creation includes initial files. Keep this normal setup path in the
     // real Sandbox proof so credential-only fixtures cannot hide delivery gaps.
-    ...(harnessId === "codex"
-      ? { initialWorkspaceFiles: { "AGENTS.md": "# Initialized OpenShell workspace\n" } }
-      : {}),
+    ...(workspaceFiles === undefined ? {} : { initialWorkspaceFiles: workspaceFiles }),
     // The list holds every bound source; harnessAuth names the model source within it.
     credentialSources: [
-      { sourceId: modelSource.data.id },
+      ...(modelSource === undefined ? [] : [{ sourceId: modelSource.data.id }]),
       ...(toolSources ?? []).map(({ id }) => ({ sourceId: id })),
       ...(untrustedTlsSource === undefined ? [] : [{ sourceId: untrustedTlsSource.id }]),
       ...(refreshSources?.bound ?? []).map(({ id }) => ({ sourceId: id })),
@@ -2730,20 +2808,20 @@ async function prepareProductionInstallation(
   assert.equal(runtimeCredentials.status, 200, JSON.stringify(runtimeCredentials.error));
   assert.equal(runtimeCredentials.data.transportConfigured, true);
   const transport = await readAgentTransportCredentials(gatewayPlacement, agent.data.id);
-  // Deployment admission and the worker both require the Agent principal to operate the
-  // exact source; it receives no permission on the underlying Secret. The grant goes through
-  // the Namespace IAM API so its credential_source policy support is part of the proof.
+  // Grant only the selected model material: the Secret for embedded execution,
+  // or the dedicated CredentialSource. Exercise the normal IAM API in both cases.
+  const modelResourceKind = executionMode === "embedded" ? "secret" : "credential_source";
   const sourceRole = await request("POST", `/namespaces/${namespaceId}/iam/roles`, {
-    name: "Exact model credential source operate",
-    permissions: [{ action: "operate", resourceKind: "credential_source" }],
+    name: "Exact model material operate",
+    permissions: [{ action: "operate", resourceKind: modelResourceKind }],
   });
   assert.equal(sourceRole.status, 201, JSON.stringify(sourceRole.error));
   const sourceBinding = await request("POST", `/namespaces/${namespaceId}/iam/access-bindings`, {
     subjectKind: "identity",
     subjectId: agent.data.servicePrincipalId,
     roleId: sourceRole.data.id,
-    resourceKind: "credential_source",
-    resourceId: modelSource.data.id,
+    resourceKind: modelResourceKind,
+    resourceId: modelSource?.data.id ?? modelSecret.data.id,
   });
   assert.equal(sourceBinding.status, 201, JSON.stringify(sourceBinding.error));
   for (const toolSource of [
@@ -2766,7 +2844,7 @@ async function prepareProductionInstallation(
     `/namespaces/${namespaceId}/agents/${agent.data.id}/deploy`,
   );
   assert.equal(deployed.status, 202, JSON.stringify(deployed.error));
-  assert.equal(deployed.data.harness.mode, "dedicated");
+  assert.equal(deployed.data.harness.mode, executionMode);
   assert.equal(deployed.data.harness.id, harnessId);
   if (harnessId === "codex") {
     assert.equal(
@@ -2860,6 +2938,20 @@ async function prepareProductionInstallation(
     revisionId: deployed.data.id,
   });
 
+  if (executionMode === "embedded") {
+    // Reuse the production API, worker and Driver without compatibility mutations.
+    return {
+      request,
+      placement,
+      namespaceId,
+      agent: agent.data,
+      revision: deployed.data,
+      gatewayPlacement,
+      platformNamespace,
+      gatewayApiKeySecretName: workspaceGateway.apiKeySecretName,
+      gatewayAdminUrl: `wss://${workspaceGatewayHostname(workspaceGateway)}:${workspaceGateway.routing.endpointPort}/namespaces/${namespaceId}/agents/${agent.data.id}`,
+    };
+  }
   const sandbox = await waitForSandbox(placement, deployed.data);
   if (harnessId === "codex") {
     const initialFilePath = `/namespaces/${namespaceId}/agents/${agent.data.id}/workspace/files/AGENTS.md`;
@@ -7270,28 +7362,6 @@ async function assertDuplicateReconciliationDoesNotDuplicateOpenShell(topology) 
   );
 }
 
-async function assertEmbeddedOpenShellFailsClosed(topology) {
-  const configuration = createHarnessConfiguration("openclaw", providerModel);
-  const createdConfiguration = await topology.request(
-    "POST",
-    `/namespaces/${topology.namespaceId}/configurations`,
-    { kind: "agent", values: configuration },
-  );
-  assert.equal(createdConfiguration.status, 201, JSON.stringify(createdConfiguration.error));
-  const agent = await topology.request("POST", `/namespaces/${topology.namespaceId}/agents`, {
-    name: `openshell-embedded-${randomUUID()}`,
-    configurationId: createdConfiguration.data.id,
-    executionMode: "embedded",
-    // The Harness credential source must also be listed in the Agent's credential sources.
-    credentialSources: [{ sourceId: topology.agent.harnessAuth.sourceId }],
-    harnessAuth: topology.agent.harnessAuth,
-  });
-  // OpenShell-selected installations refuse an embedded Agent when it is saved, so nothing
-  // can be deployed or provisioned for it.
-  assert.equal(agent.status, 400, JSON.stringify(agent.data ?? agent.error));
-  assert.match(agent.error.message, /supports only dedicated Harness execution/u);
-}
-
 async function observeExposedCodexAuthenticationBoundary(serviceUrl, appServerToken) {
   const url = new URL(serviceUrl);
   const request = url.protocol === "https:" ? httpsRequest : httpRequest;
@@ -7323,6 +7393,48 @@ async function observeExposedCodexAuthenticationBoundary(serviceUrl, appServerTo
   });
 }
 
+test(
+  embeddedContainmentTestName,
+  {
+    ...requiresOpenShellK3d,
+    skip: requiresOpenShellK3d.skip || !embeddedContainmentOnly,
+    timeout: 1_600_000,
+  },
+  async (testContext) => {
+    assert.ok(process.env.OPENAI_API_KEY, "OPENAI_API_KEY is required for embedded OpenClaw");
+    assert.ok(process.env.OCC_TEST_OPENAI_MODEL, "OCC_TEST_OPENAI_MODEL is required");
+    registerQaSecret(process.env.OPENAI_API_KEY);
+    const teardown = boundedTeardown(testContext, { label: "OpenShell embedded Agent teardown" });
+    teardownStarted = () => teardown.started;
+    const { context } = teardown;
+    const initialWorkspaceFiles = {
+      "AGENTS.md":
+        "# Embedded OpenClaw workspace\nUse the requested exec command without printing credentials.\n",
+      "USER.md": "# Owner-maintained workspace\n",
+    };
+    try {
+      const topology = await prepareProductionInstallation(context, {
+        harnessId: "openclaw",
+        executionMode: "embedded",
+        initialWorkspaceFiles,
+        controlUiOrigin: "http://127.0.0.1",
+        gatewayManagedMode: true,
+        withOAuthToolSources: false,
+        enableCompatibilityBridges: false,
+      });
+      await assertEmbeddedContainmentWorkflow(context, {
+        topology,
+        fixture,
+        controllerRequire,
+        initialWorkspaceFiles,
+      });
+    } catch (error) {
+      // Credentialed Kubernetes failures may carry raw request bodies.
+      throw redactQaError(error);
+    }
+  },
+);
+
 const selectedHarness = process.env.OCC_TEST_OPENSHELL_HARNESS ?? "codex";
 if (networkPolicyOnly) {
   assert.equal(selectedHarness, "codex", "The network-policy scenario requires Codex.");
@@ -7341,7 +7453,11 @@ if (demoStatePath !== undefined) {
 // an unavailable tool in a model response is not an invocation-denial proof.
 test(
   "OpenShell dedicated Agents enforce Gateway tool policy during normal work",
-  { ...requiresOpenShellK3d, timeout: 2_400_000 },
+  {
+    ...requiresOpenShellK3d,
+    skip: requiresOpenShellK3d.skip || embeddedContainmentOnly,
+    timeout: 2_400_000,
+  },
   async (context) => {
     const controlUiOrigin = "http://127.0.0.1";
     const topology = await prepareProductionInstallation(context, {
@@ -8249,6 +8365,7 @@ test(
     : "OpenShell enforces provider delivery and authenticated Codex exposure",
   {
     ...requiresOpenShellK3d,
+    skip: requiresOpenShellK3d.skip || embeddedContainmentOnly,
     ...(demoStatePath === undefined ? { timeout: 2_400_000 } : {}),
   },
   async (testContext) => {
@@ -8321,7 +8438,6 @@ test(
             "OpenShell integration: starting successive native worker sessions through Gateway.\n",
           );
           await requestGatewayTurns(context, topology, "openclaw");
-          await assertEmbeddedOpenShellFailsClosed(topology);
         }
         return;
       }
@@ -8435,9 +8551,8 @@ test(
       );
       await assertCredentialSourceUpdateAndLiveWithdrawal(topology);
       process.stderr.write(
-        "OpenShell integration: withdrawal recorded and post-withdrawal turn did not complete; testing embedded fail-closed.\n",
+        "OpenShell integration: withdrawal recorded and post-withdrawal turn did not complete.\n",
       );
-      await assertEmbeddedOpenShellFailsClosed(topology);
       // Changing gateway authentication restarts its service router. Keep this configuration
       // boundary last so it cannot disrupt the Agent workflow whose behavior is tested above.
       process.stderr.write("OpenShell integration: testing authenticated native policy scopes.\n");

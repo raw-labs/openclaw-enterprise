@@ -265,7 +265,12 @@ downtime without automatic rollback: deploy a higher Agent revision number.
 A selected Sandbox works only with bundled Kubernetes Compute. Compute isolates
 the Namespace, calls the Sandbox's optional Namespace setup, and either passes
 [prepared workload inputs](sandbox.md#provisioning-inputs) to a Sandbox that
-creates the dedicated Harness or creates it itself. It waits for the workload,
+creates the dedicated Harness or creates it itself. An experimental
+`SandboxDriver.embeddedRuntime` can instead provision the complete embedded
+Gateway/Harness workload. Compute retains its ingress Service, route, persistent
+claims and activation decision; it does not create a separate Gateway Deployment
+for this placement. The provider must preserve the rendered startup, file, volume
+and Secret requirements or refuse them. It waits for the workload,
 activates its route and calls Sandbox cleanup before removing provider
 resources. See the [Sandbox lifecycle](sandbox.md#admission-and-lifecycle).
 

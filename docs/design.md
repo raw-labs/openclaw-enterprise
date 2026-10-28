@@ -85,6 +85,13 @@ namespace with separate Pods, identities and storage. External access-gateway ad
 token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental.
 
+Experimental [embedded Sandbox placement](reference/drivers/sandbox.md#experimental-embedded-runtime-placement)
+adds a contract for the same Compute and Sandbox owners to contain the combined
+OpenClaw Gateway/Harness. OpenShell deployment remains blocked: the pinned
+provider cannot preserve required storage and startup semantics. The
+[proposal](../specs/rfcs/0024-embedded-runtime-containment.md) and implementation
+plan distinguish draft integration from working placement and Linux proof.
+
 <a id="current-limitations"></a>
 <a id="near-term-future-work"></a>
 

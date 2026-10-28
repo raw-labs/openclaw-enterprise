@@ -14,6 +14,7 @@ import {
 } from "../egress-enrollment.ts";
 import { forwardMethod } from "../../../backends/token-service/forward-method.ts";
 import { ProtectedExecutionDriver } from "../protected-execution-driver.ts";
+import { embeddedSandboxRequirements } from "./embedded-sandbox-workload.ts";
 import type { InstalledDriver } from "@openclaw-enterprise/occ";
 import { requireConfiguration, ConfigurationValidationError } from "@openclaw-enterprise/contracts";
 import { rewrittenIpv4Hostname } from "../../../auth/configuration.ts";
@@ -3318,7 +3319,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   readonly discoverHarnessModels = discoverHarnessModels;
 
   requiresStoppedPredecessors(revision: AgentRevision): boolean {
-    return revision.harness.mode === "dedicated";
+    return revision.harness.mode === "dedicated" || revision.sandboxDriverId !== undefined;
   }
 
   private validateGatewayManagedMode(revision: Readonly<AgentRevision>): void {
@@ -4680,6 +4681,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
     requireChannelTopology(
       enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError),
       {
+        // TODO(embedded-channel-qualification): admit native channels after their
+        // credential and egress path is preserved without the dedicated channel proxy.
         embedded: harness.mode === "embedded",
         channelRuntime: agentSave || this.options.runtime?.channels !== undefined,
       },
@@ -4700,6 +4703,18 @@ export class KubernetesComputeDriver implements ComputeDriver {
   ): void {
     if (sandboxDriverId !== undefined) {
       const sandbox = this.sandboxDriver;
+      if (
+        harness.mode === "embedded" &&
+        sandbox?.id === sandboxDriverId &&
+        sandbox.embeddedRuntime !== undefined
+      ) {
+        requireWorkspaceSetupConfiguration(
+          configuration,
+          kubernetesSetupWorkspaces("embedded"),
+          callerSettingError,
+        );
+        return;
+      }
       if (
         sandbox?.id !== sandboxDriverId ||
         sandbox.provisionHarness === undefined ||
@@ -6166,7 +6181,11 @@ export class KubernetesComputeDriver implements ComputeDriver {
       throw new Error("Refusing to observe another Compute Driver's AgentRevision.");
     }
     const sandbox = this.sandboxDriverForRevision(revision);
-    if (!sandbox?.observeHarness) {
+    const observe =
+      revision.harness.mode === "embedded"
+        ? sandbox?.embeddedRuntime?.observe.bind(sandbox.embeddedRuntime)
+        : sandbox?.observeHarness?.bind(sandbox);
+    if (observe === undefined) {
       return { state: "unknown" };
     }
     return withComputeAbortSignal(signal, async () => {
@@ -6180,7 +6199,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         this.sandboxNamespaceForRevision(revision, name),
         name,
       );
-      return sandbox.observeHarness!({ ...context, revision });
+      return observe({ ...context, revision });
     });
   }
 
@@ -6298,8 +6317,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
     const sandboxDriver = this.sandboxDriverForRevision(revision);
     const providerOwnsHarnessEndpoint = sandboxDriver?.harnessEndpoint !== undefined;
     requireNativeWorkerSandbox(revision.harness, sandboxDriver);
-    if (sandboxDriver !== undefined && embedded) {
-      throw new ConfigurationFailure("SandboxDriver support is limited to dedicated Harnesses.");
+    if (sandboxDriver !== undefined && embedded && sandboxDriver.embeddedRuntime === undefined) {
+      throw new ConfigurationFailure(
+        "The selected SandboxDriver cannot contain embedded execution.",
+      );
     }
     const workspaceSetup = this.workspaceSetupForRevision(admittedRevision, context);
     await this.prepareRevisionStage("harness_auth", async () =>
@@ -6574,7 +6595,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     const document = JSON.stringify(nativeDocument);
     const earlierDocument = gatewayDocumentBeforeLanBind(nativeConfiguration, nativeDocument);
     const pluginStatusContainer =
-      sandboxDriver?.provisionHarness === undefined &&
+      (sandboxDriver === undefined || (embedded && sandboxDriver.embeddedRuntime !== undefined)) &&
       pluginRuntime !== undefined &&
       hasEnabledPluginSelections
         ? embedded
@@ -6783,33 +6804,62 @@ export class KubernetesComputeDriver implements ComputeDriver {
             gatewayOwnership,
           ),
         );
-        await this.prepareRevisionStage("gateway_deployment", () =>
-          this.reconcile(
-            this.deployment(
-              gatewayName,
-              gatewayOwnership,
-              gatewayNamespace,
-              this.options.images.gateway,
+        const deployment = this.deployment(
+          gatewayName,
+          gatewayOwnership,
+          gatewayNamespace,
+          this.options.images.gateway,
+          gatewayAccountName,
+          "gateway",
+          environment,
+          configuration.loggingLevel,
+          configuration,
+          embedded,
+          embedded ? revision.servicePrincipalId : undefined,
+          embedded ? deliveredHarnessAuth : undefined,
+          channels,
+          gatewaySecretEnvironment,
+          pluginRuntime,
+          [],
+          workspaceSetup,
+          repositoryConsumer?.role === "gateway" ? repositoryMaterial : undefined,
+          undefined,
+          providerEndpoint,
+        );
+        if (embedded && sandboxDriver?.embeddedRuntime !== undefined) {
+          const pod = asRecord(asRecord(deployment.spec?.template)?.spec);
+          const requirements = embeddedSandboxRequirements(
+            deployment,
+            harnessAuth.loginMode,
+            new Map([
+              [configuration.name, { [CONFIGURATION_DOCUMENT]: document, ...executionCaData }],
+              ...(pluginRuntime === undefined
+                ? []
+                : [
+                    [
+                      pluginRuntime.name,
+                      pluginRuntimeConfigMapData(pluginRuntime.runtime),
+                    ] as const,
+                  ]),
+            ]),
+            this.sandboxWorkloadIdentity(
               gatewayAccountName,
-              "gateway",
-              environment,
-              configuration.loggingLevel,
-              configuration,
-              embedded,
-              embedded ? revision.servicePrincipalId : undefined,
-              embedded ? deliveredHarnessAuth : undefined,
-              channels,
-              gatewaySecretEnvironment,
-              pluginRuntime,
-              [],
-              workspaceSetup,
-              repositoryConsumer?.role === "gateway" ? repositoryMaterial : undefined,
-              undefined,
-              providerEndpoint,
+              pod?.volumes,
+              asRecord((pod?.containers as unknown[])?.[0])?.volumeMounts,
             ),
-            gatewayOwnership,
-            gatewayNamespace,
-          ),
+          );
+          const sandboxContext = await this.sandboxNamespaceContext(
+            this.sandboxNamespaceForRevision(revision, namespace),
+            namespace,
+          );
+          const resource = await this.prepareRevisionStage("sandbox_provision", () =>
+            sandboxDriver.embeddedRuntime!.provision({ ...sandboxContext, revision, requirements }),
+          );
+          this.verifySandboxResourceRef(resource, revision, namespace);
+          return;
+        }
+        await this.prepareRevisionStage("gateway_deployment", () =>
+          this.reconcile(deployment, gatewayOwnership, gatewayNamespace),
         );
       };
       if (
@@ -6831,16 +6881,25 @@ export class KubernetesComputeDriver implements ComputeDriver {
         (existingGatewayService === undefined ||
           asRecord(existingGatewayService.spec?.selector)?.["app.kubernetes.io/name"] ===
             `${gatewayName}-inactive`);
+      const embeddedSelector =
+        embedded && sandboxDriver?.embeddedRuntime !== undefined
+          ? await this.embeddedSandboxSelector(revision, namespace)
+          : undefined;
+      let gatewaySelector: Readonly<Record<string, string>> = this.gatewayServiceSelector(
+        revision,
+        gatewayName,
+      );
+      if (embedded && sandboxDriver?.embeddedRuntime !== undefined) {
+        gatewaySelector = embeddedSelector ?? {
+          "app.kubernetes.io/name": gatewayName + "-inactive",
+        };
+      }
+      if (inactiveEmbeddedGateway) {
+        gatewaySelector = { "app.kubernetes.io/name": gatewayName + "-inactive" };
+      }
       await this.prepareRevisionStage("gateway_service", () =>
         this.reconcile(
-          this.service(
-            gatewayName,
-            gatewayOwnership,
-            gatewayNamespace,
-            inactiveEmbeddedGateway
-              ? { "app.kubernetes.io/name": `${gatewayName}-inactive` }
-              : this.gatewayServiceSelector(revision, gatewayName),
-          ),
+          this.service(gatewayName, gatewayOwnership, gatewayNamespace, gatewaySelector),
           gatewayOwnership,
           gatewayNamespace,
         ),
@@ -6848,6 +6907,21 @@ export class KubernetesComputeDriver implements ComputeDriver {
       await this.prepareRevisionStage("gateway_route", () =>
         this.reconcileGatewayRoute(revision, gatewayOwnership, gatewayNamespace),
       );
+      if (embedded && sandboxDriver?.embeddedRuntime !== undefined) {
+        const provider = await this.embeddedSandboxSelector(revision, namespace);
+        if (provider !== undefined) {
+          await this.reconcileEmbeddedSandboxIngress(revision, namespace, provider);
+        }
+        const observation = await this.observeRevision(revision, this.operationSignal());
+        if (
+          provider === undefined ||
+          observation.state !== "running" ||
+          !(await this.embeddedSandboxReady(revision, namespace))
+        ) {
+          return incomplete();
+        }
+        return ready();
+      }
       if (inactiveEmbeddedGateway) {
         const gateway = await this.getOwned(
           "Deployment",
@@ -7609,7 +7683,21 @@ export class KubernetesComputeDriver implements ComputeDriver {
     const providerOwnsHarnessEndpoint = sandboxDriver?.harnessEndpoint !== undefined;
     if (revision.harness.mode === "embedded") {
       if (sandboxDriver !== undefined) {
-        throw new ConfigurationFailure("SandboxDriver support is limited to dedicated Harnesses.");
+        const selector = await this.embeddedSandboxSelector(revision, namespace);
+        if (
+          selector === undefined ||
+          (await this.observeRevision(revision, this.operationSignal())).state !== "running" ||
+          !(await this.embeddedSandboxReady(revision, namespace))
+        ) {
+          throw new DependencyUnavailableError("The contained embedded runtime is not ready.");
+        }
+        await this.reconcile(
+          this.service(gatewayName, gatewayOwnership, namespace, selector),
+          gatewayOwnership,
+          namespace,
+        );
+        await this.reconcileGatewayRoute(revision, gatewayOwnership, namespace);
+        return;
       }
       const gateway = await this.getOwned("Deployment", gatewayName, namespace, gatewayOwnership);
       if (gateway === undefined) {
@@ -8085,8 +8173,18 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     const { name: namespace } = await this.resolveNamespace(revision.namespaceId);
     if (revision.harness.mode === "embedded") {
-      if (this.sandboxDriverForRevision(revision) !== undefined) {
-        throw new ConfigurationFailure("SandboxDriver support is limited to dedicated Harnesses.");
+      if (this.sandboxDriverForRevision(revision)?.embeddedRuntime !== undefined) {
+        const name = "gateway-" + sha256Hex(revision.agentId, 12);
+        const ownership = { namespaceId: revision.namespaceId, agentId: revision.agentId };
+        await this.reconcile(
+          this.service(name, ownership, namespace, {
+            "app.kubernetes.io/name": name + "-inactive",
+          }),
+          ownership,
+          namespace,
+          { serviceSelector: { "openclaw.dev/revision": revision.id } },
+        );
+        return;
       }
       const gatewayName = `gateway-${sha256Hex(revision.agentId, 12)}`;
       const ownership = { namespaceId: revision.namespaceId, agentId: revision.agentId };
@@ -8441,15 +8539,18 @@ export class KubernetesComputeDriver implements ComputeDriver {
       { namespaceId: revision.namespaceId },
       external,
     );
-    if (
-      revision.harness.mode !== "dedicated" &&
-      this.sandboxDriverForRevision(revision) !== undefined
-    ) {
-      throw new ConfigurationFailure("SandboxDriver support is limited to dedicated Harnesses.");
-    }
     await this.lifecycle.beforeWorkloadStop(revision);
     // Stop removes the serving path first so no new traffic reaches a runtime while
     // its exact Harness is being shut down.
+    if (
+      revision.harness.mode === "embedded" &&
+      this.sandboxDriverForRevision(revision) !== undefined
+    ) {
+      await this.removeStoppedGateway(revision, namespace, { waitForPods: false });
+      await this.shutdownRevisionRuntime(revision, namespace);
+      await this.deleteRetiredRevisionArtifacts(revision, namespace);
+      return;
+    }
     if (isYieldingComputeStop()) {
       // OCC refused this candidate, so it must stop serving now: requests it may already serve
       // are cut rather than drained into the Harness. The Harness is deleted before the Gateway's
@@ -8503,12 +8604,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
       { namespaceId: revision.namespaceId },
       external,
     );
-    if (
-      revision.harness.mode !== "dedicated" &&
-      this.sandboxDriverForRevision(revision) !== undefined
-    ) {
-      throw new ConfigurationFailure("SandboxDriver support is limited to dedicated Harnesses.");
-    }
     await this.lifecycle.beforeWorkloadStop(revision);
     await this.shutdownRevisionRuntime(revision, namespace);
     await this.retireLegacyWorkspaceNode(revision, namespace);
@@ -8528,6 +8623,17 @@ export class KubernetesComputeDriver implements ComputeDriver {
     namespace: KubernetesNamespaceAddress,
   ): Promise<void> {
     if (revision.harness.mode === "embedded") {
+      const sandbox = this.sandboxDriverForRevision(revision);
+      if (sandbox !== undefined) {
+        await sandbox.cleanup({
+          ...(await this.sandboxNamespaceContext(
+            this.sandboxNamespaceForRevision(revision, namespace),
+            namespace,
+          )),
+          revision,
+        });
+        await this.waitForRevisionPodsToTerminate(revision, namespace, "gateway");
+      }
       return;
     }
     const admittedReader = this.hasPublicGithubReadAdmission(revision);
@@ -8583,6 +8689,11 @@ export class KubernetesComputeDriver implements ComputeDriver {
     namespace = this.gatewayNamespace(revision, namespace);
     const name = `gateway-${sha256Hex(revision.agentId, 12)}`;
     const ownership = { namespaceId: revision.namespaceId, agentId: revision.agentId };
+    const service = await this.getOwned("Service", name, namespace, ownership);
+    const selected = asRecord(service?.spec?.selector)?.["openclaw.dev/revision"];
+    if (isNonEmptyString(selected) && selected !== revision.id) {
+      return;
+    }
     await this.deleteGatewayUnauthenticatedRoutes(name, ownership, namespace, revision.id);
     await this.deleteGatewayRoute(name, ownership, namespace, revision.id);
     await this.deleteNamedRuntimeResources(name, ownership, namespace, revision.id);
@@ -8682,6 +8793,13 @@ export class KubernetesComputeDriver implements ComputeDriver {
     if (gateway === undefined) {
       // A missing Deployment can mean stop or external loss. Preserve shared Agent resources
       // whenever surviving route or Service evidence belongs to a newer revision.
+      const servingService = await this.getOwned("Service", name, namespace, ownership);
+      const selected = asRecord(servingService?.spec?.selector)?.["openclaw.dev/revision"];
+      if (isNonEmptyString(selected) && selected !== revision.id) {
+        await this.waitForRevisionPodsToTerminate(revision, namespace, "gateway");
+        await this.deleteRetiredRevisionArtifacts(revision, harnessNamespace);
+        return;
+      }
       const route =
         this.options.gatewayRouting === undefined
           ? undefined
@@ -8820,6 +8938,16 @@ export class KubernetesComputeDriver implements ComputeDriver {
         this.pluginRuntimeOwnership(revision),
         namespace,
       );
+    }
+    if (revision.harness.mode === "embedded" && revision.sandboxDriverId !== undefined) {
+      for (const prefix of ["embedded-ingress-", "embedded-status-"]) {
+        await this.deleteOwnedNamespacedResource(
+          "NetworkPolicy",
+          prefix + sha256Hex(revision.id, 12),
+          { namespaceId: revision.namespaceId, agentId: revision.agentId, revisionId: revision.id },
+          namespace,
+        );
+      }
     }
     await this.deleteOwnedNamespacedResource(
       "ConfigMap",
@@ -9062,6 +9190,11 @@ export class KubernetesComputeDriver implements ComputeDriver {
   ): Promise<void> {
     const clients = await this.clients(namespace.plane);
     if (stoppedRevisionId !== undefined) {
+      const service = await this.getOwned("Service", name, namespace, ownership);
+      const selected = asRecord(service?.spec?.selector)?.["openclaw.dev/revision"];
+      if (isNonEmptyString(selected) && selected !== stoppedRevisionId) {
+        return;
+      }
       const gateway = await this.getOwned("Deployment", name, namespace, ownership);
       if (gateway !== undefined) {
         if (gateway.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION] !== stoppedRevisionId) {
@@ -10349,6 +10482,145 @@ export class KubernetesComputeDriver implements ComputeDriver {
       this.sandboxDriverForRevision(revision)?.provisionHarness !== undefined
       ? PROVIDER_FENCED_NETWORK_PROFILE
       : ORDINARY_NETWORK_PROFILE;
+  }
+
+  private async reconcileEmbeddedSandboxIngress(
+    revision: AgentRevision,
+    namespace: KubernetesNamespaceAddress,
+    selector: Readonly<Record<string, string>>,
+  ): Promise<void> {
+    const ownership = { namespaceId: revision.namespaceId, agentId: revision.agentId };
+    const ingress = this.networkPolicies(ownership, namespace).find(
+      (policy) => policy.metadata.name === "allow-gateway-ingress",
+    )!;
+    await this.reconcile(
+      {
+        ...this.manifest(
+          "networking.k8s.io/v1",
+          "NetworkPolicy",
+          "embedded-ingress-" + sha256Hex(revision.id, 12),
+          { ...ownership, revisionId: revision.id },
+          namespace,
+        ),
+        spec: { ...ingress.spec, podSelector: { matchLabels: { ...selector } } },
+      },
+      { ...ownership, revisionId: revision.id },
+      namespace,
+    );
+    // Provider-fenced Pods get no ordinary egress grants. Readiness is inbound only.
+    const proxyCidrs = this.options.network.pluginStatusProxySourceCidrs ?? [];
+    if (proxyCidrs.length > 0) {
+      await this.reconcile(
+        {
+          ...this.manifest(
+            "networking.k8s.io/v1",
+            "NetworkPolicy",
+            "embedded-status-" + sha256Hex(revision.id, 12),
+            { ...ownership, revisionId: revision.id },
+            namespace,
+          ),
+          spec: {
+            podSelector: { matchLabels: { ...selector } },
+            policyTypes: ["Ingress"],
+            ingress: [
+              {
+                from: proxyCidrs.map((cidr) => ({ ipBlock: { cidr } })),
+                ports: [{ protocol: "TCP", port: PLUGIN_RUNTIME_STATUS_PORT }],
+              },
+            ],
+          },
+        },
+        { ...ownership, revisionId: revision.id },
+        namespace,
+      );
+    }
+  }
+
+  private async embeddedSandboxReady(
+    revision: AgentRevision,
+    namespace: KubernetesNamespaceAddress,
+  ): Promise<boolean> {
+    const selector = await this.embeddedSandboxSelector(revision, namespace);
+    if (selector === undefined) {
+      return false;
+    }
+    const pods = await this.revisionPods(revision, namespace, "gateway");
+    if (pods.length !== 1) {
+      return false;
+    }
+    const pod = pods[0]!;
+    const metadata = asRecord(pod.metadata);
+    const labels = asRecord(metadata?.labels);
+    const status = asRecord(pod.status);
+    if (
+      metadata?.deletionTimestamp !== undefined ||
+      status?.phase !== "Running" ||
+      Object.entries(selector).some(([key, value]) => labels?.[key] !== value)
+    ) {
+      return false;
+    }
+    const containers = asRecord(pod.spec)?.containers;
+    const gateway = Array.isArray(containers)
+      ? containers.map(asRecord).find((container) => container?.name === "gateway")
+      : undefined;
+    const probe = asRecord(gateway?.readinessProbe);
+    const http = asRecord(probe?.httpGet);
+    // A provider Running state proves its supervisor only. Keep the original application probe.
+    if (
+      http?.path !== RUNTIME_READINESS_PATH ||
+      (http.port !== "plugin-status" && http.port !== PLUGIN_RUNTIME_STATUS_PORT)
+    ) {
+      throw new ConfigurationFailure(
+        "Contained runtime must preserve the native application readiness probe.",
+      );
+    }
+    return (
+      Array.isArray(status.conditions) &&
+      status.conditions.some(
+        (item) => asRecord(item)?.type === "Ready" && asRecord(item)?.status === "True",
+      )
+    );
+  }
+
+  private async embeddedSandboxSelector(
+    revision: AgentRevision,
+    namespace: KubernetesNamespaceAddress,
+  ): Promise<Readonly<Record<string, string>> | undefined> {
+    const runtime = this.sandboxDriverForRevision(revision)?.embeddedRuntime;
+    if (runtime === undefined) {
+      throw new ConfigurationFailure(
+        "The selected SandboxDriver cannot contain embedded execution.",
+      );
+    }
+    const selector = await runtime.podSelector({
+      ...(await this.sandboxNamespaceContext(
+        this.sandboxNamespaceForRevision(revision, namespace),
+        namespace,
+      )),
+      revision,
+    });
+    if (selector === undefined) {
+      return;
+    }
+    const expected = {
+      "openclaw.dev/namespace": revision.namespaceId,
+      "openclaw.dev/agent": revision.agentId,
+      "openclaw.dev/revision": revision.id,
+      "openclaw.dev/workload-role": "gateway",
+      [NETWORK_PROFILE_LABEL]: PROVIDER_FENCED_NETWORK_PROFILE,
+    };
+    if (
+      Object.entries(expected).some(([key, value]) => selector[key] !== value) ||
+      Object.entries(selector).some(
+        ([key, value]) =>
+          !/^[a-zA-Z0-9./_-]+$/.test(key) ||
+          typeof value !== "string" ||
+          !/^[a-zA-Z0-9._-]+$/.test(value),
+      )
+    ) {
+      throw new OwnershipFailure("SandboxDriver returned an ambiguous embedded Pod selector.");
+    }
+    return selector;
   }
 
   private sandboxDriverForRevision(revision: AgentRevision): SandboxDriver | undefined {

@@ -1540,6 +1540,73 @@ export interface SandboxHarnessContext extends SandboxNamespaceContext {
  */
 export type SandboxHarnessWithdrawalContext = Omit<SandboxHarnessContext, "requirements">;
 
+/** Complete Compute-rendered combined Gateway/Harness workload. Preserve every field or refuse. */
+export interface SandboxEmbeddedRuntimeRequirements extends HarnessWorkloadRequirements {
+  /** Complete nonsecret source PodSpec; no unrepresented field may be silently discarded. */
+  readonly renderedPodSpec: Readonly<Record<string, unknown>>;
+  /** Provider must project its actual Pod UID into these variables, never a guessed literal. */
+  readonly podUidEnvironment: readonly string[];
+  readonly readinessProbe: Readonly<Record<string, unknown>>;
+  /** Exact immutable file destinations; nonsecret revision material only. */
+  readonly mountedFiles: readonly {
+    readonly name: string;
+    readonly mountPath: string;
+    readonly content: string;
+    readonly readOnly: true;
+    readonly mode: number;
+  }[];
+  /** Bounded Pod-local storage, separate from persistent workspace/private state. */
+  readonly ephemeralVolumes: readonly {
+    readonly name: string;
+    readonly sizeLimit: string;
+    readonly medium?: "Memory";
+  }[];
+  readonly volumeMounts: readonly {
+    readonly name: string;
+    readonly mountPath: string;
+    readonly subPath?: string;
+    readonly readOnly: boolean;
+  }[];
+  /** Original private-state/setup initializers, executed serially before the runtime. */
+  readonly initializers: readonly {
+    readonly name: string;
+    readonly image: string;
+    readonly command: readonly string[];
+    readonly imagePullPolicy?: string;
+    readonly environment: readonly SandboxEnvironmentVariable[];
+    readonly volumeMounts: SandboxEmbeddedRuntimeRequirements["volumeMounts"];
+    readonly securityContext?: Readonly<Record<string, unknown>>;
+    readonly resources?: Readonly<Record<string, unknown>>;
+  }[];
+  /** Kubernetes runtime identity, filesystem and resource settings; preserve them or refuse. */
+  readonly podSecurityContext: Readonly<Record<string, unknown>>;
+  readonly containerSecurityContext: Readonly<Record<string, unknown>>;
+  readonly resources: Readonly<Record<string, unknown>>;
+  readonly podOptions: Readonly<Record<string, unknown>>;
+  readonly containerOptions: Readonly<Record<string, unknown>>;
+  /** Exact private delivery volumes, never their secret contents. */
+  readonly secretVolumes: readonly {
+    readonly name: string;
+    readonly secretName: string;
+    readonly defaultMode?: number;
+  }[];
+  readonly persistentVolumes: readonly { readonly name: string; readonly claimName: string }[];
+}
+
+export interface SandboxEmbeddedRuntimeContext extends SandboxNamespaceContext {
+  readonly revision: Readonly<AgentRevision>;
+  readonly requirements: SandboxEmbeddedRuntimeRequirements;
+}
+
+export interface SandboxEmbeddedRuntime {
+  provision(context: SandboxEmbeddedRuntimeContext): Promise<SandboxResourceRef>;
+  /** Validate provider identity before selecting only this revision's owned Pod. */
+  podSelector(
+    context: SandboxNamespaceContext & { readonly revision: Readonly<AgentRevision> },
+  ): Promise<Readonly<Record<string, string>> | undefined>;
+  observe(context: SandboxLogContext): Promise<SandboxHarnessObservation>;
+}
+
 export interface SandboxHarnessStatusContext extends SandboxHarnessContext {
   /** The Agent transport token the Agent Gateway presents to the Harness. */
   readonly transportToken: string;
@@ -1932,6 +1999,7 @@ export interface SandboxRepositoryAccess {
 }
 
 export interface SandboxDriver extends Driver {
+  readonly embeddedRuntime?: SandboxEmbeddedRuntime;
   readonly repositoryAccess?: SandboxRepositoryAccess;
   /** Explicit support; a networking facet alone never grants editable policy. */
   readonly networkPolicy?: {

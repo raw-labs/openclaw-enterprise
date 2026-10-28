@@ -125,7 +125,9 @@
     "tests/integration/egress-installation-exchange.test.mjs",
     "tests/integration/egress-prepared-github-metadata.test.mjs",
     "tests/integration/protected-source-refusals.test.mjs",
-    "tests/integration/refusal-answers.test.mjs"
+    "tests/integration/refusal-answers.test.mjs",
+    "tests/conformance/embedded-sandbox-compute.test.ts",
+    "tests/conformance/openshell-embedded-runtime.test.mjs"
   ],
   "files": [
     {
@@ -630,6 +632,12 @@
     },
     {
       "path": "tests/integration/refusal-answers.test.mjs"
+    },
+    {
+      "path": "tests/conformance/embedded-sandbox-compute.test.ts"
+    },
+    {
+      "path": "tests/conformance/openshell-embedded-runtime.test.mjs"
     }
   ]
 }

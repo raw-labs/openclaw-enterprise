@@ -19,6 +19,13 @@ with an optional separately configured loopback password. Dedicated Codex and
 its Gateway use the existing capability-token app-server protocol over
 `ws://`; the server verifies the token's SHA-256 digest.
 This connection does not implement mutual TLS.
+The experimental Sandbox contract targets the whole embedded workload, not a
+credential boundary between its Gateway and Harness. The pinned OpenShell
+provider currently refuses this placement. Model, channel and
+integration material available to the runtime remains accessible to code sharing
+that runtime. Placement alone does not enable credential rewriting or TLS
+interception. See [OpenShell embedded placement](../drivers/openshell-sandbox.md#experimental-embedded-runtime).
+
 Embedded OpenClaw retains its combined data-plane workload; its transport token
 and Gateway password are separate Secrets, as in dedicated mode. For an Agent
 deployed before that split, its next deployment copies the password from the

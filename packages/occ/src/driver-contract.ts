@@ -116,6 +116,10 @@ export function driverHasCapabilityContract(driver: Driver): boolean {
     return (
       sandboxFacets(candidate.facets) &&
       sandboxPolicyContract(candidate) &&
+      (candidate.embeddedRuntime === undefined ||
+        ["provision", "podSelector", "observe"].every(
+          (name) => typeof asRecord(candidate.embeddedRuntime)?.[name] === "function",
+        )) &&
       (candidate.repositoryAccess === undefined ||
         [
           "verifyExecution",

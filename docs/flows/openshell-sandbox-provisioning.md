@@ -1,15 +1,19 @@
 ---
 created: "2026-09-21"
 updated: 2026-10-28
-last_updated_session: authoring-run/36631ccf-5c7d-4c18-aa49-9a068875fc88
+last_updated_session: authoring-run/f7158b2f-3ad7-49d8-8c00-f5b5806013d0
 ---
 
 # OpenShell Sandbox provisioning flow
 
 ## Overview
 
-Kubernetes Compute provisions dedicated Codex and OpenClaw Harnesses through
-OpenShell. [Credential sources](credential-source-lifecycle.md) supply model access.
+Kubernetes Compute provisions dedicated Codex/OpenClaw Harnesses through
+OpenShell. The experimental embedded contract passes complete combined-workload
+requirements, but the pinned OpenShell provider cannot preserve them. Its current
+branch refuses deployment rather than weakening storage or startup semantics.
+[Credential sources](credential-source-lifecycle.md) retain their dedicated-Harness
+contract. Draft integration is not a working embedded placement.
 
 ## Entry Points
 
@@ -18,15 +22,20 @@ OpenShell. [Credential sources](credential-source-lifecycle.md) supply model acc
 - Source: `apps/controller/src/drivers/sandbox/openshell.ts:ensureNamespace`
 - Source: `apps/controller/src/drivers/sandbox/openshell.ts:provisionHarness`
 - Source: `apps/controller/src/drivers/compute/kubernetes/index.ts:prepareRevision`
-- Assumptions: the Installation selects Kubernetes Compute, OpenShell Sandbox
-  and Credential Gateway through one `openshell` Backend; Namespace isolation
-  exists; the Gateway is ready in operator mode.
+- Assumptions: the Installation selects Kubernetes Compute and OpenShell Sandbox;
+  Namespace isolation exists and the OpenShell Gateway is ready in operator mode.
+  Dedicated credential-source execution also selects the paired Credential Gateway.
+  Embedded placement needs the Driver's `embeddedRuntime` capability.
 
 ## Flow
 
 ```mermaid
 graph TD
-  A["<b>Reconcile Agent revision</b><br/>Worker selects Drivers"] --> B["<b>Prepare Namespace</b><br/>Kubernetes isolation"]
+  A0["<b>Admit Agent settings</b><br/>Selected Sandbox Driver"] --> ER{"<b>Embedded placement?</b>"}
+  ER -- "yes" --> ES["<b>OpenShell refuses settings</b><br/>Storage and startup unsupported"]
+  ES --> EW["<b>No revision deployed</b><br/>No embedded Sandbox created"]
+  ER -- "no" --> A["<b>Reconcile Agent revision</b><br/>Worker selects Drivers"]
+  A --> B["<b>Prepare Namespace</b><br/>Kubernetes isolation"]
   B --> C{"<b>Workspace mode</b><br/>Installation setting"}
   C -- "managed" --> X["<b>Reject configuration</b><br/>Before mutation"]
   C -- "operator" --> D["<b>Reconcile resources</b><br/>Labels and workspace chart"]
@@ -145,11 +154,28 @@ digest fits OpenShell's 19-character limit. The Driver creates it if absent and
 rereads after `ALREADY_EXISTS`. Adoption requires exact name, OCC Namespace ID and
 managed-by labels, and active phase; conflicts fail preparation.
 
-### 2. Derive the provider-owned Harness request
+### 2. Derive the complete runtime or dedicated Harness request
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:prepareRevision`
 
-Compute derives `provisionHarness` requirements from its ordinary Deployment.
+The experimental Compute branch renders its ordinary combined Gateway/Harness
+workload and passes the image, command, environment references, file contents,
+volumes, mounts and initializers to `SandboxDriver.embeddedRuntime.provision`.
+The generic contract retains Compute-owned ingress, activation and predecessor
+exclusivity. It does not request a separate dedicated Harness.
+
+`apps/controller/src/drivers/sandbox/openshell.ts:configureAgent` refuses embedded
+execution during configuration admission. Its `embeddedRuntime` operations also
+refuse direct calls.
+`apps/controller/src/drivers/sandbox/openshell-embedded-runtime.ts:openShellEmbeddedRuntimeRefusal`
+names the provider limits: per-volume temporary storage, initializer semantics
+and projected identity cannot be represented by the pinned driver configuration.
+The refusal does not create a Sandbox, deliver credentials, return a Pod selector
+or establish application readiness. A provider implementation that preserves
+those requirements is still needed.
+
+The rest of this trace describes dedicated provisioning. Compute derives
+`provisionHarness` requirements from its ordinary Deployment.
 First deployment keeps the Agent Service inactive and Gateway transport fail-closed.
 Attachment and provider/Sandbox creation await Gateway readiness and its Agent-owned
 setup Secret, passed by reference. The local profile disables projected identity;
@@ -349,6 +375,13 @@ separate action. The mandatory stock gate stays closed; observed-hook assurance 
 
 ## Debugging and verification
 
+The embedded success path remains blocked by provider semantics and requires
+the selected real Agent workflow described in the
+[OpenShell tests](../testing/openshell.md). Model credentials, images and a
+qualified Kubernetes/OpenShell environment are also missing on the authoring
+host. Refusal/contract checks do not prove normal deployment, model execution,
+channel/plugin compatibility, state continuity or cleanup.
+
 The [testing guide](../testing/openshell.md) defines prerequisites and proof. Compose
 needs the provider ClusterIP, advertised `ws://*.openshell.localhost:8080/`
 route, and inactive direct Service. Native model execution requires real runtime
@@ -373,6 +406,8 @@ model execution.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 20:43: Trace the draft embedded contract and fail-closed provider requirements; Linux runtime proof remains blocked. (authoring-run/f7158b2f-3ad7-49d8-8c00-f5b5806013d0 - a0769268509b97b79720df5d1d14f78d491df096)
 
 - 2026-10-28 01:58: Restrict released-preview readiness to HTTP 400/404 in the accompanying Driver change. (authoring-run/36631ccf-5c7d-4c18-aa49-9a068875fc88 - 19ecdca36)
 

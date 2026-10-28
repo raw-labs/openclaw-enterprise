@@ -54,6 +54,17 @@ test(
     });
     await save();
     context.diagnostic(`QA evidence: ${artifacts}`);
+    if (selection.embeddedContainment) {
+      const { verifyQaEmbeddedContainment } =
+        await import("../helpers/qa-embedded-containment.mjs");
+      await stage(
+        context,
+        "kubernetes/OpenClaw/OpenShell",
+        "embedded Sandbox model, workspace, replacement and cleanup",
+        () => verifyQaEmbeddedContainment(artifacts),
+        "embedded-containment",
+      );
+    }
     if (selection.sandboxPolicy) {
       const { verifyQaSandboxPolicy } = await import("../helpers/qa-sandbox-policy.mjs");
       await stage(

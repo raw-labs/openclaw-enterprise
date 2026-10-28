@@ -1535,7 +1535,11 @@ function requireSandboxExecutionMode(
   sandbox: SandboxDriver | undefined,
   executionMode: HarnessExecutionMode,
 ): void {
-  if (sandbox !== undefined && executionMode !== "dedicated") {
+  if (
+    sandbox !== undefined &&
+    executionMode === "embedded" &&
+    sandbox.embeddedRuntime === undefined
+  ) {
     throw new ConfigurationHarnessError(
       `The selected Sandbox Driver supports only dedicated Harness execution; this Agent uses ${executionMode} execution. Set executionMode to dedicated.`,
     );
@@ -2878,10 +2882,7 @@ export class OpenClawController {
     if (binding === undefined) {
       return unknown;
     }
-    if (
-      binding.revision.harness.mode !== "dedicated" ||
-      binding.revision.sandboxDriverId === undefined
-    ) {
+    if (binding.revision.sandboxDriverId === undefined) {
       return unobserved;
     }
     let compute: ComputeDriver;
@@ -3025,7 +3026,7 @@ export class OpenClawController {
     }
     // A selected gateway owns model delivery for every dedicated Harness. Refuse
     // incompatible bindings before a job or external resource can be created.
-    this.assertCredentialGatewayDelivery(harnessAuth);
+    this.assertCredentialGatewayDelivery(harnessAuth, executionMode);
     const acceptedInput = Object.freeze({
       requestId,
       namespaceId: input.namespaceId,
@@ -3969,19 +3970,18 @@ export class OpenClawController {
     signal: AbortSignal,
   ): Promise<AgentRuntimeHarnessStatus | undefined> {
     const sandbox = this.revisionSandboxDriver(compute, binding.revision);
-    if (
-      binding.revision.harness.mode !== "dedicated" ||
-      typeof sandbox?.observeHarness !== "function"
-    ) {
+    const observe =
+      binding.revision.harness.mode === "embedded"
+        ? sandbox?.embeddedRuntime?.observe.bind(sandbox.embeddedRuntime)
+        : sandbox?.observeHarness?.bind(sandbox);
+    if (observe === undefined) {
       return undefined;
     }
     const unavailable = Object.freeze({ state: "unknown" as const, code: "UNAVAILABLE" as const });
     let observed: unknown;
     try {
       const namespace = await compute.resolveSandboxNamespace!.call(compute, binding.namespace);
-      observed = await sandbox.observeHarness(
-        Object.freeze({ namespace, revision: binding.revision, signal }),
-      );
+      observed = await observe(Object.freeze({ namespace, revision: binding.revision, signal }));
     } catch {
       return unavailable;
     }
@@ -10115,7 +10115,7 @@ export class OpenClawController {
         throw new ScopeViolationError("The persisted Agent Harness execution mode is invalid.");
       }
       requireSandboxExecutionMode(sandbox, lockedAgent.executionMode);
-      this.assertCredentialGatewayDelivery(lockedAgent.harnessAuth);
+      this.assertCredentialGatewayDelivery(lockedAgent.harnessAuth, lockedAgent.executionMode);
       await this.authorize(principalId, "read", {
         kind: "configuration",
         id: lockedAgent.configurationId,
@@ -12037,7 +12037,7 @@ export class OpenClawController {
       );
     }
     if (!statusRead) {
-      this.assertCredentialGatewayDelivery(binding);
+      this.assertCredentialGatewayDelivery(binding, plan.executionMode);
     }
     const backendId = this.backendId(record.plan.backendId as BackendRef | undefined);
     const agent =
@@ -13339,8 +13339,12 @@ export class OpenClawController {
   }
 
   /** A selected Credential Gateway replaces Secret-backed model delivery; no env fallback. */
-  private assertCredentialGatewayDelivery(binding: HarnessAuthBinding | null): void {
+  private assertCredentialGatewayDelivery(
+    binding: HarnessAuthBinding | null,
+    executionMode: HarnessExecutionMode,
+  ): void {
     if (
+      executionMode === "dedicated" &&
       this.selections.has("credential_gateway") &&
       binding !== null &&
       binding.method !== "credential_source" &&

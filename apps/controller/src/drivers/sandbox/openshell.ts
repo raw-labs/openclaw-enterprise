@@ -70,6 +70,7 @@ import type {
   OpenClawConfigurationDocument,
   OpenClawConfigurationValue,
   SandboxDriver,
+  SandboxEmbeddedRuntimeContext,
   SandboxHarnessEndpoint,
   SandboxHarnessContext,
   SandboxHarnessObservation,
@@ -108,6 +109,7 @@ import {
   toProtobufStruct,
 } from "./openshell-gateway-client.ts";
 import { OpenShellServiceTransportError } from "./openshell-service-transport.ts";
+import { openShellEmbeddedRuntimeRefusal } from "./openshell-embedded-runtime.ts";
 import { RUNTIME_WRAPPER_COMMAND } from "../compute/kubernetes/runtime-entrypoints.ts";
 import { harnessWorkspacePreparationScript } from "../compute/kubernetes/index.ts";
 import {
@@ -2861,6 +2863,28 @@ export class OpenShellSandboxDriver implements SandboxDriver {
   readonly harnessHome = OPENSHELL_HOME;
   static readonly configurationContributions = configurationContributions;
   readonly networkPolicy = Object.freeze({ wildcards: true, portRanges: true, live: true });
+  readonly embeddedRuntime: NonNullable<SandboxDriver["embeddedRuntime"]> = Object.freeze({
+    provision: async (context: SandboxEmbeddedRuntimeContext) => {
+      throw new SandboxRevisionUnsupportedError(
+        "SANDBOX_HARNESS_UNSUPPORTED",
+        openShellEmbeddedRuntimeRefusal(context.requirements),
+      );
+    },
+    // Neither matching provider metadata nor a Ready phase qualifies a runtime
+    // whose rendered storage and startup boundaries cannot be preserved.
+    podSelector: async () => {
+      throw new SandboxRevisionUnsupportedError(
+        "SANDBOX_HARNESS_UNSUPPORTED",
+        openShellEmbeddedRuntimeRefusal(),
+      );
+    },
+    observe: async () => {
+      throw new SandboxRevisionUnsupportedError(
+        "SANDBOX_HARNESS_UNSUPPORTED",
+        openShellEmbeddedRuntimeRefusal(),
+      );
+    },
+  });
   private readonly options: OpenShellSandboxDriverOptions;
   private readonly backend: Backend<OpenShellGateway>;
   private readonly operatorOwnedKubernetesResources: boolean;
@@ -2919,9 +2943,7 @@ export class OpenShellSandboxDriver implements SandboxDriver {
     harness: Readonly<AgentRevision["harness"]>,
   ): OpenClawConfigurationDocument {
     if (harness.mode !== "dedicated") {
-      throw new OpenShellSandboxConfigurationFailure(
-        "OpenShell SandboxDriver supports only dedicated Harness revisions.",
-      );
+      throw new ConfigurationHarnessError(openShellEmbeddedRuntimeRefusal());
     }
     if (harness.id !== "openclaw" && harness.id !== "codex") {
       throw new OpenShellSandboxConfigurationFailure(

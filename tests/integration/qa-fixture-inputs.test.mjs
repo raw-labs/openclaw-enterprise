@@ -226,7 +226,60 @@ test("QA selection keeps prerequisite credentials and reports omitted coverage",
     sandbox.cells.every((cell) => cell.scenarios.length === 0),
     "OpenShell uses its prepared enforcement lane, not Sandbox-free installations",
   );
+  const embeddedInput = {
+    OCC_TEST_QA_SCENARIOS: "embedded-containment",
+    OCC_TEST_QA_PRESET: "OpenClaw",
+    OCC_TEST_QA_INSTALLATION: "kubernetes",
+  };
+  const embedded = selectQaMatrix(embeddedInput);
+  assert.equal(embedded.embeddedContainment, true);
+  assert.equal(embedded.scope, "partial:selected");
+  assert.equal(embedded.browser, false);
+  assert.deepEqual(embedded.requiredEnv, [
+    "OPENAI_API_KEY",
+    "OCC_TEST_OPENAI_MODEL",
+    "OCC_TEST_QA_SANDBOX_ENV",
+  ]);
+  assert.ok(
+    embedded.cells.every(({ scenarios }) => scenarios.length === 0),
+    "the embedded proof must use its prepared OpenShell environment, not a Sandbox-free installation",
+  );
+  for (const missing of embedded.requiredEnv) {
+    const inputs = Object.fromEntries(
+      embedded.requiredEnv.map((name) => [name, "synthetic-test-input"]),
+    );
+    delete inputs[missing];
+    assert.throws(() => validateQaInputs(embedded, inputs), new RegExp(`${missing} is required`));
+  }
+  assert.doesNotThrow(() =>
+    validateQaInputs(embedded, {
+      OPENAI_API_KEY: "synthetic-test-input",
+      OCC_TEST_OPENAI_MODEL: "synthetic-test-model",
+      OCC_TEST_QA_SANDBOX_ENV: "/private/prepared-openshell.env",
+    }),
+  );
+  assert.throws(
+    () => selectQaMatrix({ ...embeddedInput, OCC_TEST_QA_PRESET: "Codex" }),
+    /not applicable/,
+  );
+  assert.throws(
+    () => selectQaMatrix({ ...embeddedInput, OCC_TEST_QA_INSTALLATION: "compose" }),
+    /requires the Kubernetes/,
+  );
+  assert.throws(
+    () =>
+      selectQaMatrix({
+        ...embeddedInput,
+        OCC_TEST_QA_SCENARIOS: "embedded-containment,embedded-containment",
+      }),
+    /duplicate QA scenario/,
+  );
   const full = selectQaMatrix({});
+  assert.equal(
+    full.embeddedContainment,
+    false,
+    "experimental containment requires explicit selection",
+  );
   assert.equal(full.scope, "full");
   assert.ok(full.repository);
   const isolated = selectQaMatrix({

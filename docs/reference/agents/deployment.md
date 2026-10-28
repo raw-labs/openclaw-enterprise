@@ -57,8 +57,12 @@ owns supported runtime selections, model catalogs, transport, and credential
 boundaries. OCC rejects conflicting, unknown, missing, or mode-incompatible
 selections before admitting a version: deploy returns `400 INVALID_REQUEST`
 with the specific reason, such as "The configured Agent model requires an
-explicit supported Harness runtime." A selected SandboxDriver currently requires
-`dedicated` Codex execution; it does not support embedded OpenClaw.
+explicit supported Harness runtime." A selected SandboxDriver admits embedded
+OpenClaw only when it supplies the experimental
+[embedded-runtime capability](../drivers/sandbox.md#experimental-embedded-runtime-placement).
+The contract keeps the combined runtime in embedded mode. The pinned OpenShell
+Driver still refuses deployment because it cannot preserve required workload
+semantics; capability presence alone does not establish deployability.
 
 An Agent update may include `executionMode`, `harnessAuth`, and `backendId`
 alongside its required `configurationId`. Omission preserves the current value;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 const scenarioPresets = {
   "sandbox-policy": ["Codex"],
+  "embedded-containment": ["OpenClaw"],
   "model-ui": ["OpenClaw", "Codex"],
   "console-secrets": ["OpenClaw", "Codex"],
   calendar: ["Codex"],
@@ -9,6 +10,8 @@ const scenarioPresets = {
   "git-push-denied": ["Codex"],
   slack: ["Codex"],
 };
+
+const preparedScenarios = ["sandbox-policy", "embedded-containment"];
 
 // One selection contract serves local execution and hosted credential setup.
 // Dependencies (installation, preset, Agent and cleanup) are always included.
@@ -24,7 +27,7 @@ export function selectQaMatrix(env = process.env) {
   const input = env.OCC_TEST_QA_SCENARIOS ?? "all";
   const scenarios =
     input === "all"
-      ? allScenarios.filter((name) => name !== "sandbox-policy")
+      ? allScenarios.filter((name) => !preparedScenarios.includes(name))
       : input.split(",").map((name) => name.trim());
   assert.ok(
     scenarios.length > 0 && scenarios.every((name) => allScenarios.includes(name)),
@@ -45,16 +48,18 @@ export function selectQaMatrix(env = process.env) {
       installation: value,
       preset: name,
       scenarios: scenarios.filter(
-        (scenario) => scenario !== "sandbox-policy" && scenarioPresets[scenario].includes(name),
+        (scenario) =>
+          !preparedScenarios.includes(scenario) && scenarioPresets[scenario].includes(name),
       ),
       unselected: allScenarios.filter(
         (scenario) =>
-          scenario !== "sandbox-policy" &&
+          !preparedScenarios.includes(scenario) &&
           scenarioPresets[scenario].includes(name) &&
           !scenarios.includes(scenario),
       ),
       notApplicable: allScenarios.filter(
-        (scenario) => scenario !== "sandbox-policy" && !scenarioPresets[scenario].includes(name),
+        (scenario) =>
+          !preparedScenarios.includes(scenario) && !scenarioPresets[scenario].includes(name),
       ),
     })),
   );
@@ -66,6 +71,15 @@ export function selectQaMatrix(env = process.env) {
   const requiredEnv = activePresets.map((name) =>
     name === "Codex" ? "OCC_TEST_QA_CODEX_TOKEN_FILE" : "OCC_TEST_QA_OPENAI_KEY_FILE",
   );
+  const embeddedContainment = scenarios.includes("embedded-containment");
+  if (embeddedContainment) {
+    assert.equal(
+      installation,
+      "kubernetes",
+      "embedded-containment requires the Kubernetes installation selection",
+    );
+    requiredEnv.push("OPENAI_API_KEY", "OCC_TEST_OPENAI_MODEL", "OCC_TEST_QA_SANDBOX_ENV");
+  }
   const sandboxPolicy = scenarios.includes("sandbox-policy");
   if (sandboxPolicy) {
     if (!requiredEnv.includes("OCC_TEST_QA_CODEX_TOKEN_FILE")) {
@@ -99,13 +113,16 @@ export function selectQaMatrix(env = process.env) {
   return {
     installations,
     sandboxPolicy,
+    embeddedContainment,
     cells,
     scenarios,
-    requiredEnv,
+    requiredEnv: [...new Set(requiredEnv)],
     repository,
     browser: activeScenarios.some((name) => ["model-ui", "console-secrets"].includes(name)),
     scope:
-      installation === "all" && preset === "all" && scenarios.length === allScenarios.length - 1
+      installation === "all" &&
+      preset === "all" &&
+      scenarios.length === allScenarios.length - preparedScenarios.length
         ? "full"
         : "partial:selected",
   };

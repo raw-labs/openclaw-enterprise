@@ -1,6 +1,6 @@
 ---
 status: Proposed
-implementation_status: Not implemented
+implementation_status: Partially implemented
 author: miguelbranco80
 ---
 
@@ -8,6 +8,7 @@ author: miguelbranco80
 
 - **ID:** RFC-0024
 - **Created:** 2026-10-28
+- **RFC PR:** [Experimental draft #23](https://github.com/raw-labs/openclaw-enterprise/pull/23)
 - **Implementation plan:** [Embedded runtime containment](../plans/0024-embedded-runtime-containment.md)
 
 ## Summary

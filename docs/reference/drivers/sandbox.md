@@ -7,11 +7,14 @@ human_verified: true
 
 ## Overview
 
-`SandboxDriver` confines an Agent Harness's network, filesystem, or processes.
+`SandboxDriver` confines an Agent runtime's network, filesystem, or processes.
 OpenClaw Control Plane (OCC) supports this Driver with the bundled
 [Kubernetes Compute Driver](kubernetes-compute.md).
-The Sandbox can provision a dedicated Harness. Compute owns the gateway,
-workload identity, baseline isolation, routing, and activation.
+The Sandbox can provision a dedicated Harness. Its experimental contract also
+accepts the combined embedded Gateway and Harness, but the bundled OpenShell
+implementation still refuses that placement. Compute retains workload requirements, baseline
+isolation, storage, routing, and activation. A dedicated Gateway stays
+Compute-owned; embedded placement moves the whole runtime into the Sandbox.
 
 ## Interface
 
@@ -30,6 +33,35 @@ The [exported interface](../../../packages/contracts/src/index.ts) extends `Driv
 | `repositoryAccess`      | Optional    | Compute verifies the execution receiving repository access, checks whether its Git route is ready, and retires expired access through this interface. |
 | `networkPolicy`         | Optional    | Declare support for [network policy operations](#optional-network-policy-operations).                                                                 |
 | `computeLifecycleHooks` | Optional    | Inherited from `Driver`. Installed packages supply hooks on the registration and must omit them on the capability object.                             |
+
+### Experimental embedded-runtime placement
+
+The optional `embeddedRuntime` object implements `SandboxEmbeddedRuntime` in the
+[exported contract](../../../packages/contracts/src/index.ts). Without it, a
+selected Sandbox refuses embedded execution. It provides these operations:
+
+- `provision(context)` creates or verifies the complete combined runtime and
+  returns its `SandboxResourceRef`. Requirements include the image, command,
+  environment and Secret references, immutable mounted files, persistent and
+  ephemeral volumes, mounts, serial startup initializers, original Pod/container
+  settings, application readiness probe, and actual Pod UID projection. The provider must
+  preserve each requirement or refuse it; it cannot silently drop identity or
+  startup material.
+- `podSelector(context)` validates provider ownership and returns labels selecting
+  only that Agent revision's Pods. `undefined` means placement is not observable
+  yet. Compute retains the existing authenticated Gateway Service and route.
+- `observe(context)` reports provider lifecycle state. Provider readiness alone
+  does not establish application startup or a successful model turn.
+
+The Agent remains `embedded`; this object does not create a dedicated Harness or
+a separate Gateway. Existing `cleanup(context)` removes the combined runtime on
+stop/retirement and completes provider cleanup before Namespace deletion.
+Kubernetes Compute stops predecessors before preparing replacement writers.
+
+This contract is experimental. [RFC-0024](../../../specs/rfcs/0024-embedded-runtime-containment.md)
+records the proposal and required Linux deployment proof. No bundled provider
+currently supplies a successful embedded placement; OpenShell reports its
+[unsupported workload requirements](openshell-sandbox.md#experimental-embedded-runtime).
 
 ### Methods
 
@@ -267,7 +299,9 @@ any workload it owns. Namespace cleanup follows revision cleanup.
 
 ## Limits
 
-- Sandbox selection is optional. Only dedicated execution with bundled Kubernetes Compute supports a Sandbox, including one from an installed package.
+- Sandbox selection is optional and supported only by bundled Kubernetes Compute.
+  Dedicated provisioning uses the Harness methods; experimental embedded
+  placement requires `embeddedRuntime`, including for an installed package.
 - Supported facets are `networking`, `filesystem`, and `process`. The Sandbox
   does not authorize commands or create a Sandbox for each tool invocation.
 - The Sandbox reports Harness status. Compute decides when to activate traffic.
