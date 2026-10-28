@@ -71,7 +71,7 @@ remain separate, unverified outcomes.
 
 **This scenario is not passing.** The OCE adapter still refuses embedded launch;
 this is not evidence that OpenShell cannot provide Gateway egress. See the
-[implementation gaps](../../specs/plans/0024-embedded-runtime-containment.md#provider-findings-and-implementation-gaps).
+[implementation gaps](../../specs/plans/0024-embedded-runtime-containment.md#current-evidence-and-substantive-blockers).
 The scenario also lacks a Gateway-owned plugin/integration outbound request and
 correlated OpenShell network evidence. A model/tool turn does not supply that proof.
 The scenario expects successful deployment and does not count that refusal as

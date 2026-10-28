@@ -5,44 +5,72 @@ rfc: ../rfcs/0024-embedded-runtime-containment.md
 # Gateway egress in embedded OpenClaw
 
 - **ID:** RFC-0024 implementation plan
-- **Status:** In progress — native launch and Gateway egress not implemented
+- **Status:** In progress — native launch and Gateway egress unverified
 - **Created:** 2026-10-28
-- **Source base:** upstream `openclaw/openclaw-enterprise` at `4837711993d6196c95f9264faf577fc93a2ae6af`.
+- **Source base:** `openclaw/openclaw-enterprise` at `4837711993d6196c95f9264faf577fc93a2ae6af`.
 
-## Outcome
+## Outcome and scope
 
-Deliver the [Gateway egress proposal](../rfcs/0024-embedded-runtime-containment.md) through normal Agent deployment. Keep embedded execution and existing model authentication. Gateway plugin, channel and integration traffic must use OpenShell's existing network enforcement. Keep the PR draft and unmerged.
+Make a Gateway-owned channel/plugin/integration request cross configurable OpenShell network policy through normal embedded Agent deployment. The [RFC](../rfcs/0024-embedded-runtime-containment.md) explains the concrete Slack `auth.test` example, process/Pod placement, credential locations and unchanged dedicated topology. The example is not an executed test.
 
-## Delivery gates
+Contain the combined Gateway/Harness application; keep embedded execution and native model authentication. Reuse existing OpenShell supervision, proxying and service exposure. An initially permissive compatibility policy is acceptable. Do not create a general workload provisioner, add another proxy, select credential rewriting/TLS interception, relocate a dedicated Gateway, or change dedicated Harness behavior. Keep the PR draft and unmerged.
 
-- [x] Submit RFC-0024 for human review. The active proposal is not an accepted decision.
-- [x] Draft generic Sandbox/Compute coordination and register a selected real-Agent scenario. Neither establishes a native launch or Gateway integration request.
-- [x] Reassess pinned OpenShell's canonical command, private exec stdin, PVC mounts, loopback confinement and HTTP/WebSocket exposure against application requirements.
-- [ ] Replace the Pod-template-shaped launch contract with application inputs and explicit behavioral/security requirements.
-- [ ] Implement native startup and private credential delivery in the OpenShell adapter, using the existing Gateway supervisor and native authentication. Preserve authorized Secret custody, protected Gateway-owner initialization, admitted trust settings, state persistence and enforced resource bounds.
-- [ ] Connect existing authenticated Gateway ingress to the provider service exposure. The current Pod selector cannot reach a loopback-confined application. Preserve TLS/Host handling and prevent direct exposure from bypassing trusted-proxy identity authorization.
-- [ ] Implement native channel/integration credentials and egress without selecting the dedicated channel proxy.
-- [ ] Extend selected real-Agent acceptance with a Gateway-owned plugin/integration outbound request and OpenShell network evidence. A tool command or model turn is not this proof.
-- [ ] Verify model authentication, native Gateway operation, state continuity, replacement, failure, stop and deletion through the real API and worker.
+## Owners and implementation order
 
-## Provider findings and implementation gaps
+### 1. Describe the OpenClaw application launch
 
-The pinned provider is OpenShell v0.1.5 at `bdb956f2cd65a635f1294fccf1d138d263bf650f`. It accepts a canonical workload command, private exec stdin and approved PVC mounts. Lack of arbitrary init-container and `emptyDir` pass-through prevents a verbatim Pod conversion, not necessarily the requested Gateway egress.
+**Owners:** Sandbox contract, Kubernetes Compute, OpenShell Sandbox Driver.
 
-Map each existing startup/volume requirement to its purpose before changing its representation: private file ownership, protected signing material, exact admitted application inputs, bounded writable scratch, persistent state and startup ordering. A sequential trusted bootstrap can replace an initializer only if it preserves those properties. Private stdin is a delivery mechanism, not an implemented native-auth path. Aggregate ephemeral-storage limits do not automatically bound a PVC directory. Unsupported requested ServicePrincipal identity still requires explicit refusal.
+Replace the Pod-template-shaped draft with the inputs needed by the existing OCE Gateway supervisor: selected image/command, admitted native configuration/plugin inputs, private Secret references, approved persistent workspace/private state, process identity, resource bounds, service exposure and application readiness. The caller is Compute's normal Agent revision preparation, not an arbitrary-workload API.
 
-The current adapter always refuses embedded placement. Its generic Compute branch also assumes direct Pod-Service ingress and the original Kubernetes readiness probe. These are unfinished integration choices, not unavoidable provider limitations. No reviewed source establishes that an OpenShell extension or version upgrade is mandatory for Gateway egress.
+Use OpenShell's canonical command for the long-lived runtime. Preserve startup ordering, protected Gateway-owner initialization, immutable inputs and requested identity. Do not disable owner checks or claim that same-UID chmod makes a file immutable. Reject genuinely unsupported requested identity before acquiring provider authority. Map supported initialization/storage to the application requirement; an unbounded PVC directory does not replace a storage bound.
 
-Use the provider's HTTP/WebSocket service exposure, not a new proxy or detached exec. The exposure is not proof of application authentication; preserve the trusted ingress boundary. Keep permissive outbound policy separate from ingress authorization. Do not change model endpoints, credential semantics or application TLS trust to make a test pass.
+**Proof:** review the connected caller and focused contract/startup checks; real API/worker deployment must start embedded OpenClaw without a separate application Gateway or dedicated Harness. No uncalled launcher or provider refusal counts as delivery.
 
-## Verification prerequisites
+### 2. Deliver actual native credentials and configuration
 
-The rechecked host has Docker and k3d but no running Docker workloads or k3d cluster. The task environment has no selected prepared OpenShell environment, database URL, approved Gateway image, native model selection or native model key. These are missing acceptance inputs, not evidence of provider incompatibility. Do not reuse unrelated runtime or model-provider credentials.
+**Owners:** existing Agent Secret authorization/delivery and the OpenShell adapter.
 
-Use disposable Linux Kubernetes/OpenShell infrastructure, real PostgreSQL and worker, approved immutable images and an authorized native model credential. Infrastructure can be prepared within that disposable scope; a real native credential/model selection must be supplied or explicitly selected by its owner. Do not substitute a fake model, compatibility bridge or manually launched Sandbox for ordinary Agent acceptance.
+Authorize only the selected Agent's model, Gateway, channel and integration material. Keep native environment/auth-file formats and the selected model endpoint. Separate private material from public configuration and plugin inputs. Use supported private delivery, such as fixed ExecSandbox stdin with the existing 400,000-byte cap, revision/generation checks and acknowledged installation before application code starts. Handle a lost acknowledgment without conflicting writes or secret output.
 
-## Evidence
+Model credentials belong in the combined runtime, not an inference-provider binding, proxy Pod or published Sandbox spec. Preserve embedded code's existing shared credential trust domain; do not claim Gateway/Harness credential separation.
 
-Source at `231cb7125328014c8672ae68ca1f53629016c071` passed TypeScript, ESLint, workspace boundaries, CI registration and a focused six-file run with 570 passes, zero failures/skips. This is historical contract/regression evidence, not current-head validation, Gateway egress or a successful deployment. The selected `embedded-containment` scenario remains unexecuted and does not yet include the required Gateway integration request.
+**Proof:** native authentication succeeds with the actual authorized model credential; withdrawn/mismatched/oversized material fails safely. Inspect specs, arguments, status and redacted evidence for disclosure. Channel/integration credential admission must not silently select the dedicated channel proxy.
 
-This revision refreshes against upstream `4837711993d6196c95f9264faf577fc93a2ae6af` by merge, preserving published history. Record current-head checks in the PR. Documentation-site checks require missing `@sindresorhus/slugify`; do not install dependencies as a verification side effect.
+### 3. Connect Gateway ingress and outbound enforcement
+
+**Owners:** Compute ingress/activation and OpenShell service/network operations.
+
+Keep existing authenticated OCE ingress, but send it through OpenShell's HTTP/WebSocket service exposure to the Gateway's loopback listener. Direct workload-Pod Service selection is not valid. Preserve TLS identity, HTTP Host/origin behavior, native WebSocket authentication and real application readiness. Keep the exposure private to trusted ingress/observation callers or enforce equivalent native authentication; a caller-supplied trusted-proxy identity header is not authority.
+
+Reuse OpenShell executable/destination policy and its separate supervisor/proxy Pod for Gateway outbound connections. Kubernetes NetworkPolicies retain outer isolation without direct-egress bypass. TLS passthrough must preserve application verification and admitted trust settings, not inherit injected interception trust. Do not grant a separate Harness access and label that Gateway coverage.
+
+**Proof:** a Gateway-owned request reaches its approved destination and appears in OpenShell network evidence; policy denial prevents that request. Provider Ready metadata, model traffic or a tool-process fetch alone is insufficient. Test the public/native access path as well as internal observation.
+
+### 4. Preserve the normal Agent lifecycle
+
+**Owners:** OCC worker and Compute/Sandbox cleanup coordination.
+
+Stop the previous combined runtime before a successor writes shared state or starts channel consumers. Activate only after ownership, native authentication and application readiness. On failure, retain attributable evidence without exposing secrets. Stop removes ingress and the canonical runtime; deletion removes owned provider resources and Agent storage in the existing order. Preserve dedicated execution and embedded Agents that do not select this placement.
+
+**Proof:** normal API/worker checks cover workspace/private-state continuity, replacement exclusivity, failed startup, stop and deletion. Retries adopt only matching owned resources; they must not create competing writers or mutate provider Pods outside their owner.
+
+### 5. Extend and run selected acceptance
+
+**Owners:** existing `embedded-containment` QA helper and real OpenShell/Kubernetes fixture.
+
+The selected scenario is opt-in, excluded from default QA/OpenShell execution. Extend its model/tool/lifecycle assertions with a Gateway-owned plugin/channel/integration request, matching destination receipt and OpenShell allow/deny evidence. Use supported admission and runtime loading, not a manually started Sandbox, fake model, copied fixture logic or tool-only probe. External channel checks require an approved account/destination; the illustrative Slack request does not authorize posting messages.
+
+Required acceptance must pass without skips. Keep missing infrastructure/credentials, implementation failures and successful source checks distinct. Update the owning flow/reference/testing pages and PR with actual commands, revision, images and outcomes after implementation settles.
+
+## Current evidence and substantive blockers
+
+- RFC submitted for review; decision remains Proposed. Sandbox/Compute coordination and a selected real-Agent scenario are drafted. The published adapter still refuses embedded placement.
+- Native private startup, protected owner initialization, enforced writable-state bounds, authenticated provider-service ingress and native channel admission are unfinished. Missing arbitrary init/emptyDir pass-through alone does not establish an unavoidable egress blocker or mandatory provider extension.
+- The authored scenario has not proved a Gateway integration request. Source evidence at `231cb7125328014c8672ae68ca1f53629016c071` recorded 570 regression passes, zero failures/skips; it is not current-head deployment or egress proof.
+- The task has Docker/k3d but no selected prepared OpenShell stack, PostgreSQL connection, approved runtime images or authorized native model/model credential. Prepare only disposable owned infrastructure; the credential/model must come from its authorized owner. Do not reuse unrelated provider credentials or substitute a fake model.
+- Documentation checks are blocked by missing docs-site `@sindresorhus/slugify`. Do not install dependencies as a verification side effect. Record available formatting/link/structure checks separately.
+
+## Change record
+
+- 2026-10-28: Scope the delivery to Gateway-owned outbound requests in embedded mode; name native launch, ingress, credential and acceptance owners. Source `525310dbc6823e16fb5d8b9c16fcca3706acffe7`; authoring run `f7158b2f-3ad7-49d8-8c00-f5b5806013d0`.
