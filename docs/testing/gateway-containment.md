@@ -1,11 +1,13 @@
-# Dedicated Gateway containment verification
+# Dedicated Gateway outbound connectivity verification
 
 ## Scope and status
 
 This is an experimental verification procedure, not production qualification.
-Prove containment through normal OCE Agent deployment on Linux while the
-separate dedicated Harness keeps its placement, authentication and model
-credential. The [proposal and delivery record](../../specs/plans/0024-dedicated-gateway-containment.md)
+Prove usable, policy-controlled native Gateway HTTPS and WebSocket traffic
+through OpenShell during normal OCE Agent deployment on Linux. The Gateway
+runs inside the selected Sandbox; the separate dedicated Harness keeps its
+placement, authentication, workspace and model credential. The
+[proposal and delivery record](../../specs/plans/0024-dedicated-gateway-containment.md)
 track implementation and missing evidence.
 
 A rendered Pod, passing fixture or proxy environment variable does not prove
@@ -33,7 +35,7 @@ login, WebSocket operation or message delivery.
 
 ## Required observations
 
-### Containment and compatibility
+### Outbound enforcement and compatibility
 
 Inspect the real Gateway process tree and its OpenShell boundary. Confirm that
 the Gateway and descendants run under the selected containment runtime, with
@@ -41,11 +43,17 @@ filesystem and process restrictions active. Check the exact image identity,
 command, mounts, init steps, probes, resources and namespace/Agent ownership.
 A proxy sidecar beside an otherwise uncontained Gateway fails this requirement.
 
-Exercise native HTTPS and a long-lived connection from the contained process.
-Inspect enabled channel contributions in the applied authorization policy.
-Check any runtime-required private endpoints, DNS and plugin/package traffic.
-Record the compatibility policy's actual breadth: successful egress under a
-permissive policy is not proof of destination isolation.
+Exercise native HTTPS and a long-lived WebSocket from an enabled plugin or
+channel in the real Gateway. Correlate its executable and destination with the
+OpenShell socket mediation, supervisor authorization and upstream connection.
+Do not substitute a standalone request helper for the native integration.
+
+Inspect the applied Gateway policy separately for runtime destinations, enabled
+channel contributions and compatibility access. For Slack, cover both its API
+and the dynamically selected Socket Mode destination. Check private Harness
+endpoints, OCC callbacks, DNS and required plugin/package traffic. Record the
+actual executable paths, host patterns, ports and private-address allowances.
+Successful egress under a permissive policy is not proof of destination isolation.
 
 Ordinary upstream TLS must remain verified end to end. Containment must not
 introduce request rewriting, a new interception CA, placeholder credentials or
@@ -92,6 +100,13 @@ Exercise a consequential containment failure, such as an unavailable selected
 runtime or refused policy setup. The Agent must not become serving through an
 uncontained fallback. Record pending/failure evidence and successful recovery
 through the normal deployment path.
+
+## Completion boundary
+
+Ingress compatibility, provider source inspection and policy rendering are
+prerequisites, not completed outbound experiments. Do not mark delivery complete
+until the normal contained Gateway is usable and the observations above pass.
+This procedure does not qualify a generic workload platform.
 
 ## Evidence record
 

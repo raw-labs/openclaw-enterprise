@@ -2,7 +2,7 @@
 rfc: ../rfcs/0024-dedicated-gateway-containment.md
 ---
 
-# Implementation plan: Dedicated Gateway containment
+# Implementation plan: Policy-controlled Gateway outbound connectivity
 
 - **ID:** RFC-0024
 - **Delivery status:** In progress
@@ -11,29 +11,44 @@ rfc: ../rfcs/0024-dedicated-gateway-containment.md
 
 ## Outcome and scope
 
-The target outcome is normal OCE Agent deployment with its dedicated Gateway
-inside the selected Sandbox and its dedicated Harness kept separate. OpenShell
-is the first implementation. The experiment reuses existing containment and
-outbound proxy primitives without credential rewriting or TLS interception.
+Deliver usable native Gateway HTTPS and WebSocket traffic through the selected
+Sandbox's existing policy enforcement. Run the dedicated Gateway in OpenShell
+as the mechanism. Keep the separate Harness's placement, workspace,
+authentication and model-credential path unchanged. Explicit initial
+compatibility access is acceptable; it does not prove restrictive isolation.
 
-The RFC owns requirements and alternatives. This plan owns implementation order
-and verification evidence; incomplete runtime proof keeps delivery in progress.
+Only the normal dedicated-Gateway caller is in scope. Do not build a generic
+workload executor, scheduler, Pod-template adoption layer, new public resource,
+credential broker or data-plane proxy. Gateway startup, state, ingress and
+cleanup are required only to make this connectivity path usable through normal
+Agent deployment. An ingress dependency is not a separate completed experiment.
 
-## Contract and source touchpoints
+The branch starts at upstream `33c47d409`. A read-only comparison with upstream
+`4837711993d6196c95f9264faf577fc93a2ae6af` on October 28, 2026 checked the ten
+subsequent commits. Compute changes add native-worker plugin delivery, not
+Gateway containment or authenticated relay ingress; Channel and Sandbox still
+lack the required Gateway integration. This plan does not depend on another
+experimental PR.
 
-- `packages/contracts/src/index.ts`: separate Gateway containment from
-  `provisionHarness`; define workload and destination inputs.
-- `apps/controller/src/drivers/compute/kubernetes/index.ts`: apply the selected
-  containment capability to the ordinary Gateway workload, preserving routing,
-  private state, readiness and lifecycle.
-- `apps/controller/src/drivers/sandbox/`: implement OpenShell supervisor and
-  network-policy translation behind the Sandbox contract.
-- `apps/controller/src/drivers/channel/slack.ts`: contribute channel destinations
-  through the channel interface, not an OpenShell-specific core branch.
-- Installation composition: explicitly select Gateway containment without
-  selecting a different Harness placement or credential path.
-- Existing Agent integration boundaries: prove real admission, deployment,
-  replacement and cleanup rather than direct calls to unused helpers.
+The RFC owns the decision; this plan tracks code and actual proof. Neither is
+complete while the contained normal Gateway remains unavailable.
+
+## Implementation scope review
+
+| Owner                                           | Required change                                                                                                               | Excluded expansion                                                              |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Contracts                                       | Gateway-specific Sandbox lifecycle/endpoint inputs and non-secret Channel destination contributions                           | Generic arbitrary-workload or Kubernetes-template API                           |
+| Installation composition and Kubernetes Compute | Separate Gateway Sandbox opt-in, used by normal Gateway deployment and cleanup                                                | Reusing Harness `sandboxDriverId` or enabling its credential delivery           |
+| OpenShell Sandbox Driver                        | Translate Gateway startup/state and egress into supported provider calls; reuse socket mediation and supervisor authorization | New forwarder, uncontained fallback, or copying provider behavior into OCC core |
+| Channel Driver and admission                    | Collect enabled-channel destinations into the Agent revision; Slack first                                                     | Provider host lists hardcoded in Compute or credentials stored in policy        |
+| Existing ingress owners                         | Minimum compatible authenticated final hop for operator and node traffic                                                      | General-purpose ingress product or ordinary loopback trust                      |
+| Existing Agent QA                               | Genuine Gateway HTTPS/WSS, model turn, state and cleanup with unchanged Harness                                               | Harness-only qualification presented as Gateway proof                           |
+
+Source owners are `packages/contracts/src/index.ts`,
+`apps/controller/src/composition/installation-config.ts`, Kubernetes Compute,
+`apps/controller/src/drivers/sandbox/openshell*.ts`, the bundled Slack Channel
+Driver and the existing Agent QA boundary. Keep provider translation in its
+Driver. Do not add an otherwise unused helper while ingress is unresolved.
 
 ## Open decision: authenticated ingress
 
@@ -82,45 +97,56 @@ real-runtime proof, not full-template copying.
 
 ## Implementation
 
-Resolve the ingress decision above before changing Driver contracts.
+1. Resolve the smallest compatible ingress path above. Identify exact native
+   or provider changes if existing support cannot preserve operator and node
+   authentication. The RFC is submitted; investigation needs no new approval
+   gate. Unavailable external support remains an implementation dependency.
+2. Add the Gateway-only Sandbox capability and independent composition. Keep
+   the normal Harness path unchanged. Translate native Gateway configuration,
+   credentials, private state and resources; use its real startup/readiness
+   path rather than require full Pod-template support.
+3. Connect native Gateway sockets to existing OpenShell enforcement. Add
+   runtime, channel and explicit compatibility policy inputs. Name executables,
+   host patterns, ports and private endpoints; retain native TLS validation.
+4. Add meaningful integration at normal Agent deployment, including forged
+   ingress identity, denied egress and failed setup without an uncontained
+   fallback. Register a distinct Gateway QA scenario; leave Harness-only tests
+   unchanged. Update current references and the owning runtime flow with code.
+5. Execute the Linux scenario with the separate dedicated Harness: native
+   HTTPS/WSS, enabled-channel policy and live channel separately, a model/tool
+   turn, state across replacement, stop/start and delete. Preserve unrelated
+   infrastructure and remove only run-owned effects.
 
-1. Extend the generic Sandbox/Compute integration and opt-in configuration.
-   Validate unsupported selections before any uncontained launch.
-2. Provision the Gateway through OpenShell containment. Preserve its image,
-   configuration, state, credential custody, startup behavior, readiness and
-   resource limits, translating projections through supported provider inputs.
-   Reuse the existing supervisor network proxy; do not add a forwarder.
-3. Collect enabled channels' destination requirements. Keep compatibility
-   network access explicit and distinct from credential operations.
-4. Cover the normal provisioning and lifecycle path with meaningful integration
-   assertions, including failure without an uncontained fallback.
-5. Update the owning Sandbox, Compute and Channel references, architectural
-   status, operator setup and source-backed runtime flow.
-6. Register and execute the Linux QA scenario through normal Agent deployment.
-   Inspect actual process containment, connectivity, credential custody,
-   persistent state, replacement, stop and delete.
+Steps 2–5 are not implemented or qualified. Do not mark the experiment complete
+when step 1 is documented or when a fixture passes.
 
 ## Verification
 
-| Required outcome | Check | Result or remaining proof |
-| --- | --- | --- |
-| Generic selected capability reaches normal Gateway deployment | Compute/controller integration | Pending implementation |
-| Authenticated ingress rejects forged identity | Normal route and direct/provider-relayed negative controls | Blocked on ingress capability |
-| Harness placement/auth/model custody unchanged | Normal Agent deployment and workload inspection | Not run |
-| Real full containment rather than proxy attachment | Linux supervisor, process/filesystem and runtime inspection | Not run |
-| Native outbound HTTPS and long-lived transport work | Real contained Gateway traffic | Not run |
-| Enabled channels contribute destinations | Driver/Compute integration; live channel separately | Not run |
-| Private state survives replacement | Real Agent redeploy/restart | Not run |
-| Failure cannot activate an uncontained fallback | Failure integration and real runtime negative control | Not run |
-| Stop/delete remove owned resources | Real Agent lifecycle | Not run |
-| Source/doc checks | Workspace, formatting, types, lint, docs, spec/flow validation | Pending |
+| Required outcome                                              | Check                                                       | Result or remaining proof                                            |
+| ------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- |
+| Generic selected capability reaches normal Gateway deployment | Compute/controller integration                              | Pending implementation                                               |
+| Authenticated ingress rejects forged identity                 | Normal route and direct/provider-relayed negative controls  | Blocked on ingress capability                                        |
+| Harness placement/auth/model custody unchanged                | Normal Agent deployment and workload inspection             | Not run                                                              |
+| Real full containment rather than proxy attachment            | Linux supervisor, process/filesystem and runtime inspection | Not run                                                              |
+| Native outbound HTTPS and long-lived transport work           | Real contained Gateway traffic                              | Not run                                                              |
+| Enabled channels contribute destinations                      | Driver/Compute integration; live channel separately         | Not run                                                              |
+| Private state survives replacement                            | Real Agent redeploy/restart                                 | Not run                                                              |
+| Failure cannot activate an uncontained fallback               | Failure integration and real runtime negative control       | Not run                                                              |
+| Stop/delete remove owned resources                            | Real Agent lifecycle                                        | Not run                                                              |
+| Source/doc checks                                             | Scoped formatting, workspace, local links and diff checks   | Passed; canonical docs/spec/length blocked on docs-site dependencies |
 
 ### Current Linux prerequisites
 
 Read-only preflight on October 28, 2026 found Node 24, Docker and the pinned pnpm
 available, but no project dependencies, Go, k3d, kubectl, Helm, built CLI,
 OpenShell/runtime images or model credentials. There is no disposable cluster
-or prepared database. No deployment or model/channel proof has run.
+or prepared database. No deployment or model/channel proof has run. A later
+read-only recheck found k3d and base k3s images available, but still no Go,
+kubectl, Helm, built CLI or genuine Gateway/Harness/OpenShell runtime images.
+The formatting invocation then prepared the locked root dependencies and the
+repository-managed pre-push hook automatically. No tracked manifest or lockfile
+changed; the hook matches its tracked source. The separate docs-site graph
+remains absent. Do not alter another task's cluster or images.
 
 Prepare an isolated environment with the repository's documented tooling and
 approved immutable runtime images. Supply existing authorized model credentials
@@ -140,6 +166,10 @@ dedicated Harness while containing the Gateway independently.
 - 2026-10-28: Submitted draft PR #25. Native translation assessment identified
   the ingress gap above and excluded a direct Pod-IP route. Driver code and
   Linux verification remain outstanding; keep the PR draft and unmerged.
+
+- 2026-10-28: Refocused the RFC, implementation scope and verification on
+  usable native Gateway outbound connectivity. Compared current upstream
+  `4837711993d6196c95f9264faf577fc93a2ae6af`; no runtime delivery is claimed.
 
 ## Changelog
 
