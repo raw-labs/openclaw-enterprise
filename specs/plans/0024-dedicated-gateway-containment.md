@@ -11,10 +11,10 @@ rfc: ../rfcs/0024-dedicated-gateway-containment.md
 
 ## Outcome and scope
 
-Normal OCE Agent deployment can run its dedicated Gateway inside the selected
-Sandbox while keeping the dedicated Harness separate. OpenShell is the first
-implementation. The experiment reuses existing containment and outbound proxy
-primitives without introducing credential rewriting or TLS interception.
+The target outcome is normal OCE Agent deployment with its dedicated Gateway
+inside the selected Sandbox and its dedicated Harness kept separate. OpenShell
+is the first implementation. The experiment reuses existing containment and
+outbound proxy primitives without credential rewriting or TLS interception.
 
 The RFC owns requirements and alternatives. This plan owns implementation order
 and verification evidence; incomplete runtime proof keeps delivery in progress.
@@ -35,7 +35,54 @@ and verification evidence; incomplete runtime proof keeps delivery in progress.
 - Existing Agent integration boundaries: prove real admission, deployment,
   replacement and cleanup rather than direct calls to unused helpers.
 
+## Open decision: authenticated ingress
+
+Implementation is blocked on an ingress capability, not on RFC submission or
+complete Pod-template support. [Draft PR #25](https://github.com/raw-labs/openclaw-enterprise/pull/25)
+submitted the RFC for human review on October 28, 2026. No runtime implementation
+has been added.
+
+The inspected OpenShell v0.1.5 source is
+`bdb956f2cd65a635f1294fccf1d138d263bf650f`. Its
+[socket confinement](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-sandbox/src/linux/socket_confinement.rs)
+binds workload INET sockets to the loopback device. The
+[network broker](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-sandbox/src/network_broker.rs)
+installs that restriction before passing sockets to the workload. A wildcard
+listener does not permit direct Pod-IP ingress. An ordinary Service or a broader
+NetworkPolicy cannot restore the existing Envoy-to-Gateway connection.
+
+OpenShell
+[service routing](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-server/src/service_routing.rs)
+relays to loopback. Its authorization modes strip or pass application bearer
+headers; they do not verify OCE operator identity. The relay also preserves
+`x-occ-identity`. The pinned
+[native Gateway authentication](https://github.com/openclaw/openclaw/blob/762a2fe60cc37cf6b8c9d05e61c329866e0d3f6f/src/gateway/auth.ts)
+rejects loopback trusted-proxy requests unless explicitly enabled. Kubernetes
+Compute requires that setting to remain false; its `gatewayRouteHeaderFilter`
+sets operator identity only on the authenticated route and removes it on node
+routes. Enabling ordinary loopback trust would not preserve that boundary.
+
+The RFC owner must select the scope of the required ingress change:
+
+1. Prefer a supported provider-native capability that authenticates ingress,
+   removes caller-supplied identity and supplies an identity the Gateway can
+   verify over the final hop. It must work with the Gateway trust checks;
+   authenticating only the external listener is insufficient.
+2. Alternatively, review a native Gateway authentication adaptation for the
+   provider-relayed transport. It must reject forged identity and local-workload
+   impersonation without enabling ordinary loopback trusted-proxy access.
+
+Neither capability exists in the inspected OCE integration. Both go beyond
+translating provider inputs. The RFC owner must approve the authentication
+design; this plan does not authorize changes to the provider or native Gateway
+repository. Do not add an ad-hoc relay or disable socket confinement.
+State/startup translation remains a candidate: provider files, Gateway-only PVC
+subpaths and authenticated startup delivery still need implementation and
+real-runtime proof, not full-template copying.
+
 ## Implementation
+
+Resolve the ingress decision above before changing Driver contracts.
 
 1. Extend the generic Sandbox/Compute integration and opt-in configuration.
    Validate unsupported selections before any uncontained launch.
@@ -58,6 +105,7 @@ and verification evidence; incomplete runtime proof keeps delivery in progress.
 | Required outcome | Check | Result or remaining proof |
 | --- | --- | --- |
 | Generic selected capability reaches normal Gateway deployment | Compute/controller integration | Pending implementation |
+| Authenticated ingress rejects forged identity | Normal route and direct/provider-relayed negative controls | Blocked on ingress capability |
 | Harness placement/auth/model custody unchanged | Normal Agent deployment and workload inspection | Not run |
 | Real full containment rather than proxy attachment | Linux supervisor, process/filesystem and runtime inspection | Not run |
 | Native outbound HTTPS and long-lived transport work | Real contained Gateway traffic | Not run |
@@ -87,8 +135,11 @@ dedicated Harness while containing the Gateway independently.
 ## Delivery record
 
 - 2026-10-28: Allocated RFC-0024 from current upstream and began independent
-  Gateway containment implementation. Linux preflight identified the missing
+  Gateway containment investigation. Linux preflight identified the missing
   prerequisites above. No runtime success is claimed.
+- 2026-10-28: Submitted draft PR #25. Native translation assessment identified
+  the ingress gap above and excluded a direct Pod-IP route. Driver code and
+  Linux verification remain outstanding; keep the PR draft and unmerged.
 
 ## Changelog
 
