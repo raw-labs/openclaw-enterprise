@@ -1,7 +1,7 @@
 ---
 created: "2026-10-28"
 updated: "2026-10-28"
-last_updated_session: "authoring-run/e4a4150b-1969-47ea-a5ab-88dc8b4a2061"
+last_updated_session: "agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3"
 ---
 
 # Gateway outbound destination flow
@@ -14,16 +14,25 @@ not an accepted or qualified deployment. The experiment must remain a draft and
 must not be merged. The [implementation plan](../../specs/plans/0024-gateway-outbound-proxy-reuse.md)
 tracks required acceptance evidence.
 
-A regular Agent deployment asks Kubernetes Compute to admit destination-only
-Gateway access. The selected Credential Proxy admits a nonsecret policy; its
-paired Sandbox owns a separate proxy-only Pod. Compute keeps Gateway and Harness
-placement unchanged, freezes the plan in the Agent revision, and owns routing
-and retirement. The flow stops after revision-owned attachment cleanup.
+Gateway-hosted integrations need external connections; a separate Harness's
+network access does not carry those requests. This experiment gives each dedicated
+Gateway an HTTP proxy endpoint without moving either workload. Requests pass from
+the Gateway through a Kubernetes Service to a separate Pod containing a socat TCP
+relay and OpenShell's network proxy. OpenShell checks the destination; Kubernetes
+must block direct Internet access from the Gateway. Integration credentials and
+external TLS verification stay in the Gateway. Embedded networking is unchanged.
 
-Source inspection establishes callers, not working enforcement. No real cluster,
-stock-binary forwarding, TLS, Channel, or model result has been obtained for this
-experiment. Cross-component selectors and cleanup remain acceptance conditions,
-not guarantees inferred from these helpers.
+The controller saves the policy for the Agent revision, creates and checks the
+proxy resources, configures Gateway routing, and removes those resources when the
+revision stops. The [RFC](../../specs/rfcs/0024-gateway-outbound-proxy-reuse.md)
+explains the request path and why the existing platform interfaces own this work.
+Here, “proxy attachment” means the proxy Pod, Service, policy files and network rules;
+“paired” means the policy and resource-management implementations selected together.
+Neither term means that the Gateway runs inside an OpenShell sandbox.
+
+The stock OpenShell/relay Docker test passes. Actual Gateway client compatibility,
+Channel/WebSocket traffic, Kubernetes enforcement and the complete Agent workflow
+remain unverified. Source inspection and fixture results do not establish them.
 
 ## Entry Points
 
@@ -57,7 +66,7 @@ graph TD
 
 ## Execution Trace
 
-### 1. Select the paired capabilities
+### 1. Select policy validation and proxy resource management
 
 Startup constructs these capabilities before Agent deployment. Registration does
 not admit a revision or perform its network operations.

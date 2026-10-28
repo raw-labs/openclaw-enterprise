@@ -15,19 +15,28 @@ rfc: ../rfcs/0024-gateway-outbound-proxy-reuse.md
 
 Deliver a standalone experimental draft in
 [PR 24](https://github.com/raw-labs/openclaw-enterprise/pull/24), without merging.
-The ordinary Agent workflow must preserve Gateway and Harness placement while
-routing admitted Gateway destinations through a separate revision-owned proxy.
-The selected stock OpenShell proxy plus TCP relay is this experiment's network
-attachment. Its loopback-only listener and separate Pod network boundary justify
-that choice directly; Gateway containment is not required. This plan does not
-record RFC acceptance or production support.
+Make external requests from Gateway-hosted plugins, Channels and integrations
+work through the existing OpenShell proxy and configurable destination policy.
+The Gateway connects to a Service for a separate proxy Pod, which contains a TCP
+relay and OpenShell's loopback-only network proxy. Kubernetes must block direct
+Internet connections from the Gateway. Gateway and Harness placement stays unchanged.
+See the [RFC request example and architecture](../rfcs/0024-gateway-outbound-proxy-reuse.md#one-request-before-and-after).
+This plan does not record RFC acceptance or production support.
 
 ### Dedicated path and embedded compatibility
 
 Implement destination control for opt-in dedicated, single-cluster execution.
-Keep the selected proxy capability, Channel contributions, Namespace/Agent/revision
-ownership and mandatory routing in that regular Agent workflow. Preserve native
-credentials, certificate verification and end-to-end TLS in the Gateway.
+Create a separate proxy Pod and policy for each Agent revision through the regular
+Agent deployment workflow. Include the hosts required by enabled Channels, keep
+policies separate between Agents, and block direct bypass. Integration credentials
+and external TLS verification remain in the Gateway; model credentials remain in
+the separate Harness.
+
+The connectivity goal permits an initially permissive compatibility policy.
+The implemented configuration instead accepts exact administrator DNS hosts on
+TCP/443 and trusted Channel suffix wildcards; it has no allow-all setting.
+Do not treat that implementation limit or proxy environment variables as proof
+that required native clients work.
 
 Keep embedded execution unchanged. Compatibility with its existing placement and
 networking does not establish destination control for embedded Gateways.
@@ -41,7 +50,7 @@ delivery incomplete even when helpers or selection checks pass.
 ## Contract and source touchpoints
 
 - [Shared destination contracts](../../packages/contracts/src/gateway-destinations.ts):
-  nonsecret destination admission and paired Sandbox attachment, separate from
+  destination-policy validation and proxy-resource lifecycle, separate from
   credential exchange and Harness provisioning.
 - [Channel contribution](../../apps/controller/src/drivers/channel/slack.ts):
   trusted provider requirements. Administrator inputs remain exact DNS TCP/443;
@@ -65,8 +74,9 @@ delivery incomplete even when helpers or selection checks pass.
 1. Implement the destination-only capability contracts and retain draft-only scope. Refuse
    combined protected execution or repository authority for this destination-only
    selection. Preserve the regular Harness credential path and embedded behavior.
-2. Connect generic admission and paired Sandbox provisioning through the selected
-   registration. Freeze the complete plan in Compute revision admission, compare it
+2. Register OpenShell's policy validation together with the Sandbox Driver operation
+   that creates the proxy Pod, Service, policy files and network rules. Save the complete
+   plan in Compute revision admission, compare it
    on retries, and refuse changed identity, policy, images, or attachment settings.
 3. Prepare and observe the exact proxy-only Pod before Gateway release. Verify
    immutable files, actual stock policy-engine readiness, observed image identity,
@@ -88,14 +98,14 @@ block acceptance, not further source review or documentation work.
 
 ## Verification
 
-| Required outcome                     | Real check and prerequisites                                                                                    | Result or remaining proof                                                                      |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Revision-owned policy and attachment | Ordinary API admission, PostgreSQL revision, worker preparation; exact selected pair and stock assets           | Scenario assertions exist; not run.                                                            |
-| Allowed and refused traffic          | Real Gateway CONNECT with TLS and independent marker; host/port denials; real Channel/WebSocket traffic         | Basic HTTPS assertions exist; not run. Channel/WebSocket proof deferred.                       |
-| No bypass or foreign attachment      | Enforcing CNI, positive controls, all matching policies, proxy variables removed, cross-Agent/revision attempts | TCP/443/isolation assertions exist; not run. Other protocols/address cases deferred.           |
-| Failure and cleanup                  | Tamper, proxy/relay outage, replacement, stop, measured established-connection closure                          | Outage/resource-removal assertions exist; not run. Tamper and connection-close proof deferred. |
-| Existing execution remains intact    | Actual Harness/model/workspace access and unchanged placement before/after replacement                          | Assertions exist; not run.                                                                     |
-| Document consistency                 | Flow validator, local/source links, navigation and length checks; no runtime tests for prose                    | Record actual results in the task handoff; no enforcement claim.                               |
+| Required outcome                            | Real check and prerequisites                                                                                    | Result or remaining proof                                                                      |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Policy and proxy resources for the revision | Ordinary API admission, PostgreSQL revision, worker preparation; exact selected pair and stock assets           | Scenario assertions exist; not run.                                                            |
+| Allowed and refused traffic                 | Real Gateway CONNECT with TLS and independent marker; host/port denials; real Channel/WebSocket traffic         | Basic HTTPS assertions exist; not run. Channel/WebSocket proof deferred.                       |
+| No bypass or access to another Agent proxy  | Enforcing CNI, positive controls, all matching policies, proxy variables removed, cross-Agent/revision attempts | TCP/443/isolation assertions exist; not run. Other protocols/address cases deferred.           |
+| Failure and cleanup                         | Tamper, proxy/relay outage, replacement, stop, measured established-connection closure                          | Outage/resource-removal assertions exist; not run. Tamper and connection-close proof deferred. |
+| Existing execution remains intact           | Actual Harness/model/workspace access and unchanged placement before/after replacement                          | Assertions exist; not run.                                                                     |
+| Document consistency                        | Flow validator, local/source links, navigation and length checks; no runtime tests for prose                    | Record actual results in the task handoff; no enforcement claim.                               |
 
 ## Delivery record
 
@@ -115,6 +125,12 @@ stock-proxy Docker test passes; it does not prove actual-Gateway traffic or CNI
 enforcement. The real Kubernetes scenario remains unrun. The RFC and plan now
 state a standalone connectivity design, with dedicated support and embedded
 compatibility stated separately. Keep draft and unmerged.
+
+2026-10-28: Rewrote the active RFC around the connectivity problem, a Slack
+request, the actual Pods and processes, and dedicated versus embedded behavior.
+Aligned the PR description and flow overview. Source implementation and recorded
+runtime results are unchanged; actual-Gateway client compatibility and enforced
+Kubernetes networking remain unproved.
 
 ## Manual Notes
 

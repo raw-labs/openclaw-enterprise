@@ -6,59 +6,125 @@ author: miguelbranco80
 
 # Gateway outbound destination control via a standalone OpenShell proxy
 
-## Objective
+## Problem and proposed solution
 
-Dedicated Gateways need outbound connections for native plugins, Channels and integrations. Give each Agent revision an explicit set of permitted destinations and enforce that set without changing where its Gateway or Harness runs. Reuse the selected proxy and policy engine instead of adding another HTTP forwarding implementation. Gateway workload containment is not a prerequisite for this connectivity option.
+Native plugins, Channels and integrations run in the Gateway and need external connections. Giving a separate Harness network access does not serve requests made by the Gateway.
 
-## Decision
+Kubernetes already uses default-deny networking. Channels can use an administrator-configured HTTP(S) proxy; without a usable route, required requests fail. That existing route does not provide the per-Agent OpenShell policy proposed here. The problem is to make Gateway connections work through configurable policy, not simply to remove Internet access.
 
-Extend the selected Credential Proxy capability with destination-only admission. Its paired Sandbox implementation owns the network attachment; Compute retains Gateway and Harness placement and makes the proxy route mandatory. Channel Drivers contribute destinations required by the enabled revision configuration. The admitted policy and attachment belong to one Namespace, Agent and revision.
+Run a separate OpenShell proxy Pod for each Agent revision. Configure the existing Gateway to use it, and use Kubernetes network rules to block direct Internet connections. Keep the Gateway and Harness where they already run. Reuse OpenShell's proxy and policy engine instead of writing another forwarding implementation.
 
-For the selected stock OpenShell implementation, run a separate proxy-only Pod for each revision. It contains the existing supervisor network proxy and a standard TCP relay. A Service exposes the relay only to that revision's Gateway; the relay carries bytes to the supervisor's loopback listener. OpenShell evaluates destination policy. Enforcing Kubernetes NetworkPolicy must prevent the Gateway from bypassing the attachment. Native credentials and end-to-end TLS remain with the Gateway.
+**This is an experimental, dedicated-mode implementation. Embedded networking is unchanged. Actual Gateway traffic and Kubernetes enforcement have not yet been proved. Keep the PR draft and unmerged.**
 
-This RFC defines the complete decision and its acceptance conditions. It is an experimental proposal, not an accepted architecture or production qualification.
+## One request before and after
 
-## Upstream basis and attachment design
+Consider a Slack integration sending `POST https://slack.com/api/chat.postMessage` from the Gateway.
 
-Upstream Credential Proxy operations bind credential/source routes to Sandbox executions. They do not provide a generic remote Gateway proxy. This PR adds optional destination admission to the existing [CredentialProxyDriver](../../packages/contracts/src/credential-proxy.ts); it does not treat the platform capability as another name for OpenShell. [SandboxDriver](../../docs/reference/drivers/sandbox.md) provisions Harnesses; [Kubernetes Compute](../../docs/reference/drivers/kubernetes-compute.md) owns Gateways and baseline networking. Destination permission does not require a fabricated credential source, protected execution or installation receipt.
+**Before:** the client uses the existing Channel proxy when configured and supported. Without a usable route, the request fails. The Harness does not carry this request.
 
-The selected OpenShell 0.1.5 source is `bdb956f2cd65a635f1294fccf1d138d263bf650f`. Its [standalone role](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-supervisor/src/lib.rs#L536-L629) requires local Rego and policy-data files and rejects non-loopback listeners. It selects endpoint-only authorization, deliberately omitting caller binary identity. It does not enroll a workload, authenticate incoming proxy users or contain the Gateway. Reuse its unchanged [policy engine](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-supervisor-network/data/sandbox-policy.rego) and forwarding path, not a second allow evaluator.
+**With this option enabled:**
 
-The loopback-only listener is why this attachment needs a TCP relay. Keeping the proxy in a separate Pod gives it a different network boundary from the Gateway: only the proxy receives public TCP/443 egress. A proxy sidecar in the Gateway Pod would share that public-egress permission with the Gateway and would not make the route mandatory. The separate Deployment follows from these listener and Pod-network properties, not from a requirement to contain either workload.
+1. The Gateway's HTTP client connects to the new proxy Service and requests an HTTP CONNECT tunnel to `slack.com:443`.
+2. The Service sends the connection to the proxy Pod. A TCP relay passes it to OpenShell's local listener.
+3. OpenShell checks the destination. If allowed, it opens the connection to Slack; otherwise it refuses the tunnel.
+4. The Gateway verifies Slack's TLS certificate and sends the authenticated request through the encrypted tunnel.
+5. Kubernetes must block a direct connection that avoids the proxy.
 
-These upstream boundaries were rechecked against `openclaw/openclaw-enterprise` main at `4837711993d6196c95f9264faf577fc93a2ae6af` on October 28, 2026. The PR comparison base remains the original upstream snapshot `33c47d4099ec27d7c73abe50137a95cdf6abdecd`; checking newer upstream source does not change that base.
+This is an explicit proxy, not transparent interception. A client that ignores proxy settings fails to connect; it gets no direct fallback. HTTP and WebSocket support in the actual Gateway clients is therefore a required compatibility check.
 
-## Proposed contracts and lifecycle
+## Processes, Pods and connections
 
-- Channel Drivers contribute nonsecret host/port requirements from the enabled revision configuration. A provider destination is not a Slack channel ID, tenant authorization, plugin identity or HTTP action permission.
-- Credential Proxy exposes optional destination-only admission, separate from credential exchange. It admits the complete policy for the Namespace, Agent and revision through the selected registration.
-- The paired Sandbox exposes preparation, readiness observation and retirement for the proxy-only attachment, without launching or moving a Gateway workload.
-- Compute freezes the selected policy and registration identity in its existing private revision admission state. It installs the attachment before the Gateway, verifies its immutable policy and readiness, then projects the proxy endpoint and exact network grants. Missing support fails closed.
+The diagram shows the path implemented in source, not a verified live deployment. The Harness connection is separate from the external request.
 
-The initial experiment permits exact administrator-approved public DNS hosts on TCP/443 plus explicit Channel requirements. Administrator inputs cannot use wildcards. Trusted Channel contributions can include provider suffix wildcards needed for dynamic endpoints. No TLS interception, credential injection, provider-action authorization or response custody is added. Native integration credentials and certificate verification remain in the Gateway.
+```mermaid
+---
+config:
+  theme: base
+  htmlLabels: true
+  themeVariables:
+    fontSize: 14px
+  flowchart:
+    nodeSpacing: 28
+    rankSpacing: 32
+    padding: 14
+    subGraphTitleMargin:
+      top: 10
+      bottom: 14
+---
+flowchart TB
+  subgraph GatewayPod["Existing Gateway Pod"]
+    G["<b>OpenClaw Gateway</b><br/>Native integrations"]
+  end
+  S["<b>Proxy Service</b><br/>TCP/3129"]
+  subgraph ProxyPod["New proxy Pod"]
+    R["<b>socat TCP relay</b><br/>Port 3129"]
+    P["<b>OpenShell proxy</b><br/>127.0.0.1:3128"]
+    R -->|copy bytes| P
+  end
+  E["<b>External service</b><br/>For example, Slack"]
+  H["<b>Existing Harness</b><br/>Separate workload"]
+  G -->|HTTP proxy connection| S
+  S -->|forward TCP| R
+  P -->|permitted destination| E
+  G <-->|internal transport| H
+  classDef workload fill:#EBF3F0,stroke:#7F9D93,color:#2B4038,stroke-width:1px
+  classDef endpoint fill:#EDF2F7,stroke:#879AB0,color:#25364A,stroke-width:1px
+  classDef external fill:#F1EEF5,stroke:#A091AD,color:#3A3243,stroke-width:1px
+  class G,R,P,H workload
+  class S endpoint
+  class E external
+  style GatewayPod fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
+  style ProxyPod fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
+```
 
-The proxy-only Pod runs the selected stock supervisor at `127.0.0.1:3128` and a standard TCP relay at port 3129. The relay transports bytes only. A revision-owned Service selects this attachment alone. Immutable local policy files bind its allowed destinations to the admitted revision. Readiness must check the stock proxy, not merely the relay listener. The proxy public-egress grant must exclude private, loopback, link-local, metadata and infrastructure networks.
+The proxy Pod contains neither Gateway nor Harness, workspace or integration credentials. It runs stock OpenShell supervisor network-proxy mode and stock `socat`. OpenShell 0.1.5 accepts only a loopback listener in this mode, so the relay exposes it through the Service. The relay copies bytes; OpenShell alone evaluates destination policy.
 
-## Dedicated implementation and embedded compatibility
+A separate Pod gives the proxy Internet permission without giving that permission to the Gateway. A sidecar in the Gateway Pod would share its Pod-level network permissions and would not establish this separation. The proxy adds one Deployment and Service per Agent revision, plus policy files and network rules.
 
-The implemented experimental path is opt-in, dedicated, single-cluster Kubernetes execution. It requires the selected destination-admission capability and its paired Sandbox attachment. Unsupported combined execution admissions are refused. Neither Gateway nor Harness moves into the proxy Pod.
+## Dedicated and embedded modes
 
-Embedded execution retains its existing placement, credentials and networking. This PR does not apply the dedicated destination-control path to embedded Gateways. That is a compatibility boundary, not evidence that embedded Gateway outbound control is implemented or verified.
+**Dedicated:** the option applies to supported single-cluster Kubernetes deployments when `runtime.gatewayOutbound` is configured. The Gateway stays in its Pod; the Harness keeps its placement, workspace and model credentials. The controller starts the proxy before the Gateway uses it. Required Gateway–Harness and workspace transports remain direct. Deployments without this option keep their existing routes.
 
-## Mandatory routing and trust
+The implementation requires the selected OpenShell destination-policy and proxy-resource capabilities. It rejects combinations with protected execution, repository credential authority, anonymous GitHub-read admission or a separate execution cluster. It does not automatically support every dedicated deployment.
 
-The Gateway has no public egress grant. Its only external-integration route is to the proxy Pod for its exact revision. Proxy ingress selects the Namespace, Agent, revision and Gateway role; reciprocal Gateway egress selects the exact proxy revision. Preserve the required direct Harness and workspace-node transports. Remove the old channel-proxy grant for this selection: Kubernetes NetworkPolicy allows are additive, so a deny-all policy cannot cancel another allow.
+**Embedded:** Gateway and Harness share their existing runtime. This PR does not create a destination proxy or change their networking. It provides no new OpenShell destination enforcement for embedded mode; this is a scope limit, not a claim that proxy enforcement is impossible there.
 
-This identity rests on enforcing CNI networking and trusted Kubernetes label and policy writers, not cryptographic workload authentication supplied by OpenShell. Do not share destination unions across Agents or revisions.
+## Policy, credentials and enforcement
 
-Proxy-aware clients can use HTTP CONNECT or the stock HTTP proxy. Clients that ignore proxy configuration fail; there is no direct fallback. An allowed hostname does not permit arbitrary private resolved addresses. Reuse OpenShell DNS and address checks and maintain an independent network-level public-egress fence. Uninspected CONNECT restricts host/port, not the encrypted payload.
+The policy belongs to one Namespace, Agent and revision. Administrator destinations come from trusted installation configuration. Enabled Channels contribute their required hosts; Slack includes provider suffixes for rotating WebSocket endpoints. Do not combine different Agents' policies.
 
-Stop and replacement first fence the Gateway, then terminate the revision-owned proxy and wait for its connections and Pods to disappear. Delete only resources owned by that revision. Do not claim immediate withdrawal from changing a local file or removing one additive NetworkPolicy. A changed policy requires a new revision and attachment. Proxy or relay failure must not broaden access.
+An initially permissive compatibility policy is acceptable to the connectivity goal. The current implementation is narrower: exact administrator DNS hostnames on TCP/443, plus trusted Channel suffix wildcards. It has no general allow-all compatibility setting. This is an implementation limit, not a reason to break required clients silently.
+
+Integration credentials remain in the Gateway. Dedicated Harness model credentials remain in the Harness. The new proxy receives neither. The Gateway verifies external TLS certificates; there is no TLS interception or credential rewriting. A permitted tunnel controls host and port, not encrypted API actions or data sent to an allowed service.
+
+OpenShell decides destinations; Kubernetes prevents bypass. Gateway egress must reach only its revision's proxy and required internal services. Proxy ingress must select that Gateway. The proxy's external rules must exclude private, loopback, link-local, metadata and infrastructure ranges, alongside OpenShell's DNS/address checks. Allowed DNS names must not create a route to private addresses.
+
+This requires an enforcing Kubernetes network plugin and trusted writers of Pod labels and network rules. OpenShell supplies no cryptographic Gateway identity in this mode. Remove the old Channel proxy grant for this selection and prevent broad ordinary rules from selecting this Gateway: Kubernetes allow rules are additive, so deny-all cannot cancel another allow. Removing proxy environment variables must not restore Internet access.
+
+## Platform responsibilities and lifecycle
+
+The controller divides this work among existing platform interfaces:
+
+- **Compute** already owns Gateway deployment and Kubernetes networking. It saves the policy and selected implementation identities in the immutable Agent revision, configures the Gateway's proxy address, preserves internal routes and blocks bypass.
+- **Credential Proxy** represents the selected proxy implementation. Extend it with destination-policy validation separate from credential exchange. Do not invent credential sources, grants or protected executions for a destination-only connection.
+- **OpenShell Sandbox Driver** already manages OpenShell runtime resources. Extend it to create, check and remove the separate proxy Pod, Service, policy files and network rules. This is resource management, not placement of the Gateway inside a sandbox.
+- **Channel Drivers** supply nonsecret destination requirements from the enabled configuration, not permission to use a provider account or API action.
+
+The OpenShell registration constructs the policy and resource-management implementations together. Compute checks that both match the revision's saved selections. These extensions are proposed contracts, not existing generic remote-proxy support.
+
+Before starting the Gateway, verify resource ownership, immutable policy, pinned images and readiness of OpenShell itself, not just the relay. Refuse changed or missing dependencies. Proxy or relay failure must not open a direct route.
+
+A policy change requires a new Agent revision and proxy. Stop or replacement first stops the old Gateway, then removes its proxy and waits for the Pods and established connections to disappear. Delete only that revision's resources. Service removal or a policy-file edit alone does not prove connection withdrawal.
 
 ## Required evidence and current status
 
-**Experimental source implementation is present; real-cluster enforcement is not qualified.** See the [implementation plan](../plans/0024-gateway-outbound-proxy-reuse.md), [source flow](../../docs/flows/gateway-outbound-destinations.md) and [verification procedure](../../docs/testing/gateway-outbound-destinations.md). The pinned supervisor/relay Docker test passes; it proves proxy behavior, not connectivity from the actual Gateway or CNI enforcement. Keep the experiment draft and unmerged.
+The pinned OpenShell/relay Docker test passes. It does not establish actual Gateway client compatibility or Kubernetes enforcement. The real-Agent Kubernetes scenario exists but remains unrun; its cluster, runtime, authorized credentials and controlled public endpoints have not been prepared for that proof.
 
-Before qualification, run the regular Agent admission, worker preparation, activation, replacement and stop path. From the actual Gateway, prove allowed Channel and administrator destinations, denied hosts and ports, CONNECT/WebSocket traffic, TLS verification, wrong-policy refusal, proxy-down behavior and cross-Agent isolation. Prove revision-bound access and removal of established connections. The current dedicated lifecycle stops predecessors before candidate preparation; stale-endpoint withdrawal does not establish simultaneous cross-revision CNI isolation. Verify existing Harness/model/workspace behavior and placement before and after replacement.
+Acceptance requires the regular Agent deploy, worker, activation, replacement and stop path to demonstrate:
 
-Required real-cluster proof must also show direct TCP/443, raw-IP, HTTP, UDP/QUIC and alternate-proxy attempts denied from the actual Gateway, including with proxy environment variables removed. The actual-Gateway Kubernetes scenario remains unrun: the required cluster, runtime, credentials and public probe endpoints have not been prepared for that proof. These are explicit verification gaps, not passing tests. Forwarding through a proxy container alone cannot close them.
+- Working HTTPS and Channel/WebSocket traffic, preserved TLS verification, and unchanged Harness/model/workspace behavior.
+- Denied hosts and ports, wrong-policy refusal, proxy/relay outage and tamper rejection.
+- Direct TCP, raw-IP, HTTP, UDP/QUIC and alternate-proxy attempts denied, including without proxy variables; private-address protection and cross-Agent isolation.
+- Revision-specific access, complete cleanup and measured closure of established connections. The current lifecycle stops predecessors first; stale endpoint withdrawal does not prove simultaneous cross-revision isolation.
+
+The [plan](../plans/0024-gateway-outbound-proxy-reuse.md) records delivery, the [source flow](../../docs/flows/gateway-outbound-destinations.md) traces implementation, and the [QA procedure](../../docs/testing/gateway-outbound-destinations.md) lists detailed checks and prerequisites. The selected OpenShell source is pinned at `bdb956f2cd65a635f1294fccf1d138d263bf650f`; see its [standalone role](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-supervisor/src/lib.rs#L536-L629) and [policy rules](../../deploy/runtime/gateway-proxy/sandbox-policy.rego).
