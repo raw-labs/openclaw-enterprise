@@ -2,7 +2,7 @@
 rfc: ../rfcs/0024-gateway-outbound-proxy-reuse.md
 ---
 
-# Implementation plan: Gateway destination proxy experiment
+# Implementation plan: Gateway outbound destination control via a standalone OpenShell proxy
 
 - **ID:** RFC-0024
 - **Delivery status:** Partially implemented; real-cluster acceptance pending

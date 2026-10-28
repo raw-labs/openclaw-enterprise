@@ -4,7 +4,7 @@ implementation_status: Partially implemented
 author: miguelbranco80
 ---
 
-# Policy-controlled Gateway outbound connectivity
+# Gateway outbound destination control via a standalone OpenShell proxy
 
 ## Objective
 
