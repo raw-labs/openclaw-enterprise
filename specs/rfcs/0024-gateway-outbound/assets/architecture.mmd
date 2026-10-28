@@ -1,0 +1,42 @@
+---
+config:
+  theme: base
+  htmlLabels: true
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#8795a6"
+    edgeLabelBackground: "#ffffff"
+  flowchart:
+    nodeSpacing: 30
+    rankSpacing: 36
+    padding: 14
+    subGraphTitleMargin:
+      top: 10
+      bottom: 16
+---
+flowchart TB
+  A["<b>Administrator</b><br/>Approve destinations"]
+  O["<b>OCC</b><br/>Authorize and freeze policy"]
+  C["<b>Compute</b><br/>Own routing and lifecycle"]
+  subgraph Dedicated["Dedicated Agent"]
+    G["<b>OpenClaw Gateway</b><br/>Native integration credentials"]
+    H["<b>Harness</b><br/>Existing model auth"]
+  end
+  P["<b>Selected proxy</b><br/>Destination-only capability<br/>Gateway transport required"]
+  E["<b>Approved service</b><br/>End-to-end client TLS"]
+  B["<b>Ordinary embedded</b><br/>Gateway + Harness<br/>Unchanged"]
+  A -.->|outbound selection| O
+  O -.->|admitted policy| C
+  C -.->|install and observe| P
+  G -->|existing transport| H
+  G -.->|enforced external route| P
+  P -.->|approved TCP/443| E
+  classDef platform fill:#edf2f7,stroke:#879ab0,color:#25364a,stroke-width:1px
+  classDef proxy fill:#ebf3f0,stroke:#7f9d93,color:#2b4038,stroke-width:1px
+  classDef external fill:#f1eef5,stroke:#a091ad,color:#3a3243,stroke-width:1px
+  classDef unchanged fill:#f5f6f7,stroke:#9ca3af,color:#374151,stroke-width:1px
+  class A,O,C,G,H platform
+  class P proxy
+  class E external
+  class B unchanged
+  style Dedicated fill:#fafbfc,stroke:#d8dee6,stroke-width:1px
