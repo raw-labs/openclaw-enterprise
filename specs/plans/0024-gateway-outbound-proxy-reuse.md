@@ -8,7 +8,8 @@ rfc: ../rfcs/0024-gateway-outbound-proxy-reuse.md
 - **Delivery status:** Partially implemented; real-cluster acceptance pending
 - **Owner:** RFC author and assigned implementation contributors
 - **Authority:** [Submitted RFC-0024](../rfcs/0024-gateway-outbound-proxy-reuse.md)
-- **Source baseline:** `45224b0b8ea6927e16d95c2e525ca182c28f365f` plus accompanying draft changes
+- **Upstream comparison base:** `33c47d4099ec27d7c73abe50137a95cdf6abdecd`
+- **Implementation source:** `85018ba5b7e5b93d4054184f1331923c9328dada`
 
 ## Outcome and scope
 
@@ -16,7 +17,20 @@ Deliver a standalone experimental draft in
 [PR 24](https://github.com/raw-labs/openclaw-enterprise/pull/24), without merging.
 The ordinary Agent workflow must preserve Gateway and Harness placement while
 routing admitted Gateway destinations through a separate revision-owned proxy.
-This plan does not record RFC acceptance or production support.
+The selected stock OpenShell proxy plus TCP relay is this experiment's network
+attachment. Its loopback-only listener and separate Pod network boundary justify
+that choice directly; Gateway containment is not required. This plan does not
+record RFC acceptance or production support.
+
+### Dedicated path and embedded compatibility
+
+Implement destination control for opt-in dedicated, single-cluster execution.
+Keep the selected proxy capability, Channel contributions, Namespace/Agent/revision
+ownership and mandatory routing in that regular Agent workflow. Preserve native
+credentials, certificate verification and end-to-end TLS in the Gateway.
+
+Keep embedded execution unchanged. Compatibility with its existing placement and
+networking does not establish destination control for embedded Gateways.
 
 The [source flow](../../docs/flows/gateway-outbound-destinations.md) describes the
 current draft callers. The [QA procedure](../../docs/testing/gateway-outbound-destinations.md)
@@ -48,7 +62,7 @@ delivery incomplete even when helpers or selection checks pass.
 
 ## Implementation
 
-1. Confirm the submitted contract amendment and retain draft-only scope. Refuse
+1. Implement the destination-only capability contracts and retain draft-only scope. Refuse
    combined protected execution or repository authority for this destination-only
    selection. Preserve the regular Harness credential path and embedded behavior.
 2. Connect generic admission and paired Sandbox provisioning through the selected
@@ -85,6 +99,8 @@ block acceptance, not further source review or documentation work.
 
 ## Delivery record
 
+The initial authoring observation below predates the implementation checks.
+
 2026-10-28: Added source-backed flow, current-reference caveats, experimental QA
 procedure, and navigation for the accompanying draft implementation. The source
 baseline predates the uncommitted implementation; it is provenance, not a tested
@@ -92,6 +108,13 @@ implementation SHA. No dependencies, cluster tooling, cluster, or authorized mod
 credentials were available. Stock runtime, CNI, full integration, lint, typecheck,
 and formatting remain unrun. No production support, completed acceptance, or
 merge readiness is claimed.
+
+2026-10-28: Implementation source `85018ba5b` includes destination admission,
+paired attachment, Compute lifecycle wiring and the real-Agent scenario. The
+stock-proxy Docker test passes; it does not prove actual-Gateway traffic or CNI
+enforcement. The real Kubernetes scenario remains unrun. The RFC and plan now
+state a standalone connectivity design, with dedicated support and embedded
+compatibility stated separately. Keep draft and unmerged.
 
 ## Manual Notes
 
