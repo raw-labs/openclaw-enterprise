@@ -269,8 +269,11 @@ creates the dedicated Harness or creates it itself. An experimental
 `SandboxDriver.embeddedRuntime` can instead provision the complete embedded
 Gateway/Harness workload. Compute retains its ingress Service, route, persistent
 claims and activation decision; it does not create a separate Gateway Deployment
-for this placement. The provider must preserve the rendered startup, file, volume
-and Secret requirements or refuse them. It waits for the workload,
+for this placement. This draft currently copies the Kubernetes workload;
+[RFC-0024](../../../specs/rfcs/0024-embedded-runtime-containment.md) proposes
+application launch requirements and provider-service ingress instead. Exact Pod
+representation is not the acceptance criterion. No bundled provider implements
+the working embedded path. Compute waits for the workload,
 activates its route and calls Sandbox cleanup before removing provider
 resources. See the [Sandbox lifecycle](sandbox.md#admission-and-lifecycle).
 

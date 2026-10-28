@@ -246,8 +246,10 @@ channel delivery remains unimplemented; it must not inherit the dedicated
 channel proxy as a substitute. Experimental
 [embedded Sandbox placement](sandbox.md#experimental-embedded-runtime-placement)
 passes the combined Gateway/Harness requirements to the selected Driver. The
-pinned OpenShell Driver refuses them because it cannot preserve storage and
-startup semantics. No contained embedded deployment has been established.
+OpenShell adapter still refuses them; native launch and authenticated provider
+service ingress are unfinished. Its direct Pod-Service draft is not a supported
+route to OpenShell's loopback-confined application sockets. No working embedded
+Gateway egress has been established.
 
 Stopping an Agent first deletes its exact gateway route and gateway runtime,
 then removes the dedicated Harness Deployment or delegates provider-owned

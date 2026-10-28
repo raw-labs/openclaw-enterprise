@@ -61,8 +61,10 @@ explicit supported Harness runtime." A selected SandboxDriver admits embedded
 OpenClaw only when it supplies the experimental
 [embedded-runtime capability](../drivers/sandbox.md#experimental-embedded-runtime-placement).
 The contract keeps the combined runtime in embedded mode. The pinned OpenShell
-Driver still refuses deployment because it cannot preserve required workload
-semantics; capability presence alone does not establish deployability.
+adapter still refuses deployment because its native launch, private credential
+delivery and provider-service ingress are not implemented. This is not evidence
+that missing Pod-template pass-through prevents Gateway egress; capability
+presence alone does not establish deployability.
 
 An Agent update may include `executionMode`, `harnessAuth`, and `backendId`
 alongside its required `configurationId`. Omission preserves the current value;

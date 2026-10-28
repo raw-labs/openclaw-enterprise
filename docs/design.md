@@ -86,11 +86,12 @@ token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental.
 
 Experimental [embedded Sandbox placement](reference/drivers/sandbox.md#experimental-embedded-runtime-placement)
-adds a contract for the same Compute and Sandbox owners to contain the combined
-OpenClaw Gateway/Harness. OpenShell deployment remains blocked: the pinned
-provider cannot preserve required storage and startup semantics. The
-[proposal](../specs/rfcs/0024-embedded-runtime-containment.md) and implementation
-plan distinguish draft integration from working placement and Linux proof.
+drafts coordination between the same Compute and Sandbox owners for Gateway
+egress from the combined OpenClaw Gateway/Harness. The adapter still refuses
+placement; native startup and provider-service ingress are not implemented.
+Identical Kubernetes Pod representation is not the goal. The
+[proposal](../specs/rfcs/0024-embedded-runtime-containment.md) distinguishes actual
+application/security requirements from provider configuration differences.
 
 <a id="current-limitations"></a>
 <a id="near-term-future-work"></a>

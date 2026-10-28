@@ -2,60 +2,47 @@
 rfc: ../rfcs/0024-embedded-runtime-containment.md
 ---
 
-# Embedded runtime containment implementation
+# Gateway egress in embedded OpenClaw
 
 - **ID:** RFC-0024 implementation plan
-- **Status:** In progress — provider implementation blocked
+- **Status:** In progress — native launch and Gateway egress not implemented
 - **Created:** 2026-10-28
-- **Source base:** upstream `33c47d4099ec27d7c73abe50137a95cdf6abdecd`
+- **Source base:** upstream `openclaw/openclaw-enterprise` at `4837711993d6196c95f9264faf577fc93a2ae6af`.
 
 ## Outcome
 
-Implement the [embedded placement proposal](../rfcs/0024-embedded-runtime-containment.md) through the normal Agent lifecycle. Keep the independent PR a draft and unmerged. This plan does not record acceptance of the Driver contract.
+Deliver the [Gateway egress proposal](../rfcs/0024-embedded-runtime-containment.md) through normal Agent deployment. Keep embedded execution and existing model authentication. Gateway plugin, channel and integration traffic must use OpenShell's existing network enforcement. Keep the PR draft and unmerged.
 
-## Delivery
+## Delivery gates
 
-- [x] Submit the contract proposal for human review before implementation: [draft #23](https://github.com/raw-labs/openclaw-enterprise/pull/23), initial proposal commit `a0769268509b97b79720df5d1d14f78d491df096`.
-- [x] Add the experimental Sandbox contract and generic admission. This source milestone does not establish a working provider.
-- [ ] Connect Kubernetes Compute preparation, readiness, ingress activation, replacement, stop, retirement and Namespace cleanup to that contract.
-- [ ] Implement OpenShell placement using existing provider and Sandbox owners. Preserve actual credentials, passthrough TLS, approved volumes and startup.
-- [x] Update current contract, implementation reference and source-backed flow with the source behavior and provider refusal.
-- [x] Author and register an explicitly selected normal real-Agent acceptance case. Execution is blocked; this checkbox records test authoring only.
-- [ ] Run source checks and required Linux real-runtime integration without skips.
-- [ ] Publish implementation and explicit proof limits in the draft PR.
+- [x] Submit RFC-0024 for human review. The active proposal is not an accepted decision.
+- [x] Draft generic Sandbox/Compute coordination and register a selected real-Agent scenario. Neither establishes a native launch or Gateway integration request.
+- [x] Reassess pinned OpenShell's canonical command, private exec stdin, PVC mounts, loopback confinement and HTTP/WebSocket exposure against application requirements.
+- [ ] Replace the Pod-template-shaped launch contract with application inputs and explicit behavioral/security requirements.
+- [ ] Implement native startup and private credential delivery in the OpenShell adapter, using the existing Gateway supervisor and native authentication. Preserve authorized Secret custody, protected Gateway-owner initialization, admitted trust settings, state persistence and enforced resource bounds.
+- [ ] Connect existing authenticated Gateway ingress to the provider service exposure. The current Pod selector cannot reach a loopback-confined application. Preserve TLS/Host handling and prevent direct exposure from bypassing trusted-proxy identity authorization.
+- [ ] Implement native channel/integration credentials and egress without selecting the dedicated channel proxy.
+- [ ] Extend selected real-Agent acceptance with a Gateway-owned plugin/integration outbound request and OpenShell network evidence. A tool command or model turn is not this proof.
+- [ ] Verify model authentication, native Gateway operation, state continuity, replacement, failure, stop and deletion through the real API and worker.
 
-## Provider implementation blocker
+## Provider findings and implementation gaps
 
-The pinned [OpenShell v0.1.5 Kubernetes driver configuration](https://github.com/NVIDIA/OpenShell/blob/v0.1.5/crates/openshell-driver-kubernetes/src/driver.rs) accepts PVC volumes but cannot express the ordinary embedded workload's per-volume `emptyDir` limits, original initializer container boundaries, or projected workload identity. The Driver refuses embedded configuration and direct capability calls. It does not provision a reduced runtime.
+The pinned provider is OpenShell v0.1.5 at `bdb956f2cd65a635f1294fccf1d138d263bf650f`. It accepts a canonical workload command, private exec stdin and approved PVC mounts. Lack of arbitrary init-container and `emptyDir` pass-through prevents a verbatim Pod conversion, not necessarily the requested Gateway egress.
 
-The draft contains generic contract and Compute integration work, not a working OpenShell embedded deployment. Private stdin can carry credential bytes, but does not reproduce read-only Secret mounts or initializer isolation. An aggregate container storage limit is not the requested per-volume bound.
+Map each existing startup/volume requirement to its purpose before changing its representation: private file ownership, protected signing material, exact admitted application inputs, bounded writable scratch, persistent state and startup ordering. A sequential trusted bootstrap can replace an initializer only if it preserves those properties. Private stdin is a delivery mechanism, not an implemented native-auth path. Aggregate ephemeral-storage limits do not automatically bound a PVC directory. Unsupported requested ServicePrincipal identity still requires explicit refusal.
 
-Native embedded channels also remain refused. Their credential and egress path must be implemented without substituting the dedicated channel proxy.
+The current adapter always refuses embedded placement. Its generic Compute branch also assumes direct Pod-Service ingress and the original Kubernetes readiness probe. These are unfinished integration choices, not unavoidable provider limitations. No reviewed source establishes that an OpenShell extension or version upgrade is mandatory for Gateway egress.
 
-Next dependency: select a provider implementation that can preserve these requirements, with explicit image/build scope and qualification. Do not change runtime defaults, weaken isolation, mutate provider Pods outside their owner, or claim success from the refusal path.
+Use the provider's HTTP/WebSocket service exposure, not a new proxy or detached exec. The exposure is not proof of application authentication; preserve the trusted ingress boundary. Keep permissive outbound policy separate from ingress authorization. Do not change model endpoints, credential semantics or application TLS trust to make a test pass.
 
-## Verification and prerequisites
+## Verification prerequisites
 
-Use disposable Linux Kubernetes/OpenShell infrastructure, real PostgreSQL and worker, approved immutable images, and an authorized native model credential. Normal provisioning and authenticated Gateway calls must prove embedded execution, model/tool behavior, workspace/private-state continuity, replacement, failure handling and owned-resource cleanup.
+The rechecked host has Docker and k3d but no running Docker workloads or k3d cluster. The task environment has no selected prepared OpenShell environment, database URL, approved Gateway image, native model selection or native model key. These are missing acceptance inputs, not evidence of provider incompatibility. Do not reuse unrelated runtime or model-provider credentials.
 
-Channel/plugin/integration compatibility needs actual workflow inputs; a permissive policy is not proof. Do not substitute a manually launched Sandbox process or fake provider/model.
+Use disposable Linux Kubernetes/OpenShell infrastructure, real PostgreSQL and worker, approved immutable images and an authorized native model credential. Infrastructure can be prepared within that disposable scope; a real native credential/model selection must be supplied or explicitly selected by its owner. Do not substitute a fake model, compatibility bridge or manually launched Sandbox for ordinary Agent acceptance.
 
-Initial host preflight found no JavaScript dependencies, CLI build, k3d, kubectl, Helm, Go, prepared database/cluster, OCE/OpenShell images or model credential. A later `pnpm typecheck` invocation automatically materialized the existing locked root workspace dependency graph; no manifests or lockfile changed. Documentation-site dependencies remain unavailable. The subsequent checks use the local binaries directly.
+## Evidence
 
-Rootless Docker works, but required OpenShell isolation is unproven. The missing runtime prerequisites and provider implementation block live verification. Keep the live milestone open.
+Source at `231cb7125328014c8672ae68ca1f53629016c071` passed TypeScript, ESLint, workspace boundaries, CI registration and a focused six-file run with 570 passes, zero failures/skips. This is historical contract/regression evidence, not current-head validation, Gateway egress or a successful deployment. The selected `embedded-containment` scenario remains unexecuted and does not yet include the required Gateway integration request.
 
-## Source verification
-
-Checks ran on the accompanying working tree based on proposal commit `a0769268509b97b79720df5d1d14f78d491df096`:
-
-- `node_modules/.bin/tsc --build tsconfig.json tests/tsconfig.json --pretty false`: passed.
-- `node_modules/.bin/eslint . --max-warnings 0`: passed.
-- Focused Node tests: 570 passed, zero failures/skips across `embedded-sandbox-compute`, `openshell-embedded-runtime`, `kubernetes-compute`, `kubernetes-provider-harness`, `runtime-logs-sandbox`, and `qa-fixture-inputs`. The first five are under `tests/conformance/`; the last is under `tests/integration/`.
-- `node scripts/verify-workspace-boundary.mjs` and `node scripts/ci/run-tests.mjs audit`: passed.
-- Changed-file Prettier checks, flow structure validation, local link-target checks and `git diff --check`: passed. Mermaid rendering was not available.
-- `pnpm docs:check`: blocked by missing documentation-site dependency `@sindresorhus/slugify`. No documentation dependencies were installed.
-- Real embedded acceptance: not run. Provider support, runtime infrastructure, images and authorized model credentials are unavailable. Refusal checks do not establish successful deployment.
-
-## Change record
-
-- 2026-10-28: Initial independent proposal against upstream commit `33c47d4099ec27d7c73abe50137a95cdf6abdecd`.
+This revision refreshes against upstream `4837711993d6196c95f9264faf577fc93a2ae6af` by merge, preserving published history. Record current-head checks in the PR. Documentation-site checks require missing `@sindresorhus/slugify`; do not install dependencies as a verification side effect.

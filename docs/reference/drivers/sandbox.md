@@ -59,9 +59,12 @@ stop/retirement and completes provider cleanup before Namespace deletion.
 Kubernetes Compute stops predecessors before preparing replacement writers.
 
 This contract is experimental. [RFC-0024](../../../specs/rfcs/0024-embedded-runtime-containment.md)
-records the proposal and required Linux deployment proof. No bundled provider
-currently supplies a successful embedded placement; OpenShell reports its
-[unsupported workload requirements](openshell-sandbox.md#experimental-embedded-runtime).
+records the Gateway egress outcome and required Linux deployment proof. The
+current contract remains Pod-template-shaped; the proposal calls for an
+application launch contract and provider-service ingress. No bundled provider
+currently supplies a successful embedded placement. The OpenShell adapter's
+[unfinished native launch](openshell-sandbox.md#experimental-embedded-runtime)
+is not evidence that the provider cannot support Gateway egress.
 
 ### Methods
 

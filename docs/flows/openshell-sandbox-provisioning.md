@@ -9,9 +9,10 @@ last_updated_session: authoring-run/f7158b2f-3ad7-49d8-8c00-f5b5806013d0
 ## Overview
 
 Kubernetes Compute provisions dedicated Codex/OpenClaw Harnesses through
-OpenShell. The experimental embedded contract passes complete combined-workload
-requirements, but the pinned OpenShell provider cannot preserve them. Its current
-branch refuses deployment rather than weakening storage or startup semantics.
+OpenShell. The experimental embedded contract drafts combined-workload placement
+for Gateway egress, but the adapter has no native embedded launch or provider-service
+ingress implementation. Current admission refuses it. This is not proof that a
+verbatim Kubernetes Pod representation is necessary for Gateway egress.
 [Credential sources](credential-source-lifecycle.md) retain their dedicated-Harness
 contract. Draft integration is not a working embedded placement.
 
@@ -32,7 +33,7 @@ contract. Draft integration is not a working embedded placement.
 ```mermaid
 graph TD
   A0["<b>Admit Agent settings</b><br/>Selected Sandbox Driver"] --> ER{"<b>Embedded placement?</b>"}
-  ER -- "yes" --> ES["<b>OpenShell refuses settings</b><br/>Storage and startup unsupported"]
+  ER -- "yes" --> ES["<b>OpenShell refuses settings</b><br/>Native embedded launch unfinished"]
   ES --> EW["<b>No revision deployed</b><br/>No embedded Sandbox created"]
   ER -- "no" --> A["<b>Reconcile Agent revision</b><br/>Worker selects Drivers"]
   A --> B["<b>Prepare Namespace</b><br/>Kubernetes isolation"]
@@ -168,11 +169,13 @@ exclusivity. It does not request a separate dedicated Harness.
 execution during configuration admission. Its `embeddedRuntime` operations also
 refuse direct calls.
 `apps/controller/src/drivers/sandbox/openshell-embedded-runtime.ts:openShellEmbeddedRuntimeRefusal`
-names the provider limits: per-volume temporary storage, initializer semantics
-and projected identity cannot be represented by the pinned driver configuration.
-The refusal does not create a Sandbox, deliver credentials, return a Pod selector
-or establish application readiness. A provider implementation that preserves
-those requirements is still needed.
+names missing pass-through fields for the current Pod-shaped contract: temporary
+storage, initializer containers and projected identity. That refusal does not
+establish that identical representation is necessary for Gateway egress. The
+adapter has no native launch/private-delivery or provider-service ingress path.
+It does not create a Sandbox, deliver credentials, return a Pod selector or
+establish application readiness. The RFC proposes application requirements
+instead; unsupported requested identity must still be rejected.
 
 The rest of this trace describes dedicated provisioning. Compute derives
 `provisionHarness` requirements from its ordinary Deployment.
@@ -375,8 +378,9 @@ separate action. The mandatory stock gate stays closed; observed-hook assurance 
 
 ## Debugging and verification
 
-The embedded success path remains blocked by provider semantics and requires
-the selected real Agent workflow described in the
+The embedded adapter has no native startup/private-delivery or provider-service
+ingress implementation. No unavoidable provider egress blocker is established.
+It requires the selected real Agent workflow described in the
 [OpenShell tests](../testing/openshell.md). Model credentials, images and a
 qualified Kubernetes/OpenShell environment are also missing on the authoring
 host. Refusal/contract checks do not prove normal deployment, model execution,
@@ -406,6 +410,8 @@ model execution.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 22:21: Distinguish Gateway egress implementation gaps from Pod-template differences; provider-service ingress and native private delivery remain unfinished. (authoring-run/f7158b2f-3ad7-49d8-8c00-f5b5806013d0 - 60a891cd5)
 
 - 2026-10-28 20:43: Trace the draft embedded contract and fail-closed provider requirements; Linux runtime proof remains blocked. (authoring-run/f7158b2f-3ad7-49d8-8c00-f5b5806013d0 - a0769268509b97b79720df5d1d14f78d491df096)
 

@@ -11,9 +11,10 @@ OCE runtime declares native Dedicated support. The paired
 each Agent revision's providers supply node enrollment and Codex files. These experimental APIs are
 unqualified for production.
 
-Embedded OpenClaw deployment remains blocked. The experimental Sandbox/Compute
-contract below defines combined placement, but the pinned OpenShell provider
-cannot preserve the rendered workload. Dedicated native OpenClaw retains its separate
+Embedded Gateway egress is not implemented by the adapter. The experimental
+contract drafts combined placement, but current admission refuses it. Lack of
+identical Pod-template support does not by itself establish a provider egress
+limitation. Dedicated native OpenClaw retains its separate
 [qualification limits](#qualification-contract).
 
 ## Ownership model
@@ -47,34 +48,44 @@ routing matching the running Agent revision ID before serving traffic. Each Agen
 
 ## Experimental embedded runtime
 
-The experimental `embeddedRuntime` contract passes the ordinary Compute-rendered
-workload without changing `executionMode: embedded`. The intended placement uses
-one Sandbox for the Gateway and built-in Harness. Compute retains ingress,
-storage and activation. This placement is not implemented by the pinned provider.
-The Driver refuses it before creating a Sandbox or returning a Pod selector.
+The goal is Gateway plugin, channel and integration egress through OpenShell's
+existing network enforcement, while retaining embedded execution and native
+model authentication. Gateway and Harness share this runtime; whole-runtime
+placement is the mechanism, not an independent product feature.
 
-OpenShell v0.1.5 accepts PVC volumes in `driver_config`, but cannot express the
-required per-volume `emptyDir` limits or original init-container semantics.
-Projected workload identity is also unsupported. The Driver does not replace
-these requirements with an aggregate container limit, ordinary directories,
-weaker identity, or ad hoc mutations of provider Pods.
+The adapter currently refuses embedded admission and direct capability calls.
+No ordinary embedded Agent deployment or Gateway integration request has passed.
+The draft Compute path still extracts an entire Kubernetes workload and assumes
+direct Pod-Service ingress. These are unfinished integration choices, not proof
+that the provider cannot perform the requested workflow.
 
-A working provider must preserve native startup, configuration/plugin files,
-actual model/channel credentials, workspace and private state. It must also stop
-the predecessor before replacement writers or channel consumers start. These
-requirements remain open in the [implementation plan](../../../specs/plans/0024-embedded-runtime-containment.md).
+OpenShell v0.1.5 supports a canonical workload command, private ExecSandbox stdin
+and PVC mounts. Its lack of arbitrary init-container and emptyDir pass-through
+prevents a verbatim Pod conversion, but trusted sequential initialization and
+supported storage must be assessed against application behavior and actual
+security boundaries. Private stdin alone does not implement native credential
+delivery, immutable configuration or protected Gateway-owner bootstrap.
+Requested projected workload identity remains unsupported; do not drop it from
+an Agent that requires it.
 
-The proposal uses OpenShell networking for Gateway traffic, model calls and tool
-subprocesses, with TLS passthrough. It does not require credential substitution,
-rewritten base URLs or TLS interception. Model, channel and integration credentials
-would remain in the combined runtime trust domain, accessible to code running
-there. No credential delivery or model execution is established by the refusal path.
+OpenShell confines application sockets to loopback. A working integration must
+use its existing HTTP/WebSocket service exposure, not a Service that selects
+the workload Pod. Preserve authenticated Gateway ingress and application
+readiness, including TLS/Host handling. Do not let direct exposure turn
+caller-supplied trusted-proxy identity headers into authorized identities.
 
-Treat runtime compatibility as unverified until the normal Linux Agent deployment
-passes with actual model/tool, channel/plugin/integration, replacement and cleanup
-inputs. Policy admission or a manually started Sandbox process is not that proof.
-See [RFC-0024](../../../specs/rfcs/0024-embedded-runtime-containment.md) and the
-[OpenShell verification guide](../../testing/openshell.md).
+The initial outbound policy may favor compatibility. Use TLS passthrough without
+credential rewriting or a new proxy; preserve the admitted application's trust
+settings rather than inherit injected interception trust accidentally. Retain
+actual native model/channel credentials and approved workspace/private state.
+Do not substitute the dedicated channel proxy or a CredentialSource model path.
+
+[RFC-0024](../../../specs/rfcs/0024-embedded-runtime-containment.md) defines the
+minimum application launch and the required normal-Agent Gateway integration
+request. The [plan](../../../specs/plans/0024-embedded-runtime-containment.md)
+tracks native startup, private delivery, provider ingress and real Linux proof.
+No unavoidable provider egress blocker or mandatory upgrade has been established.
+See the [OpenShell verification guide](../../testing/openshell.md).
 
 ## OpenShell containment facets
 

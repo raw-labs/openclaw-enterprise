@@ -4,104 +4,91 @@ implementation_status: Partially implemented
 author: miguelbranco80
 ---
 
-# Proposal: contain embedded OpenClaw through Sandbox and Compute
+# Proposal: control Gateway egress in embedded OpenClaw
 
 - **ID:** RFC-0024
 - **Created:** 2026-10-28
-- **RFC PR:** [Experimental draft #23](https://github.com/raw-labs/openclaw-enterprise/pull/23)
-- **Implementation plan:** [Embedded runtime containment](../plans/0024-embedded-runtime-containment.md)
+- **RFC PR:** [Gateway egress draft #23](https://github.com/raw-labs/openclaw-enterprise/pull/23)
+- **Implementation plan:** [Gateway egress delivery](../plans/0024-embedded-runtime-containment.md)
+- **Source base:** upstream `openclaw/openclaw-enterprise` at `4837711993d6196c95f9264faf577fc93a2ae6af`.
 
-## Summary
+## Decision
 
-Run the combined embedded OpenClaw Gateway and Harness in one OpenShell-managed Sandbox. OpenClaw Enterprise (OCE) selects this placement through its existing Sandbox and Compute capabilities. The Agent remains in embedded execution mode; there is no additional Gateway or dedicated Harness deployment.
+Run the ordinary embedded OpenClaw Gateway and Harness as one native OpenShell workload so that Gateway plugin, channel and integration requests cross OpenShell's existing network enforcement. Keep embedded execution and its existing model authentication. Whole-runtime placement is the mechanism, not a separate containment product or a requirement to reproduce an identical Kubernetes Pod template.
 
-This is an independent experimental proposal against upstream commit `33c47d4099ec27d7c73abe50137a95cdf6abdecd`. It is not production qualification. Extend the [Sandbox contract](../../docs/reference/drivers/sandbox.md) to accept a complete embedded runtime and reuse the [Compute lifecycle](../../docs/reference/drivers/compute.md), rather than duplicate a sandbox or network proxy in the control plane.
+The experimental contract and Compute wiring are drafted, but the OpenShell adapter still refuses embedded placement. This RFC does not claim a working deployment. Keep the PR draft and unmerged.
 
-## Motivation
+## Problem and outcome
 
-Kubernetes Compute currently owns embedded Gateway Pods. Its optional Sandbox Driver provisions only dedicated Harnesses, leaving the Gateway outside that containment boundary. Channels, plugins, model clients and tools in an embedded process tree therefore cannot share the Sandbox outbound controls.
+The current OpenShell integration provisions dedicated Harnesses, while Kubernetes Compute runs their Gateways separately. In embedded mode, Gateway and Harness share a runtime. Applying OpenShell networking to Gateway traffic therefore requires launching the combined runtime through OpenShell.
 
-Containing that whole process tree reuses existing infrastructure owners. The placement must preserve the normal Agent workflow, not merely demonstrate a manually started process in a Sandbox.
+Success is an ordinary Agent deployment through the API and worker, followed by an outbound request made by a Gateway plugin, channel or integration. Correlate the request with OpenShell's network evidence and the destination's receipt. A model turn or a tool subprocess request alone does not prove Gateway integration egress. Preserve a genuine native model turn as a compatibility check, not as a substitute for the requested outcome.
 
-## Goals
+## Minimum native launch
 
-- Provision embedded OpenClaw through the normal Agent API and worker.
-- Preserve model execution, native channels, plugins, integrations, workspace, private state, startup, replacement, stop and deletion.
-- Apply OpenShell network controls to both Gateway and embedded execution traffic.
-- Start with a compatibility-oriented policy that operators can restrict later.
-- Preserve existing model and channel credential semantics. Do not introduce credential substitution or TLS interception as a consequence of containment.
+Extend the existing Sandbox primitive and keep provider-specific behavior in its OpenShell implementation. Compute owns Agent storage, ingress, activation, replacement and cleanup coordination. The Sandbox owns the combined workload and network enforcement.
 
-## Non-goals
+The application launch contract needs:
 
-Do not split Gateway and Harness credentials, add another execution resource, replace the Credential Proxy, or change the Agent to dedicated execution. Permissive outbound access does not protect against exfiltration. This proposal does not promote the experimental OpenShell deployment into a production profile.
+- The selected runtime image and the existing OCE Gateway supervisor command, including managed-mode selection, plugin setup, native model probe and status reporting.
+- Admitted configuration and plugin material, separate from references to private native model, Gateway, channel and integration credentials.
+- Approved persistent workspace and Gateway-private-state mounts, process identity, resource limits, startup ordering and cleanup behavior.
+- A provider-owned HTTP/WebSocket exposure and an application-readiness operation. Provider Ready status alone is not application readiness.
+- Requested workload identity, when configured. Unsupported identity must be rejected explicitly, not replaced with the controller's identity.
 
-## Proposal
+Do not make `renderedPodSpec`, arbitrary init-container images or the exact `emptyDir` layout the public launch contract. Preserve the application behavior and security reason for each setting. Any replacement must name its owner and enforcement mechanism; renaming an unbounded writable directory does not preserve a storage bound.
 
-### Placement and ownership
+### Startup and private material
 
-The Sandbox Driver exposes an optional embedded-runtime capability with actual provisioning, ownership observation and Pod-selection operations. Admission refuses embedded placement if the selected Driver cannot supply that capability. The platform core depends on this contract, not OpenShell implementation names.
+Use OpenShell's canonical workload command for the long-lived Gateway. A fixed trusted wrapper prepares private state, waits for revision-bound material, then starts the existing OCE supervisor. Do not background the permanent Gateway from an exec session.
 
-Kubernetes Compute renders the ordinary embedded Gateway workload, including its existing entrypoint, native configuration, plugin material, environment, workspace and private-state mounts. It passes those requirements to Sandbox. The Sandbox must preserve every requirement or refuse before provisioning. Unsupported identity projections must not silently disappear.
+OpenShell's ExecSandbox stdin can carry a private document to a fixed receiver. The receiver must enforce the existing 400,000-byte transport cap, reject stale revision/generation material, avoid secret arguments, environment overrides, output and raw errors, and acknowledge installation before application code starts. A lost response must not permit conflicting writes. Secret custody, native auth-file formats, file permissions and the protected Gateway-owner bootstrap remain required work; stdin's existence is not proof that delivery is implemented.
 
-OpenShell implements the capability through its existing Gateway, Workspace, Sandbox API, supervisor, filesystem/process policy, private runtime-material delivery and Kubernetes volume configuration. Reuse revision-scoped resource naming and adoption checks. Do not introduce a second proxy or sandbox implementation.
+Preserve the existing native model credential and selected auth method. Do not select OpenShell inference providers, credential aliases, a different model URL or a dedicated Harness merely to make the launch pass. Embedded code retains its existing shared credential trust domain.
 
-Compute still owns the Agent ingress Service and route, activation decision, persistent claims and lifecycle hooks. Its Service selects only provider Pods whose Sandbox ownership has been independently validated for that Agent revision. Neither a dedicated Gateway Deployment nor a dedicated Harness is created. OpenShell owns the combined process tree and outbound enforcement.
+### Networking and ingress
 
-### Policy
+Gateway Node processes and their integration subprocesses use OpenShell's existing executable/destination policy. The experimental policy may allow broad destinations for compatibility. This proves mediation only when actual requests are observed; it does not establish destination restriction or prevent exfiltration.
 
-Model/tool and Gateway traffic cross the same OpenShell supervisor network boundary. The initial experimental Installation can grant broad outbound destinations and the binaries needed by its runtime. This establishes process and filesystem containment without claiming destination restriction. Operator-selected rules remain the restriction surface.
+Use TLS passthrough for the relevant rules and preserve application certificate verification. OpenShell can inject CA/trust environment even when a route uses `tls: skip`; the trusted launch must restore the admitted application's trust settings rather than inadvertently enable interception. Do not add credential rewriting, a TLS intermediary or another egress proxy.
 
-Use passthrough TLS for this placement: authorize connections without terminating application TLS. Preserve certificate and hostname verification in OpenClaw. Do not generate certificate authorities, alter provider base URLs, rewrite model credentials or install TLS interception because Sandbox was selected. Existing explicitly selected credential integrations retain their own contracts; this proposal does not implicitly select them.
+Stock OpenShell confines workload sockets to loopback. A Kubernetes Service selecting the workload Pod cannot replace its HTTP/WebSocket service exposure. Compute must route its existing authenticated Gateway ingress through that exposure, preserving the expected Host, TLS verification and native WebSocket protocol. Keep the exposure private to the trusted ingress and observation callers, or enforce equivalent application authentication. An externally reachable relay must not make caller-supplied `x-occ-identity` a trusted identity.
 
-A restrictive policy must include destinations used by model clients, channels, plugins, integrations and tool subprocesses. Configuration is not proof that every dynamic destination is known. Initially favor compatibility, report denials through existing Sandbox logs, and restrict only with workflow coverage. An allow rule for one executable is not general tool compatibility.
+Keep Kubernetes tenant isolation outside OpenShell. Do not restore ordinary direct-egress grants to provider-fenced workloads. Native channel credential delivery and Gateway egress must not inherit the dedicated channel proxy as a substitute.
 
-Kubernetes NetworkPolicies remain outer tenant isolation. Compute must not accidentally restore ordinary direct-egress grants to provider-fenced Pods. Ingress permits the existing authenticated Gateway path; it does not expose OpenShell management authority to Agent code.
+## What the provider limitations establish
 
-### Credentials and trust
+The reviewed provider is OpenShell v0.1.5 at `bdb956f2cd65a635f1294fccf1d138d263bf650f`.
 
-Embedded execution already places Gateway, channel and model credentials in one runtime trust domain. A plugin or tool that can read that runtime material remains in that domain. Containment limits effects outside the Sandbox; it does not separate credentials from code inside it.
+| Finding                                                                                                | Consequence for this workflow                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kubernetes `driver_config` has PVC mounts but no arbitrary init containers or `emptyDir` pass-through. | Prevents copying the current Pod template verbatim. It does not alone prevent native Gateway launch or outbound requests. Evaluate trusted sequential setup and supported storage against actual bounds and persistence requirements. |
+| ExecSandbox has private stdin; SandboxSpec has a canonical command.                                    | Supplies mechanisms for bootstrap and workload launch. The OCE adapter still needs to implement private native auth and startup; this is not a model-authentication limitation proved against OpenShell.                              |
+| Workload sockets are loopback-confined; HTTP/WebSocket service routing exists.                         | Invalidates direct Pod-Service ingress. Use the existing provider exposure and preserve ingress authorization, rather than bypass the network boundary.                                                                               |
+| The provider does not accept the requested arbitrary ServiceAccount/token projection.                  | Blocks a launch that actually requests that identity. It is not a blanket explanation for every embedded Agent.                                                                                                                       |
 
-Keep Agent-owned Secret authorization and delivery. The normal Gateway password, model authentication, channel Secrets and integration bindings remain unchanged from the application perspective. Private material delivery must distinguish secret bytes from nonsecret configuration and avoid values in Sandbox specifications, logs, status or published evidence. Secret references are not authority to read another Namespace.
+No unavoidable OpenShell limitation preventing Gateway egress has been established. The current unconditional adapter refusal is unfinished integration, not evidence that the objective is impossible or that a provider upgrade is mandatory.
 
-OpenShell v0.1.5 cannot preserve an arbitrary projected workload identity. Refuse that request explicitly rather than run with a weaker identity or attach controller credentials. Unsupported credential-source/protected-egress profiles must likewise fail at admission, not silently select another model path.
+## Lifecycle and acceptance
 
-### State and lifecycle
+Use existing Agent authorization, immutable revisions and worker claims. Only the selected Agent's Secret references authorize private delivery. Do not publish secret bytes in specs, arguments, status, logs or evidence.
 
-Compute retains Agent-owned persistent workspace and Gateway-private state. OpenShell mounts the approved claims and subpaths; it must not replace them with revision-local ephemeral storage. Native configuration and plugin files are immutable revision inputs. Application state remains writable only in approved private paths.
+Stop the predecessor before a successor writes shared state or starts channel consumers. Activate only after native startup, authentication and provider ownership checks. Stop and deletion remove the serving route and canonical workload before owned storage is retired. Retry uncertain provider outcomes with ownership checks, not duplicate launches or manual Pod edits.
 
-1. The normal API authorizes the Agent and referenced configuration and Secrets, freezes the revision and queues worker deployment.
-2. Compute prepares tenant isolation, claims and private startup material, then asks Sandbox to provision the entire rendered embedded workload.
-3. Sandbox validates placement, materials and ownership, then creates or verifies the revision OpenShell resource. Reconciliation adopts only an identical resource with matching Agent and revision identity.
-4. Compute waits for provider and authenticated runtime readiness. It must not activate merely because a Sandbox exists. Startup failure evidence remains attributable to the deployment; unknown provider state remains pending.
-5. Compute selects verified provider Pods on the existing Gateway Service. Normal Agent requests, workspace operations and native execution continue through that path.
-6. Replacement stops the previous combined runtime before a successor writes shared state or starts channel consumers. Retain private state and workspace. Retirement of a predecessor must not remove successor ingress or provider resources.
-7. Stop removes the serving path and contained process tree. Cleanup confirms termination before removing revision material. Agent deletion removes owned persistent state through Compute cleanup. Namespace cleanup cannot finish while owned Sandboxes remain.
+Required Linux proof:
 
-Cancellation, partial creation and provider outages remain retryable under existing work claims. Cleanup uses the stored revision Driver and resource identity, never a caller-supplied Sandbox name. A missing or ambiguous resource cannot be adopted or declared absent without provider ownership checks.
+1. Deploy an embedded OpenClaw Agent through the normal API and worker, using an authorized native model credential and approved immutable images.
+2. Exercise a real Gateway integration/plugin request to an approved destination; correlate its receipt with OpenShell network evidence. Include a policy denial without weakening application TLS or changing model authentication.
+3. Complete a genuine model turn and an authenticated native Gateway operation. Confirm that no dedicated Gateway/Harness was substituted.
+4. Check retained workspace/private state, replacement exclusivity, startup failure, stop and deletion through the normal lifecycle.
 
-## Delivery and verification
+The authored `embedded-containment` scenario currently checks model/tool and lifecycle outcomes, not the required Gateway integration request. Extend it before presenting it as egress acceptance. Missing images, environment or credentials are verification blockers, not provider-capability evidence.
 
-See the [implementation plan](../plans/0024-embedded-runtime-containment.md). Keep this PR a draft and do not merge it. Source and unit/contract checks are not evidence of a working Linux deployment.
+## Alternatives
 
-Acceptance requires real Linux Kubernetes and OpenShell through normal OCE Agent provisioning/deployment and the worker. Demonstrate an actual model/tool turn, channel/plugin/integration compatibility, workspace and private-state continuity after replacement, failure handling, stop and deletion. Inspect provider resources and Kubernetes workloads to establish that the combined runtime is contained and dedicated execution was not substituted.
+A Gateway-specific egress proxy duplicates OpenShell's existing enforcement and is not selected. Dedicated execution changes the requested topology. Extending OpenShell may become necessary if a concrete behavior or security boundary has no supported equivalent, but identical Pod representation alone does not justify that work.
 
-Use authorized model credentials and immutable runtime/controller images. Do not replace missing prerequisites with fake model or Sandbox results. Record commands, revision, environment, passed/failed/skipped cases and gaps. Live channel posting also requires an approved test destination and credentials.
+## Sources
 
-At proposal submission, this Linux host lacks a prepared Kubernetes/OpenShell stack, model credential, built images and installed JavaScript dependencies. Rootless Docker is available but its required isolation behavior is unverified. Live verification remains blocked; the plan tracks that requirement.
-
-## Rationale and alternatives
-
-**Contain the whole embedded runtime (recommended).** Reuse existing primitives and apply one outbound boundary to Gateway and model/tool traffic. Preserve embedded compatibility at the cost of sharing its credential domain.
-
-**Wrap only the Gateway with the Credential Proxy.** Express outbound authorization where the proxy protocol covers traffic, but this alone does not supply filesystem/process containment or govern arbitrary embedded tool traffic. Reuse it when its credential contract is selected; do not add interception just to make it a placement prerequisite.
-
-**Separate Gateway and Harness.** Permit a different credential boundary, but change execution topology and miss the embedded-runtime goal.
-
-**Add a Gateway-specific sandbox/proxy.** Duplicate capability owners and lifecycle. Reject this alternative for the experiment.
-
-## References
-
-- [Platform architecture](../../docs/design.md)
-- [OpenShell implementation](../../docs/reference/drivers/openshell-sandbox.md)
-- [Reviewer guidance on primitive reuse](https://github.com/openclaw/openclaw-enterprise/pull/3520#issuecomment-6425774660)
-- [Reviewer guidance on proxy authorization](https://github.com/openclaw/openclaw-enterprise/pull/3520#issuecomment-6431170986)
+- [Sandbox contract](../../docs/reference/drivers/sandbox.md), [Compute lifecycle](../../docs/reference/drivers/compute.md), and [OpenShell implementation](../../docs/reference/drivers/openshell-sandbox.md).
+- Pinned OpenShell [launch and exec protocol](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/proto/openshell.proto), [Kubernetes driver](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-driver-kubernetes/src/driver.rs), [socket confinement](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-sandbox/src/linux/socket_confinement.rs), and [service routing](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-server/src/service_routing.rs).
