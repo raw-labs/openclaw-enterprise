@@ -9,6 +9,359 @@ import { protectedText, redactedQaTail, registerQaSecret } from "./qa-secrets.mj
 export const embeddedContainmentTestName =
   "OpenShell embedded OpenClaw retains its normal Agent lifecycle inside one Sandbox";
 
+/** A real HTTP destination, not a replacement Gateway, model, or policy engine. */
+export async function prepareEmbeddedGatewayReceiver(context, { fixture, image }) {
+  const namespace = "oce-embedded-receipt-" + randomUUID().slice(0, 8);
+  const host = "gateway-receipt." + namespace + ".svc.cluster.local";
+  const ports = { control: 8080, policy: 8083, observation: 8081 };
+  const { kubectl, resource, applyManifest } = fixture;
+  // Register the obligation before creation, including an uncertain creation response.
+  context.after(() =>
+    kubectl(
+      "delete",
+      "namespace",
+      namespace,
+      "--ignore-not-found=true",
+      "--wait=true",
+      "--timeout=120s",
+    ),
+  );
+  await kubectl("create", "namespace", namespace);
+  const program = [
+    'const http = require("node:http");',
+    'const instance = require("node:crypto").randomUUID();',
+    "const receipts = [];",
+    'const safeId = value => typeof value === "string" && /^[a-zA-Z0-9_:-]{1,256}$/.test(value) ? value : null;',
+    "for (const port of [8080, 8083]) {",
+    "  http.createServer(async (request, response) => {",
+    '    if (request.method === "GET" && request.url === "/health") { response.end("ready"); return; }',
+    '    if (request.method !== "POST" || !/^\\/receipt\\/[a-f0-9-]{36}$/.test(request.url)) { response.writeHead(404).end(); return; }',
+    "    let bytes = 0; const chunks = [];",
+    "    for await (const chunk of request) {",
+    "      bytes += chunk.length;",
+    "      if (bytes > 65536) { response.writeHead(413).end(); request.destroy(); return; }",
+    "      chunks.push(chunk);",
+    "    }",
+    "    try {",
+    "      const event = JSON.parse(Buffer.concat(chunks).toString());",
+    // Never retain headers, credentials, error text, or arbitrary model output.
+    "      receipts.push({ instance, receivedAt: new Date().toISOString(), port, path: request.url,",
+    "        jobId: safeId(event.jobId), runAtMs: Number.isSafeInteger(event.runAtMs) ? event.runAtMs : null,",
+    '        finished: event.action === "finished", succeeded: event.status === "ok",',
+    '        markerMatches: event.summary === "EMBEDDED_GATEWAY_" + request.url.split("/").at(-1) });',
+    "      if (receipts.length > 32) receipts.shift();",
+    "      response.writeHead(204).end();",
+    "    } catch { response.writeHead(400).end(); }",
+    '  }).listen(port, "0.0.0.0");',
+    "}",
+    "http.createServer((request, response) => {",
+    '  response.setHeader("content-type", "application/json");',
+    "  response.end(JSON.stringify({ instance, receipts }));",
+    '}).listen(8081, "127.0.0.1");',
+  ].join("\n");
+  await applyManifest(
+    JSON.stringify({
+      apiVersion: "v1",
+      kind: "List",
+      items: [
+        {
+          apiVersion: "v1",
+          kind: "Pod",
+          metadata: { name: "gateway-receipt", namespace, labels: { app: "gateway-receipt" } },
+          spec: {
+            automountServiceAccountToken: false,
+            restartPolicy: "Never",
+            securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000 },
+            containers: [
+              {
+                name: "receipt",
+                image,
+                imagePullPolicy: "IfNotPresent",
+                command: ["node", "-e", program],
+                securityContext: {
+                  allowPrivilegeEscalation: false,
+                  readOnlyRootFilesystem: true,
+                  capabilities: { drop: ["ALL"] },
+                },
+                resources: {
+                  requests: { cpu: "20m", memory: "32Mi" },
+                  limits: { cpu: "250m", memory: "128Mi" },
+                },
+                readinessProbe: { httpGet: { path: "/health", port: ports.control } },
+              },
+            ],
+          },
+        },
+        {
+          apiVersion: "v1",
+          kind: "Service",
+          metadata: { name: "gateway-receipt", namespace },
+          spec: {
+            selector: { app: "gateway-receipt" },
+            ports: [
+              { name: "control", port: ports.control, targetPort: ports.control },
+              { name: "policy", port: ports.policy, targetPort: ports.policy },
+            ],
+          },
+        },
+      ],
+    }),
+  );
+  await kubectl(
+    "wait",
+    "-n",
+    namespace,
+    "--for=condition=Ready",
+    "pod/gateway-receipt",
+    "--timeout=180s",
+  );
+  const pod = await resource("pod", "gateway-receipt", namespace);
+  const execReceiver = (...args) =>
+    kubectl("exec", "-n", namespace, "pod/gateway-receipt", "--", ...args);
+  // Both real listeners and Service DNS must work before interpreting a Gateway failure.
+  for (const port of [ports.control, ports.policy]) {
+    const url = "http://" + host + ":" + port + "/health";
+    assert.equal(
+      await execReceiver(
+        "node",
+        "-e",
+        "fetch(" +
+          JSON.stringify(url) +
+          ", { signal: AbortSignal.timeout(5000) }).then(async r => { if (!r.ok) process.exit(1); process.stdout.write(await r.text()); })",
+      ),
+      "ready",
+    );
+  }
+  const read = async () =>
+    JSON.parse(
+      await execReceiver(
+        "node",
+        "-e",
+        'fetch("http://127.0.0.1:8081", { signal: AbortSignal.timeout(5000) }).then(r => r.text()).then(t => process.stdout.write(t))',
+      ),
+    );
+  const { instance } = await read();
+  return { host, ports, podUid: pod.metadata.uid, instance, read };
+}
+
+/** cron webhook delivery runs in the Gateway, after its command child has exited. */
+async function assertGatewayWebhookEgress({ client, topology, combined, waitFor, proof }) {
+  const receiver = topology.gatewayReceiver;
+  assert.ok(receiver, "the selected embedded workflow requires its real destination receiver");
+  const base = "/namespaces/" + topology.namespaceId + "/agents/" + topology.agent.id;
+  const policyPath = base + "/sandbox-policy/networking";
+  const binary = "/usr/local/bin/node";
+  const grant = {
+    id: "gateway-webhook",
+    binary,
+    host: receiver.host,
+    ports: [{ from: receiver.ports.policy, to: receiver.ports.policy }],
+  };
+  const evidence = {
+    integration: "native Gateway cron webhook delivery",
+    revisionId: topology.revision.id,
+    podUid: combined.pod.metadata.uid,
+    sandboxUid: combined.sandbox.metadata.uid,
+    receiverPodUid: receiver.podUid,
+    receiverInstance: receiver.instance,
+    attempts: [],
+  };
+  proof.gatewayEgress = evidence;
+  async function change(additions, expectedAdditions) {
+    const current = await topology.request("GET", policyPath);
+    assert.equal(current.status, 200);
+    assert.deepEqual(
+      current.data.policy.additions,
+      expectedAdditions,
+      "policy replacement must preserve the expected prior additions",
+    );
+    const saved = await topology.request("PUT", policyPath, {
+      expectedVersion: current.data.policy.version,
+      additions,
+    });
+    assert.equal(saved.status, 200);
+    const queued = await topology.request("POST", policyPath + "/apply", {
+      expectedVersion: saved.data.version,
+      revisionId: topology.revision.id,
+    });
+    assert.equal(queued.status, 202);
+    return await waitFor(
+      "the Gateway egress policy to be loaded by OpenShell",
+      async () => {
+        const observed = await topology.request("GET", policyPath);
+        assert.equal(observed.status, 200);
+        const application = observed.data.policy.application;
+        assert.notEqual(
+          application?.state,
+          "failed",
+          "native network-policy application must succeed",
+        );
+        return application?.id === queued.data.application.id &&
+          application.policyVersion === saved.data.version &&
+          application.revisionId === topology.revision.id &&
+          application.state === "applied" &&
+          observed.data.policy.applied?.policyVersion === saved.data.version &&
+          observed.data.policy.applied.revisionId === topology.revision.id
+          ? observed.data.policy
+          : undefined;
+      },
+      120_000,
+    );
+  }
+  async function attempt(phase, port, allowed) {
+    const nonce = randomUUID();
+    const marker = "EMBEDDED_GATEWAY_" + nonce;
+    const path = "/receipt/" + nonce;
+    const startedAt = Date.now();
+    const job = await client.request("cron.add", {
+      name: "embedded-gateway-" + nonce,
+      agentId: "main",
+      enabled: false,
+      schedule: { kind: "every", everyMs: 86_400_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      // This child only prints a nonce. It contains no URL, fetch, credential, or network code.
+      // Native server-cron notifications, not the child or model, perform the HTTP POST.
+      payload: {
+        kind: "command",
+        argv: [binary, "-e", "process.stdout.write(" + JSON.stringify(marker) + ")"],
+      },
+      delivery: { mode: "webhook", to: "http://" + receiver.host + ":" + port + path },
+      failureAlert: false,
+    });
+    assert.ok(job.id);
+    try {
+      const accepted = await client.request("cron.run", {
+        id: job.id,
+        mode: "force",
+        waitTimeoutMs: 5_000,
+      });
+      assert.equal(accepted.ok, true);
+      assert.equal(accepted.enqueued, true);
+      assert.ok(accepted.runId);
+      const run = await waitFor(
+        "native Gateway webhook run completion",
+        async () => {
+          const history = await client.request("cron.runs", {
+            id: job.id,
+            runId: accepted.runId,
+            limit: 1,
+          });
+          return history.entries?.find((row) => row.action === "finished");
+        },
+        120_000,
+      );
+      assert.equal(run.jobId, job.id);
+      assert.equal(run.runId, accepted.runId);
+      assert.ok(run.summary?.includes(marker), "the local payload must execute before delivery");
+      assert.equal(run.delivered, allowed);
+      if (allowed) {
+        assert.equal(run.status, "ok");
+        assert.equal(run.deliveryStatus, "delivered");
+      } else {
+        assert.notEqual(run.deliveryStatus, "delivered");
+      }
+      const records = await waitFor(
+        "matching native OpenShell network evidence",
+        async () => {
+          const logs = await topology.request(
+            "GET",
+            base +
+              "/deployments/" +
+              topology.revision.id +
+              "/runtime/logs?source=sandbox&tailLines=1000",
+          );
+          assert.equal(logs.status, 200);
+          const matching = logs.data.records.filter((row) => {
+            const decision = row.decision;
+            const time = typeof row.time === "number" ? row.time : Date.parse(row.time);
+            return (
+              time >= startedAt &&
+              decision?.binary === binary &&
+              decision.port === port &&
+              decision.decision === (allowed ? "allowed" : "denied") &&
+              (allowed || decision.enforcement === "blocked") &&
+              (decision.host === receiver.host ||
+                logs.data.records.some(
+                  ({ message }) =>
+                    message?.includes("Policy DNS mapped " + receiver.host + " ") &&
+                    message.includes("synthetic=" + decision.host + " "),
+                ))
+            );
+          });
+          return matching.length > 0 ? matching : undefined;
+        },
+        30_000,
+      );
+      const observed = await receiver.read();
+      assert.equal(
+        observed.instance,
+        receiver.instance,
+        "receipt loss from an observer restart is not denial",
+      );
+      const receipts = observed.receipts.filter((row) => row.path === path);
+      assert.equal(
+        receipts.length,
+        allowed ? 1 : 0,
+        "receipt must agree with the exact native run and policy decision",
+      );
+      if (allowed) {
+        assert.equal(receipts[0].jobId, job.id);
+        assert.ok(Number.isSafeInteger(run.runAtMs));
+        assert.equal(receipts[0].runAtMs, run.runAtMs);
+        assert.equal(receipts[0].port, port);
+        assert.equal(receipts[0].finished, true);
+        assert.equal(receipts[0].succeeded, true);
+        assert.equal(receipts[0].markerMatches, true);
+      }
+      const agent = await topology.request("GET", base);
+      assert.equal(agent.status, 200);
+      assert.equal(
+        agent.data.activeRevisionId,
+        topology.revision.id,
+        "live policy changes must not replace the Gateway",
+      );
+      const result = {
+        phase,
+        jobId: job.id,
+        runId: run.runId,
+        port,
+        deliveryStatus: run.deliveryStatus,
+        receipts,
+        network: records.map(({ time, decision }) => ({
+          time,
+          decision: decision.decision,
+          enforcement: decision.enforcement,
+          binary: decision.binary,
+          host: decision.host,
+          port: decision.port,
+          policyGeneration: decision.policyGeneration,
+        })),
+      };
+      evidence.attempts.push(result);
+    } finally {
+      const removed = await client.request("cron.remove", { id: job.id });
+      assert.equal(removed.ok, true);
+    }
+  }
+  // Keep the ordinary model destination and control port unchanged while one exact
+  // Gateway executable/destination/port moves deny -> allow -> deny through API/worker.
+  await attempt("installation-control", receiver.ports.control, true);
+  await attempt("default-denied", receiver.ports.policy, false);
+  assert.equal(
+    (await topology.request("PATCH", policyPath + "/editing", { enabled: true })).status,
+    200,
+  );
+  const granted = await change([grant], []);
+  await attempt("agent-granted", receiver.ports.policy, true);
+  const revoked = await change([], [grant]);
+  await attempt("agent-revoked", receiver.ports.policy, false);
+  await attempt("control-after-revocation", receiver.ports.control, true);
+  evidence.grantedPolicy = granted.applied;
+  evidence.revokedPolicy = revoked.applied;
+  return evidence;
+}
+
 /** The QA entrypoint owns only its child; prepared infrastructure keeps its existing owner. */
 export async function verifyQaEmbeddedContainment(artifacts) {
   const envFile = process.env.OCC_TEST_QA_SANDBOX_ENV;
@@ -88,10 +441,11 @@ ${output.stderr ?? ""}`,
   return {
     evidence,
     outcome:
-      "embedded Agent, real model and exec, retained session/workspace, replacement and cleanup",
+      "Gateway-owned cron webhook receipts and OpenShell allow/deny/revocation, real model and exec, retained state, replacement and cleanup",
     unverified: [
       "channel delivery",
-      "plugin installation and external integrations",
+      "selected plugin installation and third-party integrations",
+      "TLS webhook delivery (the disposable receiver uses credential-free HTTP)",
       "production qualification",
     ],
   };
@@ -115,7 +469,8 @@ export async function assertEmbeddedContainmentWorkflow(
     model: process.env.OCC_TEST_OPENAI_MODEL,
     unverified: [
       "channel delivery",
-      "plugin installation and external integrations",
+      "selected plugin installation and third-party integrations",
+      "TLS webhook delivery (the disposable receiver uses credential-free HTTP)",
       "production qualification",
     ],
   };
@@ -238,6 +593,10 @@ export async function assertEmbeddedContainmentWorkflow(
     }
   }
   let client = await connectGateway();
+  await assertGatewayWebhookEgress({ client, topology, combined, waitFor, proof });
+  const afterEgress = await readCombined(topology.revision);
+  assert.equal(afterEgress.pod.metadata.uid, combined.pod.metadata.uid);
+  assert.equal(afterEgress.sandbox.metadata.uid, combined.sandbox.metadata.uid);
   const { createNativePluginAssertions } = await import("./plugin-driver-real.mjs");
   const execCombined = async (_agent, args) => ({
     label: `${placement}/${combined.pod.metadata.name}`,

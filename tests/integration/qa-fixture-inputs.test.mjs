@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
@@ -306,6 +306,31 @@ test("QA selection keeps prerequisite credentials and reports omitted coverage",
       validateQaInputs(full, Object.fromEntries(full.requiredEnv.map((name) => [name, "fixture"]))),
     /explicit authorization/,
   );
+});
+
+test("explicit embedded OpenShell selection fails rather than skipping missing prerequisites", () => {
+  const file = new URL("./sandbox-driver-openshell-k3d-real.test.mjs", import.meta.url);
+  // No inherited model keys, kubeconfig, or integration flags may turn this into a
+  // credentialed run. Explicit scenario selection alone must demand its inputs.
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--test",
+      "--test-reporter=tap",
+      "--test-name-pattern=^OpenShell embedded OpenClaw retains its normal Agent lifecycle inside one Sandbox$",
+      file.pathname,
+    ],
+    {
+      encoding: "utf8",
+      timeout: 20_000,
+      env: { PATH: process.env.PATH, OCC_TEST_OPENSHELL_SCENARIO: "embedded-containment" },
+    },
+  );
+  assert.equal(child.status, 1, "a selected workflow cannot report a skip as success");
+  const output = child.stdout + child.stderr;
+  assert.match(output, /OPENAI_API_KEY is required for embedded OpenClaw/);
+  assert.match(output, /# fail 1\b/);
+  assert.match(output, /# skipped 0\b/);
 });
 
 test("hosted QA materializes only selected credentials and rejects missing selected inputs", async (t) => {

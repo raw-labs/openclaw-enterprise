@@ -70,6 +70,7 @@ import { availablePort } from "../helpers/available-port.mjs";
 import {
   assertEmbeddedContainmentWorkflow,
   embeddedContainmentTestName,
+  prepareEmbeddedGatewayReceiver,
 } from "../helpers/qa-embedded-containment.mjs";
 import { redactQaError, registerQaSecret } from "../helpers/qa-secrets.mjs";
 import {
@@ -137,6 +138,7 @@ const toolProbeCurlMaxSeconds = 8;
 const toolAEchoPath = "/echo-a";
 const codexCommandGraceMs = (toolProbeCurlMaxSeconds + 6) * 1_000;
 const selected =
+  embeddedContainmentOnly ||
   process.env.OCC_TEST_OPENSHELL_K3D_REAL === "1" ||
   [
     kubeconfigPath,
@@ -2368,6 +2370,39 @@ async function prepareProductionInstallation(
     openShellRuntimeClass,
     cluster: "k3d-openshell-sandboxdriver",
   });
+  const gatewayReceiver =
+    executionMode === "embedded"
+      ? await prepareEmbeddedGatewayReceiver(context, { fixture, image: gatewayImage })
+      : undefined;
+  if (gatewayReceiver !== undefined) {
+    const endpoint = new URL(nativeBaseUrl);
+    // Use ordinary Installation policy, not a provider Pod patch or a replacement
+    // inference provider. The native model still uses its admitted API key and TLS.
+    configuration.drivers.sandbox.configuration.policy.networkPolicies.push(
+      {
+        name: "embedded-native-model",
+        binaries: [{ path: "/usr/local/bin/node" }],
+        endpoints: [
+          { host: endpoint.hostname, ports: [Number(endpoint.port || 443)], tls: "skip" },
+        ],
+      },
+      {
+        name: "embedded-gateway-control",
+        binaries: [{ path: "/usr/local/bin/node" }],
+        endpoints: [
+          { host: gatewayReceiver.host, ports: [gatewayReceiver.ports.control], tls: "skip" },
+        ],
+      },
+    );
+    configuration.sandboxNetworkPolicyCeiling = [
+      {
+        id: "gateway-webhook",
+        binary: "/usr/local/bin/node",
+        host: gatewayReceiver.host,
+        ports: [{ from: gatewayReceiver.ports.policy, to: gatewayReceiver.ports.policy }],
+      },
+    ];
+  }
   // The Codex scenario runs a second Agent beside the first. Each Agent holds about 7 GiB of
   // limits: its 4 GiB Gateway, its Harness and the 1 GiB OpenShell supervisor. A rolling
   // replacement of a Gateway briefly holds another 4 GiB.
@@ -2767,6 +2802,12 @@ async function prepareProductionInstallation(
   }
   if (executionMode === "embedded") {
     nativeConfiguration.agents.defaults.workspace = workspaceMountPath;
+    // Native integration with an exact private receiver exemption, not a global
+    // SSRF/TLS bypass. No model/channel credentials are sent to this HTTP fixture.
+    nativeConfiguration.cron = {
+      enabled: true,
+      webhookSsrfPolicy: { allowedHostnames: [gatewayReceiver.host] },
+    };
   }
   const workspaceFiles =
     initialWorkspaceFiles ??
@@ -2949,6 +2990,7 @@ async function prepareProductionInstallation(
       gatewayPlacement,
       platformNamespace,
       gatewayApiKeySecretName: workspaceGateway.apiKeySecretName,
+      gatewayReceiver,
       gatewayAdminUrl: `wss://${workspaceGatewayHostname(workspaceGateway)}:${workspaceGateway.routing.endpointPort}/namespaces/${namespaceId}/agents/${agent.data.id}`,
     };
   }

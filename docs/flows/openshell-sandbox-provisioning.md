@@ -380,8 +380,11 @@ separate action. The mandatory stock gate stays closed; observed-hook assurance 
 
 The embedded adapter has no native startup/private-delivery or provider-service
 ingress implementation. No unavoidable provider egress blocker is established.
-It requires the selected real Agent workflow described in the
-[OpenShell tests](../testing/openshell.md). Model credentials, images and a
+The selected real Agent workflow in the [OpenShell tests](../testing/openshell.md)
+now requires native Gateway cron-webhook receipts and matching OpenShell network
+decisions through Agent grant and revocation. The command child only prints a
+nonce; the Gateway sends HTTP after that child exits. These are acceptance
+assertions, not a successfully deployed path. Model credentials, images and a
 qualified Kubernetes/OpenShell environment are also missing on the authoring
 host. Refusal/contract checks do not prove normal deployment, model execution,
 channel/plugin compatibility, state continuity or cleanup.
@@ -410,6 +413,8 @@ model execution.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 23:16: Record authored native Gateway webhook acceptance and its unverified runtime boundary; production admission still refuses embedded launch. (authoring-run/f7158b2f-3ad7-49d8-8c00-f5b5806013d0 - af01c1e87)
 
 - 2026-10-28 22:21: Distinguish Gateway egress implementation gaps from Pod-template differences; provider-service ingress and native private delivery remain unfinished. (authoring-run/f7158b2f-3ad7-49d8-8c00-f5b5806013d0 - 60a891cd5)
 

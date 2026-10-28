@@ -60,7 +60,7 @@ test(
       await stage(
         context,
         "kubernetes/OpenClaw/OpenShell",
-        "embedded Sandbox model, workspace, replacement and cleanup",
+        "Gateway integration egress policy, native model, workspace, replacement and cleanup",
         () => verifyQaEmbeddedContainment(artifacts),
         "embedded-containment",
       );

@@ -62,19 +62,26 @@ do not create an Agent or make a model call. They default to Docker; set
 
 ## Experimental embedded acceptance
 
-The explicit `embedded-containment` QA selector exercises the normal Agent API
-and worker, authenticated Gateway model/tool turns, retained workspace and native
-session, replacement, stop and deletion. It does not use compatibility bridges
-or a manually started Sandbox. It binds an actual native model key, not a
-substituted CredentialSource. Channel delivery and plugin/integration installation
-remain separate, unverified outcomes.
+The explicit `embedded-containment` QA selector requires normal Agent API/worker
+deployment, authenticated Gateway model/tool turns, retained workspace and native
+session, replacement, stop and deletion. Its native Gateway cron webhook posts
+a nonce to a disposable HTTP receiver; the command child only prints that nonce.
+Assertions require destination receipts and matching OpenShell decisions for an
+Installation allow, default denial, Agent grant and revocation. Policy changes
+must complete for the selected revision without replacing the Gateway.
+
+The scenario uses no compatibility bridge, manually started Sandbox or substituted
+CredentialSource. It requires an actual native model key. Channel delivery, selected
+plugin installation, third-party integrations and TLS webhook delivery remain
+separate, unverified outcomes; the receiver uses credential-free HTTP.
 
 **This scenario is not passing.** The OCE adapter still refuses embedded launch;
 this is not evidence that OpenShell cannot provide Gateway egress. See the
 [implementation gaps](../../specs/plans/0024-embedded-runtime-containment.md#current-evidence-and-substantive-blockers).
-The scenario also lacks a Gateway-owned plugin/integration outbound request and
-correlated OpenShell network evidence. A model/tool turn does not supply that proof.
-The scenario expects successful deployment and does not count that refusal as
+The Gateway webhook assertions are authored but have not run against OpenShell.
+A receiver smoke check or model/tool turn does not supply that proof. Explicit
+selection with missing prerequisites fails rather than silently skipping.
+The scenario expects successful deployment and does not count adapter refusal as
 success. It is excluded from default QA and the default OpenShell run.
 
 After a provider implementation is qualified, prepare disposable infrastructure
