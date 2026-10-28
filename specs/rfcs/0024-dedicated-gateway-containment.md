@@ -68,15 +68,18 @@ separate capability with separate admission and custody.
 
 ### Ownership and placement
 
-Compute renders the normal dedicated Gateway workload and passes the selected
+Compute derives the normal dedicated Gateway requirements and passes the selected
 Sandbox the information needed to contain that workload. The Sandbox's optional
 Gateway capability is distinct from its Harness provisioning capability.
 Installation opt-in must select a supported capability explicitly; a missing
 capability or invalid combination fails before launching an uncontained Gateway.
 Absence of opt-in preserves the existing deployment path.
 
-The contract must preserve the workload's command, configuration, Secret
-references, volumes, init steps, readiness probes and resource limits. OpenShell
+The integration must preserve the workload's startup behavior, configuration,
+credential custody, persistent state, readiness and resource limits. It may
+translate Kubernetes projections and init steps into supported Sandbox inputs;
+copying the complete Pod template is not required. A translation must establish
+equivalent behavior rather than silently dropping required inputs. OpenShell
 owns the supervisor, runtime containment, translated network policy and any
 provider-specific resources. Compute owns the Gateway Service and route, workload
 identity, PVCs and its reconciliation result. Neither owner may silently fall

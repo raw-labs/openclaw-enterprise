@@ -39,8 +39,9 @@ and verification evidence; incomplete runtime proof keeps delivery in progress.
 
 1. Extend the generic Sandbox/Compute integration and opt-in configuration.
    Validate unsupported selections before any uncontained launch.
-2. Wrap the ordinary Gateway workload in OpenShell containment. Preserve the
-   image, configuration, mounts, init steps, Secrets, probes and resource limits.
+2. Provision the Gateway through OpenShell containment. Preserve its image,
+   configuration, state, credential custody, startup behavior, readiness and
+   resource limits, translating projections through supported provider inputs.
    Reuse the existing supervisor network proxy; do not add a forwarder.
 3. Collect enabled channels' destination requirements. Keep compatibility
    network access explicit and distinct from credential operations.
