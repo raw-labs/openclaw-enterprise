@@ -63,6 +63,15 @@ test(
         () => verifyQaSandboxPolicy(artifacts),
       );
     }
+    if (selection.gatewayDestinations) {
+      const { verifyQaSandboxPolicy } = await import("../helpers/qa-sandbox-policy.mjs");
+      await stage(
+        context,
+        "kubernetes/Codex/OpenShell",
+        "experimental Gateway destination proxy and real CNI isolation",
+        () => verifyQaSandboxPolicy(artifacts, "gateway-destinations"),
+      );
+    }
     for (const installation of selection.installations.filter((value) =>
       selection.cells.some((cell) => cell.installation === value && cell.scenarios.length > 0),
     )) {

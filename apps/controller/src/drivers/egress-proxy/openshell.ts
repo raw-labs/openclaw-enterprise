@@ -1,3 +1,8 @@
+import {
+  gatewayDestinationsOptions,
+  openShellGatewayDestinations,
+  type OpenShellGatewayDestinationsOptions,
+} from "./gateway-destinations.ts";
 import { wirePolicy } from "./openshell-wire-policy.ts";
 import type { EgressAuthorityConfiguration } from "../../composition/egress-authority.ts";
 import { bindOpenShellExchange } from "./openshell-exchange-binding.ts";
@@ -270,17 +275,50 @@ export class OpenShellCredentialProxyDriver implements CredentialProxyDriver {
   static readonly configurationSchema = {
     type: "object",
     additionalProperties: false,
-    required: ["middlewareName", "authorityScope"],
     properties: {
-      middlewareName: { type: "string", minLength: 1 },
-      repositoryMiddlewareName: { type: "string", minLength: 1 },
-      observedHookPreviewWorkspace: { type: "string", maxLength: 19, minLength: 1 },
-      authorityScope: { type: "string", const: "execution" },
+      gatewayDestinations: { type: "object" },
+      middlewareName: { type: "string" },
+      repositoryMiddlewareName: { type: "string" },
+      observedHookPreviewWorkspace: { type: "string" },
+      authorityScope: { type: "string" },
     },
+    anyOf: [
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["gatewayDestinations"],
+        properties: { gatewayDestinations: { type: "object" } },
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["middlewareName", "authorityScope"],
+        properties: {
+          middlewareName: { type: "string", minLength: 1 },
+          repositoryMiddlewareName: { type: "string", minLength: 1 },
+          observedHookPreviewWorkspace: { type: "string", maxLength: 19, minLength: 1 },
+          authorityScope: { type: "string", const: "execution" },
+        },
+      },
+    ],
   };
 
   static validateConfiguration(configuration: unknown): readonly ErrorDetail[] {
     const value = asRecord(configuration);
+    if (value?.gatewayDestinations !== undefined && Object.keys(value).length === 1) {
+      try {
+        gatewayDestinationsOptions(value.gatewayDestinations);
+        return [];
+      } catch {
+        return [
+          {
+            path: "/gatewayDestinations",
+            code: "INVALID_VALUE",
+            message: "Invalid stock Gateway destination proxy configuration.",
+          },
+        ];
+      }
+    }
     if (
       !value ||
       Object.keys(value).some(
@@ -661,4 +699,38 @@ export class OpenShellCredentialProxyDriver implements CredentialProxyDriver {
       throw new Error("Protected Sandbox ownership differs from admission.");
     }
   }
+}
+
+/** Destination-only view of the selected OpenShell Driver; no credential authority is installed. */
+export function createOpenShellDestinationProxy(
+  options: OpenShellGatewayDestinationsOptions,
+  selection: {
+    readonly id: string;
+    readonly backend: Backend<OpenShellGateway>;
+    readonly sandbox: SandboxDriver;
+  },
+): CredentialProxyDriver {
+  if (!selection.sandbox.gatewayProxy) {
+    throw new Error("The selected Sandbox must own the Gateway proxy attachment.");
+  }
+  const refuse = async (): Promise<never> => {
+    throw new Error("Destination-only OpenShell does not provide protected credential execution.");
+  };
+  return Object.freeze({
+    id: selection.id,
+    capability: "credential_proxy" as const,
+    implementation: "openshell",
+    gatewayDestinations: openShellGatewayDestinations(options, selection.id, selection.sandbox.id),
+    sourceControl: Object.freeze({
+      backend: { id: selection.backend.id, generation: 1 },
+      sender: { id: selection.backend.id + "/supervisor", generation: 1 },
+      resolver: { id: selection.id + "/resolver", generation: 1 },
+      providers: [],
+      assertAvailable: refuse,
+    }),
+    configureRevision: refuse,
+    wiringStatus: refuse,
+    verifyInstallation: refuse,
+    removeRevision: refuse,
+  });
 }

@@ -20,6 +20,12 @@ it does not run a credential renewal loop.
 Credential Proxy does not replace every Credential Gateway. Existing static
 Gateway-owned attachments retain their own delivery path.
 
+The draft optional `gatewayDestinations` capability admits nonsecret Gateway
+destination permission, not credential exchange or protected execution. It is
+**experimental and UNVERIFIED**, with no supported production mode. See the
+[source flow](../../flows/gateway-outbound-destinations.md) for the paired Sandbox
+attachment and Compute ownership.
+
 ## Interface
 
 The public [contracts entry point](../../../packages/contracts/src/index.ts)

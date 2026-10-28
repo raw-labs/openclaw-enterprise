@@ -2,16 +2,20 @@
  * writers and NetworkPolicy enforcement remain separate trust boundaries.
  *
  * This module is the single home for network profile constants. Compute-owned
- * workloads carry the ordinary profile. Harness Pods provisioned by a
- * SandboxDriver carry the provider-fenced profile: they receive Compute's
- * ingress grants (Gateway transport and plugin status) and only the exact
+ * workloads use the ordinary profile unless a revision admits mandatory Gateway
+ * destination routing; that Gateway receives only explicit revision grants.
+ * SandboxDriver Harness Pods use the provider-fenced profile. They receive
+ * Compute's ingress grants (Gateway transport and plugin status) and only the exact
  * workspace-node enrollment egress grant. The provider owns every other egress
  * decision. */
 export const NETWORK_PROFILE_LABEL = "openclaw.dev/network-profile";
 export const ORDINARY_NETWORK_PROFILE = "broad-egress-v1";
 export const PROVIDER_FENCED_NETWORK_PROFILE = "provider-fenced-v1";
+export const GATEWAY_DESTINATIONS_NETWORK_PROFILE = "gateway-destinations-v1";
 export type NetworkProfile =
-  typeof ORDINARY_NETWORK_PROFILE | typeof PROVIDER_FENCED_NETWORK_PROFILE;
+  | typeof ORDINARY_NETWORK_PROFILE
+  | typeof PROVIDER_FENCED_NETWORK_PROFILE
+  | typeof GATEWAY_DESTINATIONS_NETWORK_PROFILE;
 
 /** Grants require their exact profile. Scope labels cannot override it. */
 export function profileNetworkPolicySelector(

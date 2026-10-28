@@ -97,6 +97,7 @@ import {
   startupConfiguration,
 } from "./startup-file.ts";
 import { OCCPluginDriver, CodexPluginDriver } from "../drivers/plugin/index.ts";
+import { SlackChannelDriver } from "../drivers/channel/slack.ts";
 import { createGatewayNodeEnrollment } from "../gateway/node-enrollment-client.ts";
 import { readWorkspaceFilesApiKey } from "./workspace-files.ts";
 import { TokenService } from "../backends/token-service/service.ts";
@@ -601,6 +602,7 @@ export async function loadInstallationConfiguration(options: {
   readonly createSandboxDriver?: (
     selection: SelectedDriverConfiguration,
     backend: Backend<OpenShellGateway> | undefined,
+    runtimeSelection?: OpenShellSandboxDriverSelection,
   ) => SandboxDriver;
 }): Promise<InstallationRuntimeDrivers | undefined> {
   const environment = options.environment ?? process.env;
@@ -1147,7 +1149,8 @@ export async function loadInstallationConfiguration(options: {
     sandboxPackage === undefined &&
     (!openShell ||
       !sandbox ||
-      options.createSandboxDriver !== undefined ||
+      (options.createSandboxDriver !== undefined &&
+        proxySelection.configuration.gatewayDestinations === undefined) ||
       !kubernetesCompute ||
       openShellBackend?.configuration.endpoint === undefined ||
       !openShellBackend.configuration.endpoint.startsWith("https://") ||
@@ -1189,7 +1192,12 @@ export async function loadInstallationConfiguration(options: {
         backend: openShell!,
         operatorOwnedKubernetesResources: preprovisionedNamespace !== undefined,
         createSandbox: (configuration, selection) =>
-          new bundledSandboxPackage!.OpenShellSandboxDriver(configuration, selection),
+          options.createSandboxDriver === undefined
+            ? new bundledSandboxPackage!.OpenShellSandboxDriver(configuration, selection)
+            : validateCreatedSandboxDriver(
+                options.createSandboxDriver({ ...sandbox, configuration }, openShell, selection),
+                sandbox,
+              ),
         repository: repositoryDelivery,
         proxy: {
           id: proxySelection.id,
@@ -1277,6 +1285,7 @@ export async function loadInstallationConfiguration(options: {
         id: compute.id,
         implementation: compute.implementation,
         lifecycleDrivers: [configurationDriver],
+        channelDrivers: [new SlackChannelDriver()],
         ...(sandboxDriver === undefined ? {} : { sandboxDriver }),
         ...(credentialGatewayDriver === undefined ? {} : { credentialGatewayDriver }),
         ...(protectedDriver === undefined ? {} : { protectedDriver }),

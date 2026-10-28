@@ -6,7 +6,15 @@ import { resolve } from "node:path";
 import { protectedText, redactedQaTail } from "./qa-secrets.mjs";
 
 /** Run the real OpenShell workflow against explicitly prepared, disposable infrastructure. */
-export async function verifyQaSandboxPolicy(artifacts) {
+export async function verifyQaSandboxPolicy(artifacts, scenario = "network-policy") {
+  assert.ok(["network-policy", "gateway-destinations"].includes(scenario));
+  const gatewayDestinations = scenario === "gateway-destinations";
+  if (gatewayDestinations) {
+    assert.ok(
+      process.env.OCC_TEST_QA_GATEWAY_DESTINATIONS_CONFIG,
+      "OCC_TEST_QA_GATEWAY_DESTINATIONS_CONFIG must select explicit proxy and public probe inputs",
+    );
+  }
   const token = await protectedText(process.env.OCC_TEST_QA_CODEX_TOKEN_FILE, "Codex credential");
   const envFile = process.env.OCC_TEST_QA_SANDBOX_ENV;
   assert.ok(envFile, "OCC_TEST_QA_SANDBOX_ENV must select the prepared OpenShell file environment");
@@ -15,7 +23,14 @@ export async function verifyQaSandboxPolicy(artifacts) {
     CODEX_ACCESS_TOKEN: token,
     OCC_TEST_OPENSHELL_K3D_REAL: "1",
     OCC_TEST_OPENSHELL_HARNESS: "codex",
-    OCC_TEST_OPENSHELL_SCENARIO: "network-policy",
+    OCC_TEST_OPENSHELL_SCENARIO: scenario,
+    ...(gatewayDestinations
+      ? {
+          OCC_TEST_OPENSHELL_GATEWAY_DESTINATIONS_CONFIG: resolve(
+            process.env.OCC_TEST_QA_GATEWAY_DESTINATIONS_CONFIG,
+          ),
+        }
+      : {}),
   };
   // This is a separate test process, not a recursive run inside the matrix worker.
   delete env.NODE_TEST_CONTEXT;
@@ -23,6 +38,7 @@ export async function verifyQaSandboxPolicy(artifacts) {
     `--env-file=${resolve(envFile)}`,
     "--test",
     "--test-reporter=tap",
+    `--test-name-pattern=^${gatewayDestinations ? "OpenShell Agent Gateway destination proxy lifecycle" : "OpenShell Agent network policy lifecycle"}$`,
     "tests/integration/sandbox-driver-openshell-k3d-real.test.mjs",
   ];
   let output;
@@ -54,11 +70,24 @@ export async function verifyQaSandboxPolicy(artifacts) {
     lines: 100_000,
     lineChars: 8000,
   }).join("\n");
-  const evidence = resolve(artifacts, "sandbox-policy-runtime.log");
+  const evidence = resolve(
+    artifacts,
+    `${gatewayDestinations ? "gateway-destinations" : "sandbox-policy"}-runtime.log`,
+  );
   await writeFile(evidence, text, { mode: 0o600 });
   assert.equal(failed, false, `OpenShell workflow failed; see ${evidence}`);
-  assert.match(text, /ok 1 - OpenShell Agent network policy lifecycle/);
+  assert.ok(
+    text.includes(
+      `ok 1 - ${gatewayDestinations ? "OpenShell Agent Gateway destination proxy lifecycle" : "OpenShell Agent network policy lifecycle"}`,
+    ),
+    "the selected real Agent scenario must pass",
+  );
   assert.match(text, /# pass 1\b/);
   assert.match(text, /# skipped 0\b/);
-  return { evidence, outcome: "real Agent defaults, preview, save, apply, revoke and isolation" };
+  return {
+    evidence,
+    outcome: gatewayDestinations
+      ? "real Agent admission, Gateway proxy transport, direct-egress denial, revision isolation, outage and cleanup"
+      : "real Agent defaults, preview, save, apply, revoke and isolation",
+  };
 }

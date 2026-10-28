@@ -3,6 +3,10 @@
 Configure tenant network boundaries, private Agent routes, and existing
 namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
 
+The draft `runtime.gatewayOutbound.destinations` setting is **experimental and
+UNVERIFIED**, not supported for production. See the
+[source flow](../../../flows/gateway-outbound-destinations.md).
+
 ## Networking
 
 Configure the cluster DNS namespace and Pod labels and the gateway port.

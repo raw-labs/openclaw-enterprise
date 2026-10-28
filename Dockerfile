@@ -37,6 +37,7 @@ COPY --from=console-build --chown=node:node /app/apps/controller/src/console/ind
 COPY --chown=node:node migrations migrations
 COPY --chown=node:node scripts scripts
 COPY --chown=node:node deploy/presets deploy/presets
+COPY --chown=node:node deploy/runtime/gateway-proxy deploy/runtime/gateway-proxy
 RUN mkdir -p /app/.development/configurations /var/lib/openclaw/bootstrap \
     && chown -R node:node /app/.development \
     && chown 1000:1000 /var/lib/openclaw/bootstrap \
@@ -81,6 +82,7 @@ COPY --chown=node:node scripts/lib/bootstrap-configuration.mjs scripts/lib/boots
 COPY --chown=node:node scripts/auth-maintain.mjs scripts/auth-maintain.mjs
 COPY --chown=node:node scripts/lib/auth-maintain-arguments.mjs scripts/lib/auth-maintain-arguments.mjs
 COPY --chown=node:node deploy/presets deploy/presets
+COPY --chown=node:node deploy/runtime/gateway-proxy deploy/runtime/gateway-proxy
 COPY --chown=node:node scripts/production-healthcheck.mjs scripts/production-healthcheck.mjs
 # As in the development stage: precompiled route validators and serializers for this image.
 RUN node apps/controller/src/precompile-route-schemas.mjs

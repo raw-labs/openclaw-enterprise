@@ -1,3 +1,11 @@
+export type {
+  GatewayDestination,
+  GatewayDestinationPlan,
+  GatewayDestinationControl,
+  GatewayProxyAttachmentContext,
+  GatewayProxyAttachment,
+} from "./gateway-destinations.ts";
+
 import type {
   CredentialPolicyWithdrawalOptions,
   ExecutionAdmission,
@@ -1932,6 +1940,8 @@ export interface SandboxRepositoryAccess {
 }
 
 export interface SandboxDriver extends Driver {
+  /** Optional proxy-only network attachment. Does not contain or relocate the Gateway. */
+  readonly gatewayProxy?: import("./gateway-destinations.ts").GatewayProxyAttachment;
   readonly repositoryAccess?: SandboxRepositoryAccess;
   /** Explicit support; a networking facet alone never grants editable policy. */
   readonly networkPolicy?: {
@@ -2153,6 +2163,12 @@ export type ChannelCredentialReader = (
 
 export interface ChannelDriver extends Driver {
   readonly capability: "channel";
+  /** Providers whose Gateway-side network requirements this selected Driver owns. */
+  readonly gatewayProviders?: readonly string[];
+  /** Nonsecret requirements for enabled revision configuration, separate from API lookup egress. */
+  gatewayDestinations?(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly import("./gateway-destinations.ts").GatewayDestination[];
   validateCredentials?(
     values: Readonly<Record<string, unknown>>,
     withSecret: ChannelCredentialReader,

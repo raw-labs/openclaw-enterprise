@@ -1,0 +1,12 @@
+{
+  "upstream": "https://github.com/NVIDIA/OpenShell",
+  "version": "0.1.5",
+  "revision": "bdb956f2cd65a635f1294fccf1d138d263bf650f",
+  "policyRules": {
+    "path": "sandbox-policy.rego",
+    "upstreamPath": "crates/openshell-supervisor-network/data/sandbox-policy.rego",
+    "sha256": "f60349dcfe8f42ff6c6957fd860cbfc1aef536c6f22740025c6771745f637c38"
+  },
+  "supervisorImage": "ghcr.io/nvidia/openshell/supervisor:0.1.5@sha256:fabcd01f656e9d23df4386f82e80b4f48b90f3452d7d5c58889007643a069161",
+  "relayImage": "alpine/socat:1.8.0.3@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e"
+}

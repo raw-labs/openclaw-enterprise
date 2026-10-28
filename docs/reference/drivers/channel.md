@@ -13,6 +13,12 @@ display candidates with stable provider IDs. It does not send messages
 or grant channel access. The current controller selects the bundled Slack
 implementation for directory lookup; see [Driver selection](selection.md).
 
+The draft optional `gatewayProviders` and `gatewayDestinations(configuration)`
+members contribute nonsecret provider destination requirements from enabled
+revision configuration. These requirements grant neither channel access nor
+provider actions. Their Gateway proxy path is **experimental and UNVERIFIED**;
+see the [source flow](../../flows/gateway-outbound-destinations.md).
+
 ## Interface
 
 The [shared interface](../../../packages/contracts/src/index.ts) requires a

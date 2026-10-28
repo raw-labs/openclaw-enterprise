@@ -1,3 +1,4 @@
+import { gatewayDestinationsOptions } from "./gateway-destinations.ts";
 import type { OpenShellBackendDefinition } from "@openclaw-enterprise/contracts";
 import {
   closed,
@@ -19,6 +20,16 @@ export function openShellProxyConfiguration(
   repository: OpenShellGitRuntimeConfiguration | undefined,
 ) {
   const egress = object(input, "drivers.credential_proxy.configuration");
+  if (
+    egress.gatewayDestinations !== undefined &&
+    egress.middlewareName === undefined &&
+    !repository
+  ) {
+    closed(egress, ["gatewayDestinations"], "drivers.credential_proxy.configuration");
+    return {
+      policy: { gatewayDestinations: gatewayDestinationsOptions(egress.gatewayDestinations) },
+    };
+  }
   if (repository) {
     closed(egress, ["observedHookPreviewWorkspace"], "drivers.credential_proxy.configuration");
     const preview =

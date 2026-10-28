@@ -84,6 +84,8 @@ are implemented. Single-cluster Kubernetes execution places Gateway and Harness 
 namespace with separate Pods, identities and storage. External access-gateway admission, workload
 token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental.
+The separate [Gateway destination proxy experiment](flows/gateway-outbound-destinations.md)
+is draft-only and **UNVERIFIED**. It adds no supported production egress mode.
 
 <a id="current-limitations"></a>
 <a id="near-term-future-work"></a>

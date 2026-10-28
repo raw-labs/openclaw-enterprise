@@ -12,7 +12,12 @@ import type { EgressAuthorityConfiguration } from "../../composition/egress-auth
 import type { RepositoryGitDeliveryResolver } from "../repo/credentials/delivery.ts";
 import type { OpenShellSandboxDriverSelection } from "../sandbox/openshell.ts";
 import { openShellGitRecipientEvidence } from "../repo/credentials/protected-repository-git-installation.ts";
-import { OpenShellCredentialProxyDriver, type OpenShellProxyOptions } from "./openshell.ts";
+import { type OpenShellGatewayDestinationsOptions } from "./gateway-destinations.ts";
+import {
+  OpenShellCredentialProxyDriver,
+  createOpenShellDestinationProxy,
+  type OpenShellProxyOptions,
+} from "./openshell.ts";
 import {
   OpenShellGitRuntime,
   type OpenShellGitRuntimeConfiguration,
@@ -47,12 +52,26 @@ export function createOpenShellCapabilities(input: {
   };
   readonly proxy?: {
     readonly id: string;
-    readonly configuration: OpenShellProxyOptions;
+    readonly configuration:
+      OpenShellProxyOptions | { readonly gatewayDestinations: OpenShellGatewayDestinationsOptions };
     readonly exchangeAuthority?: EgressAuthorityConfiguration;
     readonly preparedProviders: readonly CredentialProviderDefinition[];
   };
 }) {
+  const destinationOptions =
+    input.proxy && "gatewayDestinations" in input.proxy.configuration
+      ? input.proxy.configuration.gatewayDestinations
+      : undefined;
+  const protectedProxy = input.proxy && !destinationOptions ? input.proxy : undefined;
   const configuration = input.repository?.configuration;
+  if (
+    destinationOptions &&
+    (configuration || input.proxy?.exchangeAuthority || input.proxy?.preparedProviders.length)
+  ) {
+    throw new Error(
+      "Destination-only OpenShell cannot install credential or repository authority.",
+    );
+  }
   const resolveDelivery = input.repository?.resolveDelivery;
   if (configuration && !resolveDelivery) {
     throw new Error("OpenShell Git requires its Repo delivery binding.");
@@ -61,32 +80,46 @@ export function createOpenShellCapabilities(input: {
     configuration &&
     resolveDelivery &&
     new OpenShellGitRuntime(
-      { ...configuration, ...(input.proxy && { protectedExecution: true }) },
+      { ...configuration, ...(protectedProxy && { protectedExecution: true }) },
       resolveDelivery,
     );
   const sandbox = input.createSandbox(
-    { ...input.sandbox.configuration, ...(input.proxy && { egress: input.proxy.configuration }) },
+    {
+      ...input.sandbox.configuration,
+      ...(protectedProxy && { egress: protectedProxy.configuration }),
+    },
     {
       id: input.sandbox.id,
       implementation: input.sandbox.implementation,
       backend: input.backend,
       operatorOwnedKubernetesResources: input.operatorOwnedKubernetesResources,
       ...(git && { openShellGit: git }),
+      ...(destinationOptions && {
+        gatewayDestinations: { options: destinationOptions, driverId: input.proxy!.id },
+      }),
     },
   );
   const proxy: CredentialProxyDriver | undefined =
     input.proxy &&
-    new OpenShellCredentialProxyDriver(input.proxy.configuration, {
-      id: input.proxy.id,
-      backend: input.backend,
-      sandbox,
-      preparedProviders: input.proxy.preparedProviders,
-      ...(input.proxy.exchangeAuthority && { exchangeAuthority: input.proxy.exchangeAuthority }),
-      ...(git && {
-        bindRepositoryGit: git.bindRepositoryGit.bind(git),
-        previewEnforcement: git.previewEnforcement.bind(git),
-      }),
-    });
+    (destinationOptions
+      ? createOpenShellDestinationProxy(destinationOptions, {
+          id: input.proxy.id,
+          backend: input.backend,
+          sandbox,
+        })
+      : new OpenShellCredentialProxyDriver(input.proxy.configuration as OpenShellProxyOptions, {
+          id: input.proxy.id,
+          backend: input.backend,
+          sandbox,
+          preparedProviders: input.proxy.preparedProviders,
+          ...(input.proxy.exchangeAuthority && {
+            exchangeAuthority: input.proxy.exchangeAuthority,
+          }),
+          ...(git && {
+            bindRepositoryGit: git.bindRepositoryGit.bind(git),
+            previewEnforcement: git.previewEnforcement.bind(git),
+          }),
+        }));
   const repositoryTransport: OpenShellRepositoryTransport | undefined = git && {
     evidence: openShellGitRecipientEvidence,
     async bind(owner, pool, emit) {

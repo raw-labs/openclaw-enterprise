@@ -13,6 +13,11 @@ OpenClaw Control Plane (OCC) supports this Driver with the bundled
 The Sandbox can provision a dedicated Harness. Compute owns the gateway,
 workload identity, baseline isolation, routing, and activation.
 
+The draft optional `gatewayProxy` capability prepares and removes a separate
+revision-owned proxy-only attachment. It does not provision or move the Gateway
+or Harness. This capability is **experimental and UNVERIFIED**, not production
+support; see the [source flow](../../flows/gateway-outbound-destinations.md).
+
 ## Interface
 
 <a id="driver-interface"></a>

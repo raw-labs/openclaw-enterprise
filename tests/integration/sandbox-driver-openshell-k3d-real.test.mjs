@@ -77,7 +77,11 @@ import {
 
 const executeFile = promisify(execFile);
 const selectedScenario = process.env.OCC_TEST_OPENSHELL_SCENARIO ?? "full";
-assert.ok(["full", "network-policy"].includes(selectedScenario), "Unknown OpenShell scenario.");
+assert.ok(
+  ["full", "network-policy", "gateway-destinations"].includes(selectedScenario),
+  "Unknown OpenShell scenario.",
+);
+const gatewayDestinationsOnly = selectedScenario === "gateway-destinations";
 const networkPolicyOnly = selectedScenario === "network-policy";
 
 const kubeconfigPath = process.env.OCC_TEST_KUBERNETES_KUBECONFIG;
@@ -1771,7 +1775,11 @@ function createIntegrationSandboxDriverFactory(
     return state.endpoint;
   }
 
-  const createDriver = (selection) => {
+  const createDriver = (selection, _backend, runtimeSelection) => {
+    const gatewayDestinations =
+      runtimeSelection?.gatewayDestinations === undefined
+        ? {}
+        : { gatewayDestinations: runtimeSelection.gatewayDestinations };
     function optionsFor(requirements, namespaceName) {
       const options = structuredClone(selection.configuration);
       options.gateway.readiness = {
@@ -1829,6 +1837,7 @@ function createIntegrationSandboxDriverFactory(
         id: selection.id,
         implementation: "openshell",
         backend: backendFor(gatewayClient),
+        ...gatewayDestinations,
       });
     }
 
@@ -1838,18 +1847,23 @@ function createIntegrationSandboxDriverFactory(
       id: selection.id,
       implementation: "openshell",
       backend: backendFor(undefined),
+      ...gatewayDestinations,
     });
     return {
       id: selection.id,
       capability: "sandbox",
       implementation: selection.implementation,
       facets: Object.freeze(["networking", "filesystem", "process"]),
+      ...(configurationDriver.gatewayProxy === undefined
+        ? {}
+        : { gatewayProxy: configurationDriver.gatewayProxy }),
       networkPolicy: { live: true, wildcards: true, portRanges: true },
       admitNetworkPolicy(additions, version, defaults) {
         return new OpenShellSandboxDriver(selection.configuration, {
           id: selection.id,
           implementation: "openshell",
           backend: backendFor(undefined),
+          ...gatewayDestinations,
         }).admitNetworkPolicy(additions, version, defaults);
       },
       async observeNetworkPolicy(context, snapshot) {
@@ -2210,6 +2224,7 @@ async function prepareProductionInstallation(
     gatewayManagedMode,
     withOAuthToolSources = true,
     enableCompatibilityBridges = harnessId === "openclaw",
+    gatewayDestinations,
   } = {},
 ) {
   const kubeconfig = await validateOpenShellPrerequisites();
@@ -2303,6 +2318,14 @@ async function prepareProductionInstallation(
     openShellRuntimeClass,
     cluster: "k3d-openshell-sandboxdriver",
   });
+  if (gatewayDestinations !== undefined) {
+    // The API and worker consume the selected operator configuration unchanged.
+    configuration.drivers.credential_proxy = structuredClone(gatewayDestinations.credentialProxy);
+    configuration.backend[0].drivers.credential_proxy = gatewayDestinations.credentialProxy.id;
+    configuration.drivers.compute.configuration.runtime.gatewayOutbound = {
+      destinations: [{ host: gatewayDestinations.allowedHost, port: 443 }],
+    };
+  }
   // The Codex scenario runs a second Agent beside the first. Each Agent holds about 7 GiB of
   // limits: its 4 GiB Gateway, its Harness and the 1 GiB OpenShell supervisor. A rolling
   // replacement of a Gateway briefly holds another 4 GiB.
@@ -5199,6 +5222,390 @@ async function assertAuthenticatedNativePolicyScopes(topology) {
   }
 }
 
+/** Pass the selected implementation configuration unchanged; never invent proxy defaults. */
+async function readGatewayDestinationInputs() {
+  const path = process.env.OCC_TEST_OPENSHELL_GATEWAY_DESTINATIONS_CONFIG;
+  assert.ok(path, "gateway-destinations requires OCC_TEST_OPENSHELL_GATEWAY_DESTINATIONS_CONFIG");
+  const input = JSON.parse(await readFile(path, "utf8"));
+  assert.ok(
+    input.credentialProxy?.id && input.credentialProxy?.configuration?.gatewayDestinations,
+    "supply the selected credential_proxy registration with gatewayDestinations configuration",
+  );
+  for (const key of ["allowedUrl", "forbiddenUrl"]) {
+    const url = new URL(input[key]);
+    assert.equal(url.protocol, "https:");
+    assert.equal(url.port || "443", "443");
+    assert.equal(
+      url.username + url.password + url.hash,
+      "",
+      "probe URLs must be public and credential-free",
+    );
+    assert.equal(isIP(url.hostname), 0, "probe upstreams require exact DNS names");
+    assert.equal(url.hostname.includes("*"), false);
+    input[key === "allowedUrl" ? "allowedHost" : "forbiddenHost"] = url.hostname;
+  }
+  assert.notEqual(input.allowedHost, input.forbiddenHost);
+  assert.ok(
+    Number.isInteger(input.forbiddenPort) &&
+      input.forbiddenPort > 0 &&
+      input.forbiddenPort <= 65535 &&
+      input.forbiddenPort !== 443,
+    "supply a non-443 forbiddenPort",
+  );
+  assert.match(
+    input.responseMarker,
+    /^[a-zA-Z0-9_-]{8,120}$/,
+    "the allowed public HTTPS upstream must return an independent responseMarker",
+  );
+  return input;
+}
+
+async function assertGatewayDestinationLifecycle(context, topology, input) {
+  const agentPath = `/namespaces/${topology.namespaceId}/agents/${topology.agent.id}`;
+  const execGateway = (args, pod = topology.gatewayPod) =>
+    kubectl(
+      "exec",
+      pod.metadata.name,
+      "--namespace",
+      topology.gatewayPlacement,
+      "--container",
+      "gateway",
+      "--",
+      ...args,
+    );
+  const planFor = (revision) => {
+    assert.match(revision.compute.admission ?? "", /^gateway-destinations:v1:/);
+    const plan = JSON.parse(revision.compute.admission.slice("gateway-destinations:v1:".length));
+    assert.deepEqual(plan.destinations, [{ host: input.allowedHost, port: 443 }]);
+    assert.equal(plan.agentId, revision.agentId);
+    assert.equal(plan.revisionId, revision.id);
+    assert.equal(plan.namespaceId, topology.namespaceId);
+    assert.equal(plan.driverId, input.credentialProxy.id);
+    assert.equal(plan.sandboxDriverId, revision.sandboxDriverId);
+    assert.equal(plan.endpoint.port, 3129);
+    return plan;
+  };
+  const proxyPods = async (plan) =>
+    (await resources("pods", topology.gatewayPlacement)).filter(({ metadata }) =>
+      Object.entries(plan.endpoint.podLabels).every(
+        ([name, value]) => metadata.labels?.[name] === value,
+      ),
+    );
+  const readyProxy = (plan) =>
+    waitFor(`revision ${plan.revisionId} destination proxy readiness`, async () => {
+      const pods = await proxyPods(plan);
+      return pods.length === 1 &&
+        pods[0].status?.conditions?.some(
+          ({ type, status }) => type === "Ready" && status === "True",
+        )
+        ? pods[0]
+        : undefined;
+    });
+  const assertGone = async (plan) => {
+    await waitFor(`revision ${plan.revisionId} proxy resources gone`, async () => {
+      if ((await proxyPods(plan)).length !== 0) {
+        return undefined;
+      }
+      for (const kind of ["deployment", "service", "configmap", "networkpolicy"]) {
+        if (
+          await fixture.maybeResource(kind, plan.endpoint.serviceName, topology.gatewayPlacement)
+        ) {
+          return undefined;
+        }
+      }
+      return true;
+    });
+  };
+  const endpoint = (plan) =>
+    `http://${plan.endpoint.serviceName}.${topology.gatewayPlacement}.svc:3129`;
+  // This runs inside the existing Gateway. TLS and an independent upstream marker
+  // prove actual forwarding, not merely that the frontend accepts a TCP connection.
+  const proxyProbe = async (url, proxy, pod = topology.gatewayPod) =>
+    JSON.parse(
+      await execGateway(
+        [
+          "node",
+          "-e",
+          String.raw`
+const http = require("node:http");
+const https = require("node:https");
+const tls = require("node:tls");
+const url = new URL(process.argv[1]);
+const proxy = new URL(process.argv[2]);
+let finished = false;
+let connectStatus;
+const finish = (value) => { if (!finished) { finished = true; console.log(JSON.stringify({ connect: connectStatus, ...value })); } };
+const deadline = setTimeout(() => { finish({ transport: "timeout" }); process.exit(0); }, 12000);
+const connect = http.request({ host: proxy.hostname, port: proxy.port, method: "CONNECT", path: url.hostname + ":" + (url.port || "443"), headers: { Host: url.host } });
+connect.on("connect", (response, socket, head) => {
+  connectStatus = response.statusCode;
+  if (response.statusCode !== 200) { socket.destroy(); clearTimeout(deadline); finish({ connect: response.statusCode }); return; }
+  if (head.length) socket.unshift(head);
+  const secure = tls.connect({ socket, servername: url.hostname });
+  secure.on("error", (error) => { clearTimeout(deadline); finish({ transport: error.code ?? "tls-error" }); });
+  const agent = new https.Agent();
+  agent.createConnection = () => secure;
+  const request = https.request({ hostname: url.hostname, port: Number(url.port || 443), path: url.pathname + url.search, method: "GET", agent }, (upstream) => {
+    let body = "";
+    upstream.on("data", (chunk) => { if (body.length < 65536) body += chunk; });
+    upstream.on("end", () => { clearTimeout(deadline); finish({ connect: 200, upstream: upstream.statusCode, marker: body.includes(process.argv[3]) }); agent.destroy(); });
+  });
+  request.on("error", (error) => { clearTimeout(deadline); finish({ transport: error.code ?? "request-error" }); agent.destroy(); });
+  request.end();
+});
+connect.on("error", (error) => { clearTimeout(deadline); finish({ transport: error.code ?? "connect-error" }); });
+connect.end();
+`,
+          url,
+          proxy,
+          input.responseMarker,
+        ],
+        pod,
+      ),
+    );
+  const expectAllowed = async (plan) => {
+    const result = await proxyProbe(input.allowedUrl, endpoint(plan));
+    assert.equal(result.connect, 200, JSON.stringify(result));
+    assert.ok(result.upstream >= 200 && result.upstream < 300, JSON.stringify(result));
+    assert.equal(result.marker, true, "the prepared real HTTPS upstream must return its marker");
+  };
+  const expectNetworkDenied = async (proxy, pod) => {
+    const result = await proxyProbe(input.allowedUrl, proxy, pod);
+    assert.equal(result.connect, undefined, "a foreign or down frontend must not admit CONNECT");
+    assert.ok(result.transport, JSON.stringify(result));
+  };
+
+  const assertPlacement = async (plan) => {
+    assert.equal(topology.gatewayPod.metadata.namespace, topology.gatewayPlacement);
+    assert.equal(topology.harnessPod.metadata.namespace, topology.placement);
+    assert.equal(
+      topology.gatewayPod.metadata.labels["openclaw.dev/network-profile"],
+      "gateway-destinations-v1",
+    );
+    assert.deepEqual(
+      topology.gatewayPod.spec.containers.map(({ name }) => name),
+      ["gateway"],
+    );
+    await assertProviderOwnedHarness(
+      topology.placement,
+      topology.revision,
+      topology.sandbox,
+      topology.harnessPod,
+    );
+    assertWorkspaceMounts(topology.harnessPod);
+    await assertModelKeyIsPlaceholderOnly(topology.placement, topology.harnessPod, modelCredential);
+    await assertNoSecretBytes(topology.gatewayPlacement, [modelCredential]);
+    const proxy = await readyProxy(plan);
+    assert.notEqual(proxy.metadata.uid, topology.gatewayPod.metadata.uid);
+    assert.notEqual(proxy.metadata.uid, topology.harnessPod.metadata.uid);
+    assert.deepEqual(proxy.spec.containers.map(({ name }) => name).sort(), ["proxy", "relay"]);
+    assert.equal(proxy.spec.automountServiceAccountToken, false);
+    assert.equal(
+      (proxy.spec.volumes ?? []).some(
+        ({ secret, persistentVolumeClaim, projected }) =>
+          secret || persistentVolumeClaim || projected,
+      ),
+      false,
+      "the destination proxy receives no credentials, identity or workspace",
+    );
+    const config = await resource(
+      "configmap",
+      plan.endpoint.serviceName,
+      topology.gatewayPlacement,
+    );
+    assert.equal(config.data["policy.json"], plan.policy);
+    assert.equal(config.immutable, true);
+    const container = topology.gatewayPod.spec.containers[0];
+    assert.equal(
+      container.env.some(({ name, value }) => name === "HTTPS_PROXY" && value === endpoint(plan)),
+      true,
+      "the worker must wire the Gateway to its admitted proxy",
+    );
+    return proxy;
+  };
+  const plan = planFor(topology.revision);
+  await assertPlacement(plan);
+  const snapshot = await topology.observerPool.query(
+    "SELECT admitted_spec->'compute'->>'admission' AS admission FROM occ.agent_revisions WHERE id=$1",
+    [topology.revision.id],
+  );
+  assert.equal(snapshot.rows[0].admission, topology.revision.compute.admission);
+  await expectAllowed(plan);
+  for (const url of [input.forbiddenUrl, `https://${input.allowedHost}:${input.forbiddenPort}/`]) {
+    const denied = await proxyProbe(url, endpoint(plan));
+    assert.equal(
+      denied.connect,
+      403,
+      "the policy engine must refuse forbidden host or port before forwarding",
+    );
+  }
+  // Prove the same resolved public address accepts TCP/443 from the proxy Pod
+  // before checking denial in the Gateway. DNS or an upstream outage is not CNI proof.
+  const proxy = await readyProxy(plan);
+  const address = JSON.parse(
+    await execGateway([
+      "node",
+      "-e",
+      'require("node:dns").lookup(process.argv[1], {family:4}, (error,address)=>{if(error)throw error;console.log(JSON.stringify(address));});',
+      input.allowedHost,
+    ]),
+  );
+  assert.ok(isIPv4(address), "the allowed public upstream must resolve before testing CNI denial");
+  await kubectl(
+    "exec",
+    proxy.metadata.name,
+    "-n",
+    topology.gatewayPlacement,
+    "-c",
+    "relay",
+    "--",
+    "nc",
+    "-z",
+    "-w",
+    "8",
+    address,
+    "443",
+  );
+  const directProbe = async () =>
+    JSON.parse(
+      await execGateway([
+        "node",
+        "-e",
+        String.raw`
+for (const key of Object.keys(process.env)) if (/(?:^|_)proxy$/i.test(key)) delete process.env[key];
+const socket = require("node:net").connect({ host: process.argv[1], port: 443 });
+let finished = false;
+const finish = (value) => { if (!finished) { finished = true; console.log(JSON.stringify(value)); socket.destroy(); } };
+socket.setTimeout(8000);
+socket.once("connect", () => finish({ connected: true }));
+socket.once("timeout", () => finish({ connected: false, reason: "timeout" }));
+socket.once("error", (error) => finish({ connected: false, reason: error.code }));
+`,
+        address,
+      ]),
+    );
+  const direct = await directProbe();
+  assert.equal(
+    direct.connected,
+    false,
+    "removing proxy env must not restore direct public TCP/443",
+  );
+  assert.ok(direct.reason);
+  await expectAllowed(plan);
+
+  const second = await deployAdditionalCredentialAgent(
+    topology,
+    topology.agent.harnessAuth.sourceId,
+    [],
+  );
+  const secondPlan = planFor(second.revision);
+  await readyProxy(secondPlan);
+  const secondGateway = await resource(
+    "pod",
+    await currentGatewayPod(topology, second.agent.id),
+    topology.gatewayPlacement,
+  );
+  await expectNetworkDenied(endpoint(plan), secondGateway);
+  await expectNetworkDenied(endpoint(secondPlan));
+  const stoppedSecond = await topology.request("POST", `${second.path}/stop`);
+  assert.equal(stoppedSecond.status, 202, JSON.stringify(stoppedSecond.error));
+  await assertGone(secondPlan);
+  await waitFor(
+    "stopped peer Gateway removal",
+    async () =>
+      (await fixture.maybeResource(
+        "pod",
+        secondGateway.metadata.name,
+        topology.gatewayPlacement,
+      )) === undefined || undefined,
+  );
+
+  const oldGatewayUid = topology.gatewayPod.metadata.uid;
+  const oldHarnessUid = topology.harnessPod.metadata.uid;
+  const redeployed = await topology.request("POST", `${agentPath}/deploy`);
+  assert.equal(redeployed.status, 202, JSON.stringify(redeployed.error));
+  const replacementPlan = planFor(redeployed.data);
+  assert.notEqual(replacementPlan.endpoint.serviceName, plan.endpoint.serviceName);
+  // Dedicated Compute stops every predecessor before preparing its replacement.
+  // Do not fabricate simultaneous same-Agent revisions to claim CNI proof. The
+  // old frontend must be gone, and the replacement cannot use its stale address.
+  await waitFor("replacement destination revision activation", async () => {
+    const observed = await topology.request("GET", agentPath);
+    assert.equal(observed.status, 200, JSON.stringify(observed.error));
+    const status = await topology.request("GET", `${agentPath}/deployments/${redeployed.data.id}`);
+    assert.equal(status.status, 200, JSON.stringify(status.error));
+    assert.notEqual(status.data.status, "failed", JSON.stringify(status.data));
+    return observed.data.activeRevisionId === redeployed.data.id || undefined;
+  });
+  topology.revision = redeployed.data;
+  topology.harnessPod = await waitForProviderHarnessPod(topology.placement, redeployed.data);
+  topology.sandbox = await waitForSandbox(topology.placement, redeployed.data);
+  topology.gatewayPod = await resource(
+    "pod",
+    await currentGatewayPod(topology),
+    topology.gatewayPlacement,
+  );
+  assert.notEqual(topology.gatewayPod.metadata.uid, oldGatewayUid);
+  assert.notEqual(topology.harnessPod.metadata.uid, oldHarnessUid);
+  await assertGone(plan);
+  await expectNetworkDenied(endpoint(plan));
+  await assertPlacement(replacementPlan);
+  await expectAllowed(replacementPlan);
+  const workspace = await topology.request("GET", `${agentPath}/workspace/files/AGENTS.md`);
+  assert.equal(workspace.status, 200, JSON.stringify(workspace.error));
+  assert.equal(workspace.data.content, "# Initialized OpenShell workspace\n");
+  await requestGatewayTurns(context, topology, "codex");
+
+  // Real administrative outage: pause reconciliation so a successful request
+  // cannot race worker repair, then restore before ordinary API stop cleanup.
+  await topology.pauseWorker();
+  try {
+    await kubectl(
+      "scale",
+      `deployment/${replacementPlan.endpoint.serviceName}`,
+      "--replicas=0",
+      "--namespace",
+      topology.gatewayPlacement,
+    );
+    await waitFor(
+      "destination proxy outage Pod removal",
+      async () => (await proxyPods(replacementPlan)).length === 0 || undefined,
+    );
+    await expectNetworkDenied(endpoint(replacementPlan));
+    const fallback = await directProbe();
+    assert.equal(fallback.connected, false, "proxy outage must not open a direct public fallback");
+  } finally {
+    try {
+      await kubectl(
+        "scale",
+        `deployment/${replacementPlan.endpoint.serviceName}`,
+        "--replicas=1",
+        "--namespace",
+        topology.gatewayPlacement,
+      );
+    } finally {
+      await topology.resumeWorker();
+    }
+  }
+  await readyProxy(replacementPlan);
+  await expectAllowed(replacementPlan);
+  const stopped = await topology.request("POST", `${agentPath}/stop`);
+  assert.equal(stopped.status, 202, JSON.stringify(stopped.error));
+  await assertGone(replacementPlan);
+  await waitFor(
+    "stopped Harness removal",
+    async () =>
+      (await fixture.maybeResource(
+        "pod",
+        topology.harnessPod.metadata.name,
+        topology.placement,
+      )) === undefined || undefined,
+  );
+  process.stderr.write(
+    "OpenShell integration: Gateway destination admission, proxy policy, CNI no-bypass, Agent isolation, revision withdrawal, replacement, outage and stop passed.\n",
+  );
+}
+
 async function assertAgentNetworkPolicyLifecycle(topology) {
   const base = `/namespaces/${topology.namespaceId}/agents/${topology.agent.id}`;
   const policyPath = `${base}/sandbox-policy/networking`;
@@ -7324,8 +7731,8 @@ async function observeExposedCodexAuthenticationBoundary(serviceUrl, appServerTo
 }
 
 const selectedHarness = process.env.OCC_TEST_OPENSHELL_HARNESS ?? "codex";
-if (networkPolicyOnly) {
-  assert.equal(selectedHarness, "codex", "The network-policy scenario requires Codex.");
+if (networkPolicyOnly || gatewayDestinationsOnly) {
+  assert.equal(selectedHarness, "codex", "The selected network scenario requires Codex.");
 }
 assert.match(
   selectedHarness,
@@ -7341,7 +7748,11 @@ if (demoStatePath !== undefined) {
 // an unavailable tool in a model response is not an invocation-denial proof.
 test(
   "OpenShell dedicated Agents enforce Gateway tool policy during normal work",
-  { ...requiresOpenShellK3d, timeout: 2_400_000 },
+  {
+    ...requiresOpenShellK3d,
+    skip: gatewayDestinationsOnly || networkPolicyOnly || requiresOpenShellK3d.skip,
+    timeout: 2_400_000,
+  },
   async (context) => {
     const controlUiOrigin = "http://127.0.0.1";
     const topology = await prepareProductionInstallation(context, {
@@ -8244,9 +8655,11 @@ test(
 );
 
 test(
-  networkPolicyOnly
-    ? "OpenShell Agent network policy lifecycle"
-    : "OpenShell enforces provider delivery and authenticated Codex exposure",
+  gatewayDestinationsOnly
+    ? "OpenShell Agent Gateway destination proxy lifecycle"
+    : networkPolicyOnly
+      ? "OpenShell Agent network policy lifecycle"
+      : "OpenShell enforces provider delivery and authenticated Codex exposure",
   {
     ...requiresOpenShellK3d,
     ...(demoStatePath === undefined ? { timeout: 2_400_000 } : {}),
@@ -8264,8 +8677,18 @@ test(
     }
     {
       process.stderr.write(`OpenShell integration: selected real ${selectedScenario} workflow.\n`);
+      const gatewayDestinations = gatewayDestinationsOnly
+        ? await readGatewayDestinationInputs()
+        : undefined;
       const topology = await prepareProductionInstallation(context, {
         harnessId: selectedHarness,
+        ...(gatewayDestinations === undefined
+          ? {}
+          : {
+              gatewayDestinations,
+              withOAuthToolSources: false,
+              enableCompatibilityBridges: false,
+            }),
         ...(demoStatePath === undefined ? {} : { controllerPort: demoConsolePort }),
       });
       assert.equal(
@@ -8273,6 +8696,11 @@ test(
         openShellAgentName(topology.agent.id),
       );
       assert.ok(topology.sandbox.metadata.name);
+      if (gatewayDestinations !== undefined) {
+        await requestGatewayTurns(context, topology, "codex");
+        await assertGatewayDestinationLifecycle(context, topology, gatewayDestinations);
+        return;
+      }
       if (selectedHarness === "openclaw") {
         // A native worker exposes held startup failures only until its node enrolls.
         // Confirm Workspace visibility before treating an absent service as withdrawn.

@@ -999,6 +999,7 @@ test("OpenShell pins an explicit main Agent workspace to the Sandbox data mount"
       namespaceId: "ns_00000000-0000-4000-8000-000000000001",
       agentId: "agt_00000000-0000-4000-8000-000000000001",
       revision: 1,
+      compute: { id: compute.id, implementation: compute.implementation },
       configurationId: "cfg_main_workspace",
       configurationKind: "agent",
       configurationGeneration: 1,
@@ -7064,3 +7065,51 @@ test(
     );
   },
 );
+
+test("destination-only OpenShell startup exposes paired Gateway capabilities without credential authority", async (t) => {
+  const { STOCK_GATEWAY_PROXY } =
+    await import("../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts");
+  const configuration = sandboxInstallation();
+  configuration.backend[0].configuration = {
+    endpoint: "https://openshell-gateway.openclaw-system.svc:50051",
+    auth: { mode: "bearerTokenFile", path: "/operator/openshell-token" },
+  };
+  configuration.backend[0].drivers.credential_proxy = "openshell-sandbox";
+  configuration.drivers.credential_proxy = {
+    id: "openshell-sandbox",
+    configuration: {
+      gatewayDestinations: {
+        policyRulesPath: fileURLToPath(
+          new URL("../../deploy/runtime/gateway-proxy/sandbox-policy.rego", import.meta.url),
+        ),
+        supervisorImage: STOCK_GATEWAY_PROXY.supervisorImage,
+        relayImage: STOCK_GATEWAY_PROXY.relayImage,
+        blockedCidrs: ["10.0.0.0/8"],
+      },
+    },
+  };
+  // Startup must compose the real capability views without invoking the management peer.
+  // Network enforcement and Agent execution are covered by the separately selected real suite.
+  const loaded = await loadInstallationFile(t, configuration, {
+    createOpenShellBackend: () => ({
+      ...backendFor(workspaceGatewayClient()),
+      drivers: configuration.backend[0].drivers,
+    }),
+  });
+  assert.equal(typeof loaded.sandboxDriver.gatewayProxy.prepare, "function");
+  assert.equal(typeof loaded.sandboxDriver.gatewayProxy.remove, "function");
+  assert.equal(typeof loaded.proxyDriver.gatewayDestinations.admit, "function");
+  assert.deepEqual(loaded.proxyDriver.sourceControl.providers, []);
+  assert.equal(loaded.proxyDriver.bindExchange, undefined);
+  const credentialRefusal = {
+    message: "Destination-only OpenShell does not provide protected credential execution.",
+  };
+  await assert.rejects(
+    loaded.proxyDriver.sourceControl.assertAvailable(t.signal),
+    credentialRefusal,
+  );
+  await assert.rejects(
+    loaded.proxyDriver.configureRevision({ signal: t.signal }),
+    credentialRefusal,
+  );
+});

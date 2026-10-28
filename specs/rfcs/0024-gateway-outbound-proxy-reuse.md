@@ -1,6 +1,6 @@
 ---
 status: Proposed
-implementation_status: Not implemented
+implementation_status: Partially implemented
 author: miguelbranco80
 ---
 
@@ -99,7 +99,11 @@ and attachment. Proxy or relay failure must not broaden access.
 
 ## Required evidence and current status
 
-**No runtime implementation or enforcement proof is claimed by this proposal.**
+**Experimental source implementation is present; real-cluster enforcement is not qualified.**
+See the [implementation plan](../plans/0024-gateway-outbound-proxy-reuse.md),
+[source flow](../../docs/flows/gateway-outbound-destinations.md), and
+[verification procedure](../../docs/testing/gateway-outbound-destinations.md).
+The actual pinned supervisor/relay Docker test passes; it does not prove CNI enforcement.
 The experiment must remain a draft and must not be merged.
 
 Before qualifying the implementation, exercise the regular Agent admission,

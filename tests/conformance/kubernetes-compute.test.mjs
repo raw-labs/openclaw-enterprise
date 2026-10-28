@@ -1,4 +1,5 @@
 import { runOpenClawRuntimeHelper } from "../helpers/plugin-runtime.mjs";
+import { SlackChannelDriver } from "../../apps/controller/src/drivers/channel/slack.ts";
 import { openShellRepositoryAccess } from "../../apps/controller/src/drivers/egress-proxy/openshell-git-runtime.ts";
 import {
   requireConfiguration,
@@ -47,6 +48,7 @@ import {
 } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
 import {
   ActivationFailedError,
+  InstalledDriver,
   ActivationPendingError,
   ComputeGatewaySettingError,
   ConfigurationHarnessError,
@@ -7267,6 +7269,7 @@ test("the canonical Kubernetes runtime validates the dedicated Codex model endpo
   }
   // The warning changes no policy: the model egress grant is the one without the endpoint.
   const revision = {
+    ...routedRevision(createKubernetesComputeDriver(options({ runtime }))),
     id: "revision-model-egress-1",
     namespaceId: tenant.id,
     agentId: "agent-model-egress",
@@ -9803,6 +9806,7 @@ test("account-token authentication grants only the exact Codex revision outbound
     }),
   );
   const revision = {
+    ...routedRevision(driver),
     id: "revision-account-token-1",
     namespaceId: tenant.id,
     agentId: "agent-account-token",
@@ -15943,8 +15947,8 @@ test("stopping a containment-only Kubernetes revision removes its workload befor
 // `agentPodsLeft` observations. `events` records the Pod observations and the Agent Deployment's
 // deletion, in order; `gatewayReads` counts reads of the Gateway's Deployment, which its removal
 // repeats.
-function stopOrderFixture(id) {
-  const driver = new KubernetesComputeDriver(options());
+function stopOrderFixture(id, selectedDriver) {
+  const driver = selectedDriver ?? new KubernetesComputeDriver(options());
   const revision = routedRevision(driver, { id });
   const namespace = kubernetesNamespaceName(revision.namespaceId);
   const namespaceResource = {
@@ -22090,4 +22094,306 @@ test("an active embedded revision whose stored Gateway tool policy predates the 
     "a new deployment",
   );
   assert.throws(() => driver.validateConfiguration(revision.configuration), refused, "save");
+});
+
+// These contract doubles supply opaque admission and attachment observations only.
+// Compute's real admission, workload rendering, policy selection and stop paths run below.
+// This is not stock-proxy, Kubernetes API or enforcing-CNI integration proof.
+function gatewayDestinationComputeFixture(channelDrivers = []) {
+  const state = { attachment: "a".repeat(64), removed: true, events: [] };
+  const sandbox = {
+    id: "destination-owner",
+    implementation: "conformance/destination-owner",
+    capability: "sandbox",
+    facets: ["networking"],
+    provisionHarness: assert.fail,
+    enrollHarness: assert.fail,
+    harnessEndpoint: assert.fail,
+    harnessStatus: assert.fail,
+    async cleanup() {
+      state.events.push("sandbox cleanup");
+    },
+    gatewayProxy: {
+      prepare: assert.fail,
+      async remove(context, plan) {
+        assert.equal(context.revision.id, plan.revisionId);
+        assert.equal(context.namespace.id, plan.namespaceId);
+        state.events.push("remove proxy " + plan.revisionId);
+        return state.removed;
+      },
+    },
+  };
+  const proxy = {
+    id: sandbox.id,
+    implementation: sandbox.implementation,
+    capability: "credential_proxy",
+    sourceControl: { providers: [], assertAvailable: assert.fail },
+    configureRevision: assert.fail,
+    wiringStatus: assert.fail,
+    verifyInstallation: assert.fail,
+    removeRevision: assert.fail,
+    gatewayDestinations: {
+      admit(revision, destinations) {
+        return {
+          version: 1,
+          driverId: proxy.id,
+          sandboxDriverId: sandbox.id,
+          namespaceId: revision.namespaceId,
+          agentId: revision.agentId,
+          revisionId: revision.id,
+          destinations: structuredClone(destinations),
+          policy: "opaque selected policy",
+          policyHash: createHash("sha256").update("opaque selected policy").digest("hex"),
+          attachmentDigest: state.attachment,
+          endpoint: {
+            serviceName: "gateway-proxy-" + digest(revision.id),
+            port: 3129,
+            podLabels: { "conformance.proxy/revision": revision.id },
+          },
+        };
+      },
+    },
+  };
+  const owner = new InstalledDriver(
+    { id: sandbox.id, implementation: sandbox.implementation, configuration: {} },
+    { capabilities: { sandbox, credential_proxy: proxy } },
+  );
+  const driver = new KubernetesComputeDriver(
+    options({
+      network: {
+        ...options().network,
+        providerHarness: {
+          namespace: "sandbox-system",
+          podLabels: { app: "harness" },
+          address: "10.43.0.25",
+          port: 8080,
+        },
+      },
+      runtime: {
+        transportSecretPrefix: "transport",
+        gatewayStorageClassName: "local-path",
+        gatewayOutbound: { destinations: [{ host: "api.example.com", port: 443 }] },
+      },
+    }),
+    { protectedDriver: owner, channelDrivers },
+  );
+  const revision = routedRevision(driver, { sandboxDriverId: sandbox.id });
+  revision.compute.admission = driver.admitRevision(revision);
+  return { driver, revision, state, sandbox, proxy, owner };
+}
+
+test("Gateway destination admission rejects wildcard administrators, unsupported channels and changed ownership", async () => {
+  const fixture = gatewayDestinationComputeFixture();
+  const { driver, revision, state } = fixture;
+  for (const host of ["*.example.com", "192.0.2.1", "UPPER.example.com", "example.com."]) {
+    assert.throws(
+      () =>
+        new KubernetesComputeDriver({
+          ...driver.options,
+          runtime: {
+            ...driver.options.runtime,
+            gatewayOutbound: { destinations: [{ host, port: 443 }] },
+          },
+        }),
+      (error) =>
+        error instanceof SharedConfigurationValidationError &&
+        error.error.details.some(
+          (detail) =>
+            detail.path === "/runtime/gatewayOutbound/destinations" &&
+            /exact canonical public DNS/.test(detail.message),
+        ),
+    );
+  }
+  const admission = revision.compute.admission;
+  assert.ok(admission.startsWith("gateway-destinations:v1:"));
+  assert.deepEqual(driver.gatewayDestinationPlan(revision).destinations, [
+    { host: "api.example.com", port: 443 },
+  ]);
+  assert.equal(
+    driver.gatewayDestinationPlan({
+      ...revision,
+      compute: { ...revision.compute, admission: undefined },
+    }),
+    undefined,
+  );
+  for (const changed of [
+    { ...revision, id: "another-revision" },
+    { ...revision, agentId: "another-agent" },
+    { ...revision, namespaceId: "another-namespace" },
+    { ...revision, sandboxDriverId: "another-sandbox" },
+  ]) {
+    await assert.rejects(driver.prepareRevision(changed), /Gateway destination admission/);
+    await assert.rejects(driver.activateRevision(changed), /Gateway destination admission/);
+  }
+  assert.throws(
+    () =>
+      driver.admitRevision({
+        ...revision,
+        configuration: {
+          ...revision.configuration,
+          channels: { msteams: { enabled: true } },
+        },
+      }),
+    /selected destination contributor/,
+  );
+  assert.throws(
+    () => driver.admitRevision({ ...revision, egressPlan: {} }),
+    /without combined execution admission/,
+  );
+  const channel = gatewayDestinationComputeFixture([new SlackChannelDriver(assert.fail)]);
+  const channelRevision = {
+    ...channel.revision,
+    configuration: {
+      ...channel.revision.configuration,
+      channels: { slack: { enabled: true, mode: "socket" } },
+    },
+  };
+  channelRevision.compute = {
+    ...channelRevision.compute,
+    admission: channel.driver.admitRevision(channelRevision),
+  };
+  assert.deepEqual(
+    channel.driver.gatewayDestinationPlan(channelRevision).destinations.map(({ host }) => host),
+    [
+      "api.example.com",
+      "slack.com",
+      "*.slack.com",
+      "slack-edge.com",
+      "*.slack-edge.com",
+      "slack-msgs.com",
+      "*.slack-msgs.com",
+    ].sort((left, right) => left.localeCompare(right)),
+  );
+  assert.deepEqual(driver.gatewayDestinationPlan(revision).destinations, [
+    { host: "api.example.com", port: 443 },
+  ]);
+  state.attachment = "b".repeat(64);
+  await assert.rejects(driver.prepareRevision(revision), /exact selected capability/);
+  assert.equal(revision.compute.admission, admission);
+});
+
+test("Gateway destination profile keeps internal transports without ordinary public or channel grants", () => {
+  const { driver, revision } = gatewayDestinationComputeFixture();
+  const namespace = { name: kubernetesNamespaceName(revision.namespaceId), plane: "execution" };
+  const workload = profileNetworkWorkload(driver, revision, "gateway");
+  const labels = workload.spec.template.metadata.labels;
+  assert.equal(labels[ORDINARY_PROFILE_LABEL], "gateway-destinations-v1");
+  const env = Object.fromEntries(
+    workload.spec.template.spec.containers[0].env.map(({ name, value }) => [name, value]),
+  );
+  const endpoint =
+    "http://gateway-proxy-" + digest(revision.id) + "." + namespace.name + ".svc:3129";
+  for (const name of [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+  ]) {
+    assert.equal(env[name], endpoint);
+  }
+  assert.equal(env.NO_PROXY, env.no_proxy);
+  assert.ok(!env.NO_PROXY.includes(".svc,"));
+  assert.ok(!env.NO_PROXY.includes("api.example.com"));
+  const channels = driver.channelNetworkPolicy(revision, [{ egress: "https-proxy" }], namespace);
+  assert.deepEqual(channels.spec.egress, []);
+  assert.equal(selectorMatches(channels.spec.podSelector, labels), false);
+  const policies = driver.agentNetworkPolicies(revision, namespace).map(({ resource }) => resource);
+  const transport = policies.find(({ metadata }) =>
+    metadata.name.startsWith("allow-gateway-agent-"),
+  );
+  assert.equal(selectorMatches(transport.spec.podSelector, labels), true);
+  assert.equal(
+    selectorMatches(transport.spec.podSelector, { ...labels, "openclaw.dev/revision": "other" }),
+    false,
+  );
+  assert.deepEqual(transport.spec.egress[0].ports, [{ protocol: "TCP", port: 8080 }]);
+  for (const policy of driver.networkPolicies({ namespaceId: revision.namespaceId }, namespace)) {
+    if (policy.metadata.name !== "default-deny") {
+      assert.equal(selectorMatches(policy.spec.podSelector, labels), false);
+    }
+  }
+  workload.metadata.generation = 1;
+  workload.status = { observedGeneration: 1, readyReplicas: 1 };
+  assert.equal(driver.deploymentReady(workload, true, "gateway-destinations-v1"), true);
+  workload.spec.template.metadata.labels[ORDINARY_PROFILE_LABEL] = ORDINARY_PROFILE;
+  assert.equal(driver.deploymentReady(workload, true, "gateway-destinations-v1"), false);
+});
+
+test("Gateway destination stop waits for Gateway termination and refuses incomplete proxy removal", async () => {
+  const { driver, state, sandbox } = gatewayDestinationComputeFixture();
+  const fixture = stopOrderFixture("revision-destination-stop", driver);
+  const { revision } = fixture;
+  revision.sandboxDriverId = sandbox.id;
+  revision.compute.admission = driver.admitRevision(revision);
+  fixture.deploymentPresent = false; // This selected Sandbox, not Compute, owns the Harness.
+  const clients = await driver.apiClients;
+  clients.networking = {
+    async readNamespacedNetworkPolicy() {
+      throw Object.assign(new Error("Not found"), { code: 404 });
+    },
+  };
+  state.events = fixture.events;
+  fixture.gatewayPodsLeft = 1;
+  await assert.rejects(
+    withComputeWorkWaiting(
+      async () => true,
+      () => withYieldingGatewayDrain(() => driver.stopRevision(revision)),
+    ),
+    ComputeStopYieldedError,
+  );
+  assert.deepEqual(state.events, ["list gateway Pods"]);
+  state.removed = false;
+  await assert.rejects(driver.stopRevision(revision), /proxy has not finished terminating/);
+  assert.deepEqual(state.events, [
+    "list gateway Pods",
+    "list gateway Pods",
+    "remove proxy " + revision.id,
+  ]);
+  assert.ok(!state.events.includes("sandbox cleanup"));
+  state.removed = true;
+  await driver.stopRevision(revision);
+  assert.ok(
+    state.events.indexOf("sandbox cleanup") > state.events.indexOf("remove proxy " + revision.id),
+  );
+});
+
+test("Gateway destination preparation and activation cannot release a Gateway before attachment readiness", async () => {
+  const selected = gatewayDestinationComputeFixture();
+  const observations = [];
+  selected.sandbox.gatewayProxy.prepare = async (context, plan) => {
+    assert.equal(context.revision.id, plan.revisionId);
+    assert.equal(context.namespaceName, context.namespace.name);
+    observations.push(plan.revisionId);
+    return false;
+  };
+  const { gatewayClients: _directClients, ...network } = selected.driver.options.network;
+  const fixture = workspaceSetupFixture(
+    false,
+    true,
+    network,
+    { runtime: selected.driver.options.runtime },
+    { protectedDriver: selected.owner },
+  );
+  const { driver, revision, context, objects, records } = fixture;
+  revision.sandboxDriverId = selected.sandbox.id;
+  revision.compute.admission = driver.admitRevision(revision);
+  const { workspaceSetup: _initialFiles, ...runtimeContext } = context;
+  const prepared = await driver.prepareRevision(revision, runtimeContext);
+  assert.equal(prepared.ready, false);
+  await assert.rejects(
+    driver.activateRevision(revision, runtimeContext),
+    /proxy is not ready for activation/,
+  );
+  assert.deepEqual(observations, [revision.id, revision.id]);
+  assert.equal(
+    [...objects.values()].some(({ kind }) => kind === "Deployment"),
+    false,
+  );
+  assert.equal(
+    records.some(({ kind }) => kind === "Secret"),
+    false,
+    "no credential copies are projected while the attachment is unavailable",
+  );
 });
