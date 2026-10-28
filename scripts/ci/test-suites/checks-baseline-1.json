@@ -127,7 +127,8 @@
     "tests/integration/protected-source-refusals.test.mjs",
     "tests/integration/refusal-answers.test.mjs",
     "tests/conformance/embedded-sandbox-compute.test.ts",
-    "tests/conformance/openshell-embedded-runtime.test.mjs"
+    "tests/conformance/openshell-embedded-runtime.test.mjs",
+    "tests/integration/namespace-deletion-console-api.test.ts"
   ],
   "files": [
     {
@@ -638,6 +639,9 @@
     },
     {
       "path": "tests/conformance/openshell-embedded-runtime.test.mjs"
+    },
+    {
+      "path": "tests/integration/namespace-deletion-console-api.test.ts"
     }
   ]
 }

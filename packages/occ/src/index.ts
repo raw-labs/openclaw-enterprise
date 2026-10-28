@@ -3176,7 +3176,7 @@ export class OpenClawController {
       // Plugins the Plugin Driver cannot run in this Harness, as Agent save refuses them;
       // authorizeProvisioningRecord repeats this check for the stored record.
       if (plugins !== undefined && Object.keys(plugins).length > 0) {
-        this.validatePluginHarness(plugins, {
+        this.validatePluginPlacement(plugins, {
           id: resolveConfiguredHarnessId(configurationInput.values),
           mode: executionMode,
         });
@@ -8460,7 +8460,7 @@ export class OpenClawController {
     },
     signal?: AbortSignal,
   ): Promise<PluginCatalogPage> {
-    return this.withSavedAgentPluginCredential(
+    const page = await this.withSavedAgentPluginCredential(
       principalId,
       namespaceId,
       agentId,
@@ -8484,6 +8484,24 @@ export class OpenClawController {
       },
       input.credentialSource,
     );
+    if (page.plugins.length === 0) {
+      return page;
+    }
+    const validatePlacement = await this.savedAgentPluginPlacement(namespaceId, agentId);
+    return {
+      ...page,
+      plugins: page.plugins.filter((entry) => {
+        try {
+          validatePlacement(entry.id);
+          return true;
+        } catch (error) {
+          if (error instanceof ConfigurationHarnessError) {
+            return false;
+          }
+          throw error;
+        }
+      }),
+    };
   }
 
   async discoverSavedAgentPluginDetails(
@@ -8493,7 +8511,7 @@ export class OpenClawController {
     input: { readonly pluginId: string; readonly credentialSource?: CredentialSourceReference },
     signal?: AbortSignal,
   ): Promise<PluginCatalogEntry> {
-    return this.withSavedAgentPluginCredential(
+    const entry = await this.withSavedAgentPluginCredential(
       principalId,
       namespaceId,
       agentId,
@@ -8510,6 +8528,39 @@ export class OpenClawController {
       },
       input.credentialSource,
     );
+    (await this.savedAgentPluginPlacement(namespaceId, agentId))(entry.id);
+    return entry;
+  }
+
+  /**
+   * The Plugin Driver's catalog does not know the Agent. Saved-Agent discovery offers only the
+   * plugins that Agent save admits for this Agent's Harness, execution mode and Compute, and
+   * refuses details with the save refusal (finding 2787). Read after discovery authorized the
+   * caller for the Agent.
+   */
+  private async savedAgentPluginPlacement(
+    namespaceId: string,
+    agentId: string,
+  ): Promise<(pluginId: string) => void> {
+    const { mode, readConfiguration } = await this.read(async (state) => {
+      const namespace = await this.exactNamespace(state, namespaceId);
+      const agent = await state.agents.findAgent(namespace.id, agentId);
+      const metadata =
+        agent === undefined
+          ? undefined
+          : await state.configurations.findConfiguration(namespace.id, agent.configurationId);
+      if (agent === undefined || metadata === undefined) {
+        throw new ScopeViolationError(
+          "The Agent does not belong to the exact Installation and Namespace.",
+        );
+      }
+      return {
+        mode: agent.executionMode,
+        readConfiguration: this.savedConfigurationReader(metadata),
+      };
+    });
+    const harness = { id: resolveConfiguredHarnessId((await readConfiguration()).values), mode };
+    return (pluginId) => this.validatePluginPlacement({ [pluginId]: { enabled: true } }, harness);
   }
 
   private async withSavedAgentPluginCredential<T>(
@@ -10274,7 +10325,7 @@ export class OpenClawController {
       // Agent saves check the plugins against the Configuration they name, but a later
       // Configuration save does not know which Agents use it: check the admitted pair again.
       this.validatePluginConfiguration(pluginState?.plugins, admittedConfiguration);
-      this.validatePluginHarness(pluginState?.plugins, revisionHarness);
+      this.validatePluginPlacement(pluginState?.plugins, revisionHarness);
       // Decode every earlier revision: one that is unreadable refuses the deploy here (503,
       // nothing created), because the worker must decode them all to stop or retire them.
       const previous = await state.revisions.listRevisions(namespace.id, lockedAgent.id);
@@ -12129,7 +12180,7 @@ export class OpenClawController {
         normalizeAgentPluginApprovers(record.plan.pluginApprovers as PluginApprovers | undefined),
         "stored",
       );
-      this.validatePluginHarness(plugins, harness);
+      this.validatePluginPlacement(plugins, harness);
       const repositoryBindings = asRecord(record.plan)?.repositoryBindings;
       if (Array.isArray(repositoryBindings) && repositoryBindings.length > 0) {
         this.validateRepositoryBrokerNetworkProxy(harness, plugins, configuration, sandbox);
@@ -14188,14 +14239,16 @@ export class OpenClawController {
   // Compute runs a bundled Plugin Driver's runtime only in the Harness it supports, and its
   // preparation refuses any other pair after a dedicated deployment stopped the running
   // revision. Agent save, provisioning and deployment refuse the pair first (finding 2348).
-  private validatePluginHarness(
+  private validatePluginPlacement(
     plugins: PluginDesiredState | undefined,
     harness: Readonly<Pick<RevisionHarnessDescriptor, "id" | "mode">>,
   ): void {
     if (plugins === undefined || Object.keys(plugins).length === 0) {
       return;
     }
-    const required = pluginRuntimeHarnessRequirement(this.pluginDriver().implementation, harness);
+    const driver = this.pluginDriver();
+    driver.validatePlacement?.(plugins, harness, this.selectedDriver("compute").implementation);
+    const required = pluginRuntimeHarnessRequirement(driver.implementation, harness);
     if (required !== undefined) {
       throw new ConfigurationHarnessError(
         `The Installation's Plugin Driver runs plugins only in ${required}: remove the Agent's plugins, or change its Configuration or execution mode to a Harness that runs them.`,
@@ -14322,7 +14375,7 @@ export class OpenClawController {
       return;
     }
     const harness = Object.freeze({ ...approved, mode: agent.executionMode });
-    this.validatePluginHarness(agent.plugins, harness);
+    this.validatePluginPlacement(agent.plugins, harness);
     const values = this.agentRuntimeConfiguration(configuration.values, harness, compute, sandbox);
     // A Configuration that selects no model yet is a draft: the binding has nothing to deliver
     // to, so deployment refuses that pair and save does not.

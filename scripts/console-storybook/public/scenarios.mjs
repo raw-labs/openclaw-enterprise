@@ -1431,6 +1431,101 @@ export const scenarios = {
       "Reset, then cancel a new form with Escape. No Namespace is created and focus returns to Create Namespace.",
     ],
   },
+  namespaceDelete: {
+    group: "Pages/Namespaces",
+    name: "Delete Namespace",
+    path: "/console/namespaces",
+    emptyAgents: true,
+    namespaceDeleteOutcome: "complete",
+    description:
+      "Use the same trash icon as the Agents table, confirm the exact Namespace, and watch simulated cleanup finish.",
+    steps: [
+      "Select Engineering's trash icon, then Delete Namespace. The row stays Deleting until the next status reads confirm removal.",
+    ],
+  },
+  namespaceDeleteConfirmation: {
+    group: "Pages/Namespaces",
+    name: "Delete confirmation",
+    path: "/console/namespaces",
+    namespaceDeleteOutcome: "complete",
+    actions: [{ selector: '[aria-label="Delete Engineering"]', click: true }],
+    description:
+      "The confirmation identifies the Namespace and explains reserved names, asynchronous cleanup, and default Presets. Cancel restores focus to the trash icon.",
+  },
+  namespaceDeleteMobile: {
+    group: "Pages/Namespaces",
+    name: "Delete confirmation mobile",
+    path: "/console/namespaces",
+    mobile: true,
+    namespaceDeleteOutcome: "complete",
+    actions: [{ selector: '[aria-label="Delete Engineering"]', click: true }],
+    description: "The same confirmation becomes a bottom sheet at phone width.",
+  },
+  namespaceDeleteBlocked: {
+    group: "Pages/Namespaces",
+    name: "Delete blocked by resources",
+    path: "/console/namespaces",
+    namespaceDeleteOutcome: "blocked",
+    actions: [
+      { selector: '[aria-label="Delete Engineering"]', click: true },
+      { click: "Delete Namespace" },
+    ],
+    description:
+      "A simulated NAMESPACE_NOT_EMPTY response names remaining resources. Open Agents or Secrets, or inspect Configuration cleanup commands.",
+  },
+  namespaceDeleteDenied: {
+    group: "Pages/Namespaces",
+    name: "Delete permission denied",
+    path: "/console/namespaces",
+    namespaceDeleteDenied: true,
+    description:
+      "The advisory permission answer disables deletion and explains the exact required grant.",
+  },
+  namespaceDeleteRefused: {
+    group: "Pages/Namespaces",
+    name: "Delete permission changed",
+    path: "/console/namespaces",
+    namespaceDeleteOutcome: "forbidden",
+    actions: [
+      { selector: '[aria-label="Delete Engineering"]', click: true },
+      { click: "Delete Namespace" },
+    ],
+    description:
+      "A write can still be refused after the advisory read. The row shows the reason and request ID.",
+  },
+  namespaceDeletePending: {
+    group: "Pages/Namespaces",
+    name: "Delete request pending",
+    path: "/console/namespaces",
+    namespaceDeleteOutcome: "pending",
+    actions: [
+      { selector: '[aria-label="Delete Engineering"]', click: true },
+      { click: "Delete Namespace" },
+    ],
+    description:
+      "The pending write blocks dismissal and navigation. Its timeout requires a status read before another attempt.",
+  },
+  namespaceDeleteUnknown: {
+    group: "Pages/Namespaces",
+    name: "Delete outcome unknown",
+    path: "/console/namespaces",
+    namespaceDeleteOutcome: "unknown",
+    actions: [
+      { selector: '[aria-label="Delete Engineering"]', click: true },
+      { click: "Delete Namespace" },
+    ],
+    description:
+      "An unconfirmed write requires Refresh status. The Console does not replay deletion or assume it started.",
+  },
+  namespaceDeleteRetry: {
+    group: "Pages/Namespaces",
+    name: "Delete cleanup recovery",
+    path: "/console/namespaces",
+    namespaceStatus: "deleting",
+    namespaceDeleteOutcome: "stalled",
+    description:
+      "An existing deleting Namespace keeps status and deliberate retry controls. Only the backend decides whether retry is allowed.",
+  },
   namespacesUnavailable: {
     group: "Pages/Namespaces",
     name: "Unavailable selection",
@@ -2065,7 +2160,7 @@ export const scenarios = {
     steps: [
       "Review the reminder before deployment: catalog availability does not confirm linked credentials, and OCE policies do not configure them.",
       "Open Plugin selections JSON and confirm that Calendar has only enabled: true; presentation links and setup guidance are not stored in selections.",
-      "Reopen Configure plugins, remove Calendar, and click Done. With no configured plugins, the reminder is hidden.",
+      "Reopen Configure plugins, open More actions on Calendar, choose Remove Calendar, and click Done. With no configured plugins, the reminder is hidden.",
     ],
     gap: pluginDiscoveryGap,
   },
@@ -2367,6 +2462,36 @@ export const scenarios = {
     description:
       "Without a Driver capability descriptor, saved policies remain visible and policy controls stay disabled. The component does not assume policy support from the catalog.",
     gap: pluginPreviewGap,
+  },
+  managedGoogleInstall: {
+    group: "Components/Plugins",
+    name: "Install Google Workspace",
+    component: "plugins",
+    pluginCapabilities: {
+      ...pluginCapabilities,
+      driver: { id: "occ-plugin", implementation: "occ/openclaw-plugin" },
+      policyScopeByPlugin: { "occ-plugin:google@1.0.0": "enablement_only" },
+    },
+    pluginCatalog: {
+      status: "ready",
+      entries: [
+        {
+          id: "occ-plugin:google@1.0.0",
+          name: "Google Workspace",
+          description:
+            "Install the pinned gog Google Workspace CLI on a dedicated OpenClaw worker using Kubernetes Compute.",
+          selectableWithoutTools: true,
+          tools: [],
+        },
+      ],
+    },
+    actions: [
+      click("Configure plugins"),
+      { selector: 'button[aria-label="Google Workspace"]', click: true },
+      click("Add Google Workspace"),
+    ],
+    description:
+      "Toggle Enable plugin. Open More actions to find Remove Google Workspace. Compare the Plugin policies, Driver policy, and Tools sections. Each shows which settings Google Workspace supports. This fixture simulates the catalog.",
   },
   pluginsNativeLimited: {
     group: "Components/Plugins",
@@ -4615,7 +4740,7 @@ export const scenarios = {
       "The first catalog page loads in the background when the Plugins tab opens, using the saved Service Accounts token. Open Configure plugins to review Calendar's saved policy.",
       "Open Calendar and inspect the tool IDs beneath their titles. Type create into Filter tools, then clear it; filtering should keep the cursor in the search box.",
       "In Available, select Calendar, filter tools by create, and expand Create event. Switch to Configured, filter plugins by Calendar, and choose Calendar with a different tool filter. Round-trip the tabs: each keeps its selection, query, tool filter, and expanded rows without another catalog request.",
-      "Remove Calendar from Configured: its details clear even though Available still lists it. Add Calendar again from Available; Configured must not restore the removed detail state.",
+      "In Configured, open More actions and choose Remove Calendar. Its details clear even though Available still lists it. Add Calendar again from Available; Configured must not restore the removed detail state.",
       "In Configure plugins, change Calendar's tool policy, add Documents from the next page, and select Done.",
       "Select Save plugin selections. The tab updates in place: the page keeps its scroll and focus moves to Plugin selections saved. Then select Deploy new version and compare the new version with the earlier immutable plugin snapshot.",
     ],
