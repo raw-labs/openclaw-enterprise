@@ -52,6 +52,18 @@ introduce request rewriting, a new interception CA, placeholder credentials or
 model-key projection into the Gateway. Do not disable certificate checks to make
 a probe succeed.
 
+### Authenticated ingress
+
+Complete an operator request through the existing authenticated route. Then
+try an unauthenticated request with `x-occ-identity: occ-workspace-files` through
+each reachable direct or provider-relayed endpoint. The forged header must not
+grant operator access. Node routes must not inherit operator identity.
+
+Inspect the source address and identity that the Gateway actually accepts.
+Do not enable loopback trust, widen trusted proxy ranges or remove route
+authentication to make the contained Gateway respond. A refused legitimate
+request is an ingress compatibility failure, not a reason to weaken the check.
+
 ### Separate Harness and credentials
 
 Before and after opt-in, compare admitted Harness descriptors, authentication

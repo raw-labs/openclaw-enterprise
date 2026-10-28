@@ -161,6 +161,21 @@ considered. Unsupported traffic must produce a concrete configuration refusal
 or runtime diagnostic rather than bypassing the Sandbox. Restricting the policy
 later must not require another network-proxy implementation.
 
+### Authenticated ingress
+
+Containment must preserve the authenticated Gateway route, not only outbound
+access. Kubernetes Compute currently requires native trusted-proxy authentication
+and rejects loopback trust. Its operator route sets `x-occ-identity` only after
+authentication; node routes remove that header. A contained Gateway must retain
+these distinctions.
+
+A provider relay must not make caller-supplied identity headers authoritative.
+The integration must reject requests that bypass the authenticated route,
+including requests with a forged operator identity. Do not enable loopback trust
+or broaden trusted proxy ranges merely to accommodate a relay. If the provider
+cannot preserve this boundary, resolve its ingress contract before implementing
+Gateway containment.
+
 ### Credentials and state
 
 The Gateway retains only the credentials its existing role requires, including
@@ -206,7 +221,8 @@ the selected Sandbox and genuine Gateway/Harness images:
   Confirm the Gateway process is inside that boundary, not merely attached to
   an HTTP proxy.
 - Complete authenticated Gateway access and a model turn through the separate
-  Harness. Inspect credential placement without logging values.
+  Harness. Reject direct and relayed requests with forged operator headers.
+  Inspect credential placement without logging values.
 - Exercise outbound HTTPS, a long-lived connection and channel-contributed
   authorization. Configuration projection alone is not a live channel test.
 - Check private-state survival across Gateway restart/replacement and verify
