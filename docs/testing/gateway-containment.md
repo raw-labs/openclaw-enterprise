@@ -43,6 +43,13 @@ filesystem and process restrictions active. Check the exact image identity,
 command, mounts, init steps, probes, resources and namespace/Agent ownership.
 A proxy sidecar beside an otherwise uncontained Gateway fails this requirement.
 
+Record the ordinary dedicated Gateway's configured channel-proxy path before
+opt-in. After opt-in, inspect the OpenShell workload and supervisor Pods, and
+confirm the ordinary Gateway workload is not also serving. Check that automatic
+`HTTPS_PROXY` injection does not send the probe through an unintended second
+proxy. If a required upstream proxy is unsupported, deployment must reject it
+rather than claim destination enforcement for traffic it cannot distinguish.
+
 Exercise native HTTPS and a long-lived WebSocket from an enabled plugin or
 channel in the real Gateway. Correlate its executable and destination with the
 OpenShell socket mediation, supervisor authorization and upstream connection.
@@ -95,6 +102,11 @@ channel/integration material.
 Complete an authenticated Gateway request, unauthenticated rejection, and a real
 model/tool turn through that Harness. A healthy supervisor or Gateway HTTP
 health endpoint alone does not establish an operational Agent.
+
+Verify an embedded Agent still uses its existing combined workload, credentials,
+workspace and networking, without this Gateway containment capability. Check a
+dedicated Agent without opt-in retains its ordinary channel-proxy path. This
+proposal adds no embedded channel or egress support.
 
 ### State and lifecycle
 

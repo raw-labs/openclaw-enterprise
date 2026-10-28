@@ -9,67 +9,87 @@ author: miguelbranco80
 - **ID:** RFC-0024
 - **Created:** 2026-10-28
 - **Last updated:** 2026-10-28
-- **Implementation plan:** [Gateway containment](../plans/0024-dedicated-gateway-containment.md)
+- **Implementation plan:** [Gateway connectivity](../plans/0024-dedicated-gateway-containment.md)
 
-## Problem and proposed solution
+## Application problem
 
-OpenClaw Enterprise (OCE) must let native Gateway plugins, channels and
-integrations make outbound HTTPS and long-lived WebSocket connections. The
-dedicated Harness's network policy does not control those Gateway connections:
-the two processes run separately. A Gateway that cannot reach its enabled
-integrations is not a usable Agent.
+Native plugins, channels and integrations execute in the OpenClaw Gateway.
+They need HTTPS APIs and long-lived WebSocket connections to external services.
+In dedicated execution, the Harness runs in a different Pod. Giving that
+Harness network access does not let a Gateway plugin reach its provider.
 
-Run the dedicated Gateway inside a separately selected Gateway Sandbox, using
-OpenShell first, so its native outbound connections reach OpenShell's existing
-enforcement path. Keep the dedicated Harness separate, with its existing
-placement, workspace, authentication and model-credential delivery unchanged.
-Start with an explicit compatibility policy where destinations are not yet
-fully known. Narrow policy without replacing the networking mechanism.
+OpenClaw Enterprise (OCE) currently starts dedicated Gateways under Kubernetes
+network policy. Direct public channel access is denied; enabled channels use
+an approved proxy configured by `runtime.channels.proxyUrl`. Compute supplies
+`HTTPS_PROXY` and grants access to that proxy's IP or selected Pods. This is an
+existing channel route, not general destination enforcement for every native
+plugin or child process. A client that ignores proxy settings does not gain
+access, and the Harness's Sandbox policy does not govern its sockets.
 
-**This experiment is not implemented.** Authenticated ingress must also work
-before the contained Gateway is usable. The [plan](../plans/0024-dedicated-gateway-containment.md)
-records that integration dependency and the unrun Linux proof. Resolving or
-documenting a dependency alone does not complete this experiment.
+Propose running the dedicated Gateway inside OpenShell containment so its
+ordinary sockets use OpenShell's existing network authorization and proxy.
+The result must be usable, configurable Gateway outbound connectivity. Process
+and filesystem containment support that result; they do not create an arbitrary-workload
+provisioning product. Initial permissive compatibility policy is
+acceptable. Neither credential rewriting nor TLS interception is required.
 
-## Current upstream gap
+**Status:** this proposal has no runtime implementation or Linux qualification.
+The [plan](../plans/0024-dedicated-gateway-containment.md) records the unresolved
+ingress, startup and verification work. Existing networking is described in
+[Kubernetes networking](../../docs/reference/drivers/kubernetes-compute/networking-and-isolation.md).
 
-Kubernetes Compute provisions the per-Agent Gateway as its own workload. The
-selected OpenShell Sandbox provisions a dedicated Harness; selecting that path
-is not independent Gateway containment. The current Channel Driver validates
-credentials and looks up provider identities, but does not contribute Gateway
-runtime destinations. These existing paths do not deliver policy-controlled
-native Gateway egress with an unchanged Harness.
+## One outbound request, before and after
 
-Extend the owning Compute, Sandbox and Channel contracts only where this normal
-Agent deployment needs them. OpenShell launch, socket mediation and policy
-translation belong in its Sandbox Driver, not OpenClaw Control Plane (OCC) core.
-This is a Gateway connectivity experiment, not a general-purpose workload
-platform.
+Consider the native Slack integration sending an HTTPS
+`POST https://slack.com/api/chat.postMessage` with its bot token.
 
-## Scope and boundaries
+**Before:** the SDK runs in the ordinary dedicated Gateway Pod. Its configured
+channel path is Gateway → approved channel proxy → Slack TCP/443. The Gateway
+owns Slack authentication and native TLS settings. This is the configured
+route, not a live success recorded by this task. Without the approved path,
+Kubernetes denies direct public egress. A successful channel-proxy request does
+not establish policy enforcement for arbitrary native plugin sockets.
 
-The experiment must deliver:
+**After, proposed:** the same SDK call runs in the contained Gateway. OpenShell
+mediates its socket, identifies the executable and destination, and asks the
+existing supervisor to authorize the connection. If allowed, the supervisor
+opens the upstream TCP connection and relays opaque bytes. The Gateway still
+verifies Slack's TLS certificate and sends its real token inside that TLS
+session. A denial must fail the connection without direct-network fallback.
 
-- Native HTTPS and WebSockets from the contained Gateway through the existing
-  OpenShell policy enforcement, including enabled channels' destinations.
-- Normal authenticated Gateway access, readiness and a model/tool turn through
-  the separate Harness.
-- The Gateway configuration, required writable state, credentials and resource
-  limits needed for startup, replacement, stop and delete.
-- Failure without an uncontained serving fallback, plus cleanup of owned effects.
+Slack Socket Mode also opens a long-lived WSS connection to a temporary URL
+returned by its API. That connection needs its own admitted destination; API
+access alone is insufficient. Native code retains login and reconnect ownership.
 
-Do not add a generic workload API, scheduler, cross-provider workload migration,
-new public resource, new proxy or credential broker. Do not relocate the
-Harness, enable its Sandbox path implicitly, or give its model credentials to
-the Gateway. Automatic credential substitution and TLS interception are outside
-this experiment. Production qualification and merging this draft are not goals.
+The contained path must deliberately replace the existing cooperative channel
+proxy route for these sockets. Do not leave `HTTPS_PROXY` accidentally routing
+requests through a second proxy and then claim that OpenShell checked Slack's
+destination. Required application/upstream proxies need explicit handling or
+rejection before deployment. Ordinary, non-contained deployments keep their
+existing channel-proxy configuration.
 
-## Outbound traffic and policy
+## Processes, Pods and connections
 
-### Enforcement path
+The proposed dedicated layout is:
 
-The proposed Gateway integration uses existing OpenShell networking components.
-All dashed arrows below remain unverified for this Gateway caller.
+- **Gateway workload Pod, owned by OpenShell:** its workload container runs the
+  trusted boundary launcher and the native Gateway Node process under OpenShell
+  confinement. Plugins and supported descendants run inside that boundary.
+  Gateway-private state mounts here, not the Harness workspace.
+- **Supervisor Pod, owned by OpenShell:** the existing supervisor authorizes
+  executable/destination pairs and opens upstream connections. Authenticated
+  provider boundary streams connect it to the workload's socket broker.
+  This is an existing provider process, not a new OCE proxy.
+- **Separate Harness Pod:** the selected Harness and its existing workspace/node
+  processes stay on their current path. For dedicated Codex, the Gateway still
+  uses its authenticated app-server connection on 18790 and status on 18791;
+  routed deployments retain WSS/HTTPS on 443.
+- **OCE API/worker and OpenShell control service:** OCE requests provisioning and
+  owns Agent lifecycle. OpenShell creates its runtime Pods. Its existing service
+  relay supplies an inbound transport candidate; it is not the outbound proxy.
+
+Logical request flow below is proposed and unverified; dashed arrows do not
+represent a passing deployment or control-session dial direction.
 
 ```mermaid
 ---
@@ -88,139 +108,133 @@ config:
       bottom: 14
 ---
 flowchart TB
-  Channels["<b>Enabled channels</b><br/>Destination contributions"]
-  Policy["<b>Gateway policy</b><br/>Runtime + channels<br/>+ compatibility access"]
-  subgraph Boundary["OpenShell Sandbox: dedicated Gateway"]
-    Gateway["<b>Native Gateway</b><br/>Plugins and channels"]
-    Broker["<b>Socket mediation</b><br/>Contained connections"]
+  subgraph Workload["Gateway workload Pod: OpenShell-owned"]
+    Gateway["<b>Native Gateway</b><br/>Slack SDK and plugins"]
+    Boundary["<b>Boundary process</b><br/>Contained socket broker"]
   end
-  Enforcement["<b>Existing supervisor</b><br/>Network authorization<br/>and outbound proxy"]
-  External["<b>Provider endpoints</b><br/>HTTPS and WebSockets"]
-  Harness["<b>Separate Harness</b><br/>Unchanged transport<br/>and model credentials"]
-  Channels -.->|contribute| Policy
-  Policy -.->|configure| Enforcement
-  Gateway -.->|native sockets| Broker
-  Broker -.->|mediate| Enforcement
-  Enforcement -.->|end-to-end TLS| External
-  Enforcement -.->|existing authenticated link| Harness
-  classDef policy fill:#EDF2F7,stroke:#879AB0,color:#25364A,stroke-width:1px
+  subgraph SupervisorPod["Separate OpenShell supervisor Pod"]
+    Proxy["<b>Existing supervisor</b><br/>Policy and upstream TCP"]
+  end
+  Slack["<b>Slack endpoint</b><br/>HTTPS or WSS"]
+  subgraph HarnessPod["Separate Harness Pod: unchanged"]
+    Harness["<b>Harness runtime</b><br/>Workspace and model auth"]
+  end
+  Gateway -.->|ordinary sockets| Boundary
+  Boundary -.->|mediated streams| Proxy
+  Proxy -.->|opaque TLS bytes| Slack
+  Proxy -.->|existing authenticated transport| Harness
   classDef runtime fill:#EBF3F0,stroke:#7F9D93,color:#2B4038,stroke-width:1px
   classDef external fill:#F1EEF5,stroke:#A091AD,color:#3A3243,stroke-width:1px
-  class Channels,Policy policy
-  class Gateway,Broker,Enforcement runtime
-  class External,Harness external
-  style Boundary fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
+  class Gateway,Boundary,Proxy,Harness runtime
+  class Slack external
+  style Workload fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
+  style SupervisorPod fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
+  style HarnessPod fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
 ```
 
-1. A native plugin or channel opens an HTTPS or WebSocket connection in the
-   Gateway process, or an explicitly supported child executable.
-2. OpenShell's contained socket path mediates the connection. Proxy environment
-   variables alone are not this boundary, and the Gateway does not get a direct
-   network escape for integrations that ignore those variables.
-3. The existing supervisor applies the translated executable and destination
-   policy and opens an authorized upstream connection. The integration adds no
-   OCE data-plane forwarder.
-4. The Gateway authenticates the remote TLS peer and supplies its normal native
-   credentials. HTTPS and WSS remain end-to-end TLS. Select OpenShell's explicit
-   `tls: skip` mode to skip interception, not application certificate validation.
+Managing a proxy Pod alone does not contain the Gateway. Here the Gateway itself
+runs inside the selected Sandbox; its sockets are mediated even when a client
+ignores proxy environment variables. Compute must replace its ordinary Gateway
+realization, not leave an uncontained serving copy beside the contained one.
 
-The Linux experiment must exercise this path from the real Gateway, not merely
-inspect a rendered policy. Confirm the actual executable identities used by
-Node, plugin subprocesses and startup downloads before granting them access.
+## Dedicated and embedded behavior
 
-### Channel contributions and compatibility access
+**Dedicated, with Gateway containment selected:** move only the Gateway's
+realization into the OpenShell runtime above. Keep the separate Harness's
+placement, descriptor, workspace, authentication and model-credential delivery
+unchanged. Derive allowed private Harness destinations from its rendered
+transport configuration; do not infer them from a public wildcard grant.
 
-Add a side-effect-free Channel Driver contribution for the enabled channel
-configuration: destination host patterns, ports and transport requirements.
-OCC collects non-secret contributions for the Agent revision; Compute passes
-them to the Gateway's Sandbox policy. Channel implementations own provider
-knowledge, while the Sandbox owns executable mapping and provider syntax.
-No contribution carries a credential or authorizes request rewriting.
+**Dedicated, without opt-in:** retain the current Gateway deployment and channel
+proxy. Unsupported containment requests fail before an uncontained candidate
+starts; they must not silently select the ordinary path.
 
-Start with Slack HTTPS API access and its Socket Mode WebSocket destinations.
-Socket Mode can return a dynamic hostname; do not claim that one API hostname
-covers the live socket. Propose `slack.com:443` and `**.slack.com:443`, with
-explicit compatibility access for unverified integration/media destinations.
-Native SDK source does not guarantee a Slack-only socket hostname; Sandbox
-policy must enforce the admitted destination patterns.
-Other enabled channels without a destination contributor must be identified,
-not silently treated as restricted and functional.
+**Embedded:** keep the existing combined Gateway/Harness workload, workspace,
+credential mounts and networking unchanged. This proposal neither contains that
+combined runtime nor adds embedded outbound access or channel support. Embedded
+Agents do not invoke the proposed Gateway containment capability. An explicit
+request to use this dedicated-only capability for embedded execution is rejected,
+not converted to dedicated mode.
 
-Keep three policy inputs distinct: Gateway runtime needs, channel contributions,
-and operator-selected compatibility access. Runtime needs include DNS, the
-existing private Harness endpoint, configured OCC callbacks and required
-plugin/package traffic. Record actual executables, destination patterns, ports
-and private-IP allowances. Permissive compatibility access is acceptable, but
-is not evidence of destination isolation. Removing a channel removes its contribution on
-replacement; a wider compatibility rule can still permit that destination.
+## Credentials and destination enforcement
 
-## Minimal deployment integration
+In dedicated execution, existing Namespace Secrets supply channel/integration
+credentials to the Gateway. Its Harness transport credential stays available
+for the existing link. Selected model credentials remain only in the separate
+Harness. The supervisor does not need model or Slack tokens to enforce this
+non-intercepting policy; they remain native application credentials, not proxy
+substitution credentials. Supported delivery into the contained Gateway still
+needs implementation. Keep values out of policy, ConfigMaps, logs and evidence.
+Embedded credential custody remains unchanged.
 
-Compute requests a Gateway-specific capability from the selected Sandbox,
-independently of its existing Harness Sandbox selection. The integration must
-not reuse Harness provisioning by changing the Harness descriptor,
-`sandboxDriverId`, authentication or credential attachments. Absence of opt-in
-keeps the current Gateway path; unsupported opt-in fails before an uncontained
-Gateway starts.
+Select explicit OpenShell `tls: skip`: this skips interception, not the native
+client's certificate checks. The supervisor enforces executable, host and port
+policy without terminating this TLS session. Proxy environment variables alone
+are not enforcement.
 
-Limit the contract to the inputs and results needed by this dedicated Gateway
-caller: native startup/configuration, private state, resources, policy,
-authenticated endpoint, readiness and owned cleanup. Translate those inputs
-through supported OpenShell provisioning. Copying the entire Kubernetes Pod
-template is not required. A generic template executor or workload adoption
-framework is not a prerequisite.
+Compose three non-secret inputs: exact runtime destinations, enabled-channel
+destinations, and explicit operator-selected compatibility access. Channels
+supply hosts/ports and HTTPS/WSS requirements; the Sandbox maps them to executable
+identities and provider rules. Slack initially proposes `slack.com:443` plus
+`**.slack.com:443` for enabled Socket Mode accounts, not a complete media allowlist.
+Do not claim native code validates every returned WSS hostname as Slack-owned.
 
-Compute retains Agent lifecycle, routes, private-state ownership and the result
-reported to OCC. The OpenShell Driver owns its contained runtime and provider
-resources. Preserve the Gateway's channel/integration credentials and Harness
-transport credential without exposing values in provider configuration or logs.
+A broad compatibility grant may establish connectivity, not restrictive
+isolation. Record executables, ports and private-address behavior. OpenShell's
+`**` spans DNS labels; `*` does not. Wildcard DNS and direct IP-literal dials have
+different private-address handling. Verify both. Removing a channel removes its
+contribution on replacement; a broader compatibility rule may still allow it.
+The [plan](../plans/0024-dedicated-gateway-containment.md#outbound-policy-implementation-details)
+owns translation details and limits.
+
+## Platform interfaces and ownership
+
+Use existing platform owners because each already owns part of this deployment:
+
+- **Compute** keeps normal Agent provisioning, routes, readiness, private-state
+  claims, activation, stop and delete. It invokes containment only around the
+  dedicated Gateway realization.
+- **Sandbox** owns launching the contained Gateway, its process/filesystem
+  boundary, socket enforcement and provider-resource cleanup. A separately
+  selected Gateway capability is needed because existing `sandboxDriverId` and
+  Harness provisioning affect the Harness, which must remain unchanged.
+- **Channel** owns provider destination knowledge. A pure contribution from the
+  same selected adapter avoids Slack host lists in Compute and secret reads
+  during policy derivation.
+
+Proposed names such as `gatewaySandbox` and `SandboxDriver.gateway` are not current
+configuration/API support. Limit inputs to this Gateway's startup/configuration,
+private state, resources, policy, endpoint and cleanup. Supported native
+translation is sufficient; a full Pod-template executor, scheduler, generic
+workload API, new public resource or credential broker is outside scope.
 No model CredentialSource or Credential Proxy registration is required merely
 to select Gateway containment.
 
-## Authenticated ingress
+## Ingress dependency and completion
 
-Ingress is a compatibility dependency of this outbound experiment. The current
-OCE route authenticates operator requests before setting `x-occ-identity`;
-node routes remove operator identity. The native Gateway rejects ordinary
-loopback trusted-proxy authentication. OpenShell's current service relay
-presents a loopback peer, while direct Pod-IP ingress is excluded by its socket
-confinement.
+Outbound success is insufficient if users and nodes cannot reach the Gateway.
+OpenShell confines workload INET sockets to loopback; ordinary Pod-IP ingress
+cannot reach them. Its service relay reaches loopback, but the pinned native
+Gateway rejects ordinary loopback trusted-proxy authentication.
 
-Recommend reusing the service relay and adding native verification of OCE-signed
-ingress evidence. Existing authenticated OCE callers issue fresh evidence; the
-Gateway receives verification material, not signing authority. This requires
-native attribution, authentication, schema and policy-revalidation changes,
-not a new forwarding service. Keep node credentials and role admission
-separate from operator identity. Private status/readiness also needs a mapping
-through the selected Sandbox because the current Pod proxy cannot reach loopback.
+The source-backed recommendation is native verification of OCE-signed ingress
+evidence over that existing relay. This requires native attribution/auth/schema
+and policy-revalidation changes; it is not an implemented protocol. Keep signing
+authority outside the Sandbox, ordinary loopback identity trust disabled, and
+native node authorization separate. Node attribution and private status/readiness
+mapping remain unresolved. The [minimum ingress analysis](../plans/0024-dedicated-gateway-containment.md#minimum-ingress-dependency)
+names exact owners, alternatives and review/authority requirements.
 
-The [plan](../plans/0024-dedicated-gateway-containment.md#minimum-ingress-dependency)
-names exact source owners, existing-auth alternatives, and unresolved node
-attribution and proof-binding requirements. This is a recommendation pending
-authority for native-repository changes and authentication design review, not
-an approved wire protocol. Do not enable ordinary loopback identity trust,
-accept raw identity headers or disable confinement. Ingress remains incomplete
-until the supported path is implemented and exercised.
+Delivery requires normal Linux Agent provisioning with genuine images: native
+HTTPS and long-lived WSS through enforcement, allowed/denied destinations,
+authenticated ingress and forgery rejection, a real model/tool turn with the
+unchanged Harness, private-state survival, stop/start/delete and no uncontained
+fallback on failure. Verify embedded behavior remains unchanged. Report live
+channel login/messages separately from synthetic policy checks.
 
-## Completion evidence
-
-Use normal Linux Agent provisioning with genuine Gateway, Harness and OpenShell
-images. The [verification procedure](../../docs/testing/gateway-containment.md)
-defines the environment and evidence record. Delivery requires:
-
-- HTTPS and a long-lived WebSocket from the actual contained Gateway through
-  the existing enforcement path, with native TLS verification intact.
-- Channel contributions in the applied Gateway policy; live channel login and
-  message exchange reported separately from synthetic policy inspection.
-- Authenticated operator access and rejection of forged identity at each
-  reachable endpoint; no operator privilege through node routes.
-- A real model/tool turn with unchanged Harness placement and credential custody.
-- Required Gateway state across restart/replacement, normal stop/start/delete,
-  and failure without an uncontained fallback.
-
-Keep this RFC Proposed, report unimplemented code and unrun proof explicitly,
-and leave the PR draft and unmerged. Existing Harness qualification is not
-proof of Gateway connectivity with an unchanged Harness.
+Use the [verification procedure](../../docs/testing/gateway-containment.md).
+Keep the RFC Proposed and the PR draft and unmerged. Documentation or
+Harness-only qualification is not Gateway proof.
 
 ## Related
 
@@ -228,3 +242,4 @@ proof of Gateway connectivity with an unchanged Harness.
 - [Sandbox Driver](../../docs/reference/drivers/sandbox.md)
 - [OpenShell Sandbox](../../docs/reference/drivers/openshell-sandbox.md)
 - [Channel Driver](../../docs/reference/drivers/channel.md)
+- [Storage and credentials](../../docs/reference/drivers/kubernetes-compute/storage-and-credentials.md)
