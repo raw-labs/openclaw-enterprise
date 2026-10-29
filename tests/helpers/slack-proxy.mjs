@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import net from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { availablePort } from "./available-port.mjs";
+import { reservedPortArgs, reservePort } from "./available-port.mjs";
+import { temporaryDirectory } from "./temporary-directory.mjs";
 
 /**
  * Starts the bundled Slack proxy (apps/controller/src/slack-proxy.mjs) as a child process and
  * resolves once it logs the port it bound. By default OCC_SLACK_PROXY_PORT is 0; with
- * `fixedPort` the helper picks a free port, passes it, and requires the proxy to bind exactly
- * that port (another process can take a picked port first, so EADDRINUSE picks again). The
- * test's cleanup sends the proxy SIGTERM. With `upstreamPort`, the child resolves each of
+ * `fixedPort` the helper holds a free port with reservePort() until the proxy has bound it,
+ * passes it, and requires the proxy to bind exactly that port. Without SO_REUSEPORT the
+ * reservation holds nothing and another process can take the port first, so EADDRINUSE picks
+ * again. The test's cleanup sends the proxy SIGTERM. With `upstreamPort`, the child resolves
  * `upstreamHosts` (default slack.com) to a public fixture address and its pinned numeric
  * connections on port 443 reach that loopback port instead. `dnsAnswers` overrides individual
  * responses (an address list, "failure", or "pending"). A connection to a
@@ -36,8 +37,15 @@ export async function startSlackProxy(
       ? []
       : ["--import", await writeDnsFixture(t, upstreamPort, upstreamHosts, dnsAnswers)];
   for (let attempt = 1; ; attempt += 1) {
-    const port = fixedPort ? await availablePort({ host: "0.0.0.0" }) : 0;
-    const proxy = await spawnSlackProxy(t, preload, port, teamsEnabled, teamsFileHosts);
+    const reservation = fixedPort ? await reservePort({ host: "0.0.0.0" }) : undefined;
+    const port = reservation?.port ?? 0;
+    const proxy = await spawnSlackProxy(
+      t,
+      [...(reservation ? reservedPortArgs(reservation) : []), ...preload],
+      port,
+      teamsEnabled,
+      teamsFileHosts,
+    ).finally(() => reservation?.release());
     if (expectStartupFailure) {
       assert.equal(proxy.port, undefined, "invalid proxy configuration must fail before listening");
       return proxy;
@@ -88,8 +96,7 @@ async function spawnSlackProxy(t, preload, port, teamsEnabled, teamsFileHosts) {
 }
 
 async function writeDnsFixture(t, upstreamPort, upstreamHosts, dnsAnswers) {
-  const directory = await mkdtemp(join(tmpdir(), "openclaw-slack-proxy-test-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "openclaw-slack-proxy-test-");
   const path = join(directory, "dns-fixture.mjs");
   await writeFile(
     path,

@@ -20,7 +20,9 @@ access, bind a Namespace Secret, grant Agent access, and retain the native
 plugin selection. The same case saves the optional SharePoint upload site ID,
 checks it after reopening and an unrelated access edit, then clears it and
 verifies removal from native Configuration. This proves configuration handling,
-not Microsoft upload permissions or file delivery. Its directory case uses the real API, OCC, IAM, Secret Driver,
+not Microsoft upload permissions or file delivery. The Credentials step also
+checks that an IAM refusal leaves the saved Teams binding unchanged and grants
+no access to the replacement Secret. Its directory case uses the real API, OCC, IAM, Secret Driver,
 and bundled Channel Driver with a local HTTP Microsoft protocol fixture. It
 selects names, saves native IDs, and preserves manual entry after consent denial.
 `tests/integration/teams-directory.test.mjs` additionally checks Team-scoped
@@ -35,6 +37,12 @@ Run `node --test tests/integration/production-kubernetes-packaging.test.mjs`
 with Helm and yq installed to verify the opt-in TLS listener, explicit ingress
 peers, proxy flag, and rejected conflicting settings. This checks real rendered
 chart output, not live Envoy policy enforcement.
+
+The existing deployment-admission case in
+`tests/conformance/kubernetes-compute.test.mjs` refuses missing callback routing,
+custom or invalid webhook settings, legacy listeners, and unsupported clouds
+before predecessor shutdown. It also accepts the default callback path and
+keeps Installation prerequisites out of Configuration and Agent saves.
 
 The existing retirement case in `tests/conformance/kubernetes-compute.test.mjs`
 also exercises serving/candidate callback ownership, exact method/path/header

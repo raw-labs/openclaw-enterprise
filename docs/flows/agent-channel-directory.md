@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
-updated: 2026-10-16
-last_updated_session: 01a1345f-9591-7c21-9306-c235c3bd6ee3
+updated: 2026-10-28
+last_updated_session: "authoring-run/d2bd1414-d73d-4eca-b675-32310d3d3c26"
 ---
 
 # Agent Channel Directory Lookup Flow
@@ -22,7 +22,7 @@ actionable error.
   authorized caller posts to the Namespace channel directory route.
 - Assumptions: the caller can create an Agent or update the exact Agent or
   Configuration, and can operate the selected same-Namespace Secret.
-- Source: `apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`,
+- Source: `apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`,
   `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`,
   and `apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`.
 
@@ -99,14 +99,21 @@ not participate in bot deployment credential admission.
 cancels an unused response body on a non-success HTTP status before returning
 the safe rate-limit or unavailable error. This releases occupied transport
 capacity even when the error body has not finished. The same request owner
-serves credential validation; no automatic retry is added. Successful responses
+serves credential validation; no automatic retry is added. Production
+composition sets `expectProxy`: with no proxy URL, a credential check whose
+fetch fails to connect, resolve, or answer within the time budget raises
+`SlackRouteNotConfiguredError` (`409`) instead of the unavailable error (finding
+2521). Its message names the Helm proxy settings and says to try again when the
+API has another approved route, since an open route can also time out (finding
+2531). Any other fetch rejection, such as a refused redirect, a TLS failure, or
+an invalid header value, stays unavailable (finding 2532). Successful responses
 have an 8,000,000-byte streaming cap before decoded JSON is checked against the
 existing limit of 2,000,000 UTF-16 code units. Overflow cancels the body read and returns `invalid_response`.
 
 ### 3. Display names and save IDs
 
-`apps/controller/src/console/channels/slack.mjs:appendFields`,
-`apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`
+`apps/controller/src/console/channels/slack.mts:appendFields`,
+`apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`
 
 The Console presents bot-token selection before channel access and explains that
 name lookup needs that token. It debounces typing and shows each candidate's name,
@@ -201,6 +208,10 @@ Manual IDs remain available after missing-consent or provider errors.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 22:25: Carry Teams into the typed console owners and preserve Slack transport diagnostics and shared Secret validation. (authoring-run/d2bd1414-d73d-4eca-b675-32310d3d3c26 - 93c1dc4f24b9)
+
+- 2026-10-25: Name the Slack proxy settings, and keep a retry for another approved route, when production credential validation cannot connect to Slack. (findings 2521, 2531, 2532)
 
 - 2026-10-16 18:08: Expose the optional native Teams upload destination and preserve its save/clear semantics. (01a1345f-9591-7c21-9306-c235c3bd6ee3 - d279f3bcb15a)
 

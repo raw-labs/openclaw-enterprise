@@ -77,6 +77,10 @@ test("Agent-scoped Teams lookup uses the authorized password and Team roster, th
         dmPolicy: "disabled",
       },
     },
+  }, {
+    secretBindings: {
+      MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } },
+    },
   });
   assert.deepEqual(configuration.values.channels.msteams.groupAllowFrom, [teamsMemberId]);
   assert.ok(configuration.values.channels.msteams.teams[teamsNativeId]);

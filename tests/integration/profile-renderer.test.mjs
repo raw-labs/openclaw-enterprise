@@ -1,3 +1,7 @@
+import {
+  requireConfiguration,
+  ConfigurationValidationError as SharedConfigurationValidationError,
+} from "../../packages/contracts/src/index.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -6,9 +10,12 @@ import {
   cpSync,
   existsSync,
   mkdtempSync,
+  mkdirSync,
+  linkSync,
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,6 +34,7 @@ import {
 import { conformanceKubernetesOptions } from "../helpers/kubernetes-compute.mjs";
 import { syntheticCredentialUrl } from "../fixtures/synthetic-credential-url.mjs";
 import { fileTemporaryDirectory } from "../helpers/temporary-directory.mjs";
+import { helmTemplate } from "../helpers/production-chart.mjs";
 import {
   RenderRefusal,
   renderInstallationProfile,
@@ -124,6 +132,8 @@ function managedCodexInput(overrides = {}) {
 function repositoryConfiguration(upstreamCidrs = ["192.0.2.30/32"]) {
   return {
     enabled: true,
+    authority: "prepared-git",
+    preparedCustodySecretName: "occ-repository-custody",
     image: `registry.example.invalid/openclaw-enterprise/repository-credentials@sha256:${digestC}`,
     backendId: "github-primary",
     registryConfigMapName: "occ-repository-registry-v1",
@@ -287,29 +297,6 @@ async function startDnsFixture(t, records) {
   return { directory, queriesPath, server: `127.0.0.1:${port}` };
 }
 
-function helmTemplate(output, extraValueFiles = [], releaseName = "oce", extraArgs = []) {
-  return execFileSync(
-    helm,
-    [
-      "template",
-      releaseName,
-      "deploy/helm/openclaw-enterprise",
-      "--namespace",
-      "openclaw-system",
-      "--values",
-      join(output.directory, "values.yaml"),
-      ...extraValueFiles.flatMap((path) => ["--values", path]),
-      ...extraArgs,
-    ],
-    {
-      cwd: repository,
-      encoding: "utf8",
-      maxBuffer: 2_000_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-}
-
 function deploymentChecksum(manifests, component) {
   const document = manifests
     .split(/\n---\n/)
@@ -414,11 +401,11 @@ const containerDefaultResources = {
   limits: { cpu: "4", memory: "2Gi" },
 };
 // Memory requests cover measured use between turns and limits cover measured
-// peaks (see the renderer): Gateways hold 1.2-1.6 GiB and peak at 2.2 GiB; a
+// peaks (see the renderer): Gateways hold 2.3-2.4 GiB and peak at 2.8 GiB; a
 // Codex Harness holds about 0.5 GiB and reached a 4 GiB limit building and testing.
 const gatewayResources = {
-  requests: { cpu: "100m", memory: "1792Mi" },
-  limits: { cpu: "4", memory: "3Gi" },
+  requests: { cpu: "100m", memory: "2560Mi" },
+  limits: { cpu: "4", memory: "4Gi" },
 };
 const harnessResources = {
   requests: { cpu: "100m", memory: "768Mi" },
@@ -487,7 +474,7 @@ test("profiles give tenant runtimes four-core CPU limits over unchanged 100m req
   // The example's placeholder proxy CIDR is the only value operators must supply.
   const compute = structuredClone(example.drivers.compute.configuration);
   compute.network.gatewayTrustedProxyCidrs = ["192.0.2.10/32"];
-  KubernetesComputeDriver.validateConfiguration(compute);
+  requireConfiguration(KubernetesComputeDriver, compute);
 });
 
 test("managed ChatGPT service-account wiring is optional and explicit", async () => {
@@ -550,6 +537,66 @@ test(
   },
 );
 
+test("profile renderer refuses input paths owned by its output directory without deleting files", async (t) => {
+  for (const name of ["values.yaml", "installation.yaml", "preflight.json"]) {
+    for (const alias of ["direct", "input-directory", "output-directory", "file", "hardlink"]) {
+      await t.test(`${name}, alias=${alias}`, async () => {
+        const directory = fileTemporaryDirectory("occ-profile-input-collision-");
+        const output = join(directory, "output");
+        mkdirSync(output);
+        // Seed real rendered files. A naming mistake must not destroy the input or its siblings.
+        await render("openclaw", baseInput(), output);
+        const input = join(output, name);
+        writeFileSync(input, JSON.stringify(baseInput()));
+        const before = new Map(
+          ["values.yaml", "installation.yaml", "preflight.json"].map((file) => [
+            file,
+            readFileSync(join(output, file)),
+          ]),
+        );
+        let inputPath = input;
+        let outputPath = output;
+        if (alias === "input-directory" || alias === "output-directory") {
+          const link = join(directory, "output-alias");
+          symlinkSync(output, link, "dir");
+          if (alias === "input-directory") {
+            inputPath = join(link, name);
+          } else {
+            outputPath = link;
+          }
+        } else if (alias === "file" || alias === "hardlink") {
+          inputPath = join(directory, "input-alias.json");
+          if (alias === "file") {
+            symlinkSync(input, inputPath);
+          } else {
+            linkSync(input, inputPath);
+          }
+        }
+        assert.throws(
+          () =>
+            execFileSync(
+              process.execPath,
+              [
+                "scripts/render-installation-profile.mjs",
+                "--profile",
+                "openclaw",
+                "--input",
+                inputPath,
+                "--out-dir",
+                outputPath,
+              ],
+              { cwd: repository, stdio: "pipe" },
+            ),
+          /input must not name a generated output file/,
+        );
+        for (const [file, contents] of before) {
+          assert.deepEqual(readFileSync(join(output, file)), contents, file);
+        }
+      });
+    }
+  }
+});
+
 test("failed rerenders remove stale deployable artifacts from a reused directory", async () => {
   for (const profile of ["openclaw", "codex"]) {
     const input = profile === "codex" ? codexInput() : baseInput();
@@ -583,6 +630,32 @@ test("failed rerenders remove stale deployable artifacts from a reused directory
             profile,
             "--input",
             join(output.directory, "input.json"),
+            "--out-dir",
+            output.directory,
+          ],
+          { cwd: repository, stdio: "pipe" },
+        ),
+      /unavailable or invalid JSON/,
+    );
+    for (const name of ["values.yaml", "installation.yaml", "preflight.json"]) {
+      assert.equal(existsSync(join(output.directory, name)), false);
+    }
+    assert.equal(readFileSync(notes, "utf8"), "Retain operator-owned files.\n");
+
+    // A filesystem metadata failure must still revoke stale success before reporting bad input.
+    assert.equal((await render(profile, input, output.directory)).preflight.ok, true);
+    const loop = join(output.directory, "loop.json");
+    symlinkSync(loop, loop);
+    assert.throws(
+      () =>
+        execFileSync(
+          process.execPath,
+          [
+            "scripts/render-installation-profile.mjs",
+            "--profile",
+            profile,
+            "--input",
+            loop,
             "--out-dir",
             output.directory,
           ],
@@ -852,6 +925,7 @@ const credentialSecretNames = [
 const repositorySecretKeys = [
   "serviceConfigSecretName",
   "appKeySecretName",
+  "preparedCustodySecretName",
   "tlsSecretName",
   "publicCaSecretName",
 ];
@@ -880,6 +954,7 @@ test(
       "occ-chatgpt-admin",
       "occ-repository-service-config",
       "occ-repository-app-key",
+      "occ-repository-custody",
       "occ-repository-tls",
       "occ-repository-public-ca",
     ]) {
@@ -955,6 +1030,12 @@ test(
         ["appKeySecretName", root, "the generated Gateway root CA"],
         ["appKeySecretName", "occ-database", "database.secretName"],
         ["appKeySecretName", "occ-private-gateway-key", "gatewayRouting.apiKeySecretName"],
+        ["preparedCustodySecretName", "occ-database", "database.secretName"],
+        [
+          "preparedCustodySecretName",
+          "occ-repository-app-key",
+          "repositoryCredentials.appKeySecretName",
+        ],
         ["tlsSecretName", "occ-chatgpt-admin", "backend.chatgpt.secretName"],
         ["tlsSecretName", "occ-repository-app-key", "repositoryCredentials.appKeySecretName"],
       ].map(([key, secretName, other]) => [
@@ -1835,7 +1916,13 @@ test("profiles pass an optional observability URL to Installation startup YAML",
     // So is an empty user info, which Node drops: any @ before the host, with or without the
     // slashes, and before an IPv4 host too.
     "http://@grafana.example.internal/d",
-    "https://:@grafana.example.internal/d",
+    syntheticCredentialUrl({
+      protocol: "https",
+      username: "",
+      password: "",
+      host: "grafana.example.internal",
+      pathname: "/d",
+    }),
     "http:@grafana.example.internal/d",
     "http:\t//@grafana.example.internal/d",
     "http://@192.0.2.10:3000/d",
@@ -2059,6 +2146,7 @@ function checkoutWithoutDependencies() {
   const sources = [
     "package.json",
     "scripts/render-installation-profile.mjs",
+    "scripts/lib/prepared-repository-installation.mjs",
     "deploy/profiles",
     "apps/controller/package.json",
     "apps/controller/src",
@@ -2430,7 +2518,8 @@ test("preflight rejects channel proxy URLs with an invalid octet or port", async
   );
   assert.match(accepted.values, /channelDirectoryProxyUrl: http:\/\/192\.0\.2\.10:8080/);
   assert.match(accepted.installation, /proxyUrl: http:\/\/192\.0\.2\.10:8080/);
-  KubernetesComputeDriver.validateConfiguration(
+  requireConfiguration(
+    KubernetesComputeDriver,
     loadYaml(accepted.installation).drivers.compute.configuration,
   );
 });
@@ -2447,7 +2536,7 @@ for (const profile of ["openclaw", "codex"]) {
       const compute = loadYaml(output.installation).drivers.compute.configuration;
       assert.equal(compute.runtime.channels.proxyUrl, proxyUrl);
       // Installation validation runs even before an Agent enables a channel.
-      assert.doesNotThrow(() => KubernetesComputeDriver.validateConfiguration(compute));
+      assert.doesNotThrow(() => requireConfiguration(KubernetesComputeDriver, compute));
     });
   }
 }
@@ -2458,7 +2547,7 @@ test("channel proxy validation preserves explicit ports and exact managed peers"
   const compute = loadYaml(output.installation).drivers.compute.configuration;
   const managed = structuredClone(compute.runtime.channels);
   assert.equal(managed.managedProxy.port, 3128);
-  KubernetesComputeDriver.validateConfiguration(compute);
+  requireConfiguration(KubernetesComputeDriver, compute);
 
   // IPv6 is supported by Compute directly; profile input intentionally remains IPv4-only.
   for (const proxyUrl of [
@@ -2469,7 +2558,7 @@ test("channel proxy validation preserves explicit ports and exact managed peers"
     "https://192.0.2.10:80/",
   ]) {
     compute.runtime.channels = { proxyUrl };
-    assert.doesNotThrow(() => KubernetesComputeDriver.validateConfiguration(compute), proxyUrl);
+    assert.doesNotThrow(() => requireConfiguration(KubernetesComputeDriver, compute), proxyUrl);
   }
   for (const [scheme, port] of [
     ["http", 80],
@@ -2480,7 +2569,7 @@ test("channel proxy validation preserves explicit ports and exact managed peers"
       proxyUrl: `${scheme}://${managed.managedProxy.hostname}:${port}/`,
       managedProxy: { ...managed.managedProxy, port },
     };
-    assert.doesNotThrow(() => KubernetesComputeDriver.validateConfiguration(compute));
+    assert.doesNotThrow(() => requireConfiguration(KubernetesComputeDriver, compute));
   }
 
   for (const proxyUrl of [
@@ -2502,7 +2591,10 @@ test("channel proxy validation preserves explicit ports and exact managed peers"
     "http://proxy.example.invalid:80",
   ]) {
     compute.runtime.channels = { proxyUrl };
-    assert.throws(() => KubernetesComputeDriver.validateConfiguration(compute), /Channel proxy/i);
+    assert.throws(
+      () => requireConfiguration(KubernetesComputeDriver, compute),
+      SharedConfigurationValidationError,
+    );
   }
   // A valid peer grant never authorizes a different Service, port, or URL credentials.
   for (const proxyUrl of [
@@ -2522,7 +2614,10 @@ test("channel proxy validation preserves explicit ports and exact managed peers"
       proxyUrl,
       managedProxy: { ...managed.managedProxy, port: 80 },
     };
-    assert.throws(() => KubernetesComputeDriver.validateConfiguration(compute), /channel proxy/i);
+    assert.throws(
+      () => requireConfiguration(KubernetesComputeDriver, compute),
+      SharedConfigurationValidationError,
+    );
   }
 });
 
@@ -2539,9 +2634,10 @@ test("channel proxy validation preserves omitted-port endpoint diagnostics", asy
     "http://192.0.2.10:8080/path",
   ]) {
     compute.runtime.channels = { proxyUrl };
-    assert.throws(() => KubernetesComputeDriver.validateConfiguration(compute), {
-      message: "Channel proxy URL must identify one credential-free HTTP(S) IP endpoint.",
-    });
+    assert.throws(
+      () => requireConfiguration(KubernetesComputeDriver, compute),
+      SharedConfigurationValidationError,
+    );
   }
   for (const proxyUrl of [
     `http://${managed.managedProxy.hostname}`,
@@ -2549,9 +2645,10 @@ test("channel proxy validation preserves omitted-port endpoint diagnostics", asy
     "http://other.openclaw-system.svc:3128",
   ]) {
     compute.runtime.channels = { ...managed, proxyUrl };
-    assert.throws(() => KubernetesComputeDriver.validateConfiguration(compute), {
-      message: "Managed channel proxy URL must match the exact configured Service host and port.",
-    });
+    assert.throws(
+      () => requireConfiguration(KubernetesComputeDriver, compute),
+      SharedConfigurationValidationError,
+    );
   }
 });
 
@@ -2686,7 +2783,7 @@ test("profiles refuse gateway namespaces the compute driver refuses", async () =
     );
     assert.throws(
       () => admit({ ...routing, gatewayNamespace: namespace }),
-      /Gateway routing Gateway namespace must be a Kubernetes namespace name/,
+      SharedConfigurationValidationError,
     );
   }
   for (const envoyNamespace of refused) {
@@ -2695,10 +2792,7 @@ test("profiles refuse gateway namespaces the compute driver refuses", async () =
       baseInput({ controlPlane: { ...controlPlane, envoyNamespace } }),
       envoyMessage,
     );
-    assert.throws(
-      () => admit({ ...routing, envoyNamespace }),
-      /Gateway routing Envoy namespace must be a Kubernetes namespace name/,
-    );
+    assert.throws(() => admit({ ...routing, envoyNamespace }), SharedConfigurationValidationError);
   }
   const namespace = "a".repeat(63);
   const envoyNamespace = `${"b".repeat(62)}9`;
@@ -2756,7 +2850,7 @@ test("preflight rejects Codex seccomp paths the compute driver refuses", async (
   }
   const accepted = await render("codex", codexInput());
   const installation = loadYaml(accepted.installation);
-  KubernetesComputeDriver.validateConfiguration(installation.drivers.compute.configuration);
+  requireConfiguration(KubernetesComputeDriver, installation.drivers.compute.configuration);
   assert.match(accepted.installation, /codexSeccompProfile: profiles\/codex\.json/);
 });
 
@@ -2784,7 +2878,7 @@ test("the codex profile carries a Codex model endpoint under Compute startup's r
     loadYaml(backslashScheme.installation).drivers.compute.configuration.runtime.codexModelBaseUrl,
     "https://192.0.2.1/v1",
   );
-  KubernetesComputeDriver.validateConfiguration(compute);
+  requireConfiguration(KubernetesComputeDriver, compute);
   assert.equal(
     loadYaml((await render("codex", codexInput())).installation).drivers.compute.configuration
       .runtime.codexModelBaseUrl,
@@ -2804,7 +2898,12 @@ test("the codex profile carries a Codex model endpoint under Compute startup's r
     ],
     ["https://@models.example.com/v1", "must not contain user info or an @ before the host."],
     [
-      "https://user:pass@models.example.com/v1",
+      syntheticCredentialUrl({
+        username: "fixture-user",
+        password: "fixture-password",
+        host: "models.example.com",
+        pathname: "/v1",
+      }),
       "must not contain user info or an @ before the host.",
     ],
     ["http://models.example.com/v1", general],
@@ -2832,16 +2931,40 @@ test("the codex profile carries a Codex model endpoint under Compute startup's r
     await assertFieldRefusals("codex", codexInput(), field, [value], message);
     assert.throws(
       () =>
-        KubernetesComputeDriver.validateConfiguration({
+        requireConfiguration(KubernetesComputeDriver, {
           ...compute,
           runtime: { ...compute.runtime, codexModelBaseUrl: value },
         }),
       // Compute startup has no separate nonempty-string refusal; its general rule covers it.
-      {
-        message: `Codex model endpoint ${message === "must be a nonempty string." ? general : message}`,
-      },
+      SharedConfigurationValidationError,
       JSON.stringify(value),
     );
+  }
+  // Generated Harness model egress is TCP/443 to non-excluded IPv4, but an operator's own
+  // NetworkPolicy can admit more: preflight warns like Compute startup (findings 1740, 2284).
+  assert.doesNotMatch(accepted.preflight.warnings.join("\n"), /model egress/);
+  for (const [value, blocked] of [
+    [
+      "https://models.example.com:8443/v1",
+      "uses port 8443 but Harness model egress allows only TCP/443",
+    ],
+    [
+      "https://10.0.0.5:8443/v1",
+      "uses port 8443 but Harness model egress allows only TCP/443 and has an IPv4 host in 10.0.0.0/8 which Harness model egress excludes",
+    ],
+    ["https://[2001:db8::1]/v1", "is an IPv6 address but Harness model egress allows only IPv4"],
+    ["https://10.0.0.1/v1", "has an IPv4 host in 10.0.0.0/8 which Harness model egress excludes"],
+  ]) {
+    const warned = await render("codex", codexInput({ runtime: { codexModelBaseUrl: value } }));
+    assert.ok(
+      warned.preflight.warnings.includes(
+        `${field} ${blocked}: the generated policy will not admit it unless another NetworkPolicy does.`,
+      ),
+      value,
+    );
+    const configured = loadYaml(warned.installation).drivers.compute.configuration;
+    assert.equal(configured.runtime.codexModelBaseUrl, value);
+    requireConfiguration(KubernetesComputeDriver, configured);
   }
 });
 
@@ -2879,7 +3002,7 @@ test("profile transport Secret prefixes agree with controller startup admission"
           mode: "production",
           environment: { OCC_CONFIG_PATH: path },
         }),
-        /runtime\.transportSecretPrefix/,
+        SharedConfigurationValidationError,
       );
     }
   }
