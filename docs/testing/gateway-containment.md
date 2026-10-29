@@ -35,6 +35,25 @@ login, WebSocket operation or message delivery.
 
 ## Required observations
 
+### Default-deny policy cases
+
+Use the [RFC's proposed selections](../../specs/rfcs/0024-dedicated-gateway-containment.md#gateway-outbound-policy),
+not a permissive substitute. Exercise the real Gateway and record these outcomes:
+
+| Configuration                                 | Required outcome                                                                       |
+| --------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Omitted `gatewayOutbound`, no enabled channel | `channelsOnly` applies; external application connections fail.                         |
+| Default with Slack enabled                    | Declared Slack HTTPS/WSS destinations work; unrelated destinations remain denied.      |
+| `restricted` with an approved DNS host        | That host on TCP/443 works; an unapproved host remains denied.                         |
+| `publicHttps` without Installation permission | Admission rejects the selection.                                                       |
+| Explicitly permitted `publicHttps`            | Public TCP/443 works; forbidden DNS answers and IP-literal destinations remain denied. |
+
+Check that disabling Slack removes its contribution on replacement unless an
+independent explicit grant still allows it. Exact internal transport and DNS
+must continue to work without broad external access. Package/plugin downloads
+are not implicit grants. Record channel configuration separately from live
+provider login/messages; a rendered destination policy proves neither.
+
 ### Outbound enforcement and compatibility
 
 Inspect the real Gateway process tree and its OpenShell boundary. Confirm that
@@ -57,9 +76,10 @@ OpenShell socket mediation, supervisor authorization and upstream connection.
 Do not substitute a standalone request helper for the native integration.
 
 Inspect the applied Gateway policy separately for runtime destinations, enabled
-channel contributions and compatibility access. For Slack, cover both its API
-and the dynamically selected Socket Mode destination. Check private Harness
-endpoints, OCC callbacks, DNS and required plugin/package traffic. Record the
+channel contributions and explicit `gatewayOutbound` access. For Slack, cover
+both its API and the dynamically selected Socket Mode destination. Check private Harness
+endpoints, configured platform callbacks and DNS. Verify that plugin/package
+traffic has an explicit grant instead of widening the default. Record the
 actual executable paths, host patterns, ports and private-address allowances.
 Successful egress under a permissive policy is not proof of destination isolation.
 Exercise direct private-IP dials separately from wildcard DNS destinations; a

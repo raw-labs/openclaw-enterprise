@@ -30,8 +30,9 @@ Propose running the dedicated Gateway inside OpenShell containment so its
 ordinary sockets use OpenShell's existing network authorization and proxy.
 The result must be usable, configurable Gateway outbound connectivity. Process
 and filesystem containment support that result; they do not create an arbitrary-workload
-provisioning product. Initial permissive compatibility policy is
-acceptable. Neither credential rewriting nor TLS interception is required.
+provisioning product. External application egress is denied by default except
+for enabled channels. Neither credential rewriting nor TLS interception is
+required.
 
 **Status:** this proposal has no runtime implementation or Linux qualification.
 The [plan](../plans/0024-dedicated-gateway-containment.md) records the unresolved
@@ -148,9 +149,8 @@ transport configuration; do not infer them from a public wildcard grant.
 
 If the selected Gateway containment capability is absent or setup fails,
 deployment fails before an uncontained candidate starts. Do not fall back to
-the old Gateway deployment or channel proxy. Policy defaults for runtime,
-enabled-channel and additional plugin access remain a review decision; required
-connectivity must be explicit when replacing the proxy.
+the old Gateway deployment or channel proxy. The policy below replaces the
+proxy's permitted connectivity without adding general external access.
 
 **Embedded:** keep the existing combined Gateway/Harness workload, workspace,
 credential mounts and networking unchanged. This proposal neither contains that
@@ -158,6 +158,38 @@ combined runtime nor adds embedded outbound access or channel support. Embedded
 Agents do not invoke the proposed Gateway containment capability. An explicit
 request to use this dedicated-only capability for embedded execution is rejected,
 not converted to dedicated mode.
+
+## Gateway outbound policy
+
+Propose an OCE Agent setting, `gatewayOutbound`, separate from native OpenClaw
+Configuration. Omitting it selects `channelsOnly`. It controls external
+application destinations, not whether the dedicated Gateway is contained.
+
+| Selection                    | External application access                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| `channelsOnly` **(default)** | Only destinations contributed by enabled, supported channels.                |
+| `restricted`                 | Channel destinations plus exact administrator-approved DNS hosts on TCP/443. |
+| `publicHttps`                | Public TCP/443, only when the Installation explicitly permits it.            |
+
+With no enabled channel, the default grants no external application access.
+Enabling Slack adds its required API and Socket Mode destinations; unrelated
+services remain denied. Channel Drivers own these non-secret requirements.
+Installing a plugin does not authorize its provider, package registry or other
+external services. Additional access requires an explicit wider selection.
+
+Exact internal Gateway/Harness transport and necessary DNS are separate runtime
+grants, not general Internet access. Public rules cannot override the
+Installation ceiling or forbidden private, loopback, link-local, metadata and
+infrastructure addresses. The implementation must validate DNS results and
+IP-literal dials; a broad provider wildcard alone is not sufficient evidence.
+TCP/443 policy does not inspect application protocols or replace native TLS.
+
+Changing access requires `update` and `administer` on the exact Agent, with
+attributable mutation/denial evidence. Freeze the selection, channel
+requirements and Installation ceiling in the Agent revision. Native
+Configuration cannot widen that authority. Unsupported selections fail before
+activation; no policy permits an uncontained fallback. These are proposed
+contracts, not current supported configuration.
 
 ## Credentials and destination enforcement
 
@@ -176,19 +208,26 @@ policy without terminating this TLS session. Proxy environment variables alone
 are not enforcement.
 
 Compose three non-secret inputs: exact runtime destinations, enabled-channel
-destinations, and explicit operator-selected compatibility access. Channels
+destinations, and additional access selected by `gatewayOutbound`. Channels
 supply hosts/ports and HTTPS/WSS requirements; the Sandbox maps them to executable
 identities and provider rules. Slack initially proposes `slack.com:443` plus
 `**.slack.com:443` for enabled Socket Mode accounts, not a complete media allowlist.
 Do not claim native code validates every returned WSS hostname as Slack-owned.
 
-A broad compatibility grant may establish connectivity, not restrictive
-isolation. Record executables, ports and private-address behavior. OpenShell's
-`**` spans DNS labels; `*` does not. Wildcard DNS and direct IP-literal dials have
-different private-address handling. Verify both. Removing a channel removes its
-contribution on replacement; a broader compatibility rule may still allow it.
+No broad grant is installed implicitly. Record executables, ports and
+private-address behavior. OpenShell's `**` spans DNS labels; `*` does not.
+Wildcard DNS and direct IP-literal dials have different private-address handling;
+verify both against the required policy. Removing a channel removes its
+contribution on replacement; an independently approved wider selection may
+still allow that destination.
 The [plan](../plans/0024-dedicated-gateway-containment.md#outbound-policy-implementation-details)
 owns translation details and limits.
+
+Feasibility must show `channelsOnly` denying external access with no enabled
+channel, Slack's declared HTTPS/WSS destinations allowed when enabled,
+and an unrelated destination still denied. An explicit restricted grant must
+allow its destination without granting others. Also verify rejection of public
+mode without Installation permission and denial of forbidden DNS/IP targets.
 
 ## Platform interfaces and ownership
 

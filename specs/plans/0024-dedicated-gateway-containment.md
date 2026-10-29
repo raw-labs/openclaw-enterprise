@@ -6,6 +6,7 @@ rfc: ../rfcs/0024-dedicated-gateway-containment.md
 
 - **ID:** RFC-0024
 - **Delivery status:** In progress
+- **Implementation hold:** Await the RFC owner's review; no implementation is authorized.
 - **Authority:** [Gateway containment RFC](../rfcs/0024-dedicated-gateway-containment.md)
 - **Source baseline:** `33c47d4099ec27d7c73abe50137a95cdf6abdecd`
 
@@ -14,8 +15,9 @@ rfc: ../rfcs/0024-dedicated-gateway-containment.md
 Deliver usable native Gateway HTTPS and WebSocket traffic through the selected
 Sandbox's existing policy enforcement. Run the dedicated Gateway in OpenShell
 as the mechanism. Keep the separate Harness's placement, workspace,
-authentication and model-credential path unchanged. Explicit initial
-compatibility access is acceptable; it does not prove restrictive isolation.
+authentication and model-credential path unchanged. Use the RFC's
+[`gatewayOutbound` policy](../rfcs/0024-dedicated-gateway-containment.md#gateway-outbound-policy):
+`channelsOnly` by default, with broader access explicit.
 
 Only the normal dedicated-Gateway caller is in scope. Do not build a generic
 workload executor, scheduler, Pod-template adoption layer, new public resource,
@@ -58,10 +60,9 @@ workspace and networking. It does not invoke this dedicated-only capability;
 an explicit embedded containment request fails admission without changing mode.
 The dedicated path requires the selected Gateway containment capability;
 missing support or setup failure rejects deployment, with no ordinary Gateway
-or channel-proxy fallback. Only egress permissions are configurable. Defaults
-remain a review decision and must cover required runtime and enabled-channel
-connections when the proxy is removed. Embedded behavior needs regression proof,
-not new containment features.
+or channel-proxy fallback. Only egress permissions are configurable. Exact
+runtime/DNS grants remain separate from external application access. Embedded
+behavior needs regression proof, not new containment features.
 
 ## Implementation scope review
 
@@ -99,12 +100,12 @@ account derivation; perform no secret reads or network calls to derive policy.
 
 Derive exact Harness transport/status destinations from rendered configuration:
 in-cluster Codex uses ports 18790/18791; routed variants use authenticated TLS
-on 443. Add only configured callbacks and observed startup/package needs.
-Do not invent a universal OCC callback.
+on 443. Add only required platform callbacks. Package/plugin downloads need
+explicit outbound permission; startup must not silently widen the default.
 
-A proposed compatibility rule may admit host `**`, ports 80/443 and explicit
-non-interception for Node. It is not a verified configuration or a private-network
-isolation claim. OpenShell [host patterns](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-core/src/host_pattern.rs)
+Do not install a broad compatibility rule. Additional restricted hosts use
+TCP/443; public TCP/443 requires explicit `publicHttps` selection and Installation
+permission. There is no implicit port-80 grant. OpenShell [host patterns](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-core/src/host_pattern.rs)
 use `*` for one DNS label and `**` across labels. TCP grants do not authorize
 UDP/QUIC; DNS uses the broker path. [Destination validation](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-supervisor-network/src/proxy/destination.rs)
 rejects private answers under wildcard DNS policy, but handles IP-literal dials
@@ -119,8 +120,8 @@ For Slack, start with `slack.com:443` for HTTPS and proposed
 not include the apex. [Socket Mode returns a temporary URL](https://docs.slack.dev/reference/methods/apps.connections.open/);
 retain native connection/reconnect ownership and never log its ticket. Native
 SDK source does not establish a Slack-only host validator. These contributions
-are not complete Slack media/response-URL coverage; retain explicit compatibility
-access where narrower support is unverified.
+are not complete Slack media/response-URL coverage. Unsupported destinations
+fail closed or require explicit additional access; never add a broad default.
 
 ## Minimum ingress dependency
 
@@ -217,7 +218,7 @@ only OpenShell's external relay still leaves final-hop verification unresolved.
    leave the Harness and embedded paths unchanged. Translate Gateway startup,
    credentials, private state and resources through supported provider calls.
 3. Connect native Gateway sockets to existing OpenShell enforcement. Add
-   runtime, channel and explicit compatibility policy inputs. Name executables,
+   runtime, channel and explicit `gatewayOutbound` policy inputs. Name executables,
    host patterns, ports and private endpoints; retain native TLS validation.
 4. Add meaningful integration at normal Agent deployment, including forged
    ingress identity, denied egress and failed setup without an uncontained
@@ -241,6 +242,7 @@ when step 1 is documented or when a fixture passes.
 | Harness and embedded placement/auth/model custody unchanged | Normal Agent deployment and workload inspection             | Not run                                                              |
 | Real full containment rather than proxy attachment          | Linux supervisor, process/filesystem and runtime inspection | Not run                                                              |
 | Native outbound HTTPS and long-lived transport work         | Real contained Gateway traffic                              | Not run                                                              |
+| Default-deny and explicit widening work                     | Policy cases in the verification procedure                  | Not run                                                              |
 | Enabled channels contribute destinations                    | Driver/Compute integration; live channel separately         | Not run                                                              |
 | Private state survives replacement                          | Real Agent redeploy/restart                                 | Not run                                                              |
 | Failure cannot activate an uncontained fallback             | Failure integration and real runtime negative control       | Not run                                                              |
@@ -291,6 +293,10 @@ dedicated Harness while containing the Gateway independently.
 - 2026-10-29: Removed the uncontained dedicated variant. Gateway containment is
   required in this proposal; egress policy remains configurable and embedded
   behavior remains unchanged. Corrected native patch ownership to the OCE build.
+
+- 2026-10-29: Set `gatewayOutbound` to `channelsOnly` by default; wider
+  selections are explicit. Added default-deny proof cases. Implementation is on
+  hold for the RFC owner's review.
 
 ## Changelog
 
