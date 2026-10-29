@@ -10,7 +10,7 @@ enabled for the Installation:
 1. [Create and deploy an Agent](../../reference/console/create-and-deploy.md) in the
    console, for example from Standard OpenClaw or Standard Codex. Their UI-enabled
    Configurations receive native admin policy in the first admitted version.
-2. Wait for deployment to succeed, then open **Gateway administration** → **Open admin console** on the
+2. Wait for deployment to succeed, then open **Open Agent UI** on the
    Agent detail page. The account needs `administer` permission on that exact Agent.
 3. For custom Configurations or existing Agents, follow
    [Deploy each Agent](#configure-each-agent). Explicit opt-outs remain effective;
@@ -137,7 +137,7 @@ ignores the shared cookie-domain value and keeps the legacy host-only
 Create an Agent from Standard OpenClaw or Standard Codex in the console and
 complete its ordinary deployment. With the Installation feature configured above,
 Kubernetes Compute prepares native admin policy in the first admitted revision.
-After deployment succeeds, choose **Gateway administration** → **Open admin console** on the Agent detail page. Expect the isolated Agent host, including any
+After deployment succeeds, choose **Open Agent UI** on the Agent detail page. Expect the isolated Agent host, including any
 port configured on the public OCC origin.
 
 For a custom Configuration, select `gateway.controlUi.enabled: true`. Leave
@@ -170,8 +170,9 @@ The editor preserves Secret bindings. If someone saves a newer Configuration fir
 
 For uncertain saves, follow [Configuration editor recovery](../console/configuration-plugins-and-files.md#configuration-tab).
 
-Keep durable configuration changes in OCE. For compatible Kubernetes gateways,
-native edits affect a Pod-local copy and are discarded when the Pod is replaced
+Keep durable configuration changes in OCE. Gateway managed mode defaults on and
+rejects native Configuration writes. When explicitly disabled and deployed,
+native edits on compatible Kubernetes gateways affect a Pod-local copy and are discarded when the Pod is replaced
 or the Agent is redeployed; persistent workspace and gateway data remain.
 See [Kubernetes managed native configuration](../../reference/drivers/kubernetes-compute/storage-and-credentials.md#managed-native-configuration)
 for the exact opt-in conditions and storage lifecycle.
@@ -204,6 +205,9 @@ gatewayRouting:
           matchLabels:
             app.kubernetes.io/name: ingress-nginx
 ```
+
+Each peer is an `ipBlock` or namespace and Pod selectors; Helm refuses a peer
+the Kubernetes API would refuse.
 
 Route the preview wildcard through your ingress to the Envoy Service's sandbox
 port, preserving the requested hostname and TLS server name. Keep the private
@@ -243,7 +247,7 @@ the same file and verify its contents are retained.
 
 ## Tests
 
-Open the console, choose a running Agent with a selected version, and verify the **Gateway administration** section on its detail page reports available for an administrator. Select **Open admin console** and confirm the Agent host loads in a new tab without native-admin exchange, bootstrap, callback, or Agent-specific session-cookie requests.
+Open the console, choose a running Agent with a selected version, and verify **Open Agent UI** is enabled for an administrator. Its description names the version selected for service. Select **Open Agent UI** and confirm the Agent host loads in a new tab without native-admin exchange, bootstrap, callback, or Agent-specific session-cookie requests.
 
 Full runtime proof still requires a real browser test that loads native assets through OCC, reconnects native WebSocket traffic, verifies the OCE session cookie never reaches the native gateway, and performs a reversible native admin edit against a disposable Agent.
 
@@ -276,13 +280,16 @@ the OCE login.
 If an open Gateway tab offers **Reconnect in browser**, select it. Your sign-in
 may have expired, or your access may have changed. If OCE asks you to sign in,
 it checks your access again and returns you to that Agent’s detail page. Select
-**Open admin console** to continue. With an older runtime, open the Agent root
+**Open Agent UI** to continue. With an older runtime, open the Agent root
 or its console page to start the same recovery.
 
 If expiry coincides with controller restarts, check persistent session storage
 and whether the configured auth secret changed. In-memory sessions disappear
 on restart; production uses PostgreSQL. Distinguish a console `401` from an
-actual permission denial (`403`), which signing in cannot repair.
+actual permission denial (`403`), which signing in cannot repair. That browser
+document navigation shows a generic 403 page whose only link is the signed-in
+person's Agents list. API clients and WebSocket upgrades still get the refusal
+without that page.
 
 ## Related
 

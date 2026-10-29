@@ -36,6 +36,7 @@ owns their deployment, workspace resource rendering, and image import.
 
 | Path                                                      | Responsibility                                                                                               |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `apps/controller/plugins/`                                | Checked-in managed plugin marketplace, portable packages, skills and OCE deployment rules.                   |
 | `apps/controller/src/`                                    | HTTP API, console serving, and API/worker entrypoints. `server.mjs` and `worker.mjs` start the processes.    |
 | `apps/controller/src/admission/`                          | Request admission and resource validation at the API boundary.                                               |
 | `apps/controller/src/http/`                               | Resource HTTP handlers and response projection, grouped by platform primitive.                               |
@@ -101,6 +102,7 @@ See the [Agent repository flow](flows/agent-repository-credentials.md).
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `deploy/helm/openclaw-enterprise/`                       | Helm chart for Kubernetes installation.                                                          |
 | `deploy/helm/openclaw-execution/`                        | Execution-cluster access roles and authenticated Harness routing infrastructure.                 |
+| `deploy/helm/openclaw-plugin-request-guard/`             | Shared OpenShell request middleware for managed plugins in an execution cluster.                 |
 | `deploy/runtime/`, `deploy/logging/`, `deploy/examples/` | Runtime packaging, logging configuration, and deployment examples.                               |
 | `deploy/presets/`                                        | Installable Agent Preset requests; see [standard Codex](guides/topics/standard-codex-preset.md). |
 | `Dockerfile`, `compose*.yaml`                            | Controller image and local stack definitions or overlays.                                        |
@@ -122,6 +124,8 @@ selected emitted modules and minimal manifests in
 the standalone service/client images do not include the controller dependency
 graph. The full `deploy/runtime/Dockerfile` uses the repository root as its build
 context to include the emitted client router in the Agent image.
+`deploy/runtime/openclaw-source.json` owns the OpenClaw source commit, archive
+checksum, and fixed build timestamp used by that runtime recipe and its callers.
 
 Chart-owned startup scripts live under `deploy/helm/openclaw-enterprise/files/`
 and are embedded in rendered container commands; they ship with the chart.
@@ -129,7 +133,6 @@ and are embedded in rendered container commands; they ship with the chart.
 Select checks using the [testing guide](testing/README.md). Follow AGENTS.md's
 integration requirements for runtime changes. For documentation-only changes,
 use formatting, builds, and link checks; do not add or run tests solely for prose.
-Do not install dependencies as a verification side effect.
 
 ## Code conventions
 
@@ -185,8 +188,7 @@ architecture pages for every feature.
 Put contributor workflows for documentation in `docs/contributing/`, starting
 with the [writing guide](contributing/documentation.md). Existing site-tooling
 guides and inventories may remain directly under `docs/`; `docs/testing/` owns
-code verification and test setup. Reusable writing templates belong to the local
-technical-writing skill.
+code verification and test setup. The [documentation taxonomy](taxonomy.md) maps page kinds to their templates.
 
 The [documentation map](README.md) has six menus. **Getting Started**, **Topics**,
 **Integrations**, **Operate**, and **Reference** serve product users and operators;
