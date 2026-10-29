@@ -45,13 +45,17 @@ gatewayOutbound:
       port: 443
 ```
 
-The default list is empty. Each enabled Channel contributes its required hosts from that Agent's configuration. Enabling Slack supplies its API and Socket Mode destinations automatically, including suffix wildcards for rotating WebSocket endpoints. Additional plugin services require explicit entries in the Agent's list.
+The default list is empty. Each enabled Channel contributes its required hosts from that Agent's configuration. Enabling Slack supplies its API and Socket Mode destinations automatically, including suffix wildcards for rotating WebSocket endpoints. Administrators approve extra hosts through the Agent's outbound settings.
 
-The controller combines only that Agent's additional destinations and enabled Channel requirements. Manual entries use exact DNS hosts on TCP/443; trusted Channel Drivers can contribute DNS suffix wildcards. Installation policy sets the maximum permitted access and mandatory address exclusions. Admission rejects any required destination that conflicts with those limits.
+The controller combines only that Agent's additional destinations and enabled Channel requirements. Manual entries use exact DNS hosts on TCP/443; trusted Channel Drivers can contribute DNS suffix wildcards. Every resulting policy must enforce the address exclusions described under Network enforcement and failure.
 
-Setting or changing destinations requires both `update` and `administer` on the exact Agent. OpenClaw Control Plane (OCC) validates and persists the setting through the Agent API and exposes it through the Console and CLI. It records attributable mutations and authorization denials. Native Configuration edits and plugin installation cannot grant additional destinations.
+Setting or changing destinations requires both `update` and `administer` on the exact Agent. OpenClaw Control Plane (OCC) validates and persists the setting through the Agent API and exposes it through the Console and CLI. It records attributable mutations and authorization denials.
 
-Deployment uses the existing deployment permissions. OCC saves the Agent's destination list, enabled Channel requirements, effective policy and selected Driver identities in the immutable Agent revision. The policy binds the Namespace, Agent and revision. Compute validates it against Installation restrictions before deployment. Later Agent edits take effect through a new revision; reconciliation uses the policy saved in the existing revision. Disabling a Channel removes its contribution on the next deployment while preserving independently approved destinations.
+Deployment uses the existing deployment permissions. OCC saves the Agent's destination list, enabled Channel requirements, effective policy and selected Driver identities in the immutable Agent revision.
+
+Each policy identifies its Namespace, Agent and revision. Compute checks that the policy enforces the required address exclusions before deployment.
+
+Later Agent edits take effect through a new revision; reconciliation uses the policy saved in the existing revision. Disabling a Channel removes its contribution on the next deployment while preserving independently approved destinations.
 
 Destination permissions cover hosts and ports. The Gateway retains integration credentials, and each external service authorizes the encrypted API requests.
 
