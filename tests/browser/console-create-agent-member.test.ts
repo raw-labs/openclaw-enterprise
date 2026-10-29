@@ -53,7 +53,7 @@ const ACCESS_FROM_PRESET =
 const MEMBER_CREDENTIAL_ACCESS =
   "An Installation administrator then gives the new Agent access to its Secrets.";
 const MEMBER_GRANT_REFUSED =
-  "The Agent was created as a draft. Giving it access to its saved model and channel Secrets needs Installation administration. Ask an Installation administrator to open the saved Agent and grant it.";
+  "The Agent was created as a draft. Giving it access to its saved model and Configuration Secrets needs Installation administration. Ask an Installation administrator to open the saved Agent and grant it.";
 const INSTALLATION_REFUSAL = AGENT_CREATE_INSTALLATION_DENIED;
 
 // Every console API answer, as "METHOD path status".
@@ -418,7 +418,7 @@ test("a member's unconfirmed credential grant offers a retry until the API refus
 });
 
 const ADMINISTRATOR_GRANT_REQUEST = "req_00000000-0000-4000-8000-000000002543";
-const ADMINISTRATOR_GRANT_REFUSED = `${CREDENTIAL_ACCESS_UNCONFIRMED} ${ADMINISTRATOR_ACCESS_DENIED} Retry credential access, or open the saved Agent and check its access to its saved model and channel Secrets. Request ID: ${ADMINISTRATOR_GRANT_REQUEST}`;
+const ADMINISTRATOR_GRANT_REFUSED = `${CREDENTIAL_ACCESS_UNCONFIRMED} ${ADMINISTRATOR_ACCESS_DENIED} Retry credential access, or open the saved Agent and check its access to its saved model and Configuration Secrets. Request ID: ${ADMINISTRATOR_GRANT_REQUEST}`;
 
 test("an administrator's refused credential grant keeps the retry and the API's answer", async (t) => {
   const { fixture, namespace, secret } = await setup(t);

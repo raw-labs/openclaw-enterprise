@@ -81,7 +81,7 @@ import {
   namespaceListDenied,
   PLUGIN_CREDENTIALS_REJECTED,
 } from "../helpers/refusal-text.mjs";
-import { restrict } from "../helpers/iam-grants.mjs";
+import { liftRestriction, restrict } from "../helpers/iam-grants.mjs";
 
 type ConsoleFixture = Awaited<ReturnType<typeof createBaseConsoleAppFixture>>;
 type FixtureResponse<Data> = Omit<Awaited<ReturnType<ConsoleFixture["request"]>>, "data"> & {
@@ -135,6 +135,7 @@ const createConsoleAppFixture = (
   options: {
     defaultPresets?: (typeof defaultCodexPreset)[];
     filesystemConfiguration?: boolean;
+    provisionedPeople?: string[];
   } = {},
 ) => createBaseConsoleAppFixture(t, { defaultPresets: [defaultCodexPreset], ...options });
 
@@ -2819,14 +2820,33 @@ test("Preset marks referenced variables without defaults as required before rend
   assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "Required Agent");
 });
 
-test("Preset with a prebound model Secret grants the created draft access", async (t) => {
-  const fixture = await createConsoleAppFixture(t);
+test("Embedded Preset grants all bound Secrets and retries denied access without duplicate writes", async (t) => {
+  const fixture = await createConsoleAppFixture(t, { provisionedPeople: [] });
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Bound Secret Preset", { ready: true });
   const modelSecret = await fixture.createSecret(namespace.id, "Model token", "hidden-model-token");
-  const artifact = structuredClone(standardCodexPreset);
+  // A distinct generic source prevents the model grant from masking missing Configuration grants.
+  const toolSecret = await fixture.createSecret(namespace.id, "Tool token", "hidden-tool-token");
+  const searchSecret = await fixture.createSecret(
+    namespace.id,
+    "Search token",
+    "hidden-search-token",
+  );
+  const unusedSecret = await fixture.createSecret(
+    namespace.id,
+    "Unbound token",
+    "hidden-unbound-token",
+  );
+  const artifact = JSON.parse(
+    await readFile(new URL("../../deploy/presets/standard-openclaw.json", import.meta.url), "utf8"),
+  );
   delete artifact.template.variables.modelSecret;
   artifact.template.agent.harnessAuth = { method: "api_key", source: modelSecret.ref };
+  artifact.template.configuration.secretBindings = {
+    TOOL_TOKEN: { source: toolSecret.ref },
+    SECOND_TOOL_TOKEN: { source: toolSecret.ref, delivery: { type: "env" } },
+    SEARCH_TOKEN: { source: searchSecret.ref },
+  };
   const preset: FixtureResponse<Preset> = await fixture.request(
     "POST",
     `/namespaces/${namespace.id}/presets`,
@@ -2836,17 +2856,70 @@ test("Preset with a prebound model Secret grants the created draft access", asyn
   );
   assert.equal(preset.status, 201, JSON.stringify(preset.body));
   const { page } = await newPage(t, fixture);
-  await routeInstallationWithoutProvisioning(page, fixture);
+  const requests = apiRequests(page, fixture.origin);
   await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
   await page.getByLabel("Preset template").selectOption(preset.data.id);
   await page.getByLabel("Name", { exact: true }).fill("Bound Secret Agent");
-  await page.getByLabel("Model", { exact: true }).fill("gpt-5.1");
+  await page.getByLabel("Model", { exact: true }).fill("gpt-4.1");
   await page.getByRole("button", { name: "Use Preset" }).click();
-  const created = await createAgentThroughForm(page, fixture, namespace.id);
+  // Refuse the second distinct Configuration Secret after creation. The model and first
+  // Configuration grants succeed, so retry must retain both. Administration remains valid.
+  let denial: ReturnType<typeof restrict> | undefined;
+  await page.route(`${fixture.origin}/namespaces/${namespace.id}/agents`, async (route) => {
+    const response = await route.fetch();
+    if (route.request().method() === "POST" && response.status() === 201) {
+      denial = restrict(fixture.policy, "read", "secret", {
+        namespaceId: namespace.id,
+        resourceId: searchSecret.id,
+      });
+    }
+    await route.fulfill({ response });
+  });
+  const bindingPath = `/namespaces/${namespace.id}/iam/access-bindings`;
+  const refusedGrant = page.waitForResponse(
+    (response) =>
+      response.url() === `${fixture.origin}${bindingPath}` &&
+      response.request().method() === "POST" &&
+      response.status() === 403,
+  );
+  const created: AgentWire = await createAgentThroughForm(page, fixture, namespace.id);
+  await refusedGrant;
+  await page
+    .getByRole("alert")
+    .filter({ hasText: /credential access is not confirmed/ })
+    .waitFor();
+  assert.equal(await page.getByLabel("Agent name").isDisabled(), true);
+  assert.match(
+    (await page.getByRole("link", { name: "Open saved Agent" }).getAttribute("href")) ?? "",
+    new RegExp(created.id),
+  );
+  const partial: FixtureResponse<IAMAccessBindingWire[]> = await fixture.request(
+    "GET",
+    bindingPath,
+  );
+  assert.equal(partial.status, 200);
+  assert.equal(partial.data.length, 2);
+  assert.deepEqual(
+    partial.data
+      .map((binding) => {
+        assert.ok("resourceKind" in binding);
+        assert.equal(binding.subjectId, created.servicePrincipalId);
+        assert.equal(binding.resourceKind, "secret");
+        return binding.resourceId;
+      })
+      .sort(),
+    [modelSecret.id, toolSecret.id].sort(),
+  );
+
+  // Repairing that exact denial retries the remaining grant without duplicating either
+  // successful grant or saved resource. It does not restore Installation administration.
+  assert.ok(denial);
+  liftRestriction(fixture.policy, denial);
+  await page.getByRole("button", { name: "Retry credential access" }).click();
   await page.waitForURL((url) => url.pathname === `/console/agents/${created.id}`);
   const bindings: FixtureResponse<IAMAccessBindingWire[]> = await fixture.request(
     "GET",
-    `/namespaces/${namespace.id}/iam/access-bindings`,
+    bindingPath,
   );
   const roles: FixtureResponse<IAMRoleWire[]> = await fixture.request(
     "GET",
@@ -2859,16 +2932,127 @@ test("Preset with a prebound model Secret grants the created draft access", asyn
       role.permissions[0].action === "operate",
   );
   assert.ok(secretOperateRole);
-  assert.ok(
-    bindings.data.some(
-      (binding) =>
-        binding.subjectKind === "identity" &&
-        binding.subjectId === created.servicePrincipalId &&
-        binding.roleId === secretOperateRole.id &&
-        "resourceKind" in binding &&
-        binding.resourceKind === "secret" &&
-        binding.resourceId === modelSecret.id,
-    ),
+  assert.deepEqual(
+    bindings.data
+      .map((binding) => {
+        assert.ok("resourceKind" in binding);
+        return {
+          subjectKind: binding.subjectKind,
+          subjectId: binding.subjectId,
+          roleId: binding.roleId,
+          resourceKind: binding.resourceKind,
+          resourceId: binding.resourceId,
+        };
+      })
+      .sort((a, b) => a.resourceId.localeCompare(b.resourceId)),
+    [modelSecret, toolSecret, searchSecret]
+      .map((secret) => ({
+        subjectKind: "identity",
+        subjectId: created.servicePrincipalId,
+        roleId: secretOperateRole.id,
+        resourceKind: "secret",
+        resourceId: secret.id,
+      }))
+      .sort((a, b) => a.resourceId.localeCompare(b.resourceId)),
+  );
+  assert.equal(pathRequests(requests, "POST", bindingPath).length, 4);
+  assert.equal(configurationPostRequests(requests, namespace.id).length, 1);
+  assert.equal(agentPostRequests(requests, namespace.id).length, 1);
+  const savedConfiguration: FixtureResponse<ConfigurationWire> = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/configurations/${created.configurationId}`,
+  );
+  assert.equal(savedConfiguration.data.secretBindings?.TOOL_TOKEN?.delivery?.type, "env");
+  assert.equal(savedConfiguration.data.secretBindings?.SECOND_TOOL_TOKEN?.delivery?.type, "env");
+  const unrelated = await fixture.iamDriver.authorize({
+    principalId: created.servicePrincipalId,
+    action: "operate",
+    resource: unusedSecret.ref,
+  });
+  assert.equal(unrelated.allowed, false, "a saved draft must not gain access to unbound Secrets");
+
+  // Real deployment admission requires the generic grant independently of the model grant.
+  const toolBinding = bindings.data.find(
+    (binding) => "resourceKind" in binding && binding.resourceId === toolSecret.id,
+  );
+  assert.ok(toolBinding && "resourceKind" in toolBinding);
+  assert.equal((await fixture.request("DELETE", `${bindingPath}/${toolBinding.id}`)).status, 204);
+  const deployPath = `/namespaces/${namespace.id}/agents/${created.id}/deploy`;
+  assert.equal((await fixture.request("POST", deployPath)).status, 403);
+  const restored = await fixture.request("POST", bindingPath, {
+    body: {
+      subjectKind: toolBinding.subjectKind,
+      subjectId: toolBinding.subjectId,
+      roleId: toolBinding.roleId,
+      resourceKind: toolBinding.resourceKind,
+      resourceId: toolBinding.resourceId,
+    },
+  });
+  assert.equal(restored.status, 201, JSON.stringify(restored.body));
+  const deployed = await fixture.request("POST", deployPath);
+  assert.equal(deployed.status, 202, JSON.stringify(deployed.body));
+});
+
+test("Codex Preset grants its prebound model Secret without creating another Secret", async (t) => {
+  const fixture = await createConsoleAppFixture(t, { provisionedPeople: [] });
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Prebound Codex Preset", { ready: true });
+  const modelSecret = await fixture.createSecret(namespace.id, "Model token", "hidden-model-token");
+  const artifact = JSON.parse(
+    await readFile(new URL("../../deploy/presets/standard-codex.json", import.meta.url), "utf8"),
+  );
+  // A bound source has no password variable or picker selection to supply the model grant.
+  delete artifact.template.variables.modelSecret;
+  artifact.template.agent.harnessAuth = { method: "api_key", source: modelSecret.ref };
+  const preset: FixtureResponse<Preset> = await fixture.request(
+    "POST",
+    `/namespaces/${namespace.id}/presets`,
+    {
+      body: artifact,
+    },
+  );
+  assert.equal(preset.status, 201, JSON.stringify(preset.body));
+  const { page } = await newPage(t, fixture);
+  // Select the supported ordinary draft path; this does not exercise worker provisioning.
+  await routeInstallationWithoutProvisioning(page, fixture);
+  const requests = apiRequests(page, fixture.origin);
+  await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
+  await page.getByLabel("Preset template").selectOption(preset.data.id);
+  await page.getByLabel("Name", { exact: true }).fill("Prebound Codex Agent");
+  await page.getByLabel("Model", { exact: true }).fill("gpt-5.1");
+  await page.getByRole("button", { name: "Use Preset" }).click();
+  await page
+    .getByText("Preset authentication: API key · Secret configured", { exact: true })
+    .waitFor();
+  assert.equal(await page.getByLabel("API key", { exact: true }).count(), 0);
+  const created: AgentWire = await createAgentThroughForm(page, fixture, namespace.id);
+  await page.waitForURL((url) => url.pathname === `/console/agents/${created.id}`);
+
+  assert.deepEqual(created.harnessAuth, { method: "api_key", source: modelSecret.ref });
+  assert.equal(pathRequests(requests, "POST", `/namespaces/${namespace.id}/secrets`).length, 0);
+  assert.equal(configurationPostRequests(requests, namespace.id).length, 1);
+  assert.equal(agentPostRequests(requests, namespace.id).length, 1);
+  const bindings: FixtureResponse<IAMAccessBindingWire[]> = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/iam/access-bindings`,
+  );
+  assert.equal(bindings.status, 200);
+  assert.equal(bindings.data.length, 1);
+  const [binding] = bindings.data;
+  assert.ok(binding && "resourceKind" in binding);
+  assert.equal(binding.subjectKind, "identity");
+  assert.equal(binding.subjectId, created.servicePrincipalId);
+  assert.equal(binding.resourceKind, "secret");
+  assert.equal(binding.resourceId, modelSecret.id);
+  const decision = await fixture.iamDriver.authorize({
+    principalId: created.servicePrincipalId,
+    action: "operate",
+    resource: modelSecret.ref,
+  });
+  assert.equal(
+    decision.allowed,
+    true,
+    "the saved Agent must be able to use its prebound model Secret",
   );
 });
 

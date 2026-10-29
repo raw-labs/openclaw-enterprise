@@ -207,7 +207,6 @@ export interface CreateAgentDraft {
   modelCredentialSource: CredentialReference | null | undefined;
   modelCredentialSecret: SecretMetadata | CredentialSourceReference | null | undefined;
   repositoryAccess: ReturnType<Repositories["access"]>;
-  stagedChannelSecrets: SecretMetadata[];
   savedSecret: SecretMetadata | undefined;
   savedCredentialSource: RegisteredCredential | undefined;
   savedConfiguration: SavedConfiguration | undefined;
@@ -808,7 +807,7 @@ export function renderCreateAgent(context: CreateAgentContext, restored?: unknow
 // A member's Agent reaches its Secrets through an Installation administrator's grant (UX plan A2).
 const MEMBER_CREDENTIAL_ACCESS =
   "An Installation administrator then gives the new Agent access to its Secrets.";
-const MEMBER_GRANT_REFUSED = `The Agent was created as a draft. Giving it access to its saved model and channel Secrets needs Installation administration. ${askAdministratorTo("open the saved Agent and grant it")}`;
+const MEMBER_GRANT_REFUSED = `The Agent was created as a draft. Giving it access to its saved model and Configuration Secrets needs Installation administration. ${askAdministratorTo("open the saved Agent and grant it")}`;
 const INSTALLATION_REFUSAL = `Creating an Agent needs Installation access that your account does not have. ${askAdministratorTo("create this Agent")}`;
 // The Installation read was refused and the Namespace's permission answer is unknown (its read
 // failed), so whether this account may create Agents here is not known (finding 2110).
@@ -1850,7 +1849,6 @@ function renderAgentForm(
   let savedSecret = draft.savedSecret;
   let savedConfiguration = draft.savedConfiguration;
   let savedAgent: SavedAgent | undefined;
-  let stagedChannelSecrets = draft.stagedChannelSecrets ?? [];
   const feedback = element("p", { className: "error", role: "alert" });
   const savedStatus = element("p", { className: "hint", role: "status" });
   // Create's refusals show in the danger status block (UX plan C1). The line above keeps its
@@ -2182,7 +2180,6 @@ function renderAgentForm(
     pendingPrimaryModel,
     pendingModelSelections,
     configurationSecretBindings,
-    stagedChannelSecrets,
     modelCredentialSource,
     modelCredentialSecret,
     oauthLogin: oauthLogin.capture(),
@@ -2268,30 +2265,27 @@ function renderAgentForm(
   }
   async function grantConfigurationSecretAccess(
     agent: Pick<Agent, "servicePrincipalId">,
-    secrets: SecretMetadata[],
     configuration: SavedConfiguration,
   ) {
-    const bindings = Object.values(configuration.secretBindings ?? {});
-    const seen = new Set();
-    for (const secret of secrets) {
+    const sources = new Map<string, SecretReference>();
+    for (const binding of Object.values(configuration.secretBindings ?? {})) {
+      const source = binding?.source;
       if (
-        secret.namespaceId !== namespaceId ||
-        seen.has(secret.id) ||
-        !bindings.some(
-          (binding) =>
-            binding?.source?.kind === "secret" &&
-            binding.source.namespaceId === namespaceId &&
-            binding.source.id === secret.id &&
-            binding.delivery?.type === "env",
-        )
+        source?.kind !== "secret" ||
+        source.namespaceId !== namespaceId ||
+        typeof source.id !== "string" ||
+        !source.id.trim() ||
+        binding.delivery?.type !== "env"
       ) {
-        continue;
+        throw new Error("The saved Configuration contains an unsupported Secret binding.");
       }
-      seen.add(secret.id);
+      sources.set(source.id, source);
+    }
+    for (const source of sources.values()) {
       if (!context.isCurrent()) {
         throw new Error("This view has changed. Reopen Agent creation before binding Secrets.");
       }
-      await ensureCredentialOperateBinding(context, agent, secret);
+      await ensureCredentialOperateBinding(context, agent, source);
     }
   }
   function renderChannelEditor() {
@@ -2358,7 +2352,6 @@ function renderAgentForm(
         configuration.value = JSON.stringify(updatedValues, null, 2);
         if (options.secretBindings !== undefined) {
           configurationSecretBindings = structuredClone(options.secretBindings);
-          stagedChannelSecrets = [...stagedChannelSecrets, ...(options.changedSecrets ?? [])];
           directorySecret.refresh();
           defaultApprovers.refreshDirectory();
           pluginDiscovery.update();
@@ -3704,7 +3697,7 @@ function renderAgentForm(
         }
         showSavedStatus();
       }
-      // Grant retries reread exact bindings, so uncertain model or channel grants never recreate the Agent.
+      // Grant retries reread exact bindings, so uncertain model or Configuration grants never recreate the Agent.
       mutationStarted = false;
       const credential =
         savedSecret ??
@@ -3759,7 +3752,7 @@ function renderAgentForm(
         if (modelGrant) {
           await ensureCredentialOperateBinding(context, grantAgent, modelGrant);
         }
-        await grantConfigurationSecretAccess(grantAgent, stagedChannelSecrets, savedConfiguration);
+        await grantConfigurationSecretAccess(grantAgent, savedConfiguration);
       }
       if (context.isCurrent()) {
         context.navigate(`agents/${savedAgent.id}?revision=draft`);
@@ -3790,7 +3783,7 @@ function renderAgentForm(
       const detail = credentialRegistration
         ? `Credential Source registration could not be confirmed.${registrationProblem} Check credential registration before retrying; the selected Secret remains saved.`
         : savedAgent
-          ? `The Agent was created, but credential access is not confirmed. ${administratorMessage(cause)} Retry credential access, or open the saved Agent and check its access to its saved model and channel Secrets.`
+          ? `The Agent was created, but credential access is not confirmed. ${administratorMessage(cause)} Retry credential access, or open the saved Agent and check its access to its saved model and Configuration Secrets.`
           : error.status === 409 && creatingSecret && error.code !== "NAMESPACE_NOT_READY"
             ? `A Secret named "${body.name}" already exists in this Namespace, possibly from an earlier Agent with this name. Choose another Agent name, delete that Secret, or select Start over, choose the Preset again, and set its Secret source to Use existing Secret.`
             : error.status === 409 && savedConfiguration && error.code !== "NAMESPACE_NOT_READY"

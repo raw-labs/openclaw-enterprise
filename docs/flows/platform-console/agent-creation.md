@@ -1,7 +1,7 @@
 ---
 created: 2026-10-20
-updated: 2026-10-25
-last_updated_session: fix-2469
+updated: 2026-10-28
+last_updated_session: authoring-run/ee7fe581-293c-4496-933e-fb418268c5f8
 ---
 
 # Console Agent creation
@@ -148,8 +148,12 @@ Agent/Configuration for [workspace setup](../workspace-files.md).
 
 ### 5. Grant Secret access and edit authentication
 
-`create.mts:grantConfigurationSecretAccess` grants exact Secret `operate` for final
-same-Namespace `env` bindings. Failure retains the Agent; **Retry credential access**
+`create.mts:grantConfigurationSecretAccess` deduplicates same-Namespace `env` Secret
+sources in the saved Configuration and grants exact `operate` through
+`agents/credential-access.mts:ensureCredentialOperateBinding`. This includes prebound
+Secrets that the channel editor did not stage. The API makes omitted delivery explicit
+as `env` before the Console confirms the save.
+Failure retains the Agent; **Retry credential access**
 rereads grants without duplication. Grants are Installation administration: a session
 known not to administer the Installation sends no IAM request and names the administrator
 step, and a member's refused grant offers no retry. After a refused Installation read, a
@@ -167,6 +171,10 @@ Switching methods hides that feedback without changing the lookup or saved choic
 
 - `tests/browser/console-agents.test.ts`, `console-agent-presets.test.ts`, and
   `console-agent-repositories.test.ts` exercise the form against the real controller.
+  The bound-Secret Preset case checks duplicate sources and a refused Configuration
+  Secret grant after the model and another bound Secret grant succeed. Retry creates
+  no duplicate resources or grants.
+  These tests use in-memory state; they do not prove runtime delivery.
 - A refused write shows the API's reason and a request ID; inspect saved
   Configuration and Agent IDs before retrying.
 
@@ -182,6 +190,7 @@ Switching methods hides that feedback without changing the lookup or saved choic
 
 ## Changelog
 
+- 2026-10-28 22:17: Retain saved Configuration grants with current validation and permission handling. (authoring-run/ee7fe581-293c-4496-933e-fb418268c5f8 - b698b30abc802185905bf4ff28792a7b9cc1c04e)
 - 2026-10-25: The per-Secret `operate` remedy names an exact-Secret grant; the Agents list gives Create Agent's next step when Agent create is denied. (findings 2507, 2508)
 - 2026-10-25: Refuse a typed model key, and disable the Preset's **Create new Secret**, where `operate` is denied on a readable Secret. (fix-2492, finding 2492)
 - 2026-10-25: An inline Secret create rereads the `operate` answer before staging. (finding 2486)
@@ -196,4 +205,5 @@ Switching methods hides that feedback without changing the lookup or saved choic
 - 2026-10-24 10:33: Preserve an explicit Codex disable through Harness switches and explain the required repair before creation. (authoring-run/01899543-402d-43ab-86e0-b54e3afdd9ad - e699c55f8)
 - 2026-10-22 10:56: Confirm creation responses before granting access or continuing provisioning. (console-create-delivery-20261022 - eef3442ff)
 - 2026-10-21 16:25: Preserve authored native plugin permissions across Harness selection and explain explicit repairs for conflicts refused before writes. (Codex/01a12fe8-d0c6-7df1-937d-364a1301566a - bac4fdd4f)
+- 2026-10-20 12:09: Trace saved Configuration Secret grants through the shared credential helper. (authoring-run/763e9c69-84db-4150-9937-6713ed931906 - 81ce5d06aebbf935b150cab6afb2227a320fb20f)
 - 2026-10-20 05:00: Split from the platform console flow's step 3. (docs-split-1020)
