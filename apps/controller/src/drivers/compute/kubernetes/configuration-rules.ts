@@ -181,8 +181,8 @@ export function requireTeamsConfiguration(
   const password = asRecord(teams.appPassword);
   const stringReference =
     typeof teams.appPassword === "string"
-      ? wholeEnvironmentReferenceName(teams.appPassword) ??
-        secretInputShorthandName(teams.appPassword)
+      ? (wholeEnvironmentReferenceName(teams.appPassword) ??
+        secretInputShorthandName(teams.appPassword))
       : undefined;
   if (
     stringReference === undefined &&

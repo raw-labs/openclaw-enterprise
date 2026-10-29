@@ -540,8 +540,12 @@ function denialOwner(t, overrides = {}) {
       },
       getUsableActiveAgentRevision() {
         return (
-          overrides.authorize?.({ agent, revision, denied, runtimeRole: "platform-administrator" }) ??
-          Promise.reject(denied)
+          overrides.authorize?.({
+            agent,
+            revision,
+            denied,
+            runtimeRole: "platform-administrator",
+          }) ?? Promise.reject(denied)
         );
       },
       selectedDriver: () => ({

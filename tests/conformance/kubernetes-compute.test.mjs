@@ -9670,14 +9670,11 @@ test("deployment admission refuses Gateway breakers before a dedicated deploymen
       delivery: { type: "env" },
     },
   };
-  assert.throws(
-    () => withChannels.validateHarnessAuth(codex, apiKeyAuth, teams(), teamsBindings),
-    {
-      name: "ConfigurationHarnessError",
-      message:
-        "Configuration setting channels.msteams requires an Installation public HTTPS channel callback listener.",
-    },
-  );
+  assert.throws(() => withChannels.validateHarnessAuth(codex, apiKeyAuth, teams(), teamsBindings), {
+    name: "ConfigurationHarnessError",
+    message:
+      "Configuration setting channels.msteams requires an Installation public HTTPS channel callback listener.",
+  });
   withChannels.validateHarnessAuth(codex, apiKeyAuth, teams(), null);
   withChannels.validateConfiguration(teams());
   const withTeams = new KubernetesComputeDriver(

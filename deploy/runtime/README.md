@@ -1,24 +1,19 @@
 # Runtime image recipe
 
-Build a public local runtime image for the OpenClaw Enterprise quickstart and
-real-runtime integration tests. The image contains these runtime entrypoints:
+Build a public local runtime image for quickstart and real-runtime tests. Entrypoints:
 
 - OpenClaw gateway: `node /app/openclaw.mjs`.
 - Dedicated OpenClaw node: `node /app/openclaw.mjs connect --target-file <private-file> --ephemeral`.
 - Dedicated Codex app-server: `codex app-server`.
 
-The image sets `NPM_CONFIG_UPDATE_NOTIFIER=false` so local npm commands do not
-start npm's background version check. This avoids unrelated network approval
-requests during commands such as `npm test`; package installation and explicit
-network requests still use the configured network policy.
+`NPM_CONFIG_UPDATE_NOTIFIER=false` disables npm's background version check and unrelated network approvals. Package installations and explicit requests retain the configured network policy.
 
 The Dockerfile builds OpenClaw from a verified public source archive, using its
 pinned package manager, frozen dependency lockfile, and upstream Docker assembly.
 The selected upstream source pins Codex `0.164.0`. A temporary
 `stock-codex-0.163.0-alpha.2-dependency-pin.patch` sets its managed version,
 package manifest, and frozen lockfile to the stock `0.163.0-alpha.2` npm release,
-the version OCE reviewed for the Codex sandbox seccomp profile. Both Codex
-entrypoints use that same installation; no Codex binary patch is applied. Remove
+the version OCE reviewed for the Codex sandbox seccomp profile. Both entrypoints use this unpatched Codex installation. Remove
 the dependency patch when OCE qualifies the Codex release the source pins.
 Codex and Slack come from that same source. The selected commit contains
 the restricted workspace-node commands and saved-token-first pairing required by
@@ -36,7 +31,7 @@ an equivalent implementation is available upstream, the build applies its
 `readOnlyPaths` compatibility change as
 `openclaw-codex-read-only-paths.patch`. This preserves the restricted Codex
 filesystem profile required by the repository broker and selected plugins.
-The build also applies `openclaw-trusted-proxy-role.patch`. It adds paired role and policy-digest headers and explicit managed identity selectors to trusted-proxy configuration, then commits the proxy-selected role through native profile writes before WebSocket or HTTP operator admission. It retains native role enforcement, closes existing profile connections when the assignment changes, and rejects missing or mismatched assignments, undeclared identities and ambiguous profile links. The Kubernetes Driver supplies OCE's identity names; the bridge has no built-in OCE identity namespace. See [native authority and drift](../../docs/reference/agent-native-admin.md#native-authority-and-drift) for ownership and digest rules. The patch includes actual Gateway/SQLite integration cases in `server.auth.identity-scopes.test.ts` and `server.plugin-http-role-scopes.test.ts`, plus configuration validation in `zod-schema.gateway-auth.test.ts`. Remove it when upstream supports verified proxy role assignment with the same admission and role-publication guarantees.
+`openclaw-trusted-proxy-role.patch` adds role/policy-digest headers and managed identity selectors. It commits proxy-selected roles before HTTP/WebSocket operator admission, closes connections on assignment changes, and rejects missing/mismatched assignments, undeclared identities and ambiguous profiles. Kubernetes supplies identity names; the bridge embeds no OCE namespace. [Native authority and drift](../../docs/reference/agent-native-admin.md#native-authority-and-drift) owns digest rules. Gateway/SQLite regressions live in `server.auth.identity-scopes.test.ts` and `server.plugin-http-role-scopes.test.ts`; `zod-schema.gateway-auth.test.ts` validates configuration. Remove the patch when upstream provides equivalent verified assignment, admission and role-publication guarantees.
 The selected source preserves `on-request` when plugins use MCP elicitation,
 reconnects `connect --ephemeral` with saved device credentials after its setup
 code expires, and retains the original caller's authority while required-worker
@@ -84,11 +79,7 @@ model/workspace projection, and the Codex native-child relay. OCE advertises
 without a custom-image declaration. Deployment still requires a provisioning
 SandboxDriver with networking, filesystem, and process containment.
 
-The images-runtime-startup lane runs the production Gateway and Harness
-entrypoints and validates their generated configurations with the image's CLI.
-Native AMD64 and ARM64 image checks and real deployment verification remain
-separate requirements. Schema acceptance alone does not prove placement,
-enrollment, containment, workspace access, or model execution.
+The images-runtime-startup lane exercises production Gateway/Harness entrypoints and CLI-validates generated configuration. Native AMD64/ARM64 checks and real deployment verification remain required: schema acceptance proves neither placement, enrollment, containment, workspace access nor model execution.
 
 | Input                                                 | Selection                                                                                                         |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |

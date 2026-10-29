@@ -38,7 +38,7 @@ session cookie before forwarding to the native gateway.
 | `OCC_CONTROL_PLANE_OUTBOUND_PROXY_MANAGED_HOST` | Optional exact managed Service host.                                                                      | Allows that exact DNS proxy endpoint on the API.                                                                             |
 | `NODE_EXTRA_CA_CERTS`                           | Optional PEM bundle for private Gateway or IdP CAs.                                                       | Node reads it at process startup. Normal leaf renewal under that CA does not require a restart; root-bundle changes do.      |
 | `OCC_GATEWAY_CA_PATH`                           | Optional absolute path to the Gateway-only CA bundle; empty means no private Gateway CA.                  | API only; Harness node enrollment reads it instead of `NODE_EXTRA_CA_CERTS`. Helm sets it with OIDC CA values.               |
-| `OCC_API_HTTPS_EGRESS_OPEN`                | Optional `true` or `false`, default `false`; set by Helm.                                                          | API only; `true` (open sign-in egress) makes an unanswered Slack check a retryable `503`.                                    |
+| `OCC_API_HTTPS_EGRESS_OPEN`                     | Optional `true` or `false`, default `false`; set by Helm.                                                 | API only; `true` (open sign-in egress) makes an unanswered Slack check a retryable `503`.                                    |
 
 See [control-plane outbound proxy settings](#control-plane-outbound-proxy) for
 managed and external API routes.

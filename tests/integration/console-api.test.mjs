@@ -1957,10 +1957,7 @@ test("Gateway outbound approval is exact-Agent authority and deployment freezes 
         { body: { values: { ...values, env: { vars: { [name]: "http://proxy.example:3128" } } } } },
       );
       assert.equal(conflictingTransport.status, 400, JSON.stringify(conflictingTransport.body));
-      assert.match(
-        conflictingTransport.body.error.message,
-        /Compute owns channel proxy transport/,
-      );
+      assert.match(conflictingTransport.body.error.message, /Compute owns channel proxy transport/);
       assert.deepEqual((await fixture.request("GET", `${path}/revisions`)).data, []);
     }
   }

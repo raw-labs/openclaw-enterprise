@@ -8,18 +8,13 @@ last_updated_session: "authoring-run/e071870d-9569-4129-9922-8f80e1c20278"
 
 ## Overview
 
-`scripts/upgrade-production-images` updates the OpenClaw Control Plane (OCC),
-Agent runtimes, or both. Controller-only upgrades end after API and worker recovery,
-without Agent deployments. Runtime upgrades deploy every initially running Agent,
-then wait for ready Pods and read-only Doctor lint.
+`scripts/upgrade-production-images` updates the OpenClaw Control Plane (OCC), Agent runtimes or both. Controller-only upgrades stop after API/worker recovery. Runtime upgrades deploy every initially running Agent and await ready Pods and read-only Doctor lint.
 
 ## Entry Points
 
 - Trigger: an operator runs `scripts/upgrade-production-images` with one or both
   image options and explicit cluster, release, source, and protected-file inputs.
-- Required state: a healthy production Helm release and matching OCC and
-  Kubernetes Installation identity. Runtime releases additionally require a
-  complete authorized fleet inventory with no deployment in progress.
+- Required state: healthy production Helm release and matching OCC/Kubernetes Installation identity. Runtime releases also require complete authorized fleet inventory without ongoing deployments.
 - Source: `scripts/upgrade-production-images`,
   `packages/occ/src/index.ts:OpenClawController.getInstallationDeploymentInventory`,
   and `packages/occ/src/index.ts:OpenClawController.deployAgent`.
@@ -62,9 +57,7 @@ graph TD
 
 `scripts/upgrade-production-images:prepare_upgrade`
 
-Before protected-file reads, evidence writes, or cluster access, every upgrade
-attempt requires the repository root's Git `HEAD` to match `--source-revision`.
-This does not verify uncommitted changes or image provenance.
+Before protected-file reads, evidence writes or cluster access, each attempt requires root Git `HEAD` to match `--source-revision`. This checks neither uncommitted changes nor image provenance.
 The script verifies protected files, cluster, deployed Helm release, and matching
 OCC and Secret Installation IDs. It compares protected and live configuration,
 including image fields, and captures separate reviewed candidates. Only the control-plane
@@ -76,8 +69,7 @@ missing selected versions, or unready Namespaces stop preparation. Stopped and
 deleting Agents are excluded; pending repository cleanup does not block preparation.
 
 Repository-enabled releases require explicit immutable controller and broker
-images. The helper inventories all nodes matching the control plane selector,
-including unready and cordoned nodes; they must have one native architecture.
+images. All nodes matching the control-plane selector, including unready/cordoned nodes, must share one native architecture.
 `scripts/upgrade-image-identity.py:read_platform` reads Docker's native OCI export,
 resolves the selected manifest's configuration, retains JSON objects within
 2 MiB per-blob and 32 MiB total metadata limits, checks their hashes, and verifies
@@ -90,11 +82,7 @@ not Kubernetes image availability, receipt durability, or disposal. The helper
 preserves the live broker hostname; broker restart recovery remains an operator
 task in the [broker procedure](../guides/repository-credentials/installation.md#install-and-verify).
 
-After rendering and a server-side Helm dry run,
-[`scripts/upgrade-startup-preflight.mjs`](../../scripts/upgrade-startup-preflight.mjs)
-copies API and worker templates into one-shot Pods with the image,
-environment, mounts and service account; the Installation mount uses a temporary
-candidate Secret.
+After rendering and server-side Helm dry run, [`scripts/upgrade-startup-preflight.mjs`](../../scripts/upgrade-startup-preflight.mjs) copies image, environment, mounts and service account into one-shot API/worker Pods, using a temporary candidate Installation Secret.
 
 An API Pod with a theme first calls
 `apps/controller/src/composition/console-theme.ts:loadConsoleTheme`. Invalid bundles
@@ -103,7 +91,7 @@ stop preflight; workers do not load themes. Both call
 Drivers and Preset files without opening the database.
 `apps/controller/src/startup-failure.ts:formatStartupConfigurationFailure` formats
 typed configuration refusals with up to 32 field diagnostics through the API/worker
-log filter. The helper saves logs before writers stop.
+log filter. It saves logs before stopping writers.
 
 With the bundled Kubernetes Compute Driver, each Pod runs
 `KubernetesComputeDriver.preflight` with its Kubernetes credentials (its service

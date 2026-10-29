@@ -438,10 +438,7 @@ test("native admin status requires an exact person/Agent runtime assignment and 
   const denied = await nativeStatus(context, { session: limitedSession });
   assertApiError(denied, 403, "FORBIDDEN");
   // With native admin on, the grant is all the caller lacks.
-  assert.equal(
-    denied.body.error.message,
-    nativeRuntimeDenied(`Agent ${context.agent.id}`),
-  );
+  assert.equal(denied.body.error.message, nativeRuntimeDenied(`Agent ${context.agent.id}`));
 
   const missingStatus = await context.fixture.request(
     "GET",
@@ -1449,7 +1446,8 @@ for (const harness of ["openclaw", "codex"]) {
       };
       if (configuredRoles) {
         expected.roles = structuredClone(original.gateway.roles);
-        expected.roles.definitions[ADMINISTRATOR_RUNTIME_ROLE] = nativeRoleDefinitions.administrator;
+        expected.roles.definitions[ADMINISTRATOR_RUNTIME_ROLE] =
+          nativeRoleDefinitions.administrator;
         expected.roles.definitions["oce-service"] = nativeRoleDefinitions.administrator;
       }
       assert.deepEqual(revision.configuration.gateway, expected);
@@ -1499,7 +1497,9 @@ for (const harness of ["openclaw", "codex"]) {
       const sibling = await fixture.createAgent(namespace.id, "Sibling", original, {
         executionMode: harness === "codex" ? "dedicated" : "embedded",
       });
-      await fixture.updateAgent(namespace.id, sibling.id, { configurationId: agent.configurationId });
+      await fixture.updateAgent(namespace.id, sibling.id, {
+        configurationId: agent.configurationId,
+      });
       const siblingRevision = await fixture.deployAgent(namespace.id, sibling.id);
       assert.notEqual(siblingRevision.configuration.gateway.publicOrigin, status.data.origin);
       assert.deepEqual(siblingRevision.configuration.gateway.controlUi.allowedOrigins, [

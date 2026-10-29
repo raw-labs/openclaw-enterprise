@@ -124,19 +124,12 @@ Agent detail reads `${path}/native-admin` independently of the advisory OCE `adm
 
 `sessionStorage` caches audited `403` paths per session owner/tab. **Refresh access** forgets the path and retries; logout, sign-in or a new tab resets it. The [page cache](platform-console.md#2-resolve-the-session-before-private-reads) owns Back revalidation. Polling/**Refresh deployment** retries changed `activeRevisionId`/`desiredRuntimeState`, queuing one follow-up during pending reads. Native edits do not update OCE Configuration.
 
-The target description names the version selected for
-service; browsing a historical version does not change the destination. Stopped and
-unsupported states offer **Open draft**. An unavailable deployment offers **View deployment**
-when a readable version exists. Other unavailable states keep Refresh access.
+The target names the serving version, unaffected by historical browsing. Stopped/unsupported states offer **Open draft**; unavailable deployments offer **View deployment** for readable versions, otherwise Refresh access.
 
 The warning describes Gateway managed mode and OCE overwriting changes made while
 it is off; durable configuration belongs in OCE.
 
-Docker and Kubernetes also pass `OPENCLAW_CONFIG_READONLY_NOTICE` to the Gateway
-child when the deployed revision enables managed mode
-(`apps/controller/src/drivers/compute/runtime-startup.ts:gatewayManagedModeEnvironment`).
-A supporting Gateway uses this text to direct administrators to the Console when
-configuration is read-only. A change to the draft's managed mode takes effect at deployment.
+For managed deployments, Docker/Kubernetes pass `OPENCLAW_CONFIG_READONLY_NOTICE` through `apps/controller/src/drivers/compute/runtime-startup.ts:gatewayManagedModeEnvironment`. Supporting Gateways direct administrators to the Console. Draft changes take effect at deployment.
 
 ### 2. OCC protects the availability route
 
@@ -181,7 +174,7 @@ The selected Compute Driver ID and implementation must match `revision.compute`;
 `apps/controller/src/gateway/native-admin.ts:nativeAdminTarget`
 `apps/controller/src/gateway/native-admin-host.mjs:deriveNativeAdminHost`
 
-`deriveNativeAdminHost` hashes Installation, Namespace and Agent IDs into an opaque hostname under the configured domain. `nativeAdminTarget` substitutes that host in `publicOrigin` and returns `/`. first-Agent imports this helper without workspace dependencies.
+`deriveNativeAdminHost` hashes Installation/Namespace/Agent IDs under the configured domain. `nativeAdminTarget` substitutes this opaque host in `publicOrigin`, returning `/`. first-Agent imports the dependency-free helper.
 
 Native-host admission resolves the hash from Installation, Namespace, and Agent state. Unknown hosts, wrong suffixes, deleted Agents, and non-unique matches fail closed.
 
@@ -191,7 +184,7 @@ Native-host admission resolves the hash from Installation, Namespace, and Agent 
 
 `apps/controller/src/auth/index.ts:createControllerAuth`
 
-When enabled, native admin passes the configured shared cookie domain to Better Auth. The controller validates that the console and Agent hosts fit that parent on DNS-label boundaries, rejecting public suffixes and malformed domains. It never infers a parent domain. When disabled, the console uses the host-only `openclaw_occ` cookie. A shared-domain cookie cannot use the `__Host-` prefix; one canonical name and scope prevents ambiguous duplicates.
+Better Auth receives the explicit shared cookie domain. Validation checks console/Agent DNS-label containment and rejects malformed domains/public suffixes; no parent is inferred. Disabled access uses host-only `openclaw_occ`. Shared cookies cannot use `__Host-`; canonical name/scope prevents ambiguous duplicates.
 
 ### 6. OCC intercepts native-host HTTP requests
 
@@ -234,11 +227,11 @@ The proxy bounds paths to the Agent base, checks exact `Origin` for writes, stri
 
 `apps/controller/src/http/native-admin.ts:handleNativeAdminUpgrade`
 
-The API process intercepts `upgrade` before Fastify routing. It accepts only derived Agent hosts and tracks active sockets so `preClose` destroys them during shutdown. Before awaiting shared-session and exact-Agent admission, it handles client socket errors; a TCP reset during admission therefore does not raise an uncaught socket error. A refused socket closes without waiting for its denial audit, which still runs after a reset. An allowed admission checks for client destruction and shutdown before and after resolving the private transport context, so late success cannot open a gateway connection. A connected client proceeds with the selected version.
+Before Fastify routing, the API intercepts `upgrade` for derived Agent hosts and tracks sockets for `preClose` destruction. Client error handling precedes asynchronous session/Agent admission, preventing uncaught TCP resets. Refused sockets close before their denial audit, which survives a reset. Allowed admission checks disconnect/shutdown before and after private transport resolution; late success opens no gateway connection. Connected clients use the selected version.
 
 `apps/controller/src/gateway/native-admin-proxy.ts:proxyNativeAdminWebSocket`
 
-The WebSocket proxy requires a non-null exact Agent `Origin`, forwards a sanitized upgrade request to the private `https:` gateway base, and only connects the browser after the upstream returns `101`. `onConnect` appends `openclaw.agents.native_admin.websocket.connect`; `onClose` appends `openclaw.agents.native_admin.websocket.close`. The `websocket.connect` audit record includes `connectionId`; the matching `websocket.close` audit record reuses that `connectionId` and includes `closeReason`, whose value distinguishes lifecycle, revocation, dependency, client, upstream, and shutdown paths. A timer rechecks the shared-session admission path every 25 seconds, with each check subject to a five-second timeout. Failed, denied, timed-out, version-changed, role-changed, or session-changed lease checks close both sockets. Denial closure does not wait for the append; a late attributable lease denial still gets its single audit attempt. An authorized reconnect uses the selected version. Native chat does not renew the OCE session.
+The proxy requires exact non-null Agent `Origin`, sanitizes the private `https:` upgrade, and connects the browser only after upstream `101`. `onConnect`/`onClose` append `openclaw.agents.native_admin.websocket.connect`/`.close` with matching `connectionId`; `closeReason` distinguishes lifecycle, revocation, dependency, client, upstream and shutdown. Admission repeats every 25 seconds with a five-second timeout. Failed, denied, timed-out, version-, role- or session-changed leases close both sockets before denial append; late attributable denials retain one audit attempt. Authorized reconnects use the selected version. Native chat never renews the OCE session.
 
 Admission and close audits share one five-second shutdown drain. Work still pending
 afterwards logs `native_admin.pending_work_unresolved` with its count and keeps its

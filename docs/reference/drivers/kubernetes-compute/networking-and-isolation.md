@@ -5,9 +5,7 @@ Configure networking and private routes for the
 
 ## Networking
 
-Configure the cluster DNS namespace and Pod labels and the gateway port.
-Peer namespaces must be DNS labels of at most 63 characters; startup
-refuses others.
+Configure cluster DNS namespace/Pod labels and gateway port. Startup refuses peer namespaces exceeding 63 characters or DNS-label syntax.
 Set `network.gatewayTrustedProxyCidrs` to nonempty, valid CIDRs for the proxy
 socket sources. This trusted Installation setting has no production default and
 rejects all-source ranges, including IPv4-mapped equivalents. Without private
@@ -18,12 +16,7 @@ routing, also configure the namespace and Pod selectors in
 For every peer selector, values may be empty; key names and values allow 63
 characters, DNS prefixes 253.
 
-Each tenant starts with default-deny ingress and egress. Explicit policies allow
-DNS (UDP/TCP ports `53` and `5353` through `allow-dns`), approved gateway clients,
-and required communication between an Agent's gateway and dedicated Harness.
-Cross-tenant traffic, traffic between different Agents, Kubernetes API access,
-and cloud metadata access remain denied where those addresses fall inside the
-model egress exclusions below.
+Default-deny tenant policies allow DNS (UDP/TCP `53`/`5353` through `allow-dns`), approved gateway clients and each Agent's Gateway/Harness communication. Cross-tenant, cross-Agent, Kubernetes API and cloud metadata traffic remains denied within the model egress exclusions below.
 
 A provisioning Sandbox Driver may own the dedicated Harness endpoint. Configure
 `network.providerHarness` with its namespace, Pod labels, Service ClusterIP in

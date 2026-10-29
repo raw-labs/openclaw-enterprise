@@ -1352,11 +1352,7 @@ test(
     const provisioned = await waitFor("embedded channel provisioning to succeed", async () => {
       const observed = await optedIn.request("GET", admitted.data.provisioning.url);
       assert.equal(observed.status, 200, JSON.stringify(observed.body));
-      assert.notEqual(
-        observed.data.status,
-        "failed",
-        JSON.stringify(observed.body),
-      );
+      assert.notEqual(observed.data.status, "failed", JSON.stringify(observed.body));
       return observed.data.status === "succeeded" ? observed.data : undefined;
     });
     const agentPath = `/namespaces/${namespaceId}/agents/${provisioned.agentId}`;
@@ -1367,11 +1363,7 @@ test(
       // Completion proves the callback cutover and old proxy withdrawal have settled.
       await waitFor(`embedded revision ${revisionId} reconciliation`, async () => {
         const work = await optedIn.readWork(`agent_revision:${revisionId}:reconcile`);
-        assert.notEqual(
-          work?.state,
-          "failed_permanent",
-          work?.state,
-        );
+        assert.notEqual(work?.state, "failed_permanent", work?.state);
         return work?.state === "succeeded";
       });
     };
@@ -1507,7 +1499,12 @@ test(
         false,
       );
       // Native callback JWTs confer no OCE person or configured-role authority.
-      for (const name of ["x-occ-identity", "x-occ-role", "x-occ-role-policy", "x-openclaw-scopes"]) {
+      for (const name of [
+        "x-occ-identity",
+        "x-occ-role",
+        "x-occ-role-policy",
+        "x-openclaw-scopes",
+      ]) {
         assert.ok(callback.spec.rules[0].filters[1].requestHeaderModifier.remove.includes(name));
       }
     };

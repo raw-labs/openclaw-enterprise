@@ -255,12 +255,12 @@ Plan filenames and historical commit links retain their original names.
 | `0021-driver-configuration-contributions.md`  | [RFC-0022](../../specs/rfcs/0022-driver-configuration-contributions.md)  |
 | `0021-native-admin-deployment-preparation.md` | [RFC-0024](../../specs/rfcs/0024-native-admin-deployment-preparation.md) |
 | `0023-native-admin-deployment-preparation.md` | [RFC-0024](../../specs/rfcs/0024-native-admin-deployment-preparation.md) |
-| `0023-temporary-embedded-channel-trial.md` | [RFC-0025](../../specs/rfcs/0025-temporary-embedded-channel-trial.md) |
-| `0024-temporary-embedded-channel-trial.md` | [RFC-0025](../../specs/rfcs/0025-temporary-embedded-channel-trial.md) |
-| `0020-gateway-outbound.md` | [RFC-0026](../../specs/rfcs/0026-gateway-outbound.md) |
-| `0021-gateway-outbound.md` | [RFC-0026](../../specs/rfcs/0026-gateway-outbound.md) |
-| `0023-gateway-outbound.md` | [RFC-0026](../../specs/rfcs/0026-gateway-outbound.md) |
-| `0024-gateway-outbound.md` | [RFC-0026](../../specs/rfcs/0026-gateway-outbound.md) |
+| `0023-temporary-embedded-channel-trial.md`    | [RFC-0025](../../specs/rfcs/0025-temporary-embedded-channel-trial.md)    |
+| `0024-temporary-embedded-channel-trial.md`    | [RFC-0025](../../specs/rfcs/0025-temporary-embedded-channel-trial.md)    |
+| `0020-gateway-outbound.md`                    | [RFC-0026](../../specs/rfcs/0026-gateway-outbound.md)                    |
+| `0021-gateway-outbound.md`                    | [RFC-0026](../../specs/rfcs/0026-gateway-outbound.md)                    |
+| `0023-gateway-outbound.md`                    | [RFC-0026](../../specs/rfcs/0026-gateway-outbound.md)                    |
+| `0024-gateway-outbound.md`                    | [RFC-0026](../../specs/rfcs/0026-gateway-outbound.md)                    |
 
 Earlier versions of the Credential Proxy proposal used these provisional paths.
 RFC-0019, RFC-0021 and RFC-0022 are now assigned to other proposals.

@@ -1704,10 +1704,22 @@ test("Configuration save and Kubernetes deployment admission refuse settings pre
     resource: { kind: "secret", id: passwordSecret.id },
   });
   for (const [policy, message] of [
-    [{}, "Configuration setting channels.msteams requires an Installation public HTTPS channel callback listener."],
-    [{ webhook: { path: "/custom" } }, "Configuration setting channels.msteams.webhook.path must be /api/messages."],
-    [{ legacyWebhook: true }, "Configuration setting channels.msteams.legacyWebhook must be false: callbacks use the Gateway listener."],
-    [{ cloud: "USGov" }, "Configuration setting channels.msteams.cloud must be Public for this channel runtime."],
+    [
+      {},
+      "Configuration setting channels.msteams requires an Installation public HTTPS channel callback listener.",
+    ],
+    [
+      { webhook: { path: "/custom" } },
+      "Configuration setting channels.msteams.webhook.path must be /api/messages.",
+    ],
+    [
+      { legacyWebhook: true },
+      "Configuration setting channels.msteams.legacyWebhook must be false: callbacks use the Gateway listener.",
+    ],
+    [
+      { cloud: "USGov" },
+      "Configuration setting channels.msteams.cloud must be Public for this channel runtime.",
+    ],
   ]) {
     const saved = await request(teamsContext.app, "PATCH", teamsAgent.item, {
       body: {
@@ -1734,7 +1746,11 @@ test("Configuration save and Kubernetes deployment admission refuse settings pre
       message,
     );
   }
-  const teamsRevisions = await request(teamsContext.app, "GET", `${teamsAgent.agentPath}/revisions`);
+  const teamsRevisions = await request(
+    teamsContext.app,
+    "GET",
+    `${teamsAgent.agentPath}/revisions`,
+  );
   assert.equal(teamsRevisions.status, 200);
   assert.deepEqual(teamsRevisions.body.data, []);
 });

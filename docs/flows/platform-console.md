@@ -8,19 +8,16 @@ last_updated_session: fix-3678
 
 ## Overview
 
-`/console/` renders session-authorized resources.
-The [console reference](../reference/console.md) owns user-visible behavior.
+`/console/` renders authorized resources.
+[Console](../reference/console.md) defines user-visible behavior.
 
 ## Entry Points
 
-- Browser entry: `apps/controller/src/console/console.mjs` composes the session,
-  request client, view lifetime, navigation, and shell.
+- Browser entry: `apps/controller/src/console/console.mjs` composes session, requests, view lifetime, navigation and shell.
 - HTTP: `apps/controller/src/index.ts:createFastifyApp`.
 - Startup: `apps/controller/src/composition/production.ts:composeProduction`
   and `development-postgres.ts:composePostgresDevelopment`.
-- Requires a bootstrapped Installation, provisioned account, selected IAM Driver,
-  same-origin controller, and the [API permissions](../reference/api.md)
-  for each read or mutation.
+- Requires bootstrapped Installation, provisioned account, selected IAM Driver, same-origin controller and each operation's [API permissions](../reference/api.md).
 
 ## Flow
 
@@ -114,9 +111,7 @@ renders the name as text. `/console/theme/` serves only referenced images and
 generated CSS, returns a plain 404 for missing assets, and uses `no-store` so an
 API restart can replace the theme.
 
-Startup (see Entry Points) passes safe Backend `{id,type}` summaries to `createFastifyApp`.
-[Backend-managed delivery](service-account-driver-credential-delivery.md) owns
-Driver activation. Requests do not reread configuration or credentials.
+Startup passes safe Backend `{id,type}` summaries to `createFastifyApp`; [Backend delivery](service-account-driver-credential-delivery.md) owns Driver activation. Requests never reread configuration or credentials.
 
 `apps/controller/src/console-assets.ts:readConsoleAsset` serves allowlisted assets
 and the shared HTML shell with MIME types and same-origin CSP. Unknown console

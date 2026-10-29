@@ -1,11 +1,6 @@
 # Authorization
 
-Identity and access management (IAM) determines who can read, create, change,
-or operate OpenClaw Enterprise resources. Every operation is checked against
-its exact action, resource, and [Namespace](namespaces.md). Requests without an
-explicit matching grant are denied. This page defines the current authorization
-contract; [authentication](authentication.md) defines how API clients establish
-a session or verify a service key.
+Identity and access management (IAM) checks each OpenClaw Enterprise operation's exact action, resource and [Namespace](namespaces.md). Without a matching explicit grant, requests are denied. [Authentication](authentication.md) establishes API sessions and service-key identities.
 
 ```text
 Principal, ServicePrincipal, or Group

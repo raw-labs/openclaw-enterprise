@@ -1740,12 +1740,21 @@ for (const [name, access] of [
       dmPolicy: "allowlist",
       ...access,
     };
-    const password = await fixture.createSecret(namespace.id, "Teams password", "synthetic-teams-password");
+    const password = await fixture.createSecret(
+      namespace.id,
+      "Teams password",
+      "synthetic-teams-password",
+    );
     const agent = await fixture.createAgent(
       namespace.id,
       "Native Teams Agent",
       nativeValues("native-teams-senders", { harnessId: "codex", channels: { msteams: teams } }),
-      { executionMode: "dedicated", secretBindings: { MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } } } },
+      {
+        executionMode: "dedicated",
+        secretBindings: {
+          MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } },
+        },
+      },
     );
     const { page } = await newPage(t, fixture);
     const requests = apiRequests(page, fixture.origin);
@@ -1866,20 +1875,38 @@ test("Teams editor persists separate personal and channel access with an authori
   await page.getByRole("button", { name: "Deploy new version" }).waitFor();
   // Losing operate access after choosing a replacement must not overwrite the saved binding
   // or grant that Secret to the Agent. The real IAM evaluator refuses the Configuration save.
-  const replacement = await fixture.createSecret(namespace.id, "Replacement Teams password", "synthetic-replacement-password");
+  const replacement = await fixture.createSecret(
+    namespace.id,
+    "Replacement Teams password",
+    "synthetic-replacement-password",
+  );
   await selectSecret(page, "Teams app password", replacement);
-  restrict(fixture.policy, "operate", "secret", { namespaceId: namespace.id, resourceId: replacement.id });
-  const refused = page.waitForResponse((response) =>
-    response.request().method() === "PATCH" && response.url().endsWith(`/configurations/${agent.configurationId}`),
+  restrict(fixture.policy, "operate", "secret", {
+    namespaceId: namespace.id,
+    resourceId: replacement.id,
+  });
+  const refused = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      response.url().endsWith(`/configurations/${agent.configurationId}`),
   );
   await page.getByRole("button", { name: "Save channel Secrets", exact: true }).click();
   assert.equal((await refused).status(), 403);
-  const unchanged = await fixture.request("GET", `/namespaces/${namespace.id}/configurations/${agent.configurationId}`);
+  const unchanged = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
+  );
   assert.equal(unchanged.data.generation, personalOnly.data.generation);
   assert.deepEqual(unchanged.data.secretBindings.MSTEAMS_APP_PASSWORD.source, password.ref);
   const grants = await fixture.request("GET", `/namespaces/${namespace.id}/iam/access-bindings`);
   assert.equal(grants.status, 200);
-  assert.equal(grants.data.some((binding) => binding.subjectId === agent.servicePrincipalId && binding.resourceId === replacement.id), false);
+  assert.equal(
+    grants.data.some(
+      (binding) =>
+        binding.subjectId === agent.servicePrincipalId && binding.resourceId === replacement.id,
+    ),
+    false,
+  );
 });
 
 // Real Console/Fastify/OCC/Drivers and HTTP Microsoft protocol fixture: not live RSC proof.
@@ -2086,12 +2113,19 @@ test("Teams conflict recovery preserves concurrent channel and sender revocation
       },
     },
   };
-  const password = await fixture.createSecret(namespace.id, "Teams password", "synthetic-teams-password");
+  const password = await fixture.createSecret(
+    namespace.id,
+    "Teams password",
+    "synthetic-teams-password",
+  );
   const agent = await fixture.createAgent(
     namespace.id,
     "Concurrent Teams Agent",
     nativeValues("teams-conflict", { harnessId: "codex", channels: { msteams: teams } }),
-    { executionMode: "dedicated", secretBindings: { MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } } } },
+    {
+      executionMode: "dedicated",
+      secretBindings: { MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } } },
+    },
   );
   const { page } = await newPage(t, fixture);
   await openDraft(page, fixture, agent, "Concurrent Teams Agent");

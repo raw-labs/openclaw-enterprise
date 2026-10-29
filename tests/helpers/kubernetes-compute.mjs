@@ -36,7 +36,8 @@ export function createTestKubernetesComputeDriver(
 
   // Runtime storage that dedicated Agents can use needs gateway routing, node enrollment and a
   // Gateway node selector; deployment admission refuses dedicated Agents otherwise.
-  const runtime = repositoryCredentials || channelRuntime || gatewayRuntime || gatewayOutbound !== undefined;
+  const runtime =
+    repositoryCredentials || channelRuntime || gatewayRuntime || gatewayOutbound !== undefined;
   const placed = runtime && routed;
   return new KubernetesComputeDriver(
     {

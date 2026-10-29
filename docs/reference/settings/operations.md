@@ -1,7 +1,6 @@
 # Worker, Compose, and PostgreSQL settings
 
-This reference owns worker, compose, and postgresql settings. Start with the
-[settings reference](../settings.md) for startup configuration and precedence.
+Configure worker, Compose and PostgreSQL here; [settings](../settings.md) owns startup precedence.
 
 ## PostgreSQL connection authentication
 

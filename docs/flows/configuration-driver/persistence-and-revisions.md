@@ -140,7 +140,7 @@ checks the Harness authentication binding (Kubernetes Compute also runs the shar
 [the rules](../../../apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts)
 preparation and the Gateway entrypoint apply after a dedicated deployment stops its
 predecessors: enabled supported channels need enabled `runtime.gatewayOutbound` and a
- dedicated workload unless the Installation enables the
+dedicated workload unless the Installation enables the
 [embedded trial](../../guides/integrations/embedded-channel-trial.md), and a
 Gateway hosting a workspace node needs the file-transfer plugin) and, through optional
 `validateGatewaySettings`, the native gateway settings: Kubernetes and Docker Compute

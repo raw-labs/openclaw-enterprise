@@ -60,28 +60,33 @@ test("Agent-scoped Teams lookup uses the authorized password and Team roster, th
     JSON.stringify([channels.body, members.body]),
     /synthetic-teams-app-password|synthetic-graph-access-token|opaque-membership-id/,
   );
-  const configuration = await fixture.updateConfiguration(namespace.id, agent.configurationId, {
-    channels: {
-      msteams: {
-        enabled: true,
-        appId: teamsDirectoryContext.appId,
-        tenantId: teamsDirectoryContext.tenantId,
-        appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
-        teams: {
-          [channels.data.workspaceId]: {
-            channels: { [channels.data.candidates[1].id]: { requireMention: true } },
+  const configuration = await fixture.updateConfiguration(
+    namespace.id,
+    agent.configurationId,
+    {
+      channels: {
+        msteams: {
+          enabled: true,
+          appId: teamsDirectoryContext.appId,
+          tenantId: teamsDirectoryContext.tenantId,
+          appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+          teams: {
+            [channels.data.workspaceId]: {
+              channels: { [channels.data.candidates[1].id]: { requireMention: true } },
+            },
           },
+          groupPolicy: "allowlist",
+          groupAllowFrom: members.data.candidates.map((candidate) => candidate.id),
+          dmPolicy: "disabled",
         },
-        groupPolicy: "allowlist",
-        groupAllowFrom: members.data.candidates.map((candidate) => candidate.id),
-        dmPolicy: "disabled",
       },
     },
-  }, {
-    secretBindings: {
-      MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } },
+    {
+      secretBindings: {
+        MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } },
+      },
     },
-  });
+  );
   assert.deepEqual(configuration.values.channels.msteams.groupAllowFrom, [teamsMemberId]);
   assert.ok(configuration.values.channels.msteams.teams[teamsNativeId]);
   // A foreign Secret must be rejected before any provider credential or directory I/O.

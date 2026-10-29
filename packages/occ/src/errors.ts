@@ -57,10 +57,7 @@ export class AuthorizationDeniedError extends Error {
  */
 export class QualifiedAuthorizationDeniedError extends AuthorizationDeniedError {
   readonly qualifier:
-    | "current_harness_auth"
-    | "native_admin_off"
-    | "native_runtime_access"
-    | "gateway_managed_mode";
+    "current_harness_auth" | "native_admin_off" | "native_runtime_access" | "gateway_managed_mode";
 
   constructor(
     denial: AuthorizationDeniedError,

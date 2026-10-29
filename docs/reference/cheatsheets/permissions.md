@@ -8,17 +8,17 @@ override grants, and one action never implies another. See
 
 ## Actions
 
-| Action       | What it permits                                                                                                                                   |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create`     | Create a resource in its parent Installation or Namespace.                                                                                        |
-| `read`       | Read a resource or include it in a list; Secret reads return metadata, not values.                                                                |
-| `update`     | Change a resource or its credential.                                                                                                              |
-| `delete`     | Request deletion of the exact resource.                                                                                                           |
-| `deploy`     | Create a new Agent revision.                                                                                                                      |
-| `operate`    | Stop an Agent, provision its runtime credentials, write its workspace files, read its runtime status, or use a bound Secret or credential source. |
-| `administer` | Run Installation administration, read the exact Agent’s runtime log text, or approve additional Gateway outbound access together with `update`. It does not imply `read`, `deploy`, or other actions.                 |
-| `use`        | Enter an Agent runtime as a human with an exact runtime-role assignment. Does not imply OCE management permissions.                               |
-| `read_logs`  | Read the exact Agent’s runtime log text without `administer`. Not granted by bootstrap; grant it through a Namespace Role.                        |
+| Action       | What it permits                                                                                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create`     | Create a resource in its parent Installation or Namespace.                                                                                                                                            |
+| `read`       | Read a resource or include it in a list; Secret reads return metadata, not values.                                                                                                                    |
+| `update`     | Change a resource or its credential.                                                                                                                                                                  |
+| `delete`     | Request deletion of the exact resource.                                                                                                                                                               |
+| `deploy`     | Create a new Agent revision.                                                                                                                                                                          |
+| `operate`    | Stop an Agent, provision its runtime credentials, write its workspace files, read its runtime status, or use a bound Secret or credential source.                                                     |
+| `administer` | Run Installation administration, read the exact Agent’s runtime log text, or approve additional Gateway outbound access together with `update`. It does not imply `read`, `deploy`, or other actions. |
+| `use`        | Enter an Agent runtime as a human with an exact runtime-role assignment. Does not imply OCE management permissions.                                                                                   |
+| `read_logs`  | Read the exact Agent’s runtime log text without `administer`. Not granted by bootstrap; grant it through a Namespace Role.                                                                            |
 
 ## Resources and scopes
 

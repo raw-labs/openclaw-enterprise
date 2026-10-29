@@ -4,7 +4,12 @@ import { caAndLeaf } from "./certificates.mjs";
 // Callers own subprocess policy and cleanup: image tests remove the CA key,
 // while the first-Agent smoke retains it. The CA and leaf keys are the process's
 // shared fixture keys (shared-keys.mjs); both certificates are minted per call.
-export async function createModelProbeCertificates({ directory, caName, run, dnsNames = ["api.openai.com"] }) {
+export async function createModelProbeCertificates({
+  directory,
+  caName,
+  run,
+  dnsNames = ["api.openai.com"],
+}) {
   await caAndLeaf(directory, {
     caName,
     commonName: dnsNames[0],
