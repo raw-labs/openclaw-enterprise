@@ -30,6 +30,12 @@ loopback upstreams. Stock Microsoft denial and explicit Microsoft admission are
 checked separately; Composio, ClawHub, model endpoints, private literals and
 lookalike hosts remain denied. This is proxy policy proof, not plugin or model proof.
 
+The existing embedded startup case in `tests/integration/runtime-image-startup.test.mjs`
+loads Slack and Teams from the built image and checks their bundled dependencies.
+It runs in the `images-runtime-startup` lane. The Teams plugin is enabled with
+channel delivery disabled, so this case checks packaging and plugin loading without
+provider credentials. It does not verify Teams authentication or message delivery.
+
 Live qualification requires branch-built native images, enforcing networking,
 public callback DNS/certificate and authorized provider credentials and recipients.
 Follow [Teams trial setup](../guides/integrations/teams.md) and the

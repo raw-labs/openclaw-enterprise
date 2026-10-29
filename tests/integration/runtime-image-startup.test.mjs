@@ -386,14 +386,13 @@ function assertBundledCodexPluginLoaded(pluginList) {
   assert.deepEqual(codexPlugin.dependencyStatus?.missing, []);
 }
 
-function assertBundledSlackPluginLoaded(pluginList) {
-  const slackPlugin = assertBundledPluginLoaded(pluginList, "slack");
-  assert.match(
-    slackPlugin.source,
-    /\/app\/node_modules\/openclaw\/dist\/extensions\/slack\/index\.js$/,
-  );
-  assert.equal(slackPlugin.dependencyStatus?.requiredInstalled, true);
-  assert.deepEqual(slackPlugin.dependencyStatus?.missing, []);
+function assertBundledChannelPluginsLoaded(pluginList) {
+  for (const id of ["slack", "msteams"]) {
+    const plugin = assertBundledPluginLoaded(pluginList, id);
+    assert.equal(plugin.source, `/app/node_modules/openclaw/dist/extensions/${id}/index.js`);
+    assert.equal(plugin.dependencyStatus?.requiredInstalled, true);
+    assert.deepEqual(plugin.dependencyStatus?.missing, []);
+  }
 }
 
 function assertBundledPluginLoaded(pluginList, pluginId) {
@@ -698,17 +697,24 @@ test(
   "runtime image starts an embedded OpenClaw gateway with the Docker driver entrypoint",
   imageTestOptions,
   async (t) => {
+    const configuration = createAdmittedRuntimeImageConfiguration("openclaw", {
+      enableSlack: true,
+    });
+    // Load the packaged Teams plugin and its SDK dependencies without starting a
+    // provider account. Missing/pruned modules must fail this fresh-image smoke;
+    // callback authentication and message delivery require separate provider proof.
+    configuration.plugins.allow.push("msteams");
+    configuration.plugins.entries.msteams = { enabled: true };
+    configuration.channels.msteams = { enabled: false };
     const { logs, pluginList } = await runGatewaySmoke(t, "openclaw", {
       collectPlugins: true,
-      configuration: createAdmittedRuntimeImageConfiguration("openclaw", {
-        enableSlack: true,
-      }),
+      configuration,
     });
 
     const entries = jsonLogEntries(logs);
     assertGatewayReadyLog(entries);
     assertGatewayModelLog(entries, `openai/${runtimeImageModel}`);
-    assertBundledSlackPluginLoaded(pluginList);
+    assertBundledChannelPluginsLoaded(pluginList);
     assertNoPackagingFailure(logs);
   },
 );
