@@ -24,9 +24,41 @@ policy for arbitrary native sockets.
 
 Run the dedicated Gateway inside the selected Sandbox, using OpenShell first.
 Reuse its socket mediation and existing outbound proxy to enforce destination
-policy. Replace the channel-proxy route with that enforcement path. Keep the
-separate Harness's placement, workspace, authentication and model credentials
-unchanged.
+policy. Replace the dedicated Gateway's channel-proxy route, not the
+control-plane API's Slack route. Keep the separate Harness's placement, workspace,
+authentication and model credentials unchanged.
+
+## Gateway and control-plane egress
+
+The existing Slack HTTP CONNECT proxy checks destination hostnames and port
+443, then relays bytes without decrypting native TLS. It does not interpret
+messages or manage Slack credentials. Native OpenClaw owns messaging and Socket
+Mode; the control-plane Slack Channel Driver owns credential validation and
+directory lookups.
+
+These callers have different destination requirements:
+
+- **Gateway:** enabled channels and installed plugins can require different
+  external services. OpenShell enforces the approved destinations for native
+  sockets; clients need not support an HTTP proxy.
+- **Control-plane Slack Driver:** current calls use the fixed
+  `https://slack.com/api/` endpoint. They do not run Gateway plugins or open
+  Socket Mode connections. Keep this Driver's existing HTTP proxy route and
+  its Kubernetes network restrictions.
+
+The proposed paths are:
+
+| Caller                     | Outbound path                                                       |
+| -------------------------- | ------------------------------------------------------------------- |
+| Dedicated Gateway          | OpenShell socket enforcement and supervisor → approved destinations |
+| Control-plane Slack Driver | Existing Slack HTTP proxy → Slack API                               |
+
+Retaining the HTTP proxy leaves one service to operate, but avoids adding
+Sandbox lifecycle or a new egress component to the control plane for these
+fixed-endpoint calls. The whole control plane does not have one permanent
+destination list: configured identity providers and other Drivers have their
+own dependencies. This proposal leaves those routes unchanged; it neither
+extends the Slack proxy to arbitrary providers nor moves the API into OpenShell.
 
 ## Gateway outbound policy
 
@@ -75,9 +107,10 @@ fails without a direct-network fallback.
 
 Socket Mode also opens a long-lived WSS connection to a temporary URL returned
 by Slack. The enabled Channel Driver contributes both API and Socket Mode
-destinations; native code retains login and reconnect behavior. The initial
-Slack rules cover `slack.com:443` and `**.slack.com:443` for Socket Mode,
-not every media or response-URL destination.
+destinations; native code retains login and reconnect behavior. Preserve the
+existing proxy's Slack destination coverage: `slack.com`, `slack-edge.com`,
+`slack-msgs.com` and their subdomains on TCP/443. Destinations outside that set
+need an explicit additional grant.
 
 Remove automatic channel-proxy injection on this path. An explicitly configured
 upstream proxy must have supported destination semantics or be rejected:
@@ -216,8 +249,9 @@ cover the provider details.
 
 ## Alternatives and tradeoffs
 
-- **Keep the cooperative channel proxy:** less lifecycle change, but clients
-  that ignore proxy settings still lack usable outbound access.
+- **Keep the cooperative channel proxy for Gateway traffic:** less lifecycle
+  change, but clients that ignore proxy settings still lack usable outbound
+  access, and the Slack allowlist does not cover other integrations.
 - **Allow broad direct egress:** simple connectivity without the proposed
   destination enforcement.
 - **Contain the Gateway using the existing Sandbox primitive:** reuses socket
@@ -230,5 +264,6 @@ cover the provider details.
 - [Sandbox Driver](../../docs/reference/drivers/sandbox.md)
 - [OpenShell Sandbox](../../docs/reference/drivers/openshell-sandbox.md)
 - [Channel Driver](../../docs/reference/drivers/channel.md)
+- [Slack Channel Driver and API proxy](../../docs/reference/drivers/slack-channel.md)
 - [Storage and credentials](../../docs/reference/drivers/kubernetes-compute/storage-and-credentials.md)
 - [Experiment procedure](../../docs/testing/gateway-containment.md)

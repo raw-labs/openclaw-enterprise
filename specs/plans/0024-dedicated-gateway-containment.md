@@ -115,9 +115,9 @@ connections. Loopback, link-local and control-plane restrictions still apply.
 The existing Agent-addition translator caps each grant at 1024 expanded ports;
 that is not a limit on separately configured baseline policy.
 
-For Slack, start with `slack.com:443` for HTTPS and proposed
-`**.slack.com:443` for enabled Socket Mode accounts. The subdomain pattern does
-not include the apex. [Socket Mode returns a temporary URL](https://docs.slack.dev/reference/methods/apps.connections.open/);
+For Slack, preserve the [RFC's existing-proxy destination coverage](../rfcs/0024-dedicated-gateway-containment.md#one-outbound-request-before-and-after):
+`slack.com`, `slack-edge.com`, `slack-msgs.com` and their subdomains on TCP/443.
+Emit each apex separately from its `**` subdomain pattern. [Socket Mode returns a temporary URL](https://docs.slack.dev/reference/methods/apps.connections.open/);
 retain native connection/reconnect ownership and never log its ticket. Native
 SDK source does not establish a Slack-only host validator. These contributions
 are not complete Slack media/response-URL coverage. Unsupported destinations
