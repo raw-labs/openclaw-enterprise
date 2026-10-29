@@ -1,7 +1,7 @@
 ---
 created: 2026-09-23
-updated: "2026-10-29"
-last_updated_session: "fix-2809"
+updated: "2026-10-28"
+last_updated_session: "authoring-run/e071870d-9569-4129-9922-8f80e1c20278"
 ---
 
 # Production image upgrade flow
@@ -332,6 +332,7 @@ Agents or Secrets.
 
 ## Changelog
 
+- 2026-10-28 23:31: Verify managed outbound proxy protection with the combined upgrade implementation. (authoring-run/e071870d-9569-4129-9922-8f80e1c20278 - e58f9e251e346b7336d22091831ad447b886c52b)
 - 2026-10-29: Check Agent drafts before writers stop. (fix-2809)
 - 2026-10-28 18:11: Check Helm status before reconciliation reads. (authoring-run/44ebe5a4-904f-4a6b-8796-e86c3ab7a26a - 541cc3f43bdfb09615ecee0cfb79c533e6a0b56c)
 - 2026-10-28 21:01: Check API themes before writer quiescence. (authoring-run/bf262f39-fa9d-4e70-94e1-e2fc516234e9 - 304fcfb169bc8403794e8562a08b1e3ee4cc23ac)

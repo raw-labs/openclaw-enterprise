@@ -1224,12 +1224,13 @@ test(
     const values = {
       agents: { defaults: { model, models: { [model]: { agentRuntime: { id: "openclaw" } } } } },
       // The existing fixture CLI supplies probe protocol responses. A supported,
-      // closed provider endpoint prevents synthetic keys reaching a live provider.
+      // reserved provider endpoint prevents synthetic keys reaching a live provider.
+      // A non-loopback host also detects a lost model-specific proxy bypass.
       models: {
         providers: {
           openai: {
             api: "openai-responses",
-            baseUrl: "https://127.0.0.1:9/v1",
+            baseUrl: "https://embedded-model.invalid:9/v1",
             models: [{ id: "gpt-6-astra", name: "Fixture model" }],
           },
         },
@@ -1443,12 +1444,21 @@ test(
       assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
       assert.equal(environment.find(({ name }) => name === "OPENCLAW_PROXY_ACTIVE").value, "1");
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
+      const bypassHosts = environment.find(({ name }) => name === "NO_PROXY").value.split(",");
+      assert.ok(bypassHosts.includes("127.0.0.1"));
       assert.ok(
-        environment
-          .find(({ name }) => name === "NO_PROXY")
-          .value.split(",")
-          .includes("127.0.0.1"),
+        bypassHosts.includes("embedded-model.invalid"),
+        "the admitted embedded model endpoint must retain its separate model egress path",
       );
+      assert.equal(bypassHosts.includes("api.openai.com"), false);
+      assert.equal(bypassHosts.includes("*"), false);
+      // Slack and Teams still traverse the revision proxy; model bypass must not
+      // exempt the channel destinations from its exact destination policy.
+      for (const { destinations } of admittedRevision.gatewayOutbound.requirements) {
+        for (const { host } of destinations) {
+          assert.equal(bypassHosts.includes(host), false, host);
+        }
+      }
       const proxy = await resource(
         "deployment",
         driver.gatewayOutboundName(admittedRevision),

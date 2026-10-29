@@ -19,8 +19,11 @@ server-side `kubectl apply` against the explicit fixture kubeconfig/context.
 Missing schemas fail the selected case rather than substituting a fake adapter.
 
 The existing OpenClaw fixture CLI supplies model-probe protocol responses.
-An explicit closed model endpoint prevents synthetic fixture credentials from
-reaching a live provider. This case proves platform admission, persistence,
+An explicit model endpoint under `.invalid` prevents synthetic fixture credentials
+from reaching a live provider. The case checks that this endpoint is in the
+Gateway's `NO_PROXY` list and that channel destinations remain outside that list.
+This checks environment projection, not a successful model connection.
+This case proves platform admission, persistence,
 credential delivery and Kubernetes resource lifecycle. It does not prove genuine
 OpenClaw startup, Teams JWT authentication, public TLS, channel delivery or model
 execution. Route manifests alone do not prove installed Envoy enforcement.

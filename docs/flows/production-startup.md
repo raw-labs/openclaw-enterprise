@@ -1,7 +1,7 @@
 ---
 created: 2026-08-25
-updated: "2026-10-24"
-last_updated_session: "authoring-run/21b9b442-e8b7-45d3-a482-742f1742b077"
+updated: "2026-10-28"
+last_updated_session: "authoring-run/e071870d-9569-4129-9922-8f80e1c20278"
 ---
 
 # Production Startup Flow
@@ -339,6 +339,8 @@ until tenant deployment/TUI procedures run.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 23:31: Verify bundled Slack and Teams requirements through the API outbound proxy startup. (authoring-run/e071870d-9569-4129-9922-8f80e1c20278 - e58f9e251e346b7336d22091831ad447b886c52b)
 
 - 2026-10-28: Give the worker a startup probe and 5-second exec probe timeouts.
 
