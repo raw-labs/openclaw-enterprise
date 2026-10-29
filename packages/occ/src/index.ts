@@ -4773,10 +4773,12 @@ export class OpenClawController {
       );
     }
     if (!result.allowed || !isNonEmptyString(result.runtimeRole)) {
-      throw new AuthorizationDeniedError(result.reason, result.evidence, {
-        action: "use",
-        resource,
-      });
+      throw new AuthorizationDeniedError(
+        result.reason,
+        result.evidence,
+        { action: "use", resource },
+        principalId,
+      );
     }
     return result.runtimeRole;
   }

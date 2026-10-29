@@ -699,18 +699,16 @@ test(
   "runtime image starts an embedded OpenClaw gateway with the Docker driver entrypoint",
   imageTestOptions,
   async (t) => {
+    // Both channels must be enabled to load their plugins. Synthetic Teams credentials
+    // stay inside the network-disabled container; live provider delivery is separate proof.
     const configuration = createAdmittedRuntimeImageConfiguration("openclaw", {
       enableSlack: true,
+      enableTeams: true,
     });
-    // Load the packaged Teams plugin and its SDK dependencies without starting a
-    // provider account. Missing/pruned modules must fail this fresh-image smoke;
-    // callback authentication and message delivery require separate provider proof.
-    configuration.plugins.allow.push("msteams");
-    configuration.plugins.entries.msteams = { enabled: true };
-    configuration.channels.msteams = { enabled: false };
     const { logs, pluginList } = await runGatewaySmoke(t, "openclaw", {
       collectPlugins: true,
       configuration,
+      extraEnvironment: ["MSTEAMS_APP_PASSWORD=synthetic-teams-password"],
     });
 
     const entries = jsonLogEntries(logs);
@@ -771,6 +769,12 @@ test(
       run: execute,
     });
     await rm(join(directory, "ca-key.pem"));
+    // Only disposable fixture material is shared with the unprivileged image UID.
+    // Remove the signing key before allowing traversal of the read-only bind mount.
+    await chmod(directory, 0o755);
+    for (const name of ["ca.pem", "cert.pem", "key.pem"]) {
+      await chmod(join(directory, name), 0o644);
+    }
     const repository = fileURLToPath(new URL("../../", import.meta.url));
     const result = await runDocker([
       "run",

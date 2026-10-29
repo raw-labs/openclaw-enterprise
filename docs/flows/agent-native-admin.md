@@ -1,7 +1,7 @@
 ---
 created: "2026-09-19"
-updated: 2026-10-28
-last_updated_session: authoring-run/e355786c-5fa9-4530-a99c-9a6c7c3875d4
+updated: 2026-10-29
+last_updated_session: authoring-run/7fce2d6e-271a-4154-952b-9d69e8b5370d
 ---
 
 # Agent Native Admin UI Flow
@@ -149,25 +149,25 @@ admission remains in `apps/controller/src/index.ts`.
 
 Enabled access requires a public origin and native domain.
 `getUsableActiveAgentRevision` selects the active revision and successor.
-Without an active revision, stopped Agents raise `ResourceConflictError`,
-returning `stopped` even before first deployment. Desired-running Agents awaiting
-activation raise `NoActiveAgentRevisionError`, returning `unavailable`.
-Dependencies, including IAM Driver errors caught by `authorizeAgentRuntimeAccess`,
-return `503`; denials return `403` with human IAM audits.
-The panel reports the active revision.
+Without an active revision, stopped Agents raise `ResourceConflictError` (`stopped`);
+desired-running Agents raise `NoActiveAgentRevisionError` (`unavailable`).
+`authorizeAgentRuntimeAccess` maps IAM errors to `503` and records the checked
+principal on denials. `http/errors.ts:requestFailure` names missing runtime grants
+only for the caller's own denial; other principals' denials stay generic.
+Denials return `403` with human IAM audits.
 
 A successor on a Compute Driver requiring stopped predecessors produces `unavailable`: the worker removes the old workload first. Failed replacement leaves the old revision active without a serving workload. Status and proxy admission both check this boundary.
 
-OCC derives the target from the active revision; desired state other than
-`running` returns `stopped`. Compute qualifies trusted-proxy identity, role
-headers and device approval covering the selected role.
-`nativeAdminConfigurationSupported` checks `controlUi.enabled`, exact
-`allowedOrigins` and host-header/device-auth settings. Rejection returns
-`unsupported` with the target and a reason: UI configuration, missing role,
-insufficient device approval or unsupported transport. Missing endpoints and
-unclean private `wss:` URLs also return `unsupported`. Only `available` carries
-private `gatewayBase`, omitted from browser responses.
-The selected Compute Driver ID and implementation must match `revision.compute`; mismatch returns `503 DEPENDENCY_UNAVAILABLE` before endpoint/key/transport lookup. Driver changes do not migrate revisions.
+OCC derives the target from the active revision; non-`running` desired state returns
+`stopped`. Compute checks trusted-proxy identity, role headers and device approval.
+`nativeAdminConfigurationSupported` checks `controlUi.enabled`, exact `allowedOrigins`
+and host-header/device-auth settings. UI, role, approval or transport rejection
+returns `unsupported` with the target and reason, as do missing endpoints or unclean
+private `wss:` URLs. Only `available` carries private `gatewayBase`, omitted from
+browser responses.
+Compute ID/implementation must match `revision.compute`; mismatch returns
+`503 DEPENDENCY_UNAVAILABLE` before endpoint/key/transport lookup. Driver changes
+do not migrate revisions.
 
 ### 4. OCC derives the isolated Agent host
 
@@ -312,6 +312,8 @@ checks role changes and selective revocation with real model turns.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-29 02:02: Identify the checked principal in runtime denials. Accompanying uncommitted fix. (authoring-run/7fce2d6e-271a-4154-952b-9d69e8b5370d - ba4c143d1d46967c921c15a552b1f87ed2b26e49)
 
 - 2026-10-28 21:19: Preserve deployment preparation with Gateway security defaults, Agent naming and managed-mode write restrictions. Accompanying uncommitted refresh. (authoring-run/5f285180-08bf-4414-abea-d615c472c459 - 37fac70dfb784351544189ad07909588b327ef47)
 - 2026-10-28 21:59: Preserve managed-mode guidance and transport refusal before audit settlement while admitting exact runtime assignments. (authoring-run/e355786c-5fa9-4530-a99c-9a6c7c3875d4 - f30db5c4045cbf2c1f5eef4576361112535ed8b4)

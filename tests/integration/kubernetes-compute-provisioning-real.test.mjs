@@ -1314,7 +1314,7 @@ test(
     // refuse that draft before creating a workload, even in an opted-in Installation.
     const draftValues = structuredClone(values);
     delete draftValues.channels.msteams.appId;
-    draftValues.channels.msteams.appPassword = "$MSTEAMS_APP_PASSWORD";
+    draftValues.channels.msteams.appPassword = "${MSTEAMS_APP_PASSWORD}";
     const draft = await optedIn.request("POST", `/namespaces/${namespaceId}/configurations`, {
       kind: "agent",
       values: draftValues,

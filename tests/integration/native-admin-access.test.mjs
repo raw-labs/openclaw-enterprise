@@ -442,7 +442,7 @@ test("native admin status requires an exact person/Agent runtime assignment and 
   const exactAvailable = await nativeStatus(context, { session: exactAdministerOnlySession });
   assert.equal(exactAvailable.status, 200);
   assert.equal(exactAvailable.data.status, "available");
-  await assertSiblingStatusDenied(context, exactAdministerOnlySession, () => GENERIC_DENIAL);
+  await assertSiblingStatusDenied(context, exactAdministerOnlySession, nativeRuntimeDenied);
 
   // An IAM outage is a dependency failure, never an Agent lifecycle state: the console must
   // not read it as "unavailable" (deploying) for an Agent the caller may not even administer.
@@ -462,10 +462,13 @@ test("native admin status requires an exact person/Agent runtime assignment and 
   }
 
   const limitedSession = await createReadOperateSession(context, "native-admin-reader");
-  const denied = await nativeStatus(context, { session: limitedSession });
+  const { response: denied, denials } = await denialsDuring(context.fixture.auditSink, () =>
+    nativeStatus(context, { session: limitedSession }),
+  );
   assertApiError(denied, 403, "FORBIDDEN");
-  // With native admin on, the grant is all the caller lacks.
+  // Name the caller's missing runtime grant on the requested Agent and audit the denial.
   assert.equal(denied.body.error.message, nativeRuntimeDenied(`Agent ${context.agent.id}`));
+  assert.deepEqual(denials, [{ action: "use", kind: "agent", id: context.agent.id }]);
 
   const missingStatus = await context.fixture.request(
     "GET",
@@ -1537,6 +1540,9 @@ for (const harness of ["openclaw", "codex"]) {
       assert.equal(next.revision, 2);
       assert.deepEqual(next.configuration.gateway, expected);
       assert.deepEqual(revision.configuration.gateway, expected);
+      // Complete the simulated cutover before testing rejected admission. An exclusive
+      // pending successor correctly makes native access unavailable until activation.
+      await fixture.activateRevision(namespace.id, agent.id, next.id, revision.id);
       // Use the production runtime renderer on the admitted revision. No cluster or native
       // Gateway is claimed by this document-level check.
       const driver = fixture.controller.selectedDriver("compute");
@@ -1550,12 +1556,17 @@ for (const harness of ["openclaw", "codex"]) {
           scopes: ["operator.admin"],
         };
         await fixture.updateConfiguration(namespace.id, agent.configurationId, restricted);
+        const revisionsPath = `/namespaces/${namespace.id}/agents/${agent.id}/revisions`;
+        const before = await fixture.request("GET", revisionsPath);
         const denied = await fixture.request(
           "POST",
           `/namespaces/${namespace.id}/agents/${agent.id}/deploy`,
         );
         assert.equal(denied.status, 409, JSON.stringify(denied.body));
-        assert.equal((await nativeStatus(context)).data.activeRevisionId, revision.id);
+        const serving = await nativeStatus(context);
+        assert.equal(serving.data.status, "available");
+        assert.equal(serving.data.activeRevisionId, next.id);
+        assert.deepEqual((await fixture.request("GET", revisionsPath)).data, before.data);
       }
     });
   }
