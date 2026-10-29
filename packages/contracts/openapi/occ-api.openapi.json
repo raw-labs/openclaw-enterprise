@@ -27482,6 +27482,16 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "context": {
+                        "additionalProperties": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "type": "string"
+                        },
+                        "maxProperties": 8,
+                        "type": "object"
+                      },
                       "cursor": {
                         "maxLength": 2048,
                         "minLength": 1,
@@ -27494,13 +27504,19 @@
                           { "const": "channels", "type": "string" }
                         ]
                       },
+                      "provider": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "pattern": "^[a-z][a-z0-9_-]*$",
+                        "type": "string"
+                      },
                       "query": { "maxLength": 200, "pattern": "^[^\\u0000]*$", "type": "string" },
                       "secretId": {
                         "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind"],
+                    "required": ["secretId", "provider", "kind"],
                     "type": "object"
                   },
                   {
@@ -27510,6 +27526,16 @@
                         "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       },
+                      "context": {
+                        "additionalProperties": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "type": "string"
+                        },
+                        "maxProperties": 8,
+                        "type": "object"
+                      },
                       "cursor": {
                         "maxLength": 2048,
                         "minLength": 1,
@@ -27522,13 +27548,19 @@
                           { "const": "channels", "type": "string" }
                         ]
                       },
+                      "provider": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "pattern": "^[a-z][a-z0-9_-]*$",
+                        "type": "string"
+                      },
                       "query": { "maxLength": 200, "pattern": "^[^\\u0000]*$", "type": "string" },
                       "secretId": {
                         "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "agentId"],
+                    "required": ["secretId", "provider", "kind", "agentId"],
                     "type": "object"
                   },
                   {
@@ -27538,6 +27570,16 @@
                         "pattern": "^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       },
+                      "context": {
+                        "additionalProperties": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "type": "string"
+                        },
+                        "maxProperties": 8,
+                        "type": "object"
+                      },
                       "cursor": {
                         "maxLength": 2048,
                         "minLength": 1,
@@ -27550,18 +27592,34 @@
                           { "const": "channels", "type": "string" }
                         ]
                       },
+                      "provider": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "pattern": "^[a-z][a-z0-9_-]*$",
+                        "type": "string"
+                      },
                       "query": { "maxLength": 200, "pattern": "^[^\\u0000]*$", "type": "string" },
                       "secretId": {
                         "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "configurationId"],
+                    "required": ["secretId", "provider", "kind", "configurationId"],
                     "type": "object"
                   },
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "context": {
+                        "additionalProperties": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "type": "string"
+                        },
+                        "maxProperties": 8,
+                        "type": "object"
+                      },
                       "ids": {
                         "items": {
                           "maxLength": 200,
@@ -27580,12 +27638,18 @@
                           { "const": "channels", "type": "string" }
                         ]
                       },
+                      "provider": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "pattern": "^[a-z][a-z0-9_-]*$",
+                        "type": "string"
+                      },
                       "secretId": {
                         "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "ids"],
+                    "required": ["secretId", "provider", "kind", "ids"],
                     "type": "object"
                   },
                   {
@@ -27595,6 +27659,16 @@
                         "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       },
+                      "context": {
+                        "additionalProperties": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "type": "string"
+                        },
+                        "maxProperties": 8,
+                        "type": "object"
+                      },
                       "ids": {
                         "items": {
                           "maxLength": 200,
@@ -27613,12 +27687,18 @@
                           { "const": "channels", "type": "string" }
                         ]
                       },
+                      "provider": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "pattern": "^[a-z][a-z0-9_-]*$",
+                        "type": "string"
+                      },
                       "secretId": {
                         "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "ids", "agentId"],
+                    "required": ["secretId", "provider", "kind", "ids", "agentId"],
                     "type": "object"
                   },
                   {
@@ -27628,6 +27708,16 @@
                         "pattern": "^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       },
+                      "context": {
+                        "additionalProperties": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "type": "string"
+                        },
+                        "maxProperties": 8,
+                        "type": "object"
+                      },
                       "ids": {
                         "items": {
                           "maxLength": 200,
@@ -27646,12 +27736,18 @@
                           { "const": "channels", "type": "string" }
                         ]
                       },
+                      "provider": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "pattern": "^[a-z][a-z0-9_-]*$",
+                        "type": "string"
+                      },
                       "secretId": {
                         "pattern": "^sec_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "ids", "configurationId"],
+                    "required": ["secretId", "provider", "kind", "ids", "configurationId"],
                     "type": "object"
                   }
                 ]

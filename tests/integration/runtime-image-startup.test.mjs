@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { createModelProbeCertificates } from "../helpers/runtime-model-probe-certificates.mjs";
 import { readOpenclawSource } from "../../scripts/lib/openclaw-source.mjs";
 import {
   cpuScaledImageTimeoutMs,
@@ -716,6 +718,89 @@ test(
     assertGatewayModelLog(entries, `openai/${runtimeImageModel}`);
     assertBundledChannelPluginsLoaded(pluginList);
     assertNoPackagingFailure(logs);
+  },
+);
+
+test(
+  "runtime image serves the bundled Teams callback with SDK authentication and no legacy listener",
+  imageTestOptions,
+  async (t) => {
+    // Synthetic credentials never leave the network-disabled container. This proves
+    // packaging and JWT rejection, not Microsoft tenant access or a model reply.
+    const { logs, containerName, pluginList } = await runGatewaySmoke(t, "openclaw", {
+      collectPlugins: true,
+      configuration: createAdmittedRuntimeImageConfiguration("openclaw", { enableTeams: true }),
+      extraEnvironment: ["MSTEAMS_APP_PASSWORD=synthetic-teams-password"],
+    });
+    const plugin = assertBundledPluginLoaded(pluginList, "msteams");
+    assert.equal(plugin.dependencyStatus?.requiredInstalled, true);
+    assert.deepEqual(plugin.dependencyStatus?.missing, []);
+    // Wait for the asynchronous channel to register its route after gateway readiness.
+    const probe = String.raw`
+const deadline = Date.now() + 20000;
+let response;
+while (Date.now() < deadline) {
+  response = await fetch("http://127.0.0.1:8080/api/messages", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  if (response.status === 401) break;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+if (response.status !== 401) throw new Error("Teams callback is not protected: " + response.status);
+const forged = await fetch("http://127.0.0.1:8080/api/messages", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer not-a-jwt", "x-occ-identity": "occ-workspace-files" }, body: "{}" });
+if (![401, 403].includes(forged.status)) throw new Error("Teams SDK accepted an invalid token: " + forged.status);
+const socket = await import("node:net");
+await new Promise((resolve, reject) => {
+  const client = socket.connect(3978, "127.0.0.1");
+  client.once("connect", () => { client.destroy(); reject(new Error("Legacy Teams listener is exposed")); });
+  client.once("error", (error) => error.code === "ECONNREFUSED" ? resolve() : reject(error));
+});
+`;
+    await runDocker(["exec", containerName, "node", "--input-type=module", "-e", probe]);
+    assertNoPackagingFailure(logs);
+  },
+);
+
+test(
+  "runtime image downloads native guarded Teams media through the channel proxy",
+  imageTestOptions,
+  async (t) => {
+    const directory = await temporaryDirectory(t, "oce-teams-attachment-certificates-");
+    await createModelProbeCertificates({
+      directory,
+      caName: "Teams attachment transport test CA",
+      dnsNames: ["graph.microsoft.com", "tenant.sharepoint.com"],
+      run: execute,
+    });
+    await rm(join(directory, "ca-key.pem"));
+    const repository = fileURLToPath(new URL("../../", import.meta.url));
+    const result = await runDocker([
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--tmpfs",
+      "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+      "--mount",
+      `type=bind,source=${repository},target=/checkout,readonly`,
+      "--mount",
+      `type=bind,source=${directory},target=/certificates,readonly`,
+      "--env",
+      "NODE_EXTRA_CA_CERTS=/certificates/ca.pem",
+      "--env",
+      "OPENCLAW_STATE_DIR=/tmp/openclaw",
+      "--entrypoint",
+      "node",
+      image,
+      "--test",
+      "--test-reporter=tap",
+      "/checkout/tests/fixtures/teams-attachment-download.mjs",
+    ]);
+    assert.match(result.stdout, /# pass 1/);
+    assert.match(result.stdout, /# fail 0/);
   },
 );
 

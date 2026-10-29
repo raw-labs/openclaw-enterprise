@@ -352,6 +352,13 @@ function containerProgram(container) {
   return inflateRawSync(Buffer.from(pieces.join(""), "base64")).toString("utf8");
 }
 
+function teamsOptions(overrides = {}) {
+  return routedOptions({
+    ...overrides,
+    gatewayRouting: { ...gatewayRouting, channels: { hostname: "callbacks.example.test" } },
+  });
+}
+
 function twoClusterOptions() {
   return routedOptions({
     runtime: { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" },
@@ -8286,7 +8293,7 @@ test("account-owned Kubernetes Secrets reject invalid or foreign credentials bef
 
 test("dedicated Codex projects the account-owned token through the common PAT login", () => {
   const driver = createKubernetesComputeDriver(
-    options({
+    teamsOptions({
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
@@ -9639,6 +9646,63 @@ test("deployment admission refuses Gateway breakers before a dedicated deploymen
     () => unrouted.validateHarnessAuth(embedded, apiKeyAuth, { ...embeddedBase, ...slack }, null),
     named("channels.slack", "is enabled, but channels require a dedicated Agent workload"),
   );
+  // Teams must fail at this same pre-stop boundary, rather than in preparation after a
+  // working predecessor has stopped. Configuration/Agent saves do not require a listener.
+  const teams = (policy = {}) => ({
+    ...base,
+    channels: {
+      msteams: {
+        enabled: true,
+        appId: "11111111-1111-4111-8111-111111111111",
+        tenantId: "22222222-2222-4222-8222-222222222222",
+        appPassword: "${MSTEAMS_APP_PASSWORD}",
+        ...policy,
+      },
+    },
+  });
+  const teamsBindings = {
+    MSTEAMS_APP_PASSWORD: {
+      source: {
+        kind: "secret",
+        namespaceId: tenant.id,
+        id: "sec_00000000-0000-4000-8000-000000000003",
+      },
+      delivery: { type: "env" },
+    },
+  };
+  assert.throws(
+    () => withChannels.validateHarnessAuth(codex, apiKeyAuth, teams(), teamsBindings),
+    {
+      name: "ConfigurationHarnessError",
+      message:
+        "Configuration setting channels.msteams requires an Installation public HTTPS channel callback listener.",
+    },
+  );
+  withChannels.validateHarnessAuth(codex, apiKeyAuth, teams(), null);
+  withChannels.validateConfiguration(teams());
+  const withTeams = new KubernetesComputeDriver(
+    teamsOptions({ runtime: { ...runtime, gatewayOutbound } }),
+    { nodeEnrollment: {} },
+  );
+  for (const [policy, refusal] of [
+    [{ webhook: { path: "/custom" } }, /channels.msteams.webhook.path must be \/api\/messages/],
+    [{ webhook: "invalid" }, /channels.msteams.webhook must be an object/],
+    [{ legacyWebhook: true }, /channels.msteams.legacyWebhook must be false/],
+    [{ cloud: "USGov" }, /channels.msteams.cloud must be Public/],
+  ]) {
+    assert.throws(
+      () => withTeams.validateHarnessAuth(codex, apiKeyAuth, teams(policy), teamsBindings),
+      (error) => error instanceof ConfigurationHarnessError && refusal.test(error.message),
+    );
+  }
+  for (const policy of [
+    {},
+    { webhook: {} },
+    { webhook: { path: "/api/messages" }, cloud: "Public", legacyWebhook: false },
+  ]) {
+    withTeams.validateHarnessAuth(codex, apiKeyAuth, teams(policy), teamsBindings);
+  }
+  withChannels.validateHarnessAuth(codex, apiKeyAuth, teams({ enabled: false }));
   // A disabled channel, and channel defaults, need neither.
   for (const channels of [{ slack: { enabled: false } }, { defaults: { groupPolicy: "open" } }]) {
     unrouted.validateHarnessAuth(codex, apiKeyAuth, { ...base, channels });
@@ -18086,7 +18150,7 @@ test("activation trims unwritten Agent policies only in its Gateway namespace", 
 
 test("retirement preserves active storage and node routing and deletes exact owned UIDs", async () => {
   const driver = createKubernetesComputeDriver(
-    routedOptions({
+    teamsOptions({
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
@@ -18154,6 +18218,7 @@ test("retirement preserves active storage and node routing and deletes exact own
   let observedRoute = route;
   const nodeResources = new Map();
   const peopleResources = new Map();
+  const teamsResources = new Map();
   const claims = [
     driver.gatewayPrivateStateClaim(agentId, ownership, { name: namespace, plane: "execution" }),
     driver.harnessWorkspaceClaim(agentId, ownership, {
@@ -18201,6 +18266,11 @@ test("retirement preserves active storage and node routing and deletes exact own
         deletions.push(["PersistentVolumeClaim", request]);
       },
       async readNamespacedService({ name }) {
+        if (name === `${gatewayName}-msteams`) {
+          return teamsResources.has("Service")
+            ? structuredClone(teamsResources.get("Service"))
+            : missing();
+        }
         if (name === agentName) {
           return structuredClone(agentService);
         }
@@ -18208,6 +18278,13 @@ test("retirement preserves active storage and node routing and deletes exact own
           return missing();
         }
         return structuredClone(observedService);
+      },
+      async patchNamespacedService({ body }) {
+        assert.equal(body.metadata.name, `${gatewayName}-msteams`);
+        teamsResources.set("Service", {
+          ...structuredClone(body),
+          metadata: { ...body.metadata, uid: "teams-service-uid", resourceVersion: "1" },
+        });
       },
       async deleteNamespacedService(request) {
         deletions.push(["Service", request]);
@@ -18229,15 +18306,27 @@ test("retirement preserves active storage and node routing and deletes exact own
       },
     },
     networking: {
-      readNamespacedNetworkPolicy: missing,
+      async patchNamespacedNetworkPolicy({ body }) {
+        assert.equal(body.metadata.name, `${gatewayName}-msteams`);
+        teamsResources.set("NetworkPolicy", {
+          ...structuredClone(body),
+          metadata: { ...body.metadata, uid: "teams-policy-uid", resourceVersion: "1" },
+        });
+      },
+      async readNamespacedNetworkPolicy({ name }) {
+        return name === `${gatewayName}-msteams` && teamsResources.has("NetworkPolicy")
+          ? structuredClone(teamsResources.get("NetworkPolicy"))
+          : missing();
+      },
     },
     objects: {
       async read({ kind, metadata }) {
         if (metadata.name === `${gatewayName}-people`) {
           return peopleResources.has(kind) ? structuredClone(peopleResources.get(kind)) : missing();
         }
-        if (metadata.name === `${gatewayName}-node`) {
-          const resource = nodeResources.get(kind);
+        if ([`${gatewayName}-node`, `${gatewayName}-msteams`].includes(metadata.name)) {
+          const scopedResources = metadata.name.endsWith("-node") ? nodeResources : teamsResources;
+          const resource = scopedResources.get(kind);
           if (resource === undefined) {
             return missing();
           }
@@ -18270,8 +18359,11 @@ test("retirement preserves active storage and node routing and deletes exact own
           };
           return;
         }
-        assert.equal(body.metadata.name, `${gatewayName}-node`);
-        nodeResources.set(body.kind, {
+        assert.ok([`${gatewayName}-node`, `${gatewayName}-msteams`].includes(body.metadata.name));
+        const scopedResources = body.metadata.name.endsWith("-node")
+          ? nodeResources
+          : teamsResources;
+        scopedResources.set(body.kind, {
           ...structuredClone(body),
           metadata: { ...body.metadata, uid: `${body.kind}-node-uid`, resourceVersion: "1" },
         });
@@ -18286,6 +18378,9 @@ test("retirement preserves active storage and node routing and deletes exact own
         body,
       ) {
         deletions.push([spec.kind, { spec, body }]);
+        if (spec.metadata.name === `${gatewayName}-msteams`) {
+          teamsResources.delete(spec.kind);
+        }
         if (spec.metadata.name === `${gatewayName}-people`) {
           peopleResources.delete(spec.kind);
         }
@@ -18472,18 +18567,51 @@ test("retirement preserves active storage and node routing and deletes exact own
     servicePrincipalId: agentOwnership.servicePrincipalId,
   });
   observedGateway.metadata.annotations["openclaw.dev/agent-revision"] = String(active.revision);
+  active.configuration = { ...active.configuration, channels: { msteams: { enabled: true } } };
+  observedGateway.metadata.annotations["openclaw.dev/msteams-webhook"] = "true";
   const candidate = { ...active, id: "revision-3", revision: 3 };
   await driver.reconcileGatewayRoute(active, ownership, { name: namespace, plane: "execution" });
+  const activeTeamsResources = structuredClone(teamsResources);
+  const callback = teamsResources.get("HTTPRoute");
+  assert.deepEqual(callback.spec.hostnames, ["callbacks.example.test"]);
+  assert.equal(callback.spec.parentRefs[0].sectionName, "channels");
+  assert.equal(callback.spec.rules.length, 1);
+  assert.deepEqual(callback.spec.rules[0].matches, [
+    {
+      method: "POST",
+      path: { type: "Exact", value: `/namespaces/${tenant.id}/agents/${agentId}/channels/msteams` },
+    },
+  ]);
+  assert.equal(callback.spec.rules[0].filters[0].urlRewrite.path.replaceFullPath, "/api/messages");
+  const headers = callback.spec.rules[0].filters[1].requestHeaderModifier;
+  assert.equal(headers.remove.includes("authorization"), false);
+  for (const header of [
+    "x-occ-identity",
+    "x-occ-role",
+    "x-occ-role-policy",
+    "x-api-key",
+    "cookie",
+    "x-openclaw-scopes",
+  ]) {
+    assert.ok(headers.remove.includes(header));
+  }
+  assert.equal(
+    (headers.set ?? []).some(({ name }) => name === "x-occ-identity"),
+    false,
+  );
+  assert.equal(teamsResources.get("SecurityPolicy").spec.apiKeyAuth, undefined);
   const activeNodeResources = structuredClone(nodeResources);
   assert.equal(activeNodeResources.size, 2);
   await driver.reconcileGatewayRoute(candidate, ownership, { name: namespace, plane: "execution" });
   assert.deepEqual(nodeResources, activeNodeResources);
+  assert.deepEqual(teamsResources, activeTeamsResources);
   // A serving Gateway predating node enrollment may have no node endpoint.
   // Preparing its successor must create one under the serving revision, or
   // node readiness would wait for activation while activation waits for it.
   nodeResources.clear();
   await driver.reconcileGatewayRoute(candidate, ownership, { name: namespace, plane: "execution" });
   assert.deepEqual(nodeResources, activeNodeResources);
+  assert.deepEqual(teamsResources, activeTeamsResources);
   await driver.removeRetiredGateway(candidate, { name: harnessNamespace, plane: "execution" });
   assert.deepEqual(deletions, []);
 
@@ -18495,8 +18623,26 @@ test("retirement preserves active storage and node routing and deletes exact own
   for (const resource of nodeResources.values()) {
     assert.equal(resource.metadata.annotations["openclaw.dev/agent-revision-id"], candidate.id);
   }
+  for (const resource of teamsResources.values()) {
+    assert.equal(resource.metadata.annotations["openclaw.dev/agent-revision-id"], candidate.id);
+  }
   await driver.removeRetiredGateway(active, { name: harnessNamespace, plane: "execution" });
   assert.deepEqual(deletions, []);
+  // Disabling on the serving revision removes the callback before its auth override.
+  // The predecessor was retained while its candidate prepared above.
+  observedGateway.metadata.annotations["openclaw.dev/msteams-webhook"] = "false";
+  await driver.reconcileGatewayRoute(candidate, ownership, { name: namespace, plane: "execution" });
+  assert.equal(teamsResources.size, 0);
+  assert.deepEqual(
+    deletions.map(([kind, { spec }]) => [kind, spec.metadata.name]),
+    [
+      ["HTTPRoute", `${gatewayName}-msteams`],
+      ["Service", `${gatewayName}-msteams`],
+      ["SecurityPolicy", `${gatewayName}-msteams`],
+      ["NetworkPolicy", `${gatewayName}-msteams`],
+    ],
+  );
+  deletions.length = 0;
   await driver.removeRetiredGateway(candidate, { name: harnessNamespace, plane: "execution" });
   assert.deepEqual(
     deletions

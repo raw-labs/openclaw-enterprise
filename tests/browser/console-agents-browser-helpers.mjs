@@ -218,13 +218,16 @@ async function artifactDirectory(t) {
 }
 
 async function launchBrowser(options = {}) {
+  const browserType = options.browserType ?? chromium;
   const browserExecutable =
     process.env.OCC_TEST_BROWSER_EXECUTABLE === undefined ||
     process.env.OCC_TEST_BROWSER_EXECUTABLE.length === 0
       ? undefined
       : process.env.OCC_TEST_BROWSER_EXECUTABLE;
-  const browser = await chromium.launch({
-    ...(browserExecutable === undefined ? {} : { executablePath: browserExecutable }),
+  const browser = await browserType.launch({
+    ...(browserType !== chromium || browserExecutable === undefined
+      ? {}
+      : { executablePath: browserExecutable }),
     headless: true,
     ...(options.args === undefined ? {} : { args: options.args }),
   });
@@ -233,8 +236,8 @@ async function launchBrowser(options = {}) {
 
 // One Chromium for every test in a file (CI runs each file in its own process), launched on
 // first use and closed after the file's last test: `after` here runs when the module loads, so it
-// attaches to the root test. newPage uses it unless a test passes launch arguments, which need a
-// browser of their own. Each test still gets its own context (cookies, storage, viewport,
+// attaches to the root test. An explicit browser type or launch arguments use a separate browser.
+// Each test still gets its own context (cookies, storage, viewport,
 // routes); this only saves the launch and close, about 0.2 CPU-s a test. A failed launch, or a
 // browser that has crashed or disconnected, is launched again for the next caller.
 let sharedLaunch;
@@ -285,10 +288,11 @@ export function fileBrowser() {
 export async function newPage(t, fixture, options = {}) {
   const artifacts = await artifactDirectory(t);
   assert.ok(
-    options.browser === undefined || options.args === undefined,
-    "pass a shared browser or launch arguments, not both",
+    options.browser === undefined ||
+      (options.args === undefined && options.browserType === undefined),
+    "pass a shared browser or browser type/launch arguments, not both",
   );
-  const shared = options.args === undefined;
+  const shared = options.args === undefined && options.browserType === undefined;
   const browser = shared
     ? await (options.browser ?? sharedBrowser)()
     : await launchBrowser(options);

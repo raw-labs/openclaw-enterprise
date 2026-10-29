@@ -76,7 +76,7 @@ dedicated execution, and channel enablement does not grant general public HTTPS.
 
 ## Enable lookup in production
 
-Production composition selects the Slack Driver. With default-deny egress,
+Production composition selects the bundled Channel Driver, which delegates Slack operations to this adapter. With default-deny egress,
 lookup and credential validation need an approved route. Configure Helm
 `outboundProxy.enabled: true` and supply `outboundProxy.denyCidrs` with the actual
 Installation infrastructure addresses, including public addresses. The chart:

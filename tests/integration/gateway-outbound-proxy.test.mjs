@@ -10,6 +10,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import tls from "node:tls";
 import { fileURLToPath } from "node:url";
+import { startControlledOutboundProxy } from "../helpers/gateway-outbound-transport.mjs";
 import { createOutboundProxyServer } from "../../apps/controller/src/gateway/outbound-proxy.mjs";
 
 const entrypoint = fileURLToPath(
@@ -128,7 +129,7 @@ test(
   },
 );
 
-async function rawRequest(proxy, bytes) {
+async function rawRequest(proxy, bytes, timeoutMs = 5000) {
   const socket = proxy.track(net.connect({ host: "127.0.0.1", port: proxy.port }));
   const chunks = [];
   const response = new Promise((resolve, reject) => {
@@ -138,11 +139,15 @@ async function rawRequest(proxy, bytes) {
   });
   await bound(once(socket, "connect"), "client connection");
   socket.write(bytes);
-  return bound(response, "proxy response");
+  return bound(response, "proxy response", timeoutMs);
 }
 
-function connectRequest(proxy, target, extraHeaders = "") {
-  return rawRequest(proxy, `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n${extraHeaders}\r\n`);
+function connectRequest(proxy, target, extraHeaders = "", timeoutMs = 5000) {
+  return rawRequest(
+    proxy,
+    `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n${extraHeaders}\r\n`,
+    timeoutMs,
+  );
 }
 
 async function readiness(port) {
@@ -451,3 +456,70 @@ test(
     }
   },
 );
+
+test("managed channel transport refuses unsafe DNS and late resolution without opening an upstream", { timeout: 25_000 }, async (t) => {
+  // DNS alone is controlled. The production CONNECT parser, address admission,
+  // deadline, disconnect handling and numeric upstream transport remain real.
+  const upstream = net.createServer((socket) => {
+    socket.destroy();
+    assert.fail("a denied or cancelled lookup reached the upstream");
+  });
+  t.after(() => new Promise((resolve) => upstream.close(resolve)));
+  await new Promise((resolve, reject) => {
+    upstream.once("error", reject);
+    upstream.listen(0, "127.0.0.1", resolve);
+  });
+  const unsafeAnswers = [
+    "127.0.0.1", "10.2.3.4", "100.64.0.1", "169.254.169.254", "172.16.0.1",
+    "192.168.0.1", "192.0.2.1", "198.18.0.1", "198.51.100.1", "203.0.113.1",
+    "224.0.0.1", "240.0.0.1", "0.0.0.1", "192.0.0.1",
+  ].map((address) => [{ address, family: 4 }]);
+  unsafeAnswers.push(
+    [{ address: "2606:4700:4700::1111", family: 6 }],
+    [{ address: "::ffff:127.0.0.1", family: 6 }],
+    [{ address: "93.184.216.34", family: 4 }, { address: "10.0.0.1", family: 4 }],
+    [],
+  );
+  const dnsAnswers = Object.fromEntries(
+    unsafeAnswers.map((answers, index) => [`denied-${index}.example.test`, answers]),
+  );
+  dnsAnswers["failed.example.test"] = "failure";
+  dnsAnswers["pending.example.test"] = "pending";
+  dnsAnswers["late.example.test"] = {
+    delayMs: 1000,
+    addresses: [{ address: "93.184.216.34", family: 4 }],
+  };
+  const hosts = Object.keys(dnsAnswers);
+  const proxy = await startControlledOutboundProxy(t, {
+    upstreamPort: upstream.address().port,
+    upstreamHosts: hosts,
+    approvedHosts: hosts,
+    dnsAnswers,
+  });
+  for (const host of hosts.filter((host) => host.startsWith("denied-"))) {
+    assert.match(await connectRequest(proxy, `${host}:443`), /^HTTP\/1\.1 403 Forbidden/, host);
+  }
+  assert.match(await connectRequest(proxy, "failed.example.test:443"), /^HTTP\/1\.1 502 Bad Gateway/);
+  const client = proxy.track(net.connect({ host: "127.0.0.1", port: proxy.port }));
+  await once(client, "connect");
+  client.write("CONNECT late.example.test:443 HTTP/1.1\r\nHost: late.example.test\r\n\r\n");
+  const dnsEvent = (event) => bound((async () => {
+    while (!proxy.stderr().includes(`"event":"fixture.${event}"`)) {
+      await delay(25);
+    }
+  })(), event);
+  // Wait until production requested DNS, then close the real client before it resolves.
+  await dnsEvent("dns_started");
+  client.destroy();
+  await dnsEvent("dns_resolved");
+  assert.equal(await readiness(proxy.port), 200);
+  // Pending OS DNS cannot extend a request past the production connect deadline.
+  assert.match(
+    await connectRequest(proxy, "pending.example.test:443", "", 15_000),
+    /^HTTP\/1\.1 504 Gateway Timeout/,
+  );
+  assert.equal(await readiness(proxy.port), 200);
+  const closed = once(proxy.child, "close");
+  proxy.child.kill("SIGTERM");
+  assert.equal((await bound(closed, "pending DNS proxy shutdown"))[0], 0);
+});

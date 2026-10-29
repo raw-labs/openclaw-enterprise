@@ -241,9 +241,10 @@ the worker stops predecessors before starting the new Harness. This permits RWO
 workspace storage with deployment downtime; restore previous
 configuration through a new version instead of restarting its old snapshot.
 
-Enabled external channels require dedicated execution. Unsupported Harness and
-execution-mode combinations fail deployment. Embedded OpenClaw is never
-delegated to OpenShell.
+External channels require dedicated execution; Teams also requires
+`gatewayRouting.channels.hostname` and the operator's **channels** listener
+([setup](../../guides/integrations/teams.md)). Unsupported Harness/mode combinations
+fail deployment. Embedded OpenClaw cannot use OpenShell.
 
 Stopping an Agent first deletes its exact gateway route and gateway runtime,
 then removes the dedicated Harness Deployment or delegates provider-owned

@@ -37,6 +37,7 @@
     "tests/integration/password-sign-in-admission.test.mjs",
     "tests/integration/google-login-transport.test.mjs",
     "tests/conformance/slack-channel-directory.test.mjs",
+    "tests/integration/teams-directory.test.mjs",
     "tests/conformance/bounded-response-reads.test.mjs",
     "tests/conformance/repository-credentials-github.test.mjs",
     "tests/integration/repository-credentials-driver.test.mjs",
@@ -119,6 +120,9 @@
     "tests/conformance/schema-auth-boundary-v1.test.mjs": "tsc --build of a fixture project that references packages/occ; if that output is stale, it rebuilds workspace output that other files read"
   },
   "files": [
+    {
+      "path": "tests/integration/teams-directory.test.mjs"
+    },
     {
       "path": "tests/integration/tls-peer-certificate.test.mjs"
     },
@@ -288,7 +292,10 @@
       "path": "tests/conformance/native-admin-upgrade-reset.test.mjs"
     },
     {
-      "path": "tests/integration/gateway-outbound-proxy.test.mjs"
+      "path": "tests/integration/gateway-outbound-proxy.test.mjs",
+      "expectedTests": [
+        "managed channel transport refuses unsafe DNS and late resolution without opening an upstream"
+      ]
     },
     {
       "path": "tests/conformance/native-admin-websocket-relay.test.mjs"

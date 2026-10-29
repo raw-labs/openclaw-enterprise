@@ -55,7 +55,7 @@ function lookup(
   return context.request(`${namespacePath(context.namespaceId)}/channel-directory/lookup`, {
     method: "POST",
     readOnly: true,
-    body,
+    body: { ...body, provider: "slack" },
     ...(signal ? { signal } : {}),
   }) as Promise<ChannelDirectoryResult>;
 }

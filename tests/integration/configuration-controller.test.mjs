@@ -348,7 +348,7 @@ async function readyAgent(context, namespace, agentId, configurationId, secretNa
 }
 
 // Creates a Configuration with `values` and a ready Agent that uses it.
-async function deployableAgent(context, namespace, { values, name, secretName }) {
+async function deployableAgent(context, namespace, { values, name, secretName, executionMode }) {
   const collection = `/namespaces/${namespace.id}/configurations`;
   const created = await request(context.app, "POST", collection, {
     body: { kind: "agent", values },
@@ -356,7 +356,7 @@ async function deployableAgent(context, namespace, { values, name, secretName })
   assert.equal(created.status, 201, JSON.stringify(created.body));
   const configurationId = created.body.data.id;
   const agent = await request(context.app, "POST", `/namespaces/${namespace.id}/agents`, {
-    body: { name, configurationId },
+    body: { name, configurationId, ...(executionMode === undefined ? {} : { executionMode }) },
   });
   assert.equal(agent.status, 201, JSON.stringify(agent.body));
   await readyAgent(context, namespace, agent.body.data.id, configurationId, secretName);
@@ -1661,6 +1661,82 @@ test("Configuration save and Kubernetes deployment admission refuse settings pre
     const saved = await request(context.app, "PATCH", item, { body: { values } });
     assert.equal(saved.status, 200, `${JSON.stringify(values)}: ${JSON.stringify(saved.body)}`);
   }
+
+  // Teams drafts can be saved before an operator configures the callback listener. Deployment
+  // must explain that prerequisite (or the unsupported native setting), rather than masking
+  // the preparation error as an authentication conflict. No Kubernetes I/O runs in this case.
+  const kubernetes = createTestKubernetesComputeDriver("compute-teams-admission", {
+    channelRuntime: true,
+  });
+  const teamsContext = await fixture({
+    computeDriver: createReadyComputeDriver("compute-teams-admission", {
+      ...Object.fromEntries(
+        configurationRules.map((rule) => [rule, (...args) => kubernetes[rule](...args)]),
+      ),
+    }),
+    computeImplementation: "kubernetes-local",
+  });
+  const teamsBase = {
+    agents: {
+      defaults: {
+        model: "codex/gpt-5",
+        models: { "codex/gpt-5": { agentRuntime: { id: "codex" } } },
+      },
+    },
+  };
+  const teamsAgent = await deployableAgent(teamsContext, teamsContext.namespace, {
+    values: teamsBase,
+    name: "Teams admission",
+    secretName: "teams-model-key",
+    executionMode: "dedicated",
+  });
+  const passwordSecret = await teamsContext.controller.createSecret(teamsContext.principal.id, {
+    namespaceId: teamsContext.namespace.id,
+    name: "Teams password",
+    value: "synthetic-teams-password",
+  });
+  const savedAgent = await request(teamsContext.app, "GET", teamsAgent.agentPath);
+  assert.equal(savedAgent.status, 200, JSON.stringify(savedAgent.body));
+  bindRole(teamsContext, savedAgent.body.data.servicePrincipalId, {
+    id: "teams-password-consumer",
+    roleId: "model-consumer",
+    namespaceId: teamsContext.namespace.id,
+    resource: { kind: "secret", id: passwordSecret.id },
+  });
+  for (const [policy, message] of [
+    [{}, "Configuration setting channels.msteams requires an Installation public HTTPS channel callback listener."],
+    [{ webhook: { path: "/custom" } }, "Configuration setting channels.msteams.webhook.path must be /api/messages."],
+    [{ legacyWebhook: true }, "Configuration setting channels.msteams.legacyWebhook must be false: callbacks use the Gateway listener."],
+    [{ cloud: "USGov" }, "Configuration setting channels.msteams.cloud must be Public for this channel runtime."],
+  ]) {
+    const saved = await request(teamsContext.app, "PATCH", teamsAgent.item, {
+      body: {
+        values: {
+          ...teamsBase,
+          channels: {
+            msteams: {
+              enabled: true,
+              appId: "11111111-1111-4111-8111-111111111111",
+              tenantId: "22222222-2222-4222-8222-222222222222",
+              appPassword: "${MSTEAMS_APP_PASSWORD}",
+              ...policy,
+            },
+          },
+        },
+        secretBindings: {
+          MSTEAMS_APP_PASSWORD: { source: passwordSecret.ref, delivery: { type: "env" } },
+        },
+      },
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assertRefused(
+      await request(teamsContext.app, "POST", `${teamsAgent.agentPath}/deploy`),
+      message,
+    );
+  }
+  const teamsRevisions = await request(teamsContext.app, "GET", `${teamsAgent.agentPath}/revisions`);
+  assert.equal(teamsRevisions.status, 200);
+  assert.deepEqual(teamsRevisions.body.data, []);
 });
 
 test("Preset save refuses a Codex approval policy every Gateway refuses, as Configuration save does", async (t) => {
@@ -1732,6 +1808,18 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
   const setting = (path, requirement) => `Configuration setting ${path} ${requirement}.`;
 
   for (const [values, message] of [
+    // Agent-owned JSON cannot delegate native SSRF checks or replace Compute's proxy.
+    ...[
+      ["env", "OPENCLAW_PROXY_ACTIVE", "1"],
+      ["env.vars", "https_proxy", "http://proxy.example.invalid:3128"],
+      ["env.vars", "NO_PROXY", "*"],
+    ].map(([parent, name, value]) => [
+      { ...valid, env: parent === "env" ? { [name]: value } : { vars: { [name]: value } } },
+      setting(
+        `${parent}.${name}`,
+        "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
+      ),
+    ]),
     [
       { ...valid, channels: { discord: { enabled: true } } },
       setting(
@@ -1890,7 +1978,7 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
   const revisions = await request(context.app, "GET", `${agentPath}/revisions`);
   assert.deepEqual(revisions.body.data, []);
 
-  // A disabled unsupported channel and a non-credential env name still save.
+  // A disabled unsupported channel and an ordinary application env name still save.
   for (const values of [
     { ...valid, channels: { discord: { enabled: false } } },
     { ...valid, env: { vars: { FEATURE_LABEL: "evaluation" } } },

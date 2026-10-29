@@ -708,7 +708,8 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- end -}}
 {{- if $routing.channels.enabled -}}
 {{- if or (gt (len $routing.channels.hostname) 253) (not (regexMatch "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$" $routing.channels.hostname)) -}}{{- fail "gatewayRouting.channels.hostname must be a public DNS hostname" -}}{{- end -}}
-{{- if eq $routing.channels.hostname $routing.hostname -}}{{- fail "gatewayRouting.channels.hostname must differ from administration" -}}{{- end -}}
+{{- $privateHostname := default (printf "%s.%s.svc" (include "openclaw.gatewayRouting.serviceName" .) $routing.envoyNamespace) $routing.hostname -}}
+{{- if eq $routing.channels.hostname $privateHostname -}}{{- fail "gatewayRouting.channels.hostname must differ from administration" -}}{{- end -}}
 {{- if not $routing.channels.tlsSecretName -}}{{- fail "gatewayRouting.channels.tlsSecretName must reference a public certificate Secret" -}}{{- end -}}
 {{- if or (not (regexMatch "^[1-9][0-9]*$" (toString $routing.channels.listenerPort))) (lt (int $routing.channels.listenerPort) 1024) (gt (int $routing.channels.listenerPort) 65535) (eq (int $routing.channels.listenerPort) (int $routing.envoyHttpsTargetPort)) (and $routing.sandbox.enabled (eq (int $routing.channels.listenerPort) (int $routing.sandbox.listenerPort))) -}}{{- fail "gatewayRouting.channels.listenerPort must be an unprivileged port distinct from other HTTPS listeners" -}}{{- end -}}
 {{- if not $routing.channels.ingressPeers -}}{{- fail "gatewayRouting.channels.ingressPeers must explicitly select public ingress sources" -}}{{- end -}}

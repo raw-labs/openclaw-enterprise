@@ -1496,6 +1496,10 @@ test(
         callback.spec.rules[0].filters[1].requestHeaderModifier.remove.includes("authorization"),
         false,
       );
+      // Native callback JWTs confer no OCE person or configured-role authority.
+      for (const name of ["x-occ-identity", "x-occ-role", "x-occ-role-policy", "x-openclaw-scopes"]) {
+        assert.ok(callback.spec.rules[0].filters[1].requestHeaderModifier.remove.includes(name));
+      }
     };
     // The normal Agent update route cannot grant extra destinations to embedded execution.
     for (const gatewayOutbound of [
@@ -1510,6 +1514,39 @@ test(
       assert.match(additional.error.message, /dedicated/);
     }
     await assertServing(provisioned.revisionId);
+    // A Teams draft may be edited while Slack and Teams serve. Refuse an unsupported
+    // callback at admission, before the worker can stop their shared Gateway or proxy.
+    const configurationPath = `/namespaces/${namespaceId}/configurations/${provisioned.configurationId}`;
+    const revisionsBeforeRefusal = await optedIn.request("GET", `${agentPath}/revisions`);
+    assert.equal(revisionsBeforeRefusal.status, 200, JSON.stringify(revisionsBeforeRefusal.body));
+    const servingCallback = await resource("httproute", callbackName, placement);
+    const invalidCallback = await optedIn.request("PATCH", configurationPath, {
+      values: {
+        ...values,
+        channels: {
+          ...values.channels,
+          msteams: { ...values.channels.msteams, webhook: { path: "/unsupported" } },
+        },
+      },
+      secretBindings,
+    });
+    assert.equal(invalidCallback.status, 200, JSON.stringify(invalidCallback.body));
+    const refusedCallback = await optedIn.request("POST", `${agentPath}/deploy`);
+    assert.equal(refusedCallback.status, 400, JSON.stringify(refusedCallback.body));
+    assert.match(refusedCallback.error.message, /channels.msteams.webhook.path.*api\/messages/);
+    const revisionsAfterRefusal = await optedIn.request("GET", `${agentPath}/revisions`);
+    assert.equal(revisionsAfterRefusal.status, 200, JSON.stringify(revisionsAfterRefusal.body));
+    assert.deepEqual(
+      revisionsAfterRefusal.data.map(({ id }) => id),
+      revisionsBeforeRefusal.data.map(({ id }) => id),
+    );
+    assert.equal(
+      (await resource("httproute", callbackName, placement)).metadata.uid,
+      servingCallback.metadata.uid,
+    );
+    await assertServing(provisioned.revisionId);
+    const restored = await optedIn.request("PATCH", configurationPath, { values, secretBindings });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
     const candidate = await optedIn.request("POST", `${agentPath}/deploy`);
     assert.equal(candidate.status, 202, JSON.stringify(candidate.body));
     await waitFor(
@@ -1530,7 +1567,6 @@ test(
     await assertServing(candidate.data.id);
     // Disabling Teams is a normal Configuration/redeployment operation. The other
     // channel stays active while only this callback and its credentials disappear.
-    const configurationPath = `/namespaces/${namespaceId}/configurations/${provisioned.configurationId}`;
     const disabled = await optedIn.request("PATCH", configurationPath, {
       values: { ...values, channels: { ...values.channels, msteams: { enabled: false } } },
       secretBindings: {

@@ -1,3 +1,4 @@
+import { BundledChannelDriver } from "../../apps/controller/src/drivers/channel/index.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -464,10 +465,12 @@ test("Slack credential checks name the missing proxy only when production expect
   t.after(() => refusing.release());
   const closedUrl = `http://127.0.0.1:${refusing.port}/`;
   // A refused connection and an expired time budget are the two ways Slack never answers.
-  await assert.rejects(
-    check(new SlackChannelDriver(sendTo(closedUrl), undefined, { expectProxy: true })),
-    noRoute,
-  );
+  for (const Driver of [SlackChannelDriver, BundledChannelDriver]) {
+    await assert.rejects(
+      check(new Driver(sendTo(closedUrl), undefined, { expectProxy: true })),
+      noRoute,
+    );
+  }
   const timedOut = async () => {
     throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
   };

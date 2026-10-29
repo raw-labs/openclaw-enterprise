@@ -53,8 +53,8 @@ verify both paths. A browser-only module needs no forwarder.
 
 ## Appearance review
 
-Use **Pages/Agents → Populated** to review the shared shell and controls at
-desktop (1440 × 1000), tablet (768 × 1024), and mobile (390 × 844).
+Review **Pages/Agents → Populated** at desktop (1440 × 1000), tablet
+(768 × 1024), and mobile (390 × 844).
 Check keyboard focus, search, navigation, an open dialog, and empty, loading,
 error, permission-denied, and missing-credential stories. The console stays light
 under either system appearance.
@@ -232,6 +232,15 @@ shows organization-wide policy restrictions. Missing-credential, read-only, and
 save-failure stories cover surrounding states. Capture final interactions and
 native values outside the repository; attach screenshots and video to the task
 and PR.
+
+### Teams editor checks
+
+Follow the [Teams workflow](../../scripts/console-storybook/teams-workflow.md)
+with **Components/Channels → Teams Editor**. Save personal and channel access
+independently; disable channel conversations, reopen and check native JSON and
+Secret controls. Related stories cover missing credentials, advanced settings,
+read-only, loading, denied and pending saves. Backend/live-provider proof:
+[Teams verification](../testing/teams.md).
 
 For policy-denial states and the reviewed-addition walkthrough, follow the
 [Agent policy storyboard](../../scripts/console-storybook/policy-workflow.md).

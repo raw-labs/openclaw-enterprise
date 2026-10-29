@@ -64,11 +64,12 @@ gateway, or a model turn.
 On a host approved for browser automation:
 
 ```sh
-pnpm exec playwright install chromium
+pnpm exec playwright install chromium webkit
 pnpm test:console-browser
 ```
 
-Set `OCC_TEST_BROWSER_EXECUTABLE` to use an approved existing browser. The test
+Teams directory selection also runs in WebKit. Set `OCC_TEST_BROWSER_EXECUTABLE`
+to use an approved existing Chromium executable. The test
 fails if no browser is available; it does not install one. Do not change managed
 browser policies. Set `OCC_TEST_CONSOLE_ARTIFACT_DIR` to retain screenshots.
 

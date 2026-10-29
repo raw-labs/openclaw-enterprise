@@ -4084,7 +4084,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
             "Channel callback hostname",
             "/gatewayRouting/channels/hostname",
           );
-          if (routing.channels.hostname === routing.hostname) {
+          const privateHostname =
+            routing.hostname ||
+            `occ-gateway-${sha256Hex(`${routing.gatewayNamespace}/${routing.gatewayName}`, 12)}.${routing.envoyNamespace}.svc`;
+          if (routing.channels.hostname === privateHostname) {
             throw configurationConstraintFailure(
               "Channel callbacks require a hostname separate from Gateway administration.",
               "/gatewayRouting/channels/hostname",
@@ -14214,6 +14217,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
                     "cookie",
                     "x-api-key",
                     "x-occ-identity",
+                    RUNTIME_ROLE_HEADER,
+                    RUNTIME_ROLE_POLICY_HEADER,
                     "x-openclaw-scopes",
                     "forwarded",
                     "x-forwarded-for",
