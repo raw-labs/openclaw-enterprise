@@ -204,11 +204,13 @@ There is no credential substitution, request rewriting or interception CA.
   from its enabled configuration. The Sandbox maps these to executable
   identities and provider rules; Compute contains no Slack-specific host list.
 
-The proposed `gatewaySandbox` selection and `SandboxDriver.gateway`
-capability carry Gateway startup/configuration, private state, resources,
-policy, endpoint and cleanup requirements. They are Gateway-specific, not a
-general workload executor. OpenShell translation stays in its Driver and reuses
-the provider's existing enforcement and proxy.
+The Installation administrator selects the Gateway Sandbox provider through
+the proposed `gatewaySandbox` setting in Installation configuration. Agent
+authors choose outbound policy, not the provider. Compute uses the selected
+Driver's `SandboxDriver.gateway` capability for Gateway startup/configuration,
+private state, resources, policy, endpoint and cleanup. This capability is
+Gateway-specific, not a general workload executor. OpenShell translation stays
+in its Driver and reuses the provider's existing enforcement and proxy.
 
 ## Ingress integration and open questions
 

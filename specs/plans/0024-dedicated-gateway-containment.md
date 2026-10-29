@@ -84,10 +84,12 @@ Driver. Do not add an otherwise unused helper while ingress is unresolved.
 
 ## Outbound policy implementation details
 
-Use an independent proposed `gatewaySandbox` selection and optional
-`SandboxDriver.gateway` capability. Existing `sandboxDriver`,
-`revision.sandboxDriverId`, `configureAgent` and `provisionHarness` retain their
-Harness meaning. Composition passes only the Gateway capability to Compute;
+Define the proposed `gatewaySandbox` provider setting in Installation
+configuration, independently of Harness Sandbox selection. The Installation
+administrator selects this provider; Agents have no provider override. Use the
+selected Driver's optional `SandboxDriver.gateway` capability. Existing
+`sandboxDriver`, `revision.sandboxDriverId`, `configureAgent` and
+`provisionHarness` retain their Harness meaning. Composition passes only the Gateway capability to Compute;
 Compute retains routes, state ownership, activation and lifecycle.
 
 The existing socket broker sends connection metadata through `AcceptNetwork`
