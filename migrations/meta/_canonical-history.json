@@ -607,7 +607,122 @@
     "initialized": "62946da6b1fc2b06df09e97dda4cf1831f170a2f3d5ff35a9f107af206c425dc",
     "completed": "5693317372204660303ec53ce8d96322d9b2404fc484401b95b846e3fb4c88e9"
   },
-  "restoredUpgradeCatalogs": null,
+  "restoredUpgradeCatalogs": {
+    "7fe2e7ccc13ce974d03137b5117752ff03e7c001d2916d50c300ddbdf826207a": [
+      "cfc06d434c484e8eaa6ec99e70074f99e7f4e99832882c83ee95eb31e58c6e75"
+    ],
+    "bd490d16dd23ec1ea722bb370155e9454fb52187bd2b16cd8a0fe277e3e41bde": [
+      "cfc06d434c484e8eaa6ec99e70074f99e7f4e99832882c83ee95eb31e58c6e75"
+    ],
+    "5f9359057412199ea7a5659bdedbef664fb6da7bcd99d7a552f01a5782b904ea": [
+      "cfc06d434c484e8eaa6ec99e70074f99e7f4e99832882c83ee95eb31e58c6e75"
+    ],
+    "a66448129d9ae2adf076f1d7887d3c7151cdc68f635c6fac7984d4254604d074": [
+      "cfc06d434c484e8eaa6ec99e70074f99e7f4e99832882c83ee95eb31e58c6e75"
+    ],
+    "3d7801c345eea875fb79adba4e04a4e2b24bad49ffe6ada62cc58117c5cce134": [
+      "cfc06d434c484e8eaa6ec99e70074f99e7f4e99832882c83ee95eb31e58c6e75"
+    ],
+    "baac9e369ace8610f96948c1a930e6387431b1d0a33cefa3893765e52f8f7a52": [
+      "cfc06d434c484e8eaa6ec99e70074f99e7f4e99832882c83ee95eb31e58c6e75"
+    ],
+    "a2ba6fc82fbf0047cea491efad4a9e58eacaed7c29ce8528accff331569c51dd": [
+      "cfc06d434c484e8eaa6ec99e70074f99e7f4e99832882c83ee95eb31e58c6e75"
+    ],
+    "55b5fd63daa059d20e4e8cff1dd6cdd3c9082b8d0b2824be06479ad4427c8c61": [
+      "22f4a6e28596e88a6f9b5704c7bd860f4771314251df5c161d9f9f02c27c2d17"
+    ],
+    "f4f4515306a31d07605c0e56da9e26dfec920a872f66cbe245ee0e5b14f5a845": [
+      "22f4a6e28596e88a6f9b5704c7bd860f4771314251df5c161d9f9f02c27c2d17"
+    ],
+    "d34dc4d6c510d2aaa2173d7eb40136246c074827145ff26e133d0082596cf93c": [
+      "22f4a6e28596e88a6f9b5704c7bd860f4771314251df5c161d9f9f02c27c2d17"
+    ],
+    "2030a4bccc1f6fe8fac4858cf715bef7c1b275d494ba44a293eb6b0d5d29cf1a": [
+      "22f4a6e28596e88a6f9b5704c7bd860f4771314251df5c161d9f9f02c27c2d17"
+    ],
+    "04afe7195a43827e39103c8ed78b19e4edc29f21bd857a79fba95caa39a9074b": [
+      "22f4a6e28596e88a6f9b5704c7bd860f4771314251df5c161d9f9f02c27c2d17"
+    ],
+    "0f093bdf3b0a5c1f8aefd18bd7ecd3be99a8a5c8559d25b309e2e582119a4c4c": [
+      "a7f99a3fd2e97bdfe048be6b85b8b6564f7266b1bb69790d772ea10b99182fc2"
+    ],
+    "0dc81ad5504c9e05cf285c3c4c7cf9da1d4e1556c4c674d39eed4a32abe44b1d": [
+      "a7f99a3fd2e97bdfe048be6b85b8b6564f7266b1bb69790d772ea10b99182fc2"
+    ],
+    "89dee96b21e37a8e67afd09c3d8096672ed2825ce7bdccd62153da5965e984bd": [
+      "a7f99a3fd2e97bdfe048be6b85b8b6564f7266b1bb69790d772ea10b99182fc2"
+    ],
+    "e3eb8e9d95e40f6e2356b6b9318f50b20ce929bbef582d42b7be56d2407f8337": [
+      "a7f99a3fd2e97bdfe048be6b85b8b6564f7266b1bb69790d772ea10b99182fc2"
+    ],
+    "6344a29afa54e754a9d8b7362146e0c1edde77f2a1b7d9d2b323d82ad0f20e8d": [
+      "a7f99a3fd2e97bdfe048be6b85b8b6564f7266b1bb69790d772ea10b99182fc2"
+    ],
+    "bdb958966896575964ac9c1d23c51759a7a11b23bc7d5980cdf0496fab1a8b8f": [
+      "a7f99a3fd2e97bdfe048be6b85b8b6564f7266b1bb69790d772ea10b99182fc2"
+    ],
+    "ba9e4c487cde7155036d79f6d29d64d9e21819361d8dfebcdfe2754cc12c3539": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "038d68892adeb6cf41001617b9ec55ca8a32115c04cfa487f0674b3756294bc2": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "3db47081c1e1f671c51aff211ae1fe560dfffe1f80b2176d16b76838cf8f3b30": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "dcd129084c45ee23fadbbad0fc97b2f6ee38ff12421760f863d1d3e1f5eb4516": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "1637119b545b917f59933031730a2ad32ba8f47435b3526f179a840e4285ea6f": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "50e7e165459306033af8d6aa074ad8d7df4fc2ff4065ef454b2f3f1a12768577": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "eb024f6c9697e8796d9633de0400495f41a2ad2378a2d8d6512feb7b99db9e73": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "d04407ae6939193a1d9cb99e8fe6bf77d4cd1a2b38ff58650f1c4bd5034b18f9": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "5aa1681236a41d763405d596daeed3921a2b8932090534f6dacf85c488279f34": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "edb33a9589120fe790330bb931ab1abb6dafea4d6fb93769678317b33223db18": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "4adecbe08d7bf8221a5fb047ab5d2d7fc741ecd7c78f4e70056e87864783d1d5": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "e77455c678262e4f58e8a12e8c28ce59680f35812c7aeab063502108e5fbe768": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "21215a502a06304661ea33897f38fe66ef92d35a7a39b464ffbd5b1c739f2410": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "06d47d8adaa9f0d6340af6813097144b98e94825990b0bedb65a16d53f83365f": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "78586d305c6ad7382894eed8a2733832252bab600d9c28ff1d9fa2c0f583c83c": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "bf9ddb2090b96332b6e8525707ec4bac98ca77813f51f54c1048abd4e02c92f0": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "b7cae22ff81eca9f73a436b60cac4f8ec26d1674b0d568f1e6073c7a8308882b": [
+      "b5ce9f26ce6a9947fb14ddbd2ae08066c8e87ca317c0c02ff5bf3185e19dacf4"
+    ],
+    "180f564cd78374f7840e7b0e32ed278be2c6d9bdbe203619f2c7d78735db7e8f": [
+      "8184c002eb1aff8c264a7c332b440b4e0e092efb95ee8e5743cc5c84c2123f1d"
+    ],
+    "7b1b65e473e36b59673b8fbfbd00fcaacf0a039ce09c9cba2abac3fc67321c2b": [
+      "8184c002eb1aff8c264a7c332b440b4e0e092efb95ee8e5743cc5c84c2123f1d"
+    ],
+    "9d62547c432a1d07fb4f4dd5c25129cce28c92267e8a8027313783758bdeec7e": [
+      "8184c002eb1aff8c264a7c332b440b4e0e092efb95ee8e5743cc5c84c2123f1d"
+    ]
+  },
   "logicalRestoreCatalogs": {
     "7fe2e7ccc13ce974d03137b5117752ff03e7c001d2916d50c300ddbdf826207a": "7a23fb23f990bde65b178ce2910ea58ad17c8ead923e42ba4ef9466fccb4d1f8",
     "bd490d16dd23ec1ea722bb370155e9454fb52187bd2b16cd8a0fe277e3e41bde": "65bad9e88c72a67c5e7326bac16a64261ccbd9f15bf9029c3d424e75afcfd913",
@@ -651,12 +766,12 @@
   "catalogEvidence": {
     "postgres": "18.6",
     "drizzleOrm": "0.45.4",
-    "method": "Fresh and incremental SQL installation plus logical dump/restore measured every canonical prefix. Restore mappings cover only existing supported canonical catalogs. Historical catalogs and compatible lineages remain unchanged. Measurement does not replace guarded populated-upgrade or application CI.",
-    "sourceSha": "ae6fecaf23ddb79a5967d50ce34a2300b57e0a6e",
-    "probeSha": "fbb7905a475422c60cbd4bb2a82bf15892a27cf0",
-    "runUrl": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/40831982846",
-    "schemaDigest": "b36ec750432e71f2b00367f06ff6bbc68e80e0ffcdfe4a267134f8a534774349",
-    "methodDigest": "9d94cf0e12d88b65d4fa00430f44771ce6678542e37853be97165e2d3fe67f42",
+    "method": "Fresh and incremental SQL installation, logical dump/restore, and restored-prefix SQL upgrades measured every canonical prefix. Restore and upgrade mappings cover only existing supported canonical catalogs. Historical catalogs and compatible lineages remain unchanged. Measurement does not replace guarded populated-upgrade or application CI.",
+    "sourceSha": "5ea9be8da80b129f0d28a9ffc1880861dcbca499",
+    "probeSha": "c6d423878085a8d7192bd02082733077dd799aa5",
+    "runUrl": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/40840541298",
+    "schemaDigest": "8c3717cba38f5ac2e429b82df61ae029d7d75500962cb60477a2ea34e63299a1",
+    "methodDigest": "091d75ec61c9a71889d5c52004d231bde709394328c25fc8adbf9d88f15fc50d",
     "migrationCount": 67
   },
   "compatibleLineages": {

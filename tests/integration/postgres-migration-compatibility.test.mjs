@@ -2713,9 +2713,12 @@ test(
     }
 
     // Restored supported prefixes must pass the same production guard before
-    // upgrading. Cover an older catalog, the published prefix, and both new boundaries.
+    // upgrading. Cover every distinct measured final catalog representation,
+    // including the published prefix and both new boundaries.
     for (const [prefix, history] of [
       [24, "prePresetsMain"],
+      [33, "prePluginApprovers"],
+      [38, "preAgentDeletionTakeover"],
       [62, "preCredentialProxy"],
       [65, "prePreparedAttemptSettlement"],
       [66, "preGatewayManagedMode"],
