@@ -1,7 +1,7 @@
 ---
 created: "2026-10-06"
 updated: "2026-10-28"
-last_updated_session: "authoring-run/d2bd1414-d73d-4eca-b675-32310d3d3c26"
+last_updated_session: "authoring-run/8eb34ae4-b76a-44dd-bb2e-5e09e180d7af"
 ---
 
 # Agent channel callback flow
@@ -54,8 +54,11 @@ uses `configuration-rules.ts:enabledChannelProviders` and `requireChannelTopolog
 to require supported providers, a Dedicated workload and a channel proxy.
 The shared `channelRequirements` check requires channel routing for enabled Teams.
 `validateHarnessAuth` runs it during deployment admission, before the worker stops
-a serving predecessor. Preparation repeats the check. Configuration saves and
-Agent saves do not require this Installation-specific listener. An omitted `webhook.path`, including `webhook: {}`, uses the native
+a serving predecessor. Admission returns `ConfigurationHarnessError`, so the API
+returns the Teams refusal reason with HTTP 400 before creating an Agent revision.
+Preparation repeats the check with its diagnostic error type. Configuration saves
+and Agent saves do not require this Installation-specific listener. An omitted
+`webhook.path`, including `webhook: {}`, uses the native
 `/api/messages` default. Non-object webhook values, custom paths, legacy
 listeners and sovereign clouds are refused.
 `validateChannelSecretBindings` requires matching admitted bindings.
@@ -134,6 +137,8 @@ by the serving revision.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 22:29: Preserve actionable Teams deployment refusals through the API in the accompanying uncommitted change. (authoring-run/8eb34ae4-b76a-44dd-bb2e-5e09e180d7af - 66c908e7b4e6)
 
 - 2026-10-28 22:25: Share Teams deployment checks with admission so predictable callback refusals precede predecessor shutdown. (authoring-run/d2bd1414-d73d-4eca-b675-32310d3d3c26 - 93c1dc4f24b9)
 

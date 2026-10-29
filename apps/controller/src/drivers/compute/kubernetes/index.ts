@@ -4552,6 +4552,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
       this.channelRequirements(
         configuration,
         enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError),
+        (message) => new ConfigurationHarnessError(message),
       );
     }
   }
@@ -14687,12 +14688,17 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       },
       preparationSettingError,
     );
-    return this.channelRequirements(revision.configuration, providers);
+    return this.channelRequirements(
+      revision.configuration,
+      providers,
+      (message) => new ConfigurationFailure(message),
+    );
   }
 
   private channelRequirements(
     configuration: Readonly<OpenClawConfigurationDocument>,
     providers: readonly string[],
+    createError: (message: string) => Error,
   ): readonly ChannelRequirements[] {
     const configured = asRecord(configuration.channels) ?? {};
     for (const provider of providers) {
@@ -14705,17 +14711,13 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           (webhook === undefined ||
             (webhook.path !== undefined && webhook.path !== "/api/messages"))
         ) {
-          throw new ConfigurationFailure("Microsoft Teams webhook path must be /api/messages.");
+          throw createError("Microsoft Teams webhook path must be /api/messages.");
         }
         if (teams?.legacyWebhook !== undefined && teams.legacyWebhook !== false) {
-          throw new ConfigurationFailure(
-            "Microsoft Teams legacy webhook listeners are unsupported.",
-          );
+          throw createError("Microsoft Teams legacy webhook listeners are unsupported.");
         }
         if (teams?.cloud !== undefined && teams.cloud !== "Public") {
-          throw new ConfigurationFailure(
-            "Microsoft Teams currently supports the Public cloud only.",
-          );
+          throw createError("Microsoft Teams currently supports the Public cloud only.");
         }
       }
     }
@@ -14726,7 +14728,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       enabled.some(({ webhook }) => webhook) &&
       this.options.gatewayRouting?.channels === undefined
     ) {
-      throw new ConfigurationFailure(
+      throw createError(
         "Microsoft Teams requires a dedicated public channel callback listener.",
       );
     }

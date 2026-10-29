@@ -43,6 +43,11 @@ The existing deployment-admission case in
 custom or invalid webhook settings, legacy listeners, and unsupported clouds
 before predecessor shutdown. It also accepts the default callback path and
 keeps Installation prerequisites out of Configuration and Agent saves.
+The existing settings-admission case in
+`tests/integration/configuration-controller.test.mjs` checks these refusals
+through Configuration save and Agent deployment HTTP requests. It verifies the
+HTTP 400 reason and absence of a new Agent revision, using real Kubernetes
+admission rules without cluster I/O.
 
 The existing retirement case in `tests/conformance/kubernetes-compute.test.mjs`
 also exercises serving/candidate callback ownership, exact method/path/header

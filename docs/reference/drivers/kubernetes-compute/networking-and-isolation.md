@@ -352,5 +352,10 @@ receive controller credentials.
 
 ## Teams callbacks
 
+Deployment admission refuses enabled Teams without `gatewayRouting.channels`,
+custom webhook paths, legacy listeners, and clouds other than `Public`. The API
+returns HTTP 400 with the reason before creating an Agent revision. Configuration
+and Agent saves do not require the Installation's callback listener.
+
 See [Teams setup](../../../guides/integrations/teams.md) for public callbacks,
 credentials, routing, cleanup, and verification.

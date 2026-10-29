@@ -9013,7 +9013,10 @@ test("deployment admission refuses Gateway breakers before a dedicated deploymen
   const teams = (policy = {}) => ({ ...base, channels: { msteams: { enabled: true, ...policy } } });
   assert.throws(
     () => withChannels.validateHarnessAuth(codex, apiKeyAuth, teams()),
-    /Microsoft Teams requires a dedicated public channel callback listener/,
+    {
+      name: "ConfigurationHarnessError",
+      message: "Microsoft Teams requires a dedicated public channel callback listener.",
+    },
   );
   withChannels.validateHarnessAuth(codex, apiKeyAuth, teams(), null);
   withChannels.validateConfiguration(teams());
@@ -9027,7 +9030,10 @@ test("deployment admission refuses Gateway breakers before a dedicated deploymen
     [{ legacyWebhook: true }, /Microsoft Teams legacy webhook listeners are unsupported/],
     [{ cloud: "USGov" }, /Microsoft Teams currently supports the Public cloud only/],
   ]) {
-    assert.throws(() => withTeams.validateHarnessAuth(codex, apiKeyAuth, teams(policy)), refusal);
+    assert.throws(
+      () => withTeams.validateHarnessAuth(codex, apiKeyAuth, teams(policy)),
+      (error) => error instanceof ConfigurationHarnessError && refusal.test(error.message),
+    );
   }
   for (const policy of [
     {},

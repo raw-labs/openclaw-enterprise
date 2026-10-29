@@ -83,8 +83,9 @@ removes the route and its authentication-policy override.
 
 Advanced native configurations remain inspectable and can be disabled in the
 console. Unsupported editor shapes require the Configuration API; the editor
-does not flatten multiple teams or wildcard access rules. Custom webhook paths
-and legacy webhook listeners fail deployment preparation.
+does not flatten multiple teams or wildcard access rules. Deployment refuses
+custom webhook paths and legacy webhook listeners before stopping the serving
+Agent. Correct the setting named in the refusal, then deploy again.
 
 ## Configure outgoing channel files
 
