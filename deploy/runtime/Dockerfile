@@ -115,7 +115,7 @@ RUN echo 'f8d1e51706f59964839d231818909ffb2ee5f6b951385a353a1a4fd07c45e2cc  /tmp
     && git apply /tmp/openclaw-codex-read-only-paths.patch
 # TODO: Remove this bridge when upstream accepts a verified proxy role at profile admission.
 COPY deploy/runtime/openclaw-trusted-proxy-role.patch /tmp/openclaw-trusted-proxy-role.patch
-RUN echo '2c9656a4db6399c446ebc1b07a5edde3720274655ca0ef0a75838e020ce88db7  /tmp/openclaw-trusted-proxy-role.patch' | sha256sum --check --strict \
+RUN echo 'b6bdbe8f4608f62332371b00609cb2c17aeee4f75f6b9aeb947e3f59925c67b9  /tmp/openclaw-trusted-proxy-role.patch' | sha256sum --check --strict \
     && git apply /tmp/openclaw-trusted-proxy-role.patch
 # TODO: Remove this bridge patch when OpenClaw selects the native full-access profile.
 COPY deploy/runtime/openclaw-codex-full-access-profile.patch /tmp/openclaw-codex-full-access-profile.patch

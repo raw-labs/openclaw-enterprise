@@ -347,7 +347,7 @@ diff --git a/src/gateway/server.auth.identity-scopes.test.ts b/src/gateway/serve
    connectReq,
    BROWSER_ORIGIN,
    TRUSTED_BROWSER_HEADERS as TRUSTED_PROXY_HEADERS,
-@@ -769,3 +773,312 @@
+@@ -769,3 +773,318 @@
      expectScopes(connected, scopes);
    });
  });
@@ -641,13 +641,19 @@ diff --git a/src/gateway/server.auth.identity-scopes.test.ts b/src/gateway/serve
 +  test.each(rejectedAssignments)("rejects $label before admission", async ({ headers }) => {
 +    await setup();
 +    await withGatewayServer(async ({ port }) => {
-+      const ws = await openWs(port, { ...TRUSTED_PROXY_HEADERS, ...headers });
++      // A managed identity isolates assignment rejection from the identity-scope guard.
++      // The shared browser fixture's default identity is outside this managed scope.
++      const ws = await openWs(port, {
++        ...TRUSTED_PROXY_HEADERS,
++        "x-forwarded-user": "team:prn_rejected",
++        ...headers,
++      });
 +      try {
 +        const closed = waitForWsClose(ws, 5_000);
 +        const response = await connectReq(ws, {
-+            client: CONTROL_UI_CLIENT,
-+            browserOrigin: BROWSER_ORIGIN,
-+            prePairDevice: true,
++          client: CONTROL_UI_CLIENT,
++          browserOrigin: BROWSER_ORIGIN,
++          prePairDevice: true,
 +          skipDefaultAuth: true,
 +          scopes: ["operator.read"],
 +          deviceIdentityPath: deviceIdentityPath("proxy-rejected"),
@@ -667,7 +673,8 @@ diff --git a/src/gateway/server.plugin-http-role-scopes.test.ts b/src/gateway/se
 +import { createHash } from "node:crypto";
 +import { GATEWAY_OWNER_PROFILE_ID } from "../../packages/gateway-protocol/src/schema/users.js";
  import { once } from "node:events";
- import type { IncomingMessage } from "node:http";
+-import type { IncomingMessage } from "node:http";
++import type { IncomingMessage, ServerResponse } from "node:http";
  import { PassThrough } from "node:stream";
 @@ -9,8 +11,9 @@
  import type { OpenClawConfig } from "../config/types.openclaw.js";
