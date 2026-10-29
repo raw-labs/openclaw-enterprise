@@ -774,6 +774,8 @@ export interface PluginToolCatalogEntry {
 }
 
 export interface PluginPolicyCapabilities {
+  /** An entry limits this plugin to its master switch. Unlisted plugins use the Driver defaults. */
+  readonly policyScopeByPlugin?: Readonly<Record<string, "enablement_only">>;
   readonly approvers?: {
     readonly agent: boolean;
     readonly plugin: boolean;
@@ -790,6 +792,15 @@ export interface PluginPolicyCapabilities {
     readonly reviewer: readonly PluginReviewer[];
   };
   readonly driverPolicySchema: JSONSchema;
+}
+
+/** Ready choices for a slot in the saved Agent's plugin picker. */
+export interface AgentPluginCredentialSlot {
+  readonly pluginId: string;
+  readonly releaseSha256: string;
+  readonly id: string;
+  readonly label: string;
+  readonly sources: readonly { readonly id: string; readonly name: string }[];
 }
 
 export interface PluginCatalogLink {
@@ -1053,6 +1064,8 @@ export interface Agent extends Scope {
   readonly harnessAuth: HarnessAuthBinding | null;
   readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode: HarnessExecutionMode;
+  /** Desired Gateway administration mode; each deployment snapshots the selected value. */
+  readonly gatewayManagedMode: boolean;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingSelection[];
@@ -1131,6 +1144,7 @@ export interface AgentRevision extends Scope {
   readonly configurationKind: ConfigurationKind;
   readonly configurationGeneration: number;
   readonly configuration: OpenClawConfigurationDocument;
+  readonly gatewayManagedMode: boolean;
   readonly harness: RevisionHarnessDescriptor;
   readonly compute: {
     readonly id: string;
@@ -1816,6 +1830,13 @@ export interface ExternalChatgptAuth {
 export interface CredentialSourceAttachment {
   readonly sourceId: string;
   readonly ref: string;
+  /** Non-secret limits of the attached OAuth provider for a Sandbox request guard. */
+  readonly requestScope?: {
+    readonly host: string;
+    readonly port: number;
+    readonly path: string;
+    readonly scopes: readonly string[];
+  };
   /** External Codex authentication carries no refresh token into the workload. */
   readonly externalChatgptAuth?: ExternalChatgptAuth;
 }
@@ -2097,6 +2118,15 @@ export interface PluginDiscoveryAuthentication {
 export interface PluginDriver extends Driver {
   readonly capability: "plugin";
   readonly policyCapabilities: PluginPolicyCapabilities;
+  /** Matches only source metadata authorized by OCC. The Driver never receives credential values. */
+  readonly credentials?: {
+    choices(sources: readonly CredentialSource[]): readonly AgentPluginCredentialSlot[];
+    validate(
+      selections: PluginDesiredState,
+      sources: readonly CredentialSource[],
+      modelSourceId?: string,
+    ): void;
+  };
   /** Checks policy support without installing plugins or performing authenticated discovery. */
   validatePolicies(selections: PluginDesiredState, defaultApprovers?: PluginApprovers): void;
   /**
@@ -2107,6 +2137,16 @@ export interface PluginDriver extends Driver {
   validateAgentConfiguration?(
     selections: PluginDesiredState,
     configuration: Readonly<OpenClawConfigurationDocument>,
+  ): void;
+  /** Refuses a selection the Agent's Harness and the Installation's Compute cannot deliver. */
+  validatePlacement?(
+    selections: PluginDesiredState,
+    harness: Readonly<Pick<RevisionHarnessDescriptor, "id" | "mode">>,
+    computeImplementation: string,
+    credentialRuntime?: {
+      readonly sandbox: string | undefined;
+      readonly gateway: string | undefined;
+    },
   ): void;
   listCatalog(context: PluginDriverContext): Promise<readonly PluginCatalogEntry[]>;
   /** Pre-Agent discovery defaults to requiring a transient credential. Results are not persisted. */
@@ -2368,6 +2408,8 @@ export interface ComputeDriver extends Driver {
     revision: Readonly<AgentRevision>,
   ): (() => Promise<void>) | undefined;
   readonly supportsWorkspaceSetup?: true;
+  /** Enforces Gateway administration restrictions for managed Agent revisions. */
+  readonly supportsGatewayManagedMode?: true;
   readonly capability: "compute";
   /** Deployment must observe and provision Agent-owned runtime credentials before revision admission. */
   readonly requiresAgentRuntimeCredentials?: true;

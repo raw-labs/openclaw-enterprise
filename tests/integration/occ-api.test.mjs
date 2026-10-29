@@ -18,7 +18,6 @@ import {
   OCCPluginDriver,
 } from "../../apps/controller/src/drivers/plugin/index.ts";
 import { resolveApprovedHarness as resolveApprovedDevelopmentHarness } from "../../apps/controller/src/composition/production-harness.ts";
-import { admitLoggingConfiguration } from "../../packages/contracts/src/index.ts";
 import { createControllerApp, createFastifyApp } from "../../apps/controller/src/index.ts";
 import { InMemoryAuditSink } from "../../packages/audit/src/index.ts";
 import { NativeIAMDriver, validateAuthAccountPrincipalSeed } from "../../packages/iam/src/index.ts";
@@ -42,6 +41,8 @@ import { jsonLineDestination } from "../helpers/json-lines.mjs";
 import { createTestSecretDriver } from "../helpers/secret-driver.mjs";
 import {
   AGENT_NAME_CONFLICT,
+  BINDING_SUBJECT_EMAIL,
+  BINDING_SUBJECT_INELIGIBLE,
   callerDenied,
   DEPLOYMENT_FAILED,
   referenceFormRefusal,
@@ -55,6 +56,8 @@ import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute
 import { createOccLogger } from "../../apps/controller/src/logging.ts";
 import { availablePort } from "../helpers/available-port.mjs";
 import { stopProcess } from "../helpers/stop-process.mjs";
+import { servedAs } from "../helpers/agent-identity.mjs";
+import { admittedConfiguration } from "../helpers/admitted-configuration.mjs";
 
 const repository = fileURLToPath(new URL("../..", import.meta.url));
 const entrypoint = fileURLToPath(new URL("../../apps/controller/src/server.mjs", import.meta.url));
@@ -2068,6 +2071,13 @@ test("Namespace IAM reports invalid policy input as 400 with the field and refus
     assertApiError(rejected, 400, "INVALID_REQUEST", path);
     assert.deepEqual(rejected.body.error.details, [{ path, code: "INVALID_VALUE" }]);
   }
+  // An email is the caller's own input, so the answer names that mistake; an unknown principal ID
+  // keeps the answer an ineligible one gets, so it reveals no principal (finding D753).
+  const email = await bind({ subjectId: "nora@example.com" });
+  assertApiError(email, 400, "INVALID_REQUEST", "/subjectId");
+  assert.equal(email.body.error.message, BINDING_SUBJECT_EMAIL);
+  const unknown = await bind({ subjectId: `prn_${randomUUID()}` });
+  assert.equal(unknown.body.error.message, BINDING_SUBJECT_INELIGIBLE);
 
   // A Role still referenced by an AccessBinding names the reason, not "already exists".
   const binding = await bind({});
@@ -3359,6 +3369,56 @@ test("Installation deployment inventory fails closed on incomplete authorization
   assert.equal(incomplete.body.error.code, "DEPENDENCY_UNAVAILABLE");
 });
 
+test("Channel directory accepts Slack's null terminal cursor without losing prior matches", async () => {
+  const controller = await configuredController({ secretDriver: createTestSecretDriver() });
+  await bootstrap(controller);
+  const namespace = await createNamespace(controller, "slack-terminal-cursor");
+  const { fixture } = controller;
+  await fixture.controller.handleNamespaceLifecycle(fixture.principal.id, namespace.id, "ready");
+  const secret = await controller.request("POST", `/namespaces/${namespace.id}/secrets`, {
+    body: { name: "directory-bot", value: "xoxb-directory-fixture" },
+  });
+  assert.equal(secret.status, 201);
+  let terminalCursor = null;
+  const driver = new SlackChannelDriver(async (url) => {
+    const request = new URL(url);
+    if (request.pathname === "/api/auth.test") {
+      return Response.json({ ok: true, bot_id: "BFIXTURE", team_id: "TWORKSPACE" });
+    }
+    assert.equal(request.pathname, "/api/conversations.list");
+    const secondPage = request.searchParams.has("cursor");
+    if (secondPage) {
+      assert.equal(request.searchParams.get("cursor"), "page-two");
+    }
+    return Response.json({
+      ok: true,
+      channels: [
+        secondPage ? { id: "CSECOND", name: "ann-second" } : { id: "CFIRST", name: "ann-first" },
+      ],
+      response_metadata: { next_cursor: secondPage ? terminalCursor : "page-two" },
+    });
+  });
+  fixture.controller.registerDriver(driver);
+  fixture.controller.selectDriver("channel", driver.id);
+  const path = `/namespaces/${namespace.id}/channel-directory/lookup`;
+  const body = { secretId: secret.data.id, kind: "channels", query: "ann" };
+  const found = await controller.request("POST", path, { body });
+  assert.equal(found.status, 200, JSON.stringify(found.body));
+  assert.deepEqual(found.data, {
+    workspaceId: "TWORKSPACE",
+    candidates: [
+      { id: "CFIRST", name: "ann-first" },
+      { id: "CSECOND", name: "ann-second" },
+    ],
+    complete: true,
+  });
+  // Accepting the documented null sentinel must not accept arbitrary cursor types.
+  terminalCursor = 7;
+  const invalid = await controller.request("POST", path, { body });
+  assert.equal(invalid.status, 503);
+  assert.equal(invalid.body.error.code, "CHANNEL_DIRECTORY_INVALID_RESPONSE");
+});
+
 test("Channel directory lookup checks the exact edit target and Secret before and after reading", async () => {
   const token = "synthetic-channel-directory-token";
   const secretDriver = createTestSecretDriver({ id: "secret-directory-integration" });
@@ -4111,6 +4171,111 @@ test("Agent save and deployment refuse plugins the Plugin Driver cannot run in t
     body: { name: "embedded-codex-plugins", configurationId: openclaw.id, plugins: codexPlugins },
   });
   assert.equal(codexEmbedded.status, 201, JSON.stringify(codexEmbedded.body));
+});
+
+test("a saved Google package refuses an incompatible Agent mode, Harness or Compute", async () => {
+  const sandbox = {
+    id: "sandbox-native",
+    capability: "sandbox",
+    implementation: "test-native-sandbox",
+    facets: ["networking", "filesystem", "process"],
+    async provisionHarness() {},
+    async cleanup() {},
+  };
+  const kubernetes = createTestKubernetesComputeDriver("compute-google-placement", {
+    sandboxDriver: sandbox,
+  });
+  const controller = await configuredController({ computeDriver: kubernetes });
+  await bootstrap(controller);
+  const namespace = await createNamespace(controller, "google-package-placement");
+  const configuration = await createConfiguration(
+    controller,
+    namespace.id,
+    createHarnessConfiguration("openclaw", "gpt-5.1"),
+  );
+  const driver = new OCCPluginDriver();
+  controller.fixture.controller.registerDriver(driver);
+  controller.fixture.controller.selectDriver("plugin", driver.id);
+  const packageId = "occ-plugin:google@1.0.0";
+  const plugins = { [packageId]: { enabled: true } };
+  const agentsPath = `/namespaces/${namespace.id}/agents`;
+  const created = await controller.request("POST", agentsPath, {
+    body: {
+      name: "Workspace Agent",
+      executionMode: "dedicated",
+      configurationId: configuration.id,
+      plugins,
+    },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const path = `${agentsPath}/${created.data.id}`;
+  const capabilities = await controller.request("GET", `${path}/plugins/capabilities`);
+  assert.equal(capabilities.status, 200);
+  assert.equal(capabilities.data.policyScopeByPlugin[packageId], "enablement_only");
+  for (const unsupportedPolicy of [
+    { toolDefaults: { approval: "all_actions" } },
+    { tools: { "gmail.users.messages.list": { enabled: false } } },
+    { approvers: [] },
+  ]) {
+    const policy = await controller.request("PATCH", path, {
+      body: {
+        configurationId: configuration.id,
+        plugins: { [packageId]: { enabled: true, ...unsupportedPolicy } },
+      },
+    });
+    assertApiError(policy, 400, "INVALID_REQUEST");
+    assert.match(policy.body.error.message, /Google Workspace.*supports .*enablement/);
+  }
+  const mode = await controller.request("PATCH", path, {
+    body: { configurationId: configuration.id, executionMode: "embedded" },
+  });
+  assert.equal(mode.status, 400, JSON.stringify(mode.body));
+  assert.match(mode.body.error.message, /Google Workspace requires a dedicated OpenClaw Agent/);
+  const saved = (await controller.request("GET", path)).data;
+  assert.equal(saved.executionMode, "dedicated");
+  assert.deepEqual(saved.plugins, plugins);
+
+  await controller.fixture.platformState.transact((unit) =>
+    unit.namespaces.transitionNamespaceStatus(namespace.id, "provisioning", "ready"),
+  );
+  await bindHarnessKey(controller.fixture, namespace.id, saved);
+  const changeHarness = async (harnessId) => {
+    const changed = await controller.request(
+      "PATCH",
+      `/namespaces/${namespace.id}/configurations/${configuration.id}`,
+      {
+        body: { values: createHarnessConfiguration(harnessId, "gpt-5.1") },
+      },
+    );
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+  };
+  await changeHarness("codex");
+  const deploy = await controller.request("POST", `${path}/deploy`);
+  assert.equal(deploy.status, 400, JSON.stringify(deploy.body));
+  assert.equal(deploy.body.error.message, mode.body.error.message);
+
+  // The Sandbox can provision native workers. The replacement Compute cannot deliver the package.
+  await changeHarness("openclaw");
+  const unsupportedCompute = createReadyComputeDriver("compute-without-packages", {
+    validateHarnessAuth() {},
+    async stopRevision() {},
+  });
+  for (const replacement of [sandbox, unsupportedCompute]) {
+    controller.fixture.controller.registerDriver(replacement);
+    controller.fixture.controller.selectDriver(replacement.capability, replacement.id);
+  }
+  const unsupported = await controller.request("POST", `${path}/deploy`);
+  assert.equal(unsupported.status, 400, JSON.stringify(unsupported.body));
+  assert.equal(unsupported.body.error.message, "Google Workspace requires Kubernetes Compute.");
+  assert.deepEqual((await controller.request("GET", `${path}/revisions`)).data, []);
+
+  controller.fixture.controller.selectDriver("compute", kubernetes.id);
+  const admitted = await controller.request("POST", `${path}/deploy`);
+  assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
+  assert.deepEqual(admitted.data.plugins, {
+    driver: { id: driver.id, implementation: driver.implementation },
+    plugins,
+  });
 });
 
 test("the OpenClaw Plugin Driver refuses a selection whose every tool the Configuration denies at save and deployment", async () => {
@@ -7054,6 +7219,7 @@ test("two Namespaces become independently ready and deletion tombstones only its
     "configurationId",
     "configurationKind",
     "createdAt",
+    "gatewayManagedMode",
     "harness",
     "harnessAuth",
     "id",
@@ -7065,7 +7231,7 @@ test("two Namespaces become independently ready and deletion tombstones only its
   assert.equal(readyDeployment.data.configurationGeneration, 1);
   assert.deepEqual(
     readyDeployment.data.configuration,
-    admitLoggingConfiguration({ model: "first", temperature: "0" }, "info"),
+    admittedConfiguration(servedAs({ model: "first", temperature: "0" }, agentA.data.name), "info"),
   );
   assert.deepEqual(readyDeployment.data.harness, {
     id: "openclaw",
@@ -7107,7 +7273,10 @@ test("two Namespaces become independently ready and deletion tombstones only its
   assert.equal(nextDeployment.data.revision, 2);
   assert.deepEqual(
     nextDeployment.data.configuration,
-    admitLoggingConfiguration({ model: "second", temperature: "1" }, "info"),
+    admittedConfiguration(
+      servedAs({ model: "second", temperature: "1" }, agentA.data.name),
+      "info",
+    ),
   );
   const admittedRevisions = await injectedRequest(
     fixture.app,
@@ -7870,7 +8039,7 @@ test("IAM and audit dependency failures fail closed without orphaned state", asy
   assertOnlyDefaultNamespace(stillUnchanged);
 });
 
-test("runtime auth admits SSH revisions without source permissions but retains deployment authorization and exact grammar", async () => {
+test("SSH Compute refuses managed mode at save and deploy and validates runtime authentication and deployment authorization", async () => {
   const computeDriver = new SshComputeDriver({
     ssh: { identityFile: "/tmp/ssh-test-key", knownHostsFile: "/tmp/ssh-test-hosts" },
     hosts: { runtime: { address: "127.0.0.1", user: "root" } },
@@ -7931,7 +8100,46 @@ test("runtime auth admits SSH revisions without source permissions but retains d
   });
   assert.equal(created.status, 201);
   assert.deepEqual(created.data.harnessAuth, { method: "runtime" });
+  // SSH Compute cannot enforce managed mode, so a new Agent defaults to off (finding 2676).
+  assert.equal(created.data.gatewayManagedMode, false);
   const path = `${collection}/${created.data.id}`;
+  const unsupported =
+    "Agent setting gatewayManagedMode is not supported by the selected Compute Driver.";
+  // Asking for managed mode fails at save and in the create preflight, not at the next deploy.
+  for (const [method, target, body] of [
+    [
+      "POST",
+      collection,
+      { name: "Managed SSH Agent", configurationId: configuration.id, gatewayManagedMode: true },
+    ],
+    [
+      "POST",
+      `${collection}/validate`,
+      { configuration: { kind: "agent", values: configuration.values }, gatewayManagedMode: true },
+    ],
+    ["PATCH", path, { gatewayManagedMode: true }],
+  ]) {
+    const refused = await controller.request(method, target, { body });
+    assert.equal(refused.status, 400, `${method} ${target}: ${JSON.stringify(refused.body)}`);
+    assert.equal(refused.body.error.message, unsupported);
+  }
+  // An Agent saved before managed mode existed was migrated to on; deploy still refuses it
+  // until an Installation administrator turns it off.
+  await controller.fixture.platformState.transact((unit) =>
+    unit.agents.updateConfiguration(
+      namespace.id,
+      created.data.id,
+      configuration.id,
+      ...Array(8).fill(undefined),
+      true,
+    ),
+  );
+  const rejected = await controller.request("POST", `${path}/deploy`);
+  assert.equal(rejected.status, 400, JSON.stringify(rejected.body));
+  assert.equal(rejected.body.error.message, unsupported);
+  assert.deepEqual((await controller.request("GET", `${path}/revisions`)).data, []);
+  const updated = await controller.request("PATCH", path, { body: { gatewayManagedMode: false } });
+  assert.equal(updated.status, 200, JSON.stringify(updated.body));
   const deployed = await controller.request("POST", `${path}/deploy`);
   assert.equal(deployed.status, 202, JSON.stringify(deployed.body));
   assert.deepEqual(deployed.data.harnessAuth, { method: "runtime" });
@@ -8026,7 +8234,12 @@ test("SSH Compute refuses at deploy gateway authentication and Secret bindings i
   const collection = `/namespaces/${namespace.id}/agents`;
   const createAgentFor = async (name, configuration) => {
     const created = await controller.request("POST", collection, {
-      body: { name, configurationId: configuration.id, harnessAuth: { method: "runtime" } },
+      body: {
+        name,
+        configurationId: configuration.id,
+        harnessAuth: { method: "runtime" },
+        gatewayManagedMode: false,
+      },
     });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     return created.data;
@@ -8164,7 +8377,13 @@ test("SSH Compute refuses at Agent save and deploy a roster or workspace whose m
   const files = { "USER.md": "ssh-workspace-roster" };
   const create = (name, configurationId, extra = {}) =>
     controller.request("POST", collection, {
-      body: { name, configurationId, harnessAuth: { method: "runtime" }, ...extra },
+      body: {
+        name,
+        configurationId,
+        harnessAuth: { method: "runtime" },
+        gatewayManagedMode: false,
+        ...extra,
+      },
     });
   const roster =
     "Configuration setting agents.entries must hold only main, or be omitted, for initial workspace files: only the main Agent reads them.";
@@ -8831,4 +9050,106 @@ test("Slack validation with no Slack proxy names the setting at provision and de
   const deploy = await controller.request("POST", `${base}/agents/${agent.data.id}/deploy`);
   assertApiError(deploy, 409, "RESOURCE_CONFLICT");
   assert.equal(deploy.body.error.message, noRoute);
+});
+
+test("saved-Agent discovery offers the Google package only where Agent save admits it", async () => {
+  // Finding 2787: the Plugin Driver's catalog takes no Agent, so OCC checks each entry against
+  // the Agent's Harness and the Installation's Compute, as Agent save does.
+  const sandbox = {
+    id: "sandbox-native",
+    capability: "sandbox",
+    implementation: "test-native-sandbox",
+    facets: ["networking", "filesystem", "process"],
+    async provisionHarness() {},
+    async cleanup() {},
+  };
+  const kubernetes = createTestKubernetesComputeDriver("compute-google-discovery", {
+    sandboxDriver: sandbox,
+  });
+  const controller = await configuredController({ computeDriver: kubernetes });
+  await bootstrap(controller);
+  const namespace = await createNamespace(controller, "google-package-discovery");
+  const configuration = await createConfiguration(
+    controller,
+    namespace.id,
+    createHarnessConfiguration("openclaw", "gpt-5.1"),
+  );
+  const driver = new OCCPluginDriver();
+  controller.fixture.controller.registerDriver(driver);
+  controller.fixture.controller.selectDriver("plugin", driver.id);
+  const packageId = "occ-plugin:google@1.0.0";
+  const created = await controller.request("POST", `/namespaces/${namespace.id}/agents`, {
+    body: {
+      name: "Discovery Agent",
+      executionMode: "dedicated",
+      configurationId: configuration.id,
+    },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const path = `/namespaces/${namespace.id}/agents/${created.data.id}`;
+  // Each step compares discovery with what saving the package on this Agent returns.
+  const discoverAndSave = async () => {
+    const catalog = await controller.request("POST", `${path}/plugins`, { body: {} });
+    assert.equal(catalog.status, 200, JSON.stringify(catalog.body));
+    const details = await controller.request("POST", `${path}/plugins/details`, {
+      body: { pluginId: packageId },
+    });
+    const save = await controller.request("PATCH", path, {
+      body: { configurationId: configuration.id, plugins: { [packageId]: { enabled: true } } },
+    });
+    return { ids: catalog.data.plugins.map((entry) => entry.id), details, save };
+  };
+
+  // A dedicated OpenClaw Agent on Kubernetes Compute is offered the package and may save it.
+  const offered = await discoverAndSave();
+  assert.deepEqual(offered.ids, [packageId]);
+  assert.equal(offered.details.status, 200, JSON.stringify(offered.details.body));
+  assert.equal(offered.details.data.id, packageId);
+  assert.equal(offered.save.status, 200, JSON.stringify(offered.save.body));
+  const cleared = await controller.request("PATCH", path, {
+    body: { configurationId: configuration.id, plugins: {} },
+  });
+  assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
+
+  // The same Agent on the Codex Harness: save refuses the package, so discovery hides it.
+  const codex = await controller.request(
+    "PATCH",
+    `/namespaces/${namespace.id}/configurations/${configuration.id}`,
+    { body: { values: createHarnessConfiguration("codex", "gpt-5.1") } },
+  );
+  assert.equal(codex.status, 200, JSON.stringify(codex.body));
+  const codexOffer = await discoverAndSave();
+  assert.deepEqual(codexOffer.ids, []);
+  assertApiError(codexOffer.save, 400, "INVALID_REQUEST");
+  assert.match(
+    codexOffer.save.body.error.message,
+    /Google Workspace requires a dedicated OpenClaw/,
+  );
+  assertApiError(codexOffer.details, 400, "INVALID_REQUEST");
+  assert.equal(codexOffer.details.body.error.message, codexOffer.save.body.error.message);
+
+  // Back on OpenClaw, Compute that cannot deliver the package refuses it the same way.
+  const openclaw = await controller.request(
+    "PATCH",
+    `/namespaces/${namespace.id}/configurations/${configuration.id}`,
+    { body: { values: createHarnessConfiguration("openclaw", "gpt-5.1") } },
+  );
+  assert.equal(openclaw.status, 200, JSON.stringify(openclaw.body));
+  const unsupportedCompute = createReadyComputeDriver("compute-without-package-discovery", {
+    validateHarnessAuth() {},
+    async stopRevision() {},
+  });
+  for (const replacement of [sandbox, unsupportedCompute]) {
+    controller.fixture.controller.registerDriver(replacement);
+    controller.fixture.controller.selectDriver(replacement.capability, replacement.id);
+  }
+  const computeOffer = await discoverAndSave();
+  assert.deepEqual(computeOffer.ids, []);
+  assertApiError(computeOffer.save, 400, "INVALID_REQUEST");
+  assert.equal(
+    computeOffer.save.body.error.message,
+    "Google Workspace requires Kubernetes Compute.",
+  );
+  assertApiError(computeOffer.details, 400, "INVALID_REQUEST");
+  assert.equal(computeOffer.details.body.error.message, computeOffer.save.body.error.message);
 });

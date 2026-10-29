@@ -1,7 +1,7 @@
 ---
 created: 2026-09-09
-updated: 2026-10-24
-last_updated_session: authoring-run/bf58bf91-3fb2-4b62-9afe-c5cf1ce830dd
+updated: 2026-10-28
+last_updated_session: authoring-run/fc103f5f-f130-4239-a879-78ed1d7e6602
 ---
 
 # Compose development startup
@@ -71,8 +71,10 @@ Without a Sandbox Driver, Compose Kubernetes startup requires Node before creati
 Engine and Compose JSON probes select Docker or Podman independently of a
 `docker` alias. Podman requires `yq` v4
 and pins standalone `podman-compose` for consistent status, including stopped
-one-shot containers. Explicit `-f FILE`, `-fFILE`, or `--file=FILE` overrides
-`COMPOSE_FILE` and the default file.
+one-shot containers. Explicit `-f FILE`, `-fFILE`, `-f=FILE`, `--file FILE`, or
+`--file=FILE` overrides `COMPOSE_FILE` and the default file. Startup and cleanup
+forward attached short options as `--file=FILE` so Podman does not mistake an
+`h` in the path for help. Empty or missing file values fail before configuration rendering.
 
 Docker Compose renders JSON; Podman YAML is converted to JSON in private temporary
 storage. `./bin/occ dev analyze-compose` enforces loopback controller and database
@@ -153,7 +155,9 @@ Compose sets that root to `/app/.development/configurations` and backs it with
 the `occ_configuration_data` named volume, mounted only into the controller.
 PostgreSQL remains the OCC metadata system of record.
 
-### 5. The worker selects Docker compute and claims durable work
+<span id="5-the-worker-selects-docker-compute-and-claims-durable-work" class="anchor-alias"></span>
+
+### 5. The worker selects Docker Compute and claims queued operations
 
 `apps/controller/src/worker.mjs:configuration`,
 `apps/controller/src/drivers/compute/docker/index.ts:DockerComputeDriver.preflight`,
@@ -292,7 +296,7 @@ Configuration, and Secret Drivers with native IAM; without OpenShell,
 it adds both bundled Presets and the Codex Plugin Driver after the shared Codex
 sandbox check. Its runtime section sets the transport Secret prefix, gateway
 storage class, and memory limits
-of 3 GiB per gateway and 6 GiB per Harness.
+of 4 GiB per gateway and 6 GiB per Harness.
 
 With Compose and OpenShell, startup installs the pinned Agent Sandbox controller
 and OpenShell Gateway in k3d and selects operator workspace mode. The
@@ -385,6 +389,8 @@ DNS/TLS, both Helm passes, recovery and destructive teardown.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 09:41: Normalize attached Podman file options for startup and cleanup, retaining file validation. (authoring-run/fc103f5f-f130-4239-a879-78ed1d7e6602 - 8eea685f0303ad004e222fc4399a019a9486dcb3)
 
 - 2026-10-24 17:53: Preserve attached Compose file selection before environment defaults. (authoring-run/bf58bf91-3fb2-4b62-9afe-c5cf1ce830dd - fd5723d94aebbd96d93e85649eec908adbc6d58a)
 

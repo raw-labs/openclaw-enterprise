@@ -57,6 +57,10 @@ the paths.
 | `error.details[].message` | `string` | No | max length: 512 |
 | `error.details[].path` | `string` | Yes | max length: 512; pattern: `^(?:/(?:[^~/]\|~0\|~1)*)*$` |
 | `error.message` | `string` | Yes | min length: 1; max length: 256 |
+| `error.remainingResources` | `array<object>` | No | max items: 7; Present for NAMESPACE_NOT_EMPTY. Each remaining resource kind reports its total count and up to 20 IDs. Pending Agent provisioning has no resource IDs. Remove the listed resources and retry to discover any others. |
+| `error.remainingResources[].count` | `integer` | Yes | minimum: 0 |
+| `error.remainingResources[].ids` | `array<string>` | Yes | max items: 20 |
+| `error.remainingResources[].kind` | `string` | Yes | min length: 1; max length: 64 |
 | `meta` | `object` | Yes | — |
 | `meta.requestId` | `string` | Yes | pattern: `^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 
@@ -1335,6 +1339,7 @@ Get the singleton Installation
 | `data.capabilities.pluginPolicies.driver.id` | `string` | Yes | min length: 1 |
 | `data.capabilities.pluginPolicies.driver.implementation` | `string` | Yes | min length: 1 |
 | `data.capabilities.pluginPolicies.driverPolicySchema` | `object<string, any>` | Yes | — |
+| `data.capabilities.pluginPolicies.policyScopeByPlugin` | `object<string, "enablement_only">` | No | — |
 | `data.capabilities.pluginPolicies.toolDefaults` | `object` | Yes | — |
 | `data.capabilities.pluginPolicies.toolDefaults.approval` | `array<"provider_default" or "all_actions" or "write_actions" or "none">` | Yes | — |
 | `data.capabilities.pluginPolicies.toolDefaults.enabled` | `boolean` | Yes | — |
@@ -1432,6 +1437,7 @@ Bootstrap the singleton Installation
 | `data.capabilities.pluginPolicies.driver.id` | `string` | Yes | min length: 1 |
 | `data.capabilities.pluginPolicies.driver.implementation` | `string` | Yes | min length: 1 |
 | `data.capabilities.pluginPolicies.driverPolicySchema` | `object<string, any>` | Yes | — |
+| `data.capabilities.pluginPolicies.policyScopeByPlugin` | `object<string, "enablement_only">` | No | — |
 | `data.capabilities.pluginPolicies.toolDefaults` | `object` | Yes | — |
 | `data.capabilities.pluginPolicies.toolDefaults.approval` | `array<"provider_default" or "all_actions" or "write_actions" or "none">` | Yes | — |
 | `data.capabilities.pluginPolicies.toolDefaults.enabled` | `boolean` | Yes | — |
@@ -1821,6 +1827,7 @@ Report advisory primary IAM permissions on a readable Namespace, not authorizati
 | `data` | `object` | Yes | — |
 | `data.agents` | `object` | Yes | — |
 | `data.agents.create` | `boolean` | Yes | Whether the selected IAM Driver allows Agent creation in this Namespace now. Advisory only: other required permissions, lifecycle state, or a later authorization decision can still prevent the operation. |
+| `data.delete` | `boolean` | Yes | Whether the selected IAM Driver allows deletion of this exact Namespace now. Advisory only: remaining resources, required Preset deletion permissions, or a later authorization decision can still prevent deletion. |
 | `data.installation` | `object` | Yes | — |
 | `data.installation.administer` | `boolean` | Yes | Whether the selected IAM Driver allows Installation administer now, which Installation-wide operations such as listing Backends need. The check targets the Installation, not this Namespace. Advisory only: a later authorization decision can still prevent the operation. |
 | `data.secrets` | `object` | Yes | — |
@@ -1973,11 +1980,12 @@ Create a Namespace-owned Agent
 
 **Operation ID:** `createAgent`
 
-**Permissions:** Requires create permission for Agent resources in the requested Namespace. Requires read permission on the requested Configuration. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected. Requires operate permission on each CredentialSource listed in credentialSources or named by a credential-source harnessAuth.
+**Permissions:** Requires create permission for Agent resources in the requested Namespace. Requires administer permission on the Installation when gatewayManagedMode is set to false. Requires read permission on the requested Configuration. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected. Requires operate permission on each CredentialSource listed in credentialSources or named by a credential-source harnessAuth.
 
 | Action | Resource | Scope |
 | --- | --- | --- |
 | `create` | `agent` | `namespace` |
+| `administer` | `installation` | `installation` (when `gatewayManagedMode` is `false`) |
 | `read` | `configuration` | `requested` |
 | `read` | `service_account` | `requested` (when associated) |
 | `operate` | `secret` | `requested` (when bound) |
@@ -2002,6 +2010,7 @@ Create a Namespace-owned Agent
 | `credentialSources` | `array<object>` | No | max items: 8; Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values. |
 | `credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `executionMode` | `"embedded" or "dedicated"` | No | — |
+| `gatewayManagedMode` | `boolean` | No | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `harnessAuth` | `object or object or object or object or null` | No | — |
 | `initialWorkspaceFiles` | `object` | No | — |
 | `initialWorkspaceFiles.AGENTS.md` | `string` | No | max length: 16384; pattern: `^[^\u0000]*$` |
@@ -2051,6 +2060,7 @@ Create a Namespace-owned Agent
 | `data.credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
+| `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
@@ -2486,6 +2496,7 @@ Create a new Agent and queue first-time provisioning
 | `configuration.secretBindings` | `object<string, object>` | No | Optional Secret binding map. Keys are destination environment variable names; at most 64 bindings are accepted. Each value must contain `source.kind`, `source.namespaceId`, and `source.id`, and may contain `delivery.type: "env"`. Admission rejects reserved or process-control destinations such as `OPENCLAW_*`, `CODEX_*`, `OPENAI_*`, `ANTHROPIC_*`, `OCC_*`, `KUBERNETES_*`, `PATH`, `HOME`, and proxy variables. Model authentication belongs to Agent.harnessAuth. |
 | `configuration.values` | `object<string, SafeJsonValue>` | Yes | A native OpenClaw configuration document. |
 | `executionMode` | `"embedded" or "dedicated"` | No | — |
+| `gatewayManagedMode` | `boolean` | No | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `harnessAuth` | `object or object or object or object or null` | No | Dedicated Harness authentication, required. Omitted, null and `runtime` are refused with 400 INVALID_REQUEST. A ready model `credential_source` is supported when the selected Credential Gateway owns it and the caller has source `operate` permission. |
 | `initialWorkspaceFiles` | `object` | No | — |
 | `initialWorkspaceFiles.AGENTS.md` | `string` | No | max length: 16384; pattern: `^[^\u0000]*$` |
@@ -2736,11 +2747,12 @@ Check an unsaved Agent Configuration, plugin selections, initial workspace files
 
 **Operation ID:** `validateAgentCreate`
 
-**Permissions:** Requires create permission for Agent resources in the requested Namespace.
+**Permissions:** Requires create permission for Agent resources in the requested Namespace. Requires administer permission on the Installation when gatewayManagedMode is set to false.
 
 | Action | Resource | Scope |
 | --- | --- | --- |
 | `create` | `agent` | `namespace` |
+| `administer` | `installation` | `installation` (when `gatewayManagedMode` is `false`) |
 
 ##### Parameters
 
@@ -2761,6 +2773,7 @@ Check an unsaved Agent Configuration, plugin selections, initial workspace files
 | `configuration.secretBindings` | `object<string, object>` | No | Optional Secret binding map. Keys are destination environment variable names; at most 64 bindings are accepted. Each value must contain `source.kind`, `source.namespaceId`, and `source.id`, and may contain `delivery.type: "env"`. Admission rejects reserved or process-control destinations such as `OPENCLAW_*`, `CODEX_*`, `OPENAI_*`, `ANTHROPIC_*`, `OCC_*`, `KUBERNETES_*`, `PATH`, `HOME`, and proxy variables. Model authentication belongs to Agent.harnessAuth. |
 | `configuration.values` | `object<string, SafeJsonValue>` | Yes | A native OpenClaw configuration document. |
 | `executionMode` | `"embedded" or "dedicated"` | No | — |
+| `gatewayManagedMode` | `boolean` | No | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `harnessAuth` | `object or object or object or object or object or null` | No | The Harness authentication Agent create will name, so Agent save's check of it against the execution mode and Compute settings runs here too. For a Secret the caller saves next, send only its `method`. The Secret and credential source are not read; omitted or null skips this check. |
 | `initialWorkspaceFiles` | `object` | No | — |
 | `initialWorkspaceFiles.AGENTS.md` | `string` | No | max length: 16384; pattern: `^[^\u0000]*$` |
@@ -2835,6 +2848,7 @@ Begin or retry deletion of the requested Agent and its Agent revisions
 | `data.credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
+| `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
@@ -2906,11 +2920,12 @@ Replace an exact Namespace-owned Agent's editable draft
 
 **Operation ID:** `updateAgent`
 
-**Permissions:** Requires update permission on the requested Agent. Requires read permission on the requested Configuration. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected. Requires operate permission on each CredentialSource the Agent lists or names in harnessAuth, before and after the update.
+**Permissions:** Requires update permission on the requested Agent. Requires administer permission on the Installation when the request changes the Agent's saved gatewayManagedMode setting. Requires read permission on the requested Configuration. Requires read permission on each currently associated or newly associated ServiceAccount when present. Requires operate permission on each bound Secret when Secret bindings are present or selected. Requires operate permission on each CredentialSource the Agent lists or names in harnessAuth, before and after the update.
 
 | Action | Resource | Scope |
 | --- | --- | --- |
 | `update` | `agent` | `requested` |
+| `administer` | `installation` | `installation` (when the request changes `gatewayManagedMode`) |
 | `read` | `configuration` | `requested` |
 | `read` | `service_account` | `requested` (when associated) |
 | `operate` | `secret` | `requested` (when bound) |
@@ -2932,10 +2947,11 @@ Replace an exact Namespace-owned Agent's editable draft
 | Field | Type | Required | Constraints |
 | --- | --- | --- | --- |
 | `backendId` | `string or null` | No | — |
-| `configurationId` | `string` | Yes | pattern: `^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `configurationId` | `string` | No | pattern: `^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `credentialSources` | `array<object>` | No | max items: 8; Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values. |
 | `credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `executionMode` | `"embedded" or "dedicated"` | No | — |
+| `gatewayManagedMode` | `boolean` | No | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `harnessAuth` | `object or object or object or object or null` | No | — |
 | `pluginApprovers` | `PluginApprovers or null` | No | — |
 | `plugins` | `PluginDesiredState` | No | Agent plugin selection map. Keys must be 1-253 characters matching ^[A-Za-z0-9._~:@-]{1,253}$. |
@@ -2977,6 +2993,7 @@ Replace an exact Namespace-owned Agent's editable draft
 | `data.credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
+| `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
@@ -3163,6 +3180,7 @@ Save an Agent revision from the Agent's saved settings
 | `data.createdAt` | `string (date-time)` | Yes | pattern: `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$` |
 | `data.credentialSources` | `array<object>` | No | max items: 8; Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values. |
 | `data.credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `data.gatewayManagedMode` | `boolean` | Yes | Gateway managed mode requested for this Agent version. It does not report Gateway runtime state. |
 | `data.harness` | `object` | Yes | — |
 | `data.harness.id` | `string` | Yes | min length: 1 |
 | `data.harness.mode` | `"embedded" or "dedicated"` | Yes | — |
@@ -3754,11 +3772,20 @@ Read selected Plugin Driver policy capabilities for an active Agent with caller 
 | `data.approvers.agent` | `boolean` | Yes | — |
 | `data.approvers.plugin` | `boolean` | Yes | — |
 | `data.approvers.tools` | `boolean` | Yes | — |
+| `data.credentialSlots` | `array<object>` | No | — |
+| `data.credentialSlots[].id` | `string` | Yes | — |
+| `data.credentialSlots[].label` | `string` | Yes | — |
+| `data.credentialSlots[].pluginId` | `string` | Yes | — |
+| `data.credentialSlots[].releaseSha256` | `string` | Yes | pattern: `^[a-f0-9]{64}$` |
+| `data.credentialSlots[].sources` | `array<object>` | Yes | — |
+| `data.credentialSlots[].sources[].id` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `data.credentialSlots[].sources[].name` | `string` | Yes | — |
 | `data.discoveryCredential` | `"required" or "none"` | Yes | — |
 | `data.driver` | `PluginDriverIdentity` | Yes | — |
 | `data.driver.id` | `string` | Yes | min length: 1 |
 | `data.driver.implementation` | `string` | Yes | min length: 1 |
 | `data.driverPolicySchema` | `object<string, any>` | Yes | — |
+| `data.policyScopeByPlugin` | `object<string, "enablement_only">` | No | — |
 | `data.toolDefaults` | `object` | Yes | — |
 | `data.toolDefaults.approval` | `array<"provider_default" or "all_actions" or "write_actions" or "none">` | Yes | — |
 | `data.toolDefaults.enabled` | `boolean` | Yes | — |
@@ -4581,6 +4608,7 @@ Temporarily enable or disable future policy edits for one Agent
 | `data.credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
+| `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
@@ -4706,6 +4734,7 @@ Stop one Agent and keep its saved Agent revision and persistent state
 | `data.credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
+| `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
