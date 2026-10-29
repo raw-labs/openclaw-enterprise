@@ -13,52 +13,49 @@ author: miguelbranco80
 
 ## Problem and decision
 
-Native plugins, channels and integrations run in the OpenClaw Gateway. In
-dedicated execution, that Gateway is separate from the Harness, so the Harness's
-network permissions do not give Gateway code access to external services.
+Native OpenClaw plugins and channels run in the Gateway and need connections
+to external services. OpenClaw Enterprise (OCE) restricts dedicated Gateway
+egress. The current Slack HTTP proxy provides a route to Slack, but covers only
+Slack destinations and requires clients to honor proxy settings. Other
+integrations need a way to reach approved services without a new proxy for each
+integration.
 
-OpenClaw Enterprise (OCE) currently gives dedicated Gateways restricted
-Kubernetes egress. Enabled channels use an approved proxy through `runtime.channels.proxyUrl` and `HTTPS_PROXY`.
-That route depends on client proxy support and does not provide destination
-policy for arbitrary native sockets.
+Run each dedicated Gateway inside the selected Sandbox, using OpenShell first.
+Enforce destination policy on socket connections instead of relying on client
+proxy settings. Reuse OpenShell's existing supervisor to open approved upstream
+connections. This replaces the Gateway's Slack HTTP proxy route and also covers
+other approved channel and plugin destinations. Native OpenClaw keeps the
+integration logic, credentials and TLS verification.
 
-Run the dedicated Gateway inside the selected Sandbox, using OpenShell first.
-Reuse its socket mediation and existing outbound proxy to enforce destination
-policy. Replace the dedicated Gateway's channel-proxy route, not the
-control-plane API's Slack route. Keep the separate Harness's placement, workspace,
-authentication and model credentials unchanged.
+The default still allows only enabled-channel destinations. Broader access
+requires explicit permission. The separate Harness, embedded execution and
+control-plane networking stay unchanged.
 
-## Gateway and control-plane egress
+## One outbound request, before and after
 
-The existing Slack HTTP CONNECT proxy checks destination hostnames and port
-443, then relays bytes without decrypting native TLS. It does not interpret
-messages or manage Slack credentials. Native OpenClaw owns messaging and Socket
-Mode; the control-plane Slack Channel Driver owns credential validation and
-directory lookups.
+Consider the native Slack SDK sending
+`POST https://slack.com/api/chat.postMessage` with its bot token.
 
-These callers have different destination requirements:
+**Current path:** Gateway Pod → Slack HTTP proxy → Slack TCP/443.
+Kubernetes denies direct public egress.
 
-- **Gateway:** enabled channels and installed plugins can require different
-  external services. OpenShell enforces the approved destinations for native
-  sockets; clients need not support an HTTP proxy.
-- **Control-plane Slack Driver:** current calls use the fixed
-  `https://slack.com/api/` endpoint. They do not run Gateway plugins or open
-  Socket Mode connections. Keep this Driver's existing HTTP proxy route and
-  its Kubernetes network restrictions.
+**Proposed path:** contained Gateway → OpenShell socket broker → existing
+supervisor → authorized Slack TCP/443. The supervisor identifies the executable
+and destination, authorizes the connection and relays opaque bytes. The Gateway
+keeps its bot token and verifies Slack's TLS certificate. A denied connection
+fails without a direct-network fallback.
 
-The proposed paths are:
+Socket Mode also opens a long-lived WSS connection to a temporary URL returned
+by Slack. The enabled Channel Driver contributes both API and Socket Mode
+destinations; native code retains login and reconnect behavior. Preserve the
+existing proxy's Slack destination coverage: `slack.com`, `slack-edge.com`,
+`slack-msgs.com` and their subdomains on TCP/443. Destinations outside that set
+need an explicit additional grant.
 
-| Caller                     | Outbound path                                                       |
-| -------------------------- | ------------------------------------------------------------------- |
-| Dedicated Gateway          | OpenShell socket enforcement and supervisor → approved destinations |
-| Control-plane Slack Driver | Existing Slack HTTP proxy → Slack API                               |
-
-Retaining the HTTP proxy leaves one service to operate, but avoids adding
-Sandbox lifecycle or a new egress component to the control plane for these
-fixed-endpoint calls. The whole control plane does not have one permanent
-destination list: configured identity providers and other Drivers have their
-own dependencies. This proposal leaves those routes unchanged; it neither
-extends the Slack proxy to arbitrary providers nor moves the API into OpenShell.
+Stop injecting `HTTPS_PROXY` from `runtime.channels.proxyUrl` into the contained
+Gateway. An explicitly configured upstream proxy must preserve destination
+enforcement or be rejected: authorizing only the proxy address would not enforce
+the Slack destination rule.
 
 ## Gateway outbound policy
 
@@ -90,31 +87,6 @@ requirements and Installation ceiling in the Agent revision. Native
 Configuration cannot widen that authority. Disabling a channel removes its
 contribution on replacement; an independently approved grant may still allow
 the same destination.
-
-## One outbound request, before and after
-
-Consider the native Slack SDK sending
-`POST https://slack.com/api/chat.postMessage` with its bot token.
-
-**Current path:** Gateway Pod → approved channel proxy → Slack TCP/443.
-Kubernetes denies direct public egress.
-
-**Proposed path:** contained Gateway → OpenShell socket broker → existing
-supervisor → authorized Slack TCP/443. The supervisor identifies the executable
-and destination, authorizes the connection and relays opaque bytes. The Gateway
-keeps its bot token and verifies Slack's TLS certificate. A denied connection
-fails without a direct-network fallback.
-
-Socket Mode also opens a long-lived WSS connection to a temporary URL returned
-by Slack. The enabled Channel Driver contributes both API and Socket Mode
-destinations; native code retains login and reconnect behavior. Preserve the
-existing proxy's Slack destination coverage: `slack.com`, `slack-edge.com`,
-`slack-msgs.com` and their subdomains on TCP/443. Destinations outside that set
-need an explicit additional grant.
-
-Remove automatic channel-proxy injection on this path. An explicitly configured
-upstream proxy must have supported destination semantics or be rejected:
-authorizing only the proxy address would not enforce the Slack destination rule.
 
 ## Processes, Pods and connections
 
@@ -187,6 +159,24 @@ fallback to the old Gateway or channel proxy.
 networking remain unchanged. This proposal does not add embedded containment
 or channel support. An explicit request for the dedicated-only capability in
 embedded mode is rejected rather than changing execution mode.
+
+## Gateway and control-plane egress
+
+The Slack HTTP proxy remains in use by the control-plane API. Its Slack Channel
+Driver validates credentials and looks up users and channels at the fixed
+`https://slack.com/api/` endpoint. Those calls keep their existing proxy route
+and Kubernetes network restrictions; they do not pass through the Gateway's
+OpenShell supervisor.
+
+The HTTP proxy checks destination hostnames and port 443, then relays bytes
+without decrypting native TLS. Messaging and Socket Mode stay in native
+OpenClaw; credential validation and directory lookups stay in the control-plane
+Driver.
+
+Keeping this service avoids introducing Sandbox lifecycle or another egress
+component for fixed-endpoint API calls. The cost is retaining a separate proxy
+for that caller. Other control-plane integrations, such as configured identity
+providers, have their own destinations and keep their existing routes.
 
 ## Credentials and TLS
 
