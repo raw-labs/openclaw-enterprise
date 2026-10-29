@@ -1008,6 +1008,13 @@ function nativeConfiguration(harnessId, slack, options = {}) {
       trustedProxies: options.gatewayAuth.trustedProxies,
     };
   }
+  if (options.roles !== undefined) {
+    configuration.gateway.roles = structuredClone(options.roles);
+    // Named roles use per-person admission instead of the shared service identity.
+    // Compute fills its reserved headers and approval scopes during first deployment.
+    delete configuration.gateway.auth.trustedProxy.allowUsers;
+    delete configuration.gateway.auth.trustedProxy.deviceAutoApprove;
+  }
   if (harnessId === "openclaw") {
     const modelEnvName = options.modelEnvName ?? "OPENAI_API_KEY";
     configuration.secrets = {
@@ -2507,7 +2514,7 @@ async function arrangeProductionTopology(testContext, mode, slack, options = {})
     process.env.OCC_TEST_CODEX_OPENAI_BASE_URL !== undefined
       ? `codex/openai-compatible/${providerModel}`
       : modelReference;
-  await assertGatewayEffectiveDefaultModel(
+  await assertGatewayConfiguredDefaultModel(
     context,
     { mode, placement, gatewayPlacement, gatewayPod },
     expectedGatewayModel,
@@ -4492,7 +4499,7 @@ async function assertDedicatedSkillSources(topology) {
   }
 }
 
-async function assertGatewayEffectiveDefaultModel(context, topology, expectedModel) {
+async function assertGatewayConfiguredDefaultModel(context, topology, expectedModel) {
   // Read through the shipped CLI instead of a removed plugin SDK export.
   const model = JSON.parse(
     await kubectl(
@@ -4512,14 +4519,14 @@ async function assertGatewayEffectiveDefaultModel(context, topology, expectedMod
   const actualModel = typeof model === "string" ? model : model?.primary;
   assert.ok(
     typeof actualModel === "string" && actualModel.trim(),
-    "Effective runtime config did not expose agents.defaults.model",
+    "Gateway configuration did not expose agents.defaults.model",
   );
   assert.equal(
     actualModel,
     expectedModel,
-    `gateway effective default model does not match its runtime projection: ${actualModel}`,
+    `gateway configured default model does not match its runtime projection: ${actualModel}`,
   );
-  context.diagnostic(`${topology.mode}: effective default model ${actualModel}`);
+  context.diagnostic(`${topology.mode}: configured default model ${actualModel}`);
 }
 
 function messageText(message) {

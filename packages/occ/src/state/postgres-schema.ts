@@ -806,7 +806,7 @@ export const agentRevisions = occSchema.table(
           NOT (${table.admittedSpec} ? 'secret_bindings')
           OR occ.secret_bindings_are_valid(${table.admittedSpec}->'secret_bindings', ${table.namespaceId})
         )
-        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound') AND ${table.admittedSpec} #>> '{harness,mode}' = 'dedicated'))
+        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound') AND (${table.admittedSpec} #>> '{harness,mode}' = 'dedicated' OR ${table.admittedSpec} #>> '{gateway_outbound,selection,mode}' = 'channelsOnly')))
         AND CASE WHEN jsonb_typeof(${table.admittedSpec}->'harness_auth') = 'object' THEN
           occ.harness_auth_is_valid((${table.admittedSpec}->'harness_auth') - 'protectedExecutionVersion', ${table.namespaceId}, true)
         ELSE false END
@@ -1153,8 +1153,16 @@ export const iamAccessBindings = occSchema.table(
       .references(() => iamRoles.id, { onDelete: "restrict", onUpdate: "restrict" }),
     resourceKind: text("resource_kind"),
     resourceId: text("resource_id"),
+    runtimeRole: text("runtime_role"),
   },
   (table) => [
+    check(
+      "iam_access_bindings_runtime_role",
+      sql`${table.runtimeRole} IS NULL OR (${table.namespaceId} IS NOT NULL AND ${table.identitySubjectId} IS NOT NULL AND ${table.resourceKind} = 'agent' AND ${table.resourceId} IS NOT NULL AND ${table.runtimeRole} = btrim(${table.runtimeRole}) AND char_length(${table.runtimeRole}) BETWEEN 1 AND 128 AND ${table.runtimeRole} !~ '[[:cntrl:]]')`,
+    ),
+    uniqueIndex("iam_access_bindings_runtime_assignment")
+      .on(table.namespaceId, table.identitySubjectId, table.resourceId)
+      .where(sql`${table.runtimeRole} IS NOT NULL`),
     check(
       "iam_access_bindings_one_subject",
       sql`num_nonnulls(${table.identitySubjectId}, ${table.groupSubjectId}) = 1`,
@@ -1182,7 +1190,7 @@ export const iamRestrictions = occSchema.table(
   (table) => [
     check(
       "iam_restrictions_action_valid",
-      sql`${table.action} IN ('create', 'read', 'update', 'delete', 'deploy', 'operate', 'administer', 'read_logs', 'manage_policy')`,
+      sql`${table.action} IN ('create', 'read', 'update', 'delete', 'deploy', 'operate', 'administer', 'read_logs', 'manage_policy', 'use')`,
     ),
     check(
       "iam_restrictions_resource_kind_valid",

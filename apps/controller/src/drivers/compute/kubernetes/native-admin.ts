@@ -5,6 +5,7 @@ import type {
 import { ComputeGatewaySettingError } from "@openclaw-enterprise/occ";
 import { asRecord } from "@openclaw-enterprise/utils";
 import { isDeepStrictEqual } from "node:util";
+import { agentRuntimeRoles } from "./runtime-access.ts";
 
 type Values = Record<string, OpenClawConfigurationValue>;
 
@@ -32,6 +33,20 @@ export function configureNativeAdmin(
   const proxy = auth.trustedProxy as Values;
   const ui = gateway.controlUi as Values;
   const approval = asRecord(proxy.deviceAutoApprove);
+  const scopes = new Set<string>();
+  for (const role of agentRuntimeRoles(configuration)) {
+    const roleScopes = role.permissions.scopes;
+    if (!Array.isArray(roleScopes) || roleScopes.some((scope) => typeof scope !== "string")) {
+      throw new ComputeGatewaySettingError(
+        "gateway.roles",
+        "must declare string scopes for each role",
+      );
+    }
+    for (const scope of roleScopes) {
+      scopes.add(scope as string);
+    }
+  }
+  const approvalScopes = [...scopes].sort();
   if (proxy.deviceAutoApprove !== undefined && approval === undefined) {
     throw new ComputeGatewaySettingError(
       "gateway.auth.trustedProxy.deviceAutoApprove",
@@ -44,10 +59,14 @@ export function configureNativeAdmin(
       "must be a boolean",
     );
   }
-  if (approval?.scopes !== undefined && !isDeepStrictEqual(approval.scopes, ["operator.admin"])) {
+  if (
+    approval?.scopes !== undefined &&
+    (!Array.isArray(approval.scopes) ||
+      !isDeepStrictEqual([...approval.scopes].sort(), approvalScopes))
+  ) {
     throw new ComputeGatewaySettingError(
       "gateway.auth.trustedProxy.deviceAutoApprove.scopes",
-      "must grant only operator.admin for native admin access; disable device approval to opt out",
+      "must match the configured runtime-role scopes, including operator.admin; disable device approval to opt out",
     );
   }
   if (gateway.publicOrigin !== undefined && gateway.publicOrigin !== origin) {
@@ -107,7 +126,7 @@ export function configureNativeAdmin(
           deviceAutoApprove: {
             ...(approval as Values | undefined),
             enabled: true,
-            scopes: ["operator.admin"],
+            scopes: approvalScopes,
           },
         },
       },

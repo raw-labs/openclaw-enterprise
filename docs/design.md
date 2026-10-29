@@ -87,6 +87,7 @@ planned. The two-cluster profile is experimental.
 The [embedded-channel trial](../specs/rfcs/0025-temporary-embedded-channel-trial.md)
 is a proposed, default-off evaluation exception to channel credential separation;
 it is unsupported for production and does not change the regular architecture.
+Human Gateway entry uses exact OCE person/Agent assignments and native role enforcement through the Kubernetes Driver and patched runtime. Broader checkpoint 3 permission mediation remains planned. See [Agent OpenClaw access](reference/agent-native-admin.md).
 
 <a id="current-limitations"></a>
 <a id="near-term-future-work"></a>

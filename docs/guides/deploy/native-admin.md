@@ -1,6 +1,16 @@
 # Deploy native admin UI access
 
-Enable Agent native admin UI access only for a trusted-operator pilot. The feature lets exact Agent administrators open the stock native UI through OCC on an isolated per-Agent browser host using their ordinary OCE console session. For a local installation, use [local development](#local-development) below. For an existing cluster, start with [production installation](production-installation.md) and [private Agent workspace routing](workspace-routing.md).
+Enable OpenClaw access through OCC with an explicit runtime assignment for each person. The selected native role determines their permissions. Configured roles require a runtime built from the [patched image recipe](../../../deploy/runtime/README.md). For a local installation, use [local development](#local-development) below. For an existing cluster, start with [production installation](production-installation.md) and [private Agent workspace routing](workspace-routing.md).
+
+## Existing Agents
+
+Existing eligible human native administrators receive explicit `platform-administrator` assignments on upgrade, preserving entry without named `gateway.roles`. An Installation administrator can downgrade or remove these assignments in **Share Agent**, independently of OCE management permissions. See [Who can open it](../../reference/agent-native-admin.md#who-can-open-it) for the authorization rules.
+
+To introduce restricted roles on an existing Agent:
+
+1. Use the patched runtime image and [configure the Agent](#configure-each-agent) with named `gateway.roles.definitions` and a `gateway.roles.default` naming one of them. Deploy the new version and wait for it to become active. The Kubernetes Driver configures the trusted-proxy role headers.
+2. Open **Share Agent**, enter the person's Principal ID, and select their OpenClaw role.
+3. Sign in as that person and open **Open Agent UI**. An `administer` grant alone no longer grants entry; each person needs exact Agent `use` permission and a runtime assignment.
 
 ## Local development
 
@@ -10,8 +20,9 @@ enabled for the Installation:
 1. [Create and deploy an Agent](../../reference/console/create-and-deploy.md) in the
    console, for example from Standard OpenClaw or Standard Codex. Their UI-enabled
    Configurations receive native admin policy in the first admitted version.
-2. Wait for deployment to succeed, then open **Open Agent UI** on the
-   Agent detail page. The account needs `administer` permission on that exact Agent.
+2. Use **Share Agent** to assign the person's Principal ID a runtime role on this
+   Agent. Without named roles, select `platform-administrator`. Wait for deployment
+   to succeed, then open **Open Agent UI**. OCE administration alone does not grant entry.
 3. For custom Configurations or existing Agents, follow
    [Deploy each Agent](#configure-each-agent). Explicit opt-outs remain effective;
    existing Agents adopt prepared policy on their next explicit deployment.
@@ -30,7 +41,7 @@ above. The helper refuses to reuse its Agent after outside Configuration edits.
 - The configured Agent domain is separate from the console host and does not include a wildcard, scheme, port, or path.
 - The configured `agentNativeAdmin.sharedCookieDomain` is the shared OCE session cookie parent domain. The console host and Agent domain must both be inside it on DNS-label boundaries, for example `console.oce.example.com`, `agents.oce.example.com`, and cookie domain `oce.example.com`. All matching subdomains that can receive the OCE session cookie must be trusted OCE ingress endpoints.
 - Each pilot Agent uses native trusted-proxy authentication with `occ-workspace-files` granted `operator.admin`, native `controlUi.enabled: true`, the derived Agent origin in `controlUi.allowedOrigins`, and trusted-proxy admin device auto-approval.
-- Operators who use the console have exact Agent `administer` permission.
+- Operators who use the console have exact Agent `use` permission with an explicit runtime-role assignment.
 
 <a id="steps"></a>
 
@@ -137,7 +148,8 @@ ignores the shared cookie-domain value and keeps the legacy host-only
 Create an Agent from Standard OpenClaw or Standard Codex in the console and
 complete its ordinary deployment. With the Installation feature configured above,
 Kubernetes Compute prepares native admin policy in the first admitted revision.
-After deployment succeeds, choose **Open Agent UI** on the Agent detail page. Expect the isolated Agent host, including any
+Assign the person a runtime role through **Share Agent**. After deployment succeeds,
+choose **Open Agent UI** on the Agent detail page. Expect the isolated Agent host, including any
 port configured on the public OCC origin.
 
 For a custom Configuration, select `gateway.controlUi.enabled: true`. Leave

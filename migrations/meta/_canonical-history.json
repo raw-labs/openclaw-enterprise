@@ -430,97 +430,113 @@
       "idx": 53,
       "version": "7",
       "when": 1787000000054,
-      "tag": "0054_credential_source_pat",
+      "tag": "0054_agent_runtime_roles",
       "breakpoints": true,
-      "sha256": "02ef4ffbdd21bb1c5e66c84c1c3dfe04c48f1936e18bab9c2de81c8ffe3c8d9d"
+      "sha256": "4bfb764c6f1a73bc67f31e993ce05d2b9d97c8b44e92ce436c84884c24f999f0"
     },
     {
       "idx": 54,
       "version": "7",
       "when": 1787000000055,
-      "tag": "0055_compute_revision_admission",
+      "tag": "0055_held_authentication_session",
       "breakpoints": true,
-      "sha256": "ad091e4c3a9de192f79f9170b009497db0cd5f0f0d287dfbc81a00d5e1fc8ea7"
+      "sha256": "dbdc63b9dd9d750a743b51a7f1cbd199d08a7977a57a73435dda722eb2bfdb36"
     },
     {
       "idx": 55,
       "version": "7",
       "when": 1787000000056,
-      "tag": "0056_held_authentication_session",
+      "tag": "0056_gateway_outbound",
       "breakpoints": true,
-      "sha256": "dbdc63b9dd9d750a743b51a7f1cbd199d08a7977a57a73435dda722eb2bfdb36"
+      "sha256": "426da30fa2dc3a010905318b95dc146c4bd7a461b8c48cb9f5dca9d12523ef52"
     },
     {
       "idx": 56,
       "version": "7",
       "when": 1787000000057,
-      "tag": "0057_canonical_harness_auth",
+      "tag": "0057_embedded_channel_outbound",
       "breakpoints": true,
-      "sha256": "f4098bc5233e0ce0bbc0666af9ef723d747fd0c4ed7f6667b4ac19f769543433"
+      "sha256": "c3b47c6e8496b6bbdaafe6e9fe4bbf5a89ff5fa4155afc679da872ea37a2248a"
     },
     {
       "idx": 57,
       "version": "7",
       "when": 1787000000058,
-      "tag": "0058_sandbox_policies",
+      "tag": "0058_credential_source_pat",
       "breakpoints": true,
-      "sha256": "21940032ee3277cbc40ff422359099e6eaa0abef6dfa78d06740671fda5f431f"
+      "sha256": "02ef4ffbdd21bb1c5e66c84c1c3dfe04c48f1936e18bab9c2de81c8ffe3c8d9d"
     },
     {
       "idx": 58,
       "version": "7",
       "when": 1787000000059,
-      "tag": "0059_administrator_sandbox_policy_grants",
+      "tag": "0059_compute_revision_admission",
       "breakpoints": true,
-      "sha256": "5693d93865d61360d2b8943846cfbfb5590c9e52e90f89eac50fec7bd3672498"
+      "sha256": "49cad1d92a96a36a688cc4ed0d770bf51ac2c9263df67b24b30d9b865215c906"
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787000000060,
+      "tag": "0060_canonical_harness_auth",
+      "breakpoints": true,
+      "sha256": "f4098bc5233e0ce0bbc0666af9ef723d747fd0c4ed7f6667b4ac19f769543433"
     },
     {
       "idx": 60,
       "version": "7",
-      "when": 1787000000060,
-      "tag": "0060_credential_proxy_admission",
+      "when": 1787000000061,
+      "tag": "0061_sandbox_policies",
       "breakpoints": true,
-      "sha256": "db0cc3ca1748de99a92f1864428848f9e6461382df5369004608622fb393b891"
+      "sha256": "e2085f7735e7413e26a45a193d6aa5b64a9f3caf7783d4aa88a6cea922a4d2e6"
     },
     {
       "idx": 61,
       "version": "7",
-      "when": 1787000000061,
-      "tag": "0061_repository_credential_authority",
+      "when": 1787000000062,
+      "tag": "0062_administrator_sandbox_policy_grants",
       "breakpoints": true,
-      "sha256": "9112cbb85635fe7d0aaa3d7b59ba074834c83afd482fc27cd7bcfe7bc1c038d5"
+      "sha256": "5693d93865d61360d2b8943846cfbfb5590c9e52e90f89eac50fec7bd3672498"
     },
     {
       "idx": 62,
       "version": "7",
-      "when": 1787000000062,
-      "tag": "0062_credential_delivery_custody",
+      "when": 1787000000063,
+      "tag": "0063_credential_proxy_admission",
       "breakpoints": true,
-      "sha256": "8620776aa1b4ecc8f640258015d88c0ff21afa3e75d2ca7cf26aabb69c7dc772"
+      "sha256": "443f236fc6369d73c5bc5c24aa85cb7266e306da34fcc21168ce37d386f117e8"
     },
     {
       "idx": 63,
       "version": "7",
-      "when": 1787000000063,
-      "tag": "0063_prepared_attempt_settlement",
+      "when": 1787000000064,
+      "tag": "0064_repository_credential_authority",
       "breakpoints": true,
-      "sha256": "af9fc293091700eb148a4c45826daa0903598399a730de23a25f7c81b49a7db6"
+      "sha256": "9112cbb85635fe7d0aaa3d7b59ba074834c83afd482fc27cd7bcfe7bc1c038d5"
     },
     {
       "idx": 64,
       "version": "7",
-      "when": 1787000000064,
-      "tag": "0064_gateway_managed_mode",
+      "when": 1787000000065,
+      "tag": "0065_credential_delivery_custody",
       "breakpoints": true,
-      "sha256": "e73a21fc94abd66ec93540293708d76e5f0c1f8946c9d9994fcf81a6b9058329"
+      "sha256": "8620776aa1b4ecc8f640258015d88c0ff21afa3e75d2ca7cf26aabb69c7dc772"
     },
     {
       "idx": 65,
       "version": "7",
-      "when": 1787000000065,
-      "tag": "0065_gateway_outbound",
+      "when": 1787000000066,
+      "tag": "0066_prepared_attempt_settlement",
       "breakpoints": true,
-      "sha256": "583a4a0e52142af9921c7238e478ebe6acbc362bdf0a358df4bc26f1d6fd1a2b"
+      "sha256": "af9fc293091700eb148a4c45826daa0903598399a730de23a25f7c81b49a7db6"
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787000000067,
+      "tag": "0067_gateway_managed_mode",
+      "breakpoints": true,
+      "sha256": "e73a21fc94abd66ec93540293708d76e5f0c1f8946c9d9994fcf81a6b9058329"
     }
   ],
   "initialSchemaStates": {
@@ -534,17 +550,23 @@
     "ownerOnly": {
       "owner": "occ_migrator",
       "privileges": [
-        ["occ_migrator", "occ_migrator", "CREATE", false],
-        ["occ_migrator", "occ_migrator", "USAGE", false]
+        [
+          "occ_migrator",
+          "occ_migrator",
+          "CREATE",
+          false
+        ],
+        [
+          "occ_migrator",
+          "occ_migrator",
+          "USAGE",
+          false
+        ]
       ],
       "objects": 0,
       "defaultPrivileges": 0,
       "databaseCreate": true
     }
-  },
-  "logicalRestoreCatalogs": {
-    "ead0bf1743197edac2cd369f4822fec0d9686d4c215b8f6dcc16745c9addf155": "e6cbf3438426666a75867241828db127a2d84717daec49ef2d9af48caf6fdfed",
-    "15676f224ccd3cbd54e1d541db393b12297e3b2aa8e8eb70b192b5350c4c3c59": "133a7bdb5d29ffee331293add98f24e8ccef44eba230202aeb37c824d073d3b9"
   },
   "catalogs": {
     "empty": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
@@ -578,16 +600,18 @@
     "preCredentialWithdrawalRequester": "50e7e165459306033af8d6aa074ad8d7df4fc2ff4065ef454b2f3f1a12768577",
     "preProvisioningDeploymentOutcome": "eb024f6c9697e8796d9633de0400495f41a2ad2378a2d8d6512feb7b99db9e73",
     "preComputePreparationFailureEvidence": "d04407ae6939193a1d9cb99e8fe6bf77d4cd1a2b38ff58650f1c4bd5034b18f9",
-    "preCredentialSourcePat": "5aa1681236a41d763405d596daeed3921a2b8932090534f6dacf85c488279f34",
-    "preComputeRevisionAdmission": "52b65cf1a9e0539f3c133d9a25f0da0ee8b2ca51f981934bef44e670134d8083",
-    "preHeldAuthenticationSession": "153f6ef879f86781ce3355594b5dca10364fb6d118c079280655242459e041b8",
-    "preCanonicalHarnessAuth": "f2ebd947c770ed1eab2628742752b924c203cdd038094d3f162db411099e2c8d",
-    "preSandboxPolicies": "2a66cf512e621405a10b1c8629303220523e1dcc2d2aa90bc857855ed1d26504",
-    "preSandboxPolicyAdministrator": "34374bccb6342bc15262d9d8e77abf1c3a0e317a2623b2bda541d1d06202a3ff",
-    "preCredentialProxy": "34374bccb6342bc15262d9d8e77abf1c3a0e317a2623b2bda541d1d06202a3ff",
-    "prePreparedAttemptSettlement": "df4fafcfd49395d0522b53a3b1a6abe828b53e91843a6d24d8cd0e9490aa84cc",
-    "preGatewayManagedMode": "ead0bf1743197edac2cd369f4822fec0d9686d4c215b8f6dcc16745c9addf155",
-    "preGatewayOutbound": "15676f224ccd3cbd54e1d541db393b12297e3b2aa8e8eb70b192b5350c4c3c59"
+    "preRuntimeRoles": "5aa1681236a41d763405d596daeed3921a2b8932090534f6dacf85c488279f34",
+    "preHeldAuthenticationSession": "edb33a9589120fe790330bb931ab1abb6dafea4d6fb93769678317b33223db18",
+    "preGatewayOutbound": "4adecbe08d7bf8221a5fb047ab5d2d7fc741ecd7c78f4e70056e87864783d1d5",
+    "preEmbeddedChannelOutbound": "e77455c678262e4f58e8a12e8c28ce59680f35812c7aeab063502108e5fbe768",
+    "preCredentialSourcePat": "21215a502a06304661ea33897f38fe66ef92d35a7a39b464ffbd5b1c739f2410",
+    "preComputeRevisionAdmission": "06d47d8adaa9f0d6340af6813097144b98e94825990b0bedb65a16d53f83365f",
+    "preCanonicalHarnessAuth": "78586d305c6ad7382894eed8a2733832252bab600d9c28ff1d9fa2c0f583c83c",
+    "preSandboxPolicies": "bf9ddb2090b96332b6e8525707ec4bac98ca77813f51f54c1048abd4e02c92f0",
+    "preSandboxPolicyAdministrator": "b7cae22ff81eca9f73a436b60cac4f8ec26d1674b0d568f1e6073c7a8308882b",
+    "preCredentialProxy": "b7cae22ff81eca9f73a436b60cac4f8ec26d1674b0d568f1e6073c7a8308882b",
+    "prePreparedAttemptSettlement": null,
+    "preGatewayManagedMode": null
   },
   "ledgerCatalogs": {
     "initialized": "62946da6b1fc2b06df09e97dda4cf1831f170a2f3d5ff35a9f107af206c425dc",
@@ -595,8 +619,8 @@
   },
   "catalogEvidence": {
     "postgres": "18.6",
-    "drizzleOrm": "0.45.4",
-    "method": "Historical catalogs retain their recorded qualification. The completed catalog after 0065_gateway_outbound and its logical restore require PostgreSQL qualification; completed remains null so the migration runner refuses unqualified history."
+    "drizzleOrm": "0.45.2",
+    "method": "The 62-entry published prefix and its recorded catalogs are preserved. Forward-only credential proxy admission, repository authority, delivery custody, prepared-attempt settlement and managed-mode evolution require PostgreSQL 18.6 catalog and logical-restore qualification. Unmeasured catalogs remain null; the migration runner refuses unqualified history."
   },
   "compatibleLineages": {
     "providerCompleted": {

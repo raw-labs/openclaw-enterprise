@@ -26,6 +26,11 @@ const appliedPatches = [
     field: "openclawBridgePatchSha256",
   },
   {
+    file: "openclaw-trusted-proxy-role.patch",
+    sha256: "b6bdbe8f4608f62332371b00609cb2c17aeee4f75f6b9aeb947e3f59925c67b9",
+    field: "openclawTrustedProxyRolePatchSha256",
+  },
+  {
     file: "openclaw-codex-full-access-profile.patch",
     sha256: "7c95a5a3727bd4c73bb9ccf3022eb4b33d182cd7f6b761dc93ecfe08ef08e27a",
   },

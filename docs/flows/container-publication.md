@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
 updated: 2026-10-28
-last_updated_session: authoring-run/f9565ffe-e506-4945-a47d-eb61a05fb2cd
+last_updated_session: authoring-run/885427e9-11dd-4a8a-939a-b9741cdc2d49
 ---
 
 # Container publication flow
@@ -80,9 +80,12 @@ so builds do not export the large intermediate cache over the network. A custom
 non-Blacksmith runner uses the GitHub Actions cache with the same scope.
 Maintainers can also dispatch `container-check.yml`, or a manual `CI` run that
 calls it, on a branch for native image verification. It has no publication job or
-package-write permission. Standalone checks use the source's CI base; publication
-and manual `CI` use the approved repository base. Publication verifies it matches
-the source. Builds export OCI directories without registry credentials.
+package-write permission. Standalone checks and manual `CI` use the source's CI
+base. The manual CI impact job reads the digest-pinned base from
+`scripts/ci/test-suites/images-packaging.json` and passes it through a job output
+to the reusable native check. An unpinned value fails before that check starts.
+Publication uses the approved repository base and verifies that it matches the
+source. Builds export OCI directories without registry credentials.
 Before Buildx runs, the workflow derives `SOURCE_DATE_EPOCH` from the exact
 OCE source commit. BuildKit rewrites image and filesystem timestamps to that epoch,
 so wall-clock time does not change the image manifests on a cold-cache rebuild.
@@ -244,6 +247,8 @@ owns package-write access and coordination.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-28 23:13: Derive the manual CI native Node base from checked-in source without changing publication inputs. (authoring-run/885427e9-11dd-4a8a-939a-b9741cdc2d49 - c49ba3482206a061762e3b08a743412796357afe)
 
 - 2026-10-28 22:51: Retain native OCI archive import with loaded-config, source and architecture checks. (authoring-run/f9565ffe-e506-4945-a47d-eb61a05fb2cd - 9f6bf0987dd2b4aae823eda7894086e0bf988eb5)
 

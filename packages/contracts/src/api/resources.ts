@@ -774,7 +774,7 @@ export const AgentCallerPermissionsResponse = Type.Object(
         }),
         administer: Type.Boolean({
           description:
-            "Whether the selected IAM Driver allows Agent administer now, which native admin UI access needs. Advisory only: other required permissions (native admin UI also needs a signed-in console session), lifecycle state, or a later authorization decision can still prevent the operation.",
+            "Whether the selected IAM Driver allows Agent administer now. This does not grant native OpenClaw access, which requires Agent use and an exact runtime assignment when enabled. Advisory only: other required permissions, lifecycle state, or a later authorization decision can still prevent the operation.",
         }),
         configurationUpdate: Type.Boolean({
           description:
@@ -997,6 +997,7 @@ export const IAMAccessBindingSchema = Type.Union([
   Type.Object(
     {
       ...IAMAccessBindingBaseSchema,
+      runtimeRole: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       resourceKind: ResourceKindSchema,
       resourceId: Type.String({ minLength: 1, maxLength: 200 }),
     },

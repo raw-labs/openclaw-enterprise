@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
+import { humanRuntimeAccess } from "../../apps/controller/src/drivers/compute/kubernetes/runtime-access.ts";
 import { deriveNativeAdminHost } from "../../apps/controller/src/gateway/native-admin.ts";
 import { createNativeAdminAccess } from "../../apps/controller/src/http/native-admin.ts";
 import { waitUntil } from "../helpers/wait-for.mjs";
@@ -150,14 +151,21 @@ async function transportOwner(t, { authorize, append }) {
       async resolveAgentReference(predicate) {
         return predicate(agent) ? agent : undefined;
       },
-      getAdministerableActiveAgentRevision() {
+      getUsableActiveAgentRevision() {
         entered.resolve();
-        return authorize({ agent, revision, denied });
+        return authorize({ agent, revision, denied, runtimeRole: "platform-administrator" });
       },
       selectedDriver: () => ({
         id: "compute_test",
         implementation: "native-admin-reset-test",
         getGatewayEndpoint: () => `wss://127.0.0.1:${gateway.address().port}/`,
+        getAgentRuntimeAccess: (revision, principalId, runtimeRole) =>
+          humanRuntimeAccess(
+            revision,
+            `wss://127.0.0.1:${gateway.address().port}/`,
+            principalId,
+            runtimeRole,
+          ),
       }),
     }),
     selectedIAMDriver: () => ({
@@ -291,8 +299,8 @@ test(
     let auditSettled = false;
     let refuseLease = false;
     const owner = await transportOwner(t, {
-      authorize: ({ agent, revision, denied }) =>
-        refuseLease ? Promise.reject(denied) : Promise.resolve({ agent, revision }),
+      authorize: ({ agent, revision, denied, runtimeRole }) =>
+        refuseLease ? Promise.reject(denied) : Promise.resolve({ agent, revision, runtimeRole }),
       append: () =>
         audit.promise.then(() => {
           auditSettled = true;
@@ -530,13 +538,18 @@ function denialOwner(t, overrides = {}) {
       async resolveAgentReference(predicate) {
         return predicate(agent) ? agent : undefined;
       },
-      getAdministerableActiveAgentRevision() {
-        return overrides.authorize?.({ agent, revision, denied }) ?? Promise.reject(denied);
+      getUsableActiveAgentRevision() {
+        return (
+          overrides.authorize?.({ agent, revision, denied, runtimeRole: "platform-administrator" }) ??
+          Promise.reject(denied)
+        );
       },
       selectedDriver: () => ({
         id: "compute_test",
         implementation: "native-admin-reset-test",
         getGatewayEndpoint: () => "wss://gateway.example.test",
+        getAgentRuntimeAccess: (revision, principalId, runtimeRole) =>
+          humanRuntimeAccess(revision, "wss://gateway.example.test", principalId, runtimeRole),
       }),
     }),
     selectedIAMDriver: () => ({
@@ -1060,7 +1073,7 @@ test("a client reset during a pending native-admin denial still records the deni
         async resolveAgentReference(predicate) {
           return predicate(agent) ? agent : undefined;
         },
-        getAdministerableActiveAgentRevision() {
+        getUsableActiveAgentRevision() {
           admissionEntered = true;
           return admissionGate;
         },
@@ -1197,7 +1210,7 @@ for (const phase of ["admission", "gateway key"]) {
         },
       },
     };
-    const selection = { agent, revision };
+    const selection = { agent, revision, runtimeRole: "platform-administrator" };
     const crashes = [];
     const onUncaught = (error) => {
       crashes.push(error);
@@ -1218,14 +1231,17 @@ for (const phase of ["admission", "gateway key"]) {
           async resolveAgentReference(predicate) {
             return predicate(agent) ? agent : undefined;
           },
-          getAdministerableActiveAgentRevision() {
+          getUsableActiveAgentRevision() {
             return phase === "admission" ? gated("admission", selection) : selection;
           },
           selectedDriver() {
             return {
               id: "compute_test",
               implementation: "native-admin-reset-test",
-              getGatewayEndpoint: () => `wss://127.0.0.1:${gateway.address().port}/`,
+              getAgentRuntimeAccess: () => ({
+                endpoint: `wss://127.0.0.1:${gateway.address().port}/`,
+                headers: {},
+              }),
             };
           },
         };

@@ -80,7 +80,10 @@
       "path": "tests/browser/console-runtime-credentials.test.mjs"
     },
     {
-      "path": "tests/integration/ci-impact.test.mjs"
+      "path": "tests/integration/ci-impact.test.mjs",
+      "expectedTests": [
+        "manual CI passes its checked-in Node base to all native image checks and refuses an unpinned source"
+      ]
     },
     {
       "path": "tests/browser/console-agent-saves.test.ts"

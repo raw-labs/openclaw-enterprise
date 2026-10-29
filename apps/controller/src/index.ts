@@ -224,6 +224,7 @@ interface RequiredPermission {
     | "directory_lookup"
     | "selected_secret"
     | "iam_binding_target"
+    | "runtime_assignment_target"
     | "provisioning_work"
     | "gateway_managed_mode_disabled"
     | "gateway_managed_mode_changed"
@@ -738,6 +739,24 @@ function requiredPermissions(operation: OccApiRoute): readonly RequiredPermissio
   }
 
   if (
+    operation.operationId === "updateIAMRuntimeRole" ||
+    operation.operationId === "listAgentRuntimeRoles"
+  ) {
+    return [
+      { action: "administer", resourceKind: "installation", scope: "requested" },
+      { action: "read", resourceKind: "namespace", scope: "requested" },
+      {
+        action: "read",
+        resourceKind: "agent",
+        scope: "requested",
+        ...(operation.operationId === "updateIAMRuntimeRole"
+          ? { condition: "runtime_assignment_target" as const }
+          : {}),
+      },
+    ];
+  }
+
+  if (
     operation.operationId === "listIAMRoles" ||
     operation.operationId === "createIAMRole" ||
     operation.operationId === "getIAMRole" ||
@@ -1060,6 +1079,9 @@ function permissionDescription(
       }
       if (condition === "iam_binding_target") {
         return `Requires ${action} permission on the request body ${name} when the AccessBinding targets that resource kind.`;
+      }
+      if (condition === "runtime_assignment_target") {
+        return `Requires ${action} permission on the ${name} targeted by the AccessBinding.`;
       }
       switch (scope) {
         case "installation":
@@ -2566,8 +2588,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
           deploy,
           operate,
           remove,
-          // Native admin UI access authorizes Agent administer on the exact Agent, so the console
-          // skips its audited probe for a caller without it.
+          // OCE administration is independent from a person’s native runtime assignment.
           administer,
           configurationUpdate,
           configurationRead,

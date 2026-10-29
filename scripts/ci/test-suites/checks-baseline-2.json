@@ -318,12 +318,14 @@
     {
       "path": "tests/integration/native-admin-access.test.mjs",
       "expectedTests": [
-        "native admin status requires exact Agent administer and reports lifecycle availability",
-        "native admin disabled status still requires exact Agent administer",
+        "native admin status requires an exact person/Agent runtime assignment and reports lifecycle availability",
+        "disabled native admin status requires exact Agent administration without a runtime assignment",
         "native admin shared session configuration validates cookie scope and rejects keys",
         "native admin proxy strips browser credentials and preserves the Agent gateway base path",
-        "first openclaw deployment admits isolated native admin policy without a Configuration PATCH",
-        "first codex deployment admits isolated native admin policy without a Configuration PATCH",
+        "first openclaw deployment admits isolated native admin policy without a Configuration PATCH (roles: false)",
+        "first openclaw deployment admits isolated native admin policy without a Configuration PATCH (roles: true)",
+        "first codex deployment admits isolated native admin policy without a Configuration PATCH (roles: false)",
+        "first codex deployment admits isolated native admin policy without a Configuration PATCH (roles: true)",
         "native admin admission preserves explicit opt-outs and refuses conflicting policy",
         "Installation native admin disablement leaves UI-enabled first revisions unchanged"
       ]

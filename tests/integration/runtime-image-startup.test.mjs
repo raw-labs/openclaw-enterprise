@@ -1829,7 +1829,9 @@ assert.equal(provenance.openclawBridgePatchSha256, "f8d1e51706f59964839d23181890
 assert.equal(Object.hasOwn(provenance, "openclawConnectPatchSha256"), false);
 assert.equal(provenance.codexDependencyPinPatchSha256, "d7eea3944eaaf4469ede0261d4f706148cd672f29f1efedd59e325c46c90d119");
 assert.equal(provenance.openclawRequiredWorkerAuthorityRegressionPatchSha256, "4d7b31957dab6e8427eeb9a8cce0a8013f0f96b999e2692fdd6903595c3c4804");
+assert.equal(provenance.openclawTrustedProxyRolePatchSha256, "b6bdbe8f4608f62332371b00609cb2c17aeee4f75f6b9aeb947e3f59925c67b9");
 assert.deepEqual(provenance.patches, {
+  "openclaw-trusted-proxy-role.patch": provenance.openclawTrustedProxyRolePatchSha256,
   "openclaw-codex-read-only-paths.patch": provenance.openclawBridgePatchSha256,
   "openclaw-codex-full-access-profile.patch": "7c95a5a3727bd4c73bb9ccf3022eb4b33d182cd7f6b761dc93ecfe08ef08e27a",
   "stock-codex-0.163.0-alpha.2-dependency-pin.patch": provenance.codexDependencyPinPatchSha256,

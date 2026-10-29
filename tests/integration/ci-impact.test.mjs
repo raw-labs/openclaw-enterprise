@@ -1380,6 +1380,44 @@ test("Suite Audit and Static Checks runs the audit and every check the lanes ski
   assert.ok(workflow.jobs["ci-required"].needs.includes("static-checks"));
 });
 
+test("manual CI passes its checked-in Node base to all native image checks and refuses an unpinned source", (t) => {
+  const workflow = loadYaml(".github/workflows/ci.yml");
+  const native = workflow.jobs["native-images"];
+  const impact = workflow.jobs.impact;
+  const step = impact.steps.find((candidate) => candidate.id === "native-base");
+  assert.equal(native.needs, "impact");
+  assert.equal(native.with.node_base_image, "${{ needs.impact.outputs.node_base_image }}");
+  assert.equal(impact.outputs.node_base_image, "${{ steps.native-base.outputs.node_base_image }}");
+  assert.equal(step.if, "github.event_name == 'workflow_dispatch'");
+  const root = mkdtempSync(join(tmpdir(), "ci-native-base-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = "scripts/ci/test-suites/images-packaging.json";
+  mkdirSync(join(root, dirname(path)), { recursive: true });
+  const lane = JSON.parse(read(path));
+  const expected = lane.prepare.defaultEnv.NODE_BASE_IMAGE;
+  const output = join(root, "output");
+  // Execute the actual workflow step. A stale runner variable cannot override
+  // source selection, and a mutable source tag cannot reach the reusable job.
+  for (const valid of [true, false]) {
+    lane.prepare.defaultEnv.NODE_BASE_IMAGE = valid ? expected : "node:latest";
+    writeFileSync(join(root, path), JSON.stringify(lane));
+    writeFileSync(output, "");
+    const result = spawnSync("bash", ["-e", "-o", "pipefail", "-c", step.run], {
+      cwd: root,
+      env: { ...process.env, GITHUB_OUTPUT: output, NODE_BASE_IMAGE: "node:stale" },
+      encoding: "utf8",
+    });
+    if (valid) {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(readFileSync(output, "utf8"), `node_base_image=${expected}\n`);
+    } else {
+      assert.notEqual(result.status, 0);
+      assert.equal(readFileSync(output, "utf8"), "");
+      assert.match(result.stderr, /source CI Node base must be digest-pinned/);
+    }
+  }
+});
+
 test("only pushes to main restore, use, or save Prettier's content cache", () => {
   // A pull request can have a cache at the same key in its own ref scope.
   // Skip restore there and require the ordinary, uncached formatting check.

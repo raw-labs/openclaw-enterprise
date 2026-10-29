@@ -42,9 +42,10 @@ before withdrawing access. Selecting Credential Proxy alone does not provide one
 
 ### Keep schema histories separate
 
-The migrator recognizes the 59-receipt history before Credential Proxy and the
-62-receipt history through `0062_credential_delivery_custody`. Both upgrade to
-63 receipts, ending at `0063_prepared_attempt_settlement`. The
+The published prefix has 62 receipts before Credential Proxy. The appended
+history retains those receipts and ends at `0067_gateway_managed_mode` with 67.
+New catalog hashes require PostgreSQL qualification before the migrator can apply
+this history. The
 [migration reference](../../reference/settings/operations.md) lists the supported
 histories. The migrator checks receipt hashes, timestamps, and the database
 catalog; a count alone does not establish compatibility.

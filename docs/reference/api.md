@@ -77,7 +77,7 @@ the paths.
 | [Agent revisions](#agent-revisions) | 2 operations |
 | [Configurations](#configurations) | 4 operations |
 | [Credential sources](#credential-sources) | 6 operations |
-| [IAM](#iam) | 11 operations |
+| [IAM](#iam) | 12 operations |
 | [Presets](#presets) | 5 operations |
 | [Secrets](#secrets) | 5 operations |
 | [Service accounts](#service-accounts) | 6 operations |
@@ -1913,7 +1913,7 @@ Report the readable Secrets that the caller may not bind to a new Agent, not aut
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/driver-configurations`](#get-namespacesnamespaceidagentsagentiddriverconfigurations) | Discover authorized Agent Driver configuration contributions |
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/gateway-outbound/capabilities`](#get-namespacesnamespaceidagentsagentidgatewayoutboundcapabilities) | Read Gateway outbound availability and whether the caller may configure this exact Agent |
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/harness-status`](#get-namespacesnamespaceidagentsagentidharnessstatus) | Read the Sandbox Driver's record of a running Agent's dedicated Harness Sandbox |
-| [`GET /namespaces/{namespaceId}/agents/{agentId}/native-admin`](#get-namespacesnamespaceidagentsagentidnativeadmin) | Resolve native admin UI launch availability for one Agent |
+| [`GET /namespaces/{namespaceId}/agents/{agentId}/native-admin`](#get-namespacesnamespaceidagentsagentidnativeadmin) | Resolve OpenClaw launch availability with an assigned runtime role |
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/permissions`](#get-namespacesnamespaceidagentsagentidpermissions) | Report advisory primary IAM permissions on a readable Agent, not authorization for a later operation |
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/permissions/secrets`](#get-namespacesnamespaceidagentsagentidpermissionssecrets) | Report the readable Secrets that the caller may not bind to a readable Agent, not authorization for a later operation |
 | [`POST /namespaces/{namespaceId}/agents/{agentId}/plugins`](#post-namespacesnamespaceidagentsagentidplugins) | List or search plugins for an active Agent; caller needs Agent read/update. Curated discovery needs no Secret; hosted discovery needs the Agent's bound Service Accounts Secret with caller and Agent Secret operate grants |
@@ -1927,6 +1927,7 @@ Report the readable Secrets that the caller may not bind to a new Agent, not aut
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/runtime-credentials`](#get-namespacesnamespaceidagentsagentidruntimecredentials) | Get metadata for one Agent's provisioned runtime credentials |
 | [`POST /namespaces/{namespaceId}/agents/{agentId}/runtime-credentials`](#post-namespacesnamespaceidagentsagentidruntimecredentials) | Provision initial runtime credentials for one undeployed Agent |
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/runtime-images`](#get-namespacesnamespaceidagentsagentidruntimeimages) | Read observed images and source commits for an Agent's active runtime |
+| [`GET /namespaces/{namespaceId}/agents/{agentId}/runtime-roles`](#get-namespacesnamespaceidagentsagentidruntimeroles) | List configured runtime roles and deployed permission summaries for an Agent |
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/sandbox-policy/{facet}`](#get-namespacesnamespaceidagentsagentidsandboxpolicyfacet) | Read one Agent sandbox policy and delegation ceiling |
 | [`PUT /namespaces/{namespaceId}/agents/{agentId}/sandbox-policy/{facet}`](#put-namespacesnamespaceidagentsagentidsandboxpolicyfacet) | Replace one Agent network policy additions |
 | [`POST /namespaces/{namespaceId}/agents/{agentId}/sandbox-policy/{facet}/apply`](#post-namespacesnamespaceidagentsagentidsandboxpolicyfacetapply) | Apply the saved policy to the running Agent revision |
@@ -3574,15 +3575,15 @@ Read the Sandbox Driver's record of a running Agent's dedicated Harness Sandbox
 
 <span id="get-namespacesnamespaceidagentsagentidnativeadmin"></span>
 
-Resolve native admin UI launch availability for one Agent
+Resolve OpenClaw launch availability with an assigned runtime role
 
 **Operation ID:** `getAgentNativeAdmin`
 
-**Permissions:** Requires a human session with administer permission on the exact Agent. Service API keys cannot launch or inspect native admin UI access.
+**Permissions:** Requires a human session. When native admin UI is disabled, requires exact Agent administer permission without a runtime assignment; when enabled, requires exact Agent use permission and one explicit runtime assignment. Service API keys cannot launch or inspect OpenClaw access.
 
 | Action | Resource | Scope |
 | --- | --- | --- |
-| `administer` | `agent` | `requested` |
+| `use` | `agent` | `requested` |
 
 ##### Parameters
 
@@ -3609,6 +3610,7 @@ Resolve native admin UI launch availability for one Agent
 | `data.activeRevisionId` | `string` | No | — |
 | `data.host` | `string` | No | — |
 | `data.origin` | `string (uri)` | No | — |
+| `data.reason` | `"ui_configuration" or "role_unavailable" or "device_approval_required" or "transport_unsupported"` | No | — |
 | `data.status` | `"available" or "disabled" or "stopped" or "unavailable" or "unsupported"` | Yes | — |
 | `data.url` | `string (uri)` | No | — |
 | `meta` | `object` | Yes | — |
@@ -3652,7 +3654,7 @@ Report advisory primary IAM permissions on a readable Agent, not authorization f
 | Field | Type | Required | Constraints |
 | --- | --- | --- | --- |
 | `data` | `object` | Yes | — |
-| `data.administer` | `boolean` | Yes | Whether the selected IAM Driver allows Agent administer now, which native admin UI access needs. Advisory only: other required permissions (native admin UI also needs a signed-in console session), lifecycle state, or a later authorization decision can still prevent the operation. |
+| `data.administer` | `boolean` | Yes | Whether the selected IAM Driver allows Agent administer now. This does not grant native OpenClaw access, which requires Agent use and an exact runtime assignment when enabled. Advisory only: other required permissions, lifecycle state, or a later authorization decision can still prevent the operation. |
 | `data.agentSourcesOperate` | `boolean` | Yes | Whether the selected IAM Driver allows, now, the source grants that each Agent update checks: Secret operate on every Secret that the Agent's Configuration binds and on a Secret Harness authentication source, credential source operate on every credential source the Agent lists or uses for Harness authentication, and ServiceAccount read on a ServiceAccount Harness authentication source. `true` when the Agent and its Configuration bind no source. Reported only to a caller with Agent update and Configuration read whose Agent settings are readable; otherwise `false`. Advisory only: other required permissions, lifecycle state, sources that an update adds, or a later authorization decision can still prevent the operation. |
 | `data.configurationRead` | `boolean` | Yes | Whether the selected IAM Driver allows read of the Agent's Configuration now, which each Agent update needs. Advisory only: other required permissions, lifecycle state, or a later authorization decision can still prevent the operation. |
 | `data.configurationSecretsOperate` | `boolean` | Yes | Whether the selected IAM Driver allows Secret operate now on every Secret that the Agent's Configuration binds. Each Configuration save needs it for the Secrets it binds: the Secrets in its `secretBindings`, or every bound Secret when it omits them. `true` when the Configuration binds no Secret. Reported only to a caller with Configuration read and update; otherwise `false`. Advisory only: other required permissions, lifecycle state, or a later authorization decision can still prevent the operation. |
@@ -4336,6 +4338,61 @@ Read observed images and source commits for an Agent's active runtime
 | `meta` | `object` | Yes | — |
 | `meta.requestId` | `string` | Yes | pattern: `^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 
+#### `GET /namespaces/{namespaceId}/agents/{agentId}/runtime-roles`
+
+<span id="get-namespacesnamespaceidagentsagentidruntimeroles"></span>
+
+List configured runtime roles and deployed permission summaries for an Agent
+
+**Operation ID:** `listAgentRuntimeRoles`
+
+**Permissions:** Requires administer permission on the requested Installation. Requires read permission on the requested Namespace. Requires read permission on the requested Agent.
+
+| Action | Resource | Scope |
+| --- | --- | --- |
+| `administer` | `installation` | `requested` |
+| `read` | `namespace` | `requested` |
+| `read` | `agent` | `requested` |
+
+##### Parameters
+
+| Name | In | Type | Required | Constraints |
+| --- | --- | --- | --- | --- |
+| `namespaceId` | path | `string` | Yes | pattern: `^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `agentId` | path | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+
+##### Responses
+
+| Status | Meaning |
+| --- | --- |
+| `200` | OK |
+| `400` | Bad Request |
+| `401` | Unauthorized |
+| `403` | Forbidden |
+| `404` | Not Found |
+| `500` | Internal Server Error |
+| `503` | Service Unavailable |
+
+**`200` response body:** `application/json`
+
+| Field | Type | Required | Constraints |
+| --- | --- | --- | --- |
+| `data` | `object` | Yes | — |
+| `data.activeRevision` | `object` | No | — |
+| `data.activeRevision.id` | `string` | Yes | pattern: `^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `data.activeRevision.roles` | `array<object>` | Yes | — |
+| `data.activeRevision.roles[].id` | `string` | Yes | — |
+| `data.activeRevision.roles[].permissions` | `object<string, any>` | Yes | — |
+| `data.configuration` | `object` | Yes | — |
+| `data.configuration.generation` | `integer` | Yes | minimum: 1; maximum: 9007199254740991 |
+| `data.configuration.id` | `string` | Yes | pattern: `^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
+| `data.roles` | `array<object>` | Yes | — |
+| `data.roles[].id` | `string` | Yes | — |
+| `data.roles[].permissions` | `object<string, any>` | Yes | — |
+| `meta` | `object` | Yes | — |
+| `meta.requestId` | `string` | Yes | — |
+
 #### `GET /namespaces/{namespaceId}/agents/{agentId}/sandbox-policy/{facet}`
 
 <span id="get-namespacesnamespaceidagentsagentidsandboxpolicyfacet"></span>
@@ -5001,11 +5058,11 @@ Resolve an authorized Agent from a copied native chat link
 
 **Operation ID:** `resolveAgentNativeAdminReturn`
 
-**Permissions:** Requires a human session with administer permission on the exact Agent. Unknown and inaccessible Agents both return 404. This lookup does not launch or start the Agent.
+**Permissions:** Requires a human session with use permission and an assigned runtime role on the exact Agent. Unknown and inaccessible Agents both return 404. This lookup does not launch or start the Agent.
 
 | Action | Resource | Scope |
 | --- | --- | --- |
-| `administer` | `agent` | `requested` |
+| `use` | `agent` | `requested` |
 
 ##### Parameters
 
@@ -6057,6 +6114,7 @@ Force the Credential Refresh Driver to mint a new token for a refresh-type sourc
 | [`POST /namespaces/{namespaceId}/iam/access-bindings`](#post-namespacesnamespaceidiamaccessbindings) | Create an immutable exact-resource Namespace IAM AccessBinding |
 | [`DELETE /namespaces/{namespaceId}/iam/access-bindings/{bindingId}`](#delete-namespacesnamespaceidiamaccessbindingsbindingid) | Delete one exact Namespace IAM AccessBinding |
 | [`GET /namespaces/{namespaceId}/iam/access-bindings/{bindingId}`](#get-namespacesnamespaceidiamaccessbindingsbindingid) | Get an exact Namespace IAM AccessBinding |
+| [`PATCH /namespaces/{namespaceId}/iam/access-bindings/{bindingId}/runtime-role`](#patch-namespacesnamespaceidiamaccessbindingsbindingidruntimerole) | Change the runtime role on an exact human Agent access grant |
 | [`GET /namespaces/{namespaceId}/iam/roles`](#get-namespacesnamespaceidiamroles) | List exact Namespace IAM Roles |
 | [`POST /namespaces/{namespaceId}/iam/roles`](#post-namespacesnamespaceidiamroles) | Create an immutable Namespace IAM Role |
 | [`DELETE /namespaces/{namespaceId}/iam/roles/{roleId}`](#delete-namespacesnamespaceidiamrolesroleid) | Delete an unreferenced exact Namespace IAM Role |
@@ -6146,6 +6204,10 @@ Create an immutable exact-resource Namespace IAM AccessBinding
 | `resourceId` | `string` | Yes | min length: 1; max length: 200 |
 | `resourceKind` | `"namespace" or "agent" or "agent_revision" or "configuration" or "credential_source" or "sandbox_policy" or "preset" or "secret" or "service_account"` | Yes | — |
 | `roleId` | `string` | Yes | min length: 1; max length: 200 |
+| `runtimeRole` | `string` | No | min length: 1; max length: 128; pattern: `^\S(?:.*\S)?$` |
+| `runtimeRoleConfiguration` | `object` | No | — |
+| `runtimeRoleConfiguration.generation` | `integer` | Yes | minimum: 1; maximum: 9007199254740991 |
+| `runtimeRoleConfiguration.id` | `string` | Yes | pattern: `^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `subjectId` | `string` | Yes | min length: 1; max length: 200 |
 | `subjectKind` | `"identity"` | Yes | — |
 
@@ -6249,6 +6311,65 @@ Get an exact Namespace IAM AccessBinding
 | `meta` | `object` | Yes | — |
 | `meta.requestId` | `string` | Yes | pattern: `^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 
+#### `PATCH /namespaces/{namespaceId}/iam/access-bindings/{bindingId}/runtime-role`
+
+<span id="patch-namespacesnamespaceidiamaccessbindingsbindingidruntimerole"></span>
+
+Change the runtime role on an exact human Agent access grant
+
+**Operation ID:** `updateIAMRuntimeRole`
+
+**Permissions:** Requires administer permission on the requested Installation. Requires read permission on the requested Namespace. Requires read permission on the Agent targeted by the AccessBinding.
+
+| Action | Resource | Scope |
+| --- | --- | --- |
+| `administer` | `installation` | `requested` |
+| `read` | `namespace` | `requested` |
+| `read` | `agent` | `requested` |
+
+##### Parameters
+
+| Name | In | Type | Required | Constraints |
+| --- | --- | --- | --- | --- |
+| `namespaceId` | path | `string` | Yes | pattern: `^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `bindingId` | path | `string` | Yes | min length: 1; max length: 200 |
+
+##### Request body
+
+**Required:** Yes
+
+**Content type:** `application/json`
+
+| Field | Type | Required | Constraints |
+| --- | --- | --- | --- |
+| `runtimeRole` | `string` | Yes | min length: 1; max length: 128; pattern: `^\S(?:.*\S)?$` |
+| `runtimeRoleConfiguration` | `object` | Yes | — |
+| `runtimeRoleConfiguration.generation` | `integer` | Yes | minimum: 1; maximum: 9007199254740991 |
+| `runtimeRoleConfiguration.id` | `string` | Yes | pattern: `^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+
+##### Responses
+
+| Status | Meaning |
+| --- | --- |
+| `200` | OK |
+| `400` | Bad Request |
+| `401` | Unauthorized |
+| `403` | Forbidden |
+| `404` | Not Found |
+| `409` | Conflict |
+| `413` | Payload Too Large |
+| `415` | Unsupported Media Type |
+| `500` | Internal Server Error |
+| `503` | Service Unavailable |
+
+**`200` response body:** `application/json`
+
+| Field | Type | Required | Constraints |
+| --- | --- | --- | --- |
+| `data` | `object or object` | Yes | — |
+| `meta` | `object` | Yes | — |
+| `meta.requestId` | `string` | Yes | pattern: `^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+
 #### `GET /namespaces/{namespaceId}/iam/roles`
 
 <span id="get-namespacesnamespaceidiamroles"></span>
@@ -6291,7 +6412,7 @@ List exact Namespace IAM Roles
 | `data[].name` | `string` | No | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
 | `data[].namespaceId` | `string` | Yes | pattern: `^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data[].permissions` | `array<object>` | Yes | min items: 1; max items: 64 |
-| `data[].permissions[].action` | `"create" or "read" or "update" or "delete" or "deploy" or "operate" or "administer" or "read_logs" or "manage_policy"` | Yes | — |
+| `data[].permissions[].action` | `"create" or "read" or "update" or "delete" or "deploy" or "operate" or "administer" or "read_logs" or "manage_policy" or "use"` | Yes | — |
 | `data[].permissions[].resourceKind` | `"installation" or "namespace" or "configuration" or "preset" or "service_account" or "secret" or "agent" or "agent_revision" or "credential_source" or "sandbox_policy"` | Yes | — |
 | `meta` | `object` | Yes | — |
 | `meta.requestId` | `string` | Yes | pattern: `^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
@@ -6327,7 +6448,7 @@ Create an immutable Namespace IAM Role
 | --- | --- | --- | --- |
 | `name` | `string` | No | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
 | `permissions` | `array<object>` | Yes | min items: 1; max items: 64 |
-| `permissions[].action` | `"create" or "read" or "update" or "delete" or "deploy" or "operate" or "administer" or "read_logs" or "manage_policy"` | Yes | — |
+| `permissions[].action` | `"create" or "read" or "update" or "delete" or "deploy" or "operate" or "administer" or "read_logs" or "manage_policy" or "use"` | Yes | — |
 | `permissions[].resourceKind` | `"namespace" or "agent" or "agent_revision" or "configuration" or "credential_source" or "sandbox_policy" or "preset" or "secret" or "service_account"` | Yes | — |
 
 ##### Responses
@@ -6354,7 +6475,7 @@ Create an immutable Namespace IAM Role
 | `data.name` | `string` | No | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
 | `data.namespaceId` | `string` | Yes | pattern: `^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.permissions` | `array<object>` | Yes | min items: 1; max items: 64 |
-| `data.permissions[].action` | `"create" or "read" or "update" or "delete" or "deploy" or "operate" or "administer" or "read_logs" or "manage_policy"` | Yes | — |
+| `data.permissions[].action` | `"create" or "read" or "update" or "delete" or "deploy" or "operate" or "administer" or "read_logs" or "manage_policy" or "use"` | Yes | — |
 | `data.permissions[].resourceKind` | `"installation" or "namespace" or "configuration" or "preset" or "service_account" or "secret" or "agent" or "agent_revision" or "credential_source" or "sandbox_policy"` | Yes | — |
 | `meta` | `object` | Yes | — |
 | `meta.requestId` | `string` | Yes | pattern: `^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
@@ -6437,7 +6558,7 @@ Get an exact Namespace IAM Role
 | `data.name` | `string` | No | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
 | `data.namespaceId` | `string` | Yes | pattern: `^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.permissions` | `array<object>` | Yes | min items: 1; max items: 64 |
-| `data.permissions[].action` | `"create" or "read" or "update" or "delete" or "deploy" or "operate" or "administer" or "read_logs" or "manage_policy"` | Yes | — |
+| `data.permissions[].action` | `"create" or "read" or "update" or "delete" or "deploy" or "operate" or "administer" or "read_logs" or "manage_policy" or "use"` | Yes | — |
 | `data.permissions[].resourceKind` | `"installation" or "namespace" or "configuration" or "preset" or "service_account" or "secret" or "agent" or "agent_revision" or "credential_source" or "sandbox_policy"` | Yes | — |
 | `meta` | `object` | Yes | — |
 | `meta.requestId` | `string` | Yes | pattern: `^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |

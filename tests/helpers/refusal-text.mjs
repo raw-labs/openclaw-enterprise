@@ -37,7 +37,7 @@ export const GATEWAY_MANAGED_MODE_DENIED =
   "Not authorized: changing gatewayManagedMode needs Installation administer. Omit it, or ask an Installation administrator to change it.";
 // The native admin host names the grant but no Agent: the host, not the caller, names the Agent.
 export const NATIVE_ADMIN_DENIED =
-  "Not authorized: opening this Agent's native admin UI needs Agent administer on it. Ask an Installation administrator to grant it.";
+  "Not authorized: opening this Agent's native admin UI needs Agent use and an assigned OpenClaw role on it. Ask an Installation administrator to grant it.";
 // An IAM AccessBinding subject that is an email, and one that is no eligible principal: an unknown
 // ID gets the same answer as an ineligible one (finding D753).
 export const BINDING_SUBJECT_EMAIL =
@@ -712,3 +712,7 @@ export const workspaceWithoutRunningVersion = (agentId) =>
   `Agent ${agentId} has no running version, so its workspace files cannot be read or written. Deploy it, then try again.`;
 export const workspaceVersionStarting = (agentId) =>
   `Agent ${agentId} has no running version yet: its deployment is still starting, so its workspace files cannot be read or written. Try again when the deployment finishes.`;
+
+export function nativeRuntimeDenied(target) {
+  return `Not authorized: this needs Agent use and an assigned OpenClaw role on ${target}. Ask an Installation administrator to grant both.`;
+}

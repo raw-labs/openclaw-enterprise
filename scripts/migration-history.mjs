@@ -221,33 +221,39 @@ function catalogAtMigrationCount(count, completedCount) {
     return "preComputePreparationFailureEvidence";
   }
   if (count === 53) {
-    return "preCredentialSourcePat";
+    return "preRuntimeRoles";
   }
   if (count === 54) {
-    return "preComputeRevisionAdmission";
-  }
-  if (count === 55) {
     return "preHeldAuthenticationSession";
   }
-  if (count === 56) {
-    return "preCanonicalHarnessAuth";
-  }
-  if (count === 57) {
-    return "preSandboxPolicies";
-  }
-  if (count === 58) {
-    return "preSandboxPolicyAdministrator";
-  }
-  if (count === 59) {
-    return "preCredentialProxy";
-  }
-  if (count === 64) {
+  if (count === 55) {
     return "preGatewayOutbound";
   }
+  if (count === 56) {
+    return "preEmbeddedChannelOutbound";
+  }
+  if (count === 57) {
+    return "preCredentialSourcePat";
+  }
+  if (count === 58) {
+    return "preComputeRevisionAdmission";
+  }
+  if (count === 59) {
+    return "preCanonicalHarnessAuth";
+  }
+  if (count === 60) {
+    return "preSandboxPolicies";
+  }
+  if (count === 61) {
+    return "preSandboxPolicyAdministrator";
+  }
   if (count === 62) {
+    return "preCredentialProxy";
+  }
+  if (count === 65) {
     return "prePreparedAttemptSettlement";
   }
-  if (count === 63) {
+  if (count === 66) {
     return "preGatewayManagedMode";
   }
   refuse("an incomplete or unsupported development history is installed");

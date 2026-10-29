@@ -179,7 +179,7 @@ ALTER TABLE occ.agent_revisions
       - 'configuration_id' - 'configuration_kind' - 'configuration_generation'
       - 'draft_spec' - 'harness' - 'compute' - 'sandbox_driver_id' - 'sandbox_policy'
       - 'secret_driver_id' - 'secret_bindings' - 'harness_auth' - 'credential_sources' - 'plugins' - 'plugin_approvers'
-      - 'repository_credentials' - 'egress_plan' - 'execution_admission') = '{}'::jsonb
+      - 'repository_credentials' - 'gateway_outbound' - 'egress_plan' - 'execution_admission') = '{}'::jsonb
     AND jsonb_typeof(admitted_spec->'configuration_id') = 'string'
     AND (admitted_spec->>'configuration_id') ~ '^cfg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
     AND jsonb_typeof(admitted_spec->'configuration_kind') = 'string'
@@ -228,6 +228,7 @@ ALTER TABLE occ.agent_revisions
       NOT (admitted_spec ? 'secret_bindings')
       OR occ.secret_bindings_are_valid(admitted_spec->'secret_bindings', namespace_id)
     )
+    AND (NOT (admitted_spec ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(admitted_spec->'gateway_outbound') AND (admitted_spec #>> '{harness,mode}' = 'dedicated' OR admitted_spec #>> '{gateway_outbound,selection,mode}' = 'channelsOnly')))
     AND CASE WHEN jsonb_typeof(admitted_spec->'harness_auth') = 'object' THEN
       occ.harness_auth_is_valid((admitted_spec->'harness_auth') - 'protectedExecutionVersion', namespace_id, true)
     ELSE false END

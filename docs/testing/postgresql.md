@@ -153,6 +153,12 @@ characters. The test reads the container's administrator password with `docker i
 connects through the selected port, and drops only databases it created.
 See [migration recovery](../reference/settings/operations.md#migration-history).
 
+The populated 62-entry history case retains existing runtime-role assignments,
+sessions, and embedded Slack/Teams outbound snapshots. After migration, the
+application role reads the revision through PostgreSQL State and checks exact
+Agent use through native IAM. The case also checks that the assigning-session
+hold commits and that embedded snapshots reject additional outbound hosts.
+
 ## Azure workload-identity connections
 
 The `postgres-azure-workload-identity` lane reads an existing authorized Azure

@@ -78,9 +78,14 @@ has 46 through `0046_model_probe_failure_cause`;
 `0047_provisioning_configuration_release`; `preCodexPatSources` has 48 through
 `0048_administrator_credential_source_grants`; `preAgentCredentialSources` has 49
 through `0049_codex_pat_sources`; `preCredentialWithdrawalRequester` has 50
-through `0050_agent_credential_sources`; later `pre*` shapes add one each, through
-`preCredentialProxy` (59) and `prePreparedAttemptSettlement` (62, through
-`0062_credential_delivery_custody`). Migration brings each to `completed` with 63 receipts.
+through `0050_agent_credential_sources`. The published role, assigning-session,
+outbound and embedded migrations retain their original identities. The 62-receipt
+prefix ends at `0062_administrator_sandbox_policy_grants` (`preCredentialProxy`).
+`prePreparedAttemptSettlement` has 65 receipts through
+`0065_credential_delivery_custody`; `preGatewayManagedMode` has 66 through
+`0066_prepared_attempt_settlement`. The appended history ends at 67 receipts with
+`0067_gateway_managed_mode`. Its new catalogs and logical restore still require
+PostgreSQL qualification; unset catalog hashes prevent migration.
 The [canonical manifest](../../../migrations/meta/_canonical-history.json) records
 accepted source and catalog hashes. Never delete or relabel unsupported preview
 receipts. Empty schemas may be absent or owner-only, with no objects or

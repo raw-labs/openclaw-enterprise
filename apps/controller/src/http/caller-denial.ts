@@ -30,7 +30,7 @@ const ASK = "Ask an Installation administrator to grant it.";
 
 // A native admin request the caller may not make. The Agent comes from the host name, not from
 // the caller, so the text names no Agent, and an unknown host gets it too.
-export const NATIVE_ADMIN_DENIAL = `${NAMED_DENIAL_PREFIX} opening this Agent's native admin UI needs Agent administer on it. ${ASK}`;
+export const NATIVE_ADMIN_DENIAL = `${NAMED_DENIAL_PREFIX} opening this Agent's native admin UI needs Agent use and an assigned OpenClaw role on it. ${ASK}`;
 
 /**
  * The text for the caller's own denial of `action` on `resource` (finding 2534). It names the
@@ -59,6 +59,7 @@ export function callerDenialMessage(
   qualifier?:
     | "current_harness_auth"
     | "native_admin_off"
+    | "native_runtime_access"
     | "gateway_managed_mode"
     | "administrator_restricted",
 ): string {
@@ -102,6 +103,9 @@ export function callerDenialMessage(
     action === "read_logs" ? "Agent read_logs (or Agent administer)" : `${kind} ${action}`;
   if (qualifier === "current_harness_auth") {
     return `${NAMED_DENIAL_PREFIX} this needs ${grant} on ${target}, the Agent's current Harness authentication: every update checks it, even one that replaces it. ${ASK}`;
+  }
+  if (qualifier === "native_runtime_access") {
+    return `${NAMED_DENIAL_PREFIX} this needs Agent use and an assigned OpenClaw role on ${target}. Ask an Installation administrator to grant both.`;
   }
   if (qualifier === "native_admin_off") {
     return `${NAMED_DENIAL_PREFIX} this needs ${grant} on ${target}. ${ASK} Native admin is also off on this Installation, so the grant alone would not open it.`;

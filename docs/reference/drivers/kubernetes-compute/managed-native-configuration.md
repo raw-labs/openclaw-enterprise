@@ -8,8 +8,10 @@ With managed mode on, Kubernetes creates that copy only when the deployment uses
 runtime Gateway images and private `gatewayRouting`, and the saved Configuration
 meets the following native admin requirements.
 
-- Trusted-proxy authentication accepts `x-occ-identity: occ-workspace-files`
-  with `operator.admin` identity scopes.
+- Trusted-proxy authentication retains `x-occ-identity: occ-workspace-files`
+  with `operator.admin` identity scopes for service operations. Configured human roles
+  use managed identity and role headers with empty `allowUsers`; see
+  [native authority](../../agent-native-admin.md#native-authority-and-drift).
 - Trusted-proxy device auto-approval is enabled with `operator.admin` scope.
 - `controlUi.enabled` is true and `controlUi.allowedOrigins` is nonempty.
 - Dangerous device-auth disabling and host-header origin fallback are disabled.

@@ -36,6 +36,7 @@ an equivalent implementation is available upstream, the build applies its
 `readOnlyPaths` compatibility change as
 `openclaw-codex-read-only-paths.patch`. This preserves the restricted Codex
 filesystem profile required by the repository broker and selected plugins.
+The build also applies `openclaw-trusted-proxy-role.patch`. It adds paired role and policy-digest headers and explicit managed identity selectors to trusted-proxy configuration, then commits the proxy-selected role through native profile writes before WebSocket or HTTP operator admission. It retains native role enforcement, closes existing profile connections when the assignment changes, and rejects missing or mismatched assignments, undeclared identities and ambiguous profile links. The Kubernetes Driver supplies OCE's identity names; the bridge has no built-in OCE identity namespace. See [native authority and drift](../../docs/reference/agent-native-admin.md#native-authority-and-drift) for ownership and digest rules. The patch includes actual Gateway/SQLite integration cases in `server.auth.identity-scopes.test.ts` and `server.plugin-http-role-scopes.test.ts`, plus configuration validation in `zod-schema.gateway-auth.test.ts`. Remove it when upstream supports verified proxy role assignment with the same admission and role-publication guarantees.
 The selected source preserves `on-request` when plugins use MCP elicitation,
 reconnects `connect --ephemeral` with saved device credentials after its setup
 code expires, and retains the original caller's authority while required-worker

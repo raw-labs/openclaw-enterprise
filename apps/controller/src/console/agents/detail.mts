@@ -40,7 +40,7 @@ import {
 } from "./harness-auth.mjs";
 import { renderGatewayOutbound } from "./gateway-outbound.mjs";
 import { renderAgentAccess } from "./access.mjs";
-import { renderNativeAdminAccess } from "./native-admin.mjs";
+import { renderRuntimeAccess } from "./runtime-access.mjs";
 import { createAgentDeletion } from "./deletion.mjs";
 import { createAgentStop } from "./stop.mjs";
 import { gatewaySafetyControls } from "./gateway-safety.mjs";
@@ -1498,27 +1498,22 @@ export async function renderAgentDetail(
   if (selected !== "draft") {
     detailPane.append(pageDisclosure);
   }
-  const nativeAdmin = renderNativeAdminAccess(
-    context,
-    path,
-    () => latestPermissionsRead.then((permissions) => permissions?.administer),
-    {
-      versionLabel: () => {
-        const current = visibleRevisions.find((revision) => revision.id === currentRevisionId);
-        return current ? `v${current.revision}` : shortId(currentRevisionId ?? "");
-      },
-      recovery: (status) => {
-        if (status === "stopped" || status === "unsupported") {
-          return versionLink("Open draft", "draft", "configuration");
-        }
-        const latest = visibleRevisions[0];
-        return status === "unavailable" && latest
-          ? versionLink("View deployment", latest.id, "deployment")
-          : null;
-      },
+  const runtimeAccess = renderRuntimeAccess(context, path, {
+    versionLabel: () => {
+      const current = visibleRevisions.find((revision) => revision.id === currentRevisionId);
+      return current ? `v${current.revision}` : shortId(currentRevisionId ?? "");
     },
-  );
-  headerActions.append(nativeAdmin.launch, nativeAdmin.unavailable);
+    recovery: (status) => {
+      if (status === "stopped" || status === "unsupported") {
+        return versionLink("Open draft", "draft", "configuration");
+      }
+      const latest = visibleRevisions[0];
+      return status === "unavailable" && latest
+        ? versionLink("View deployment", latest.id, "deployment")
+        : null;
+    },
+  });
+  headerActions.append(runtimeAccess.launch, runtimeAccess.unavailable);
   const recovery = createDeploymentRecovery(context, {
     path,
     selected,
@@ -1534,7 +1529,7 @@ export async function renderAgentDetail(
   );
   view.replaceChildren(
     recovery.section,
-    nativeAdmin.section,
+    runtimeAccess.section,
     deploymentAttention,
     overviewStatus,
     versionLayout,
@@ -2163,7 +2158,7 @@ export async function renderAgentDetail(
         }
       }
       // Native admin access depends on the serving version, so a finished deployment rereads it.
-      nativeAdmin.refresh();
+      runtimeAccess.refresh();
     }
     if (revisionResult) {
       renderOverview(revisionResult, snapshot);
@@ -2529,7 +2524,7 @@ export async function renderAgentDetail(
     const labels = new Map(revisions.map((revision) => [revision.id, `v${revision.revision}`]));
     stopPanel.setVersionLabel((id) => labels.get(id));
     renderCurrentVersion();
-    nativeAdmin.updateTarget();
+    runtimeAccess.updateTarget();
     renderVersions(
       revisions,
       snapshot,
@@ -2558,7 +2553,7 @@ export async function renderAgentDetail(
           activityPanel.replaceWith(panel);
           activityPanel = panel;
         }
-        void Promise.all([nativeAdmin.ready, failed ? callerPermissionsRead : null]).then(
+        void Promise.all([runtimeAccess.ready, failed ? callerPermissionsRead : null]).then(
           revealDetail,
         );
       };

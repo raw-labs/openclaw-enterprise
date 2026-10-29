@@ -191,7 +191,7 @@ The console has no chat panel. To give an Agent a task:
 - Message it in a channel its Configuration sets up, such as Slack. The
   [channel settings](channels-and-credentials.md#slack-editor), not OCE grants,
   decide who may mention it.
-- With Agent `administer`, use the [native admin panel](#conditional-native-admin-panel)
+- With Agent `use` and an assigned role, use the [OpenClaw panel](#conditional-native-admin-panel)
   when the Installation enables it. It is unavailable under GitHub, Google, or
   OIDC sign-in.
 - Otherwise ask someone who can edit the Agent's Configuration to let you into
@@ -206,7 +206,9 @@ When enabled by the Installation and permitted for your account, **Open Agent UI
 in the header opens the Agent interface directly in a new tab. Its description
 names the version selected for service, even while you view a draft or historical
 version. **Refresh access** checks availability again. Unavailable access leaves
-the launch disabled and explains the next step; denied access hides it.
+the launch disabled and explains the next step. Denied access hides it; an
+Installation administrator without an assignment sees instructions to assign
+their Principal ID an OpenClaw role in **Access**, then select **Refresh access**.
 
 Gateway managed mode restricts administrative changes by default. OCE deployments
 can overwrite changes made while managed mode is off. Use OCE for durable configuration. See [native admin access](../../reference/agent-native-admin.md)
