@@ -64,6 +64,12 @@ Each lane owns its tests, environment, required inputs and preparation settings.
 
 CI uses the event checkout without external service credentials. Impact and Suite Audit start independently. In every mode, `static-checks` verifies checkout identity and runs workspace, lint, format, OpenAPI and docs checks (no product tests), alone in docs mode. The [coverage map](../testing/ci.md#tests-in-each-workflow) lists matrix jobs and the separate `runtime-image-fixture`; tests mode runs only selected lanes. Image startup parts 1 and 2, PostgreSQL Application and the `checks-baseline` and `checks-browser` parts use `blacksmith-32vcpu-ubuntu-2404` for its 8 CPUs, k3d fixture and observability for its NetworkPolicy-enforcing kernel; `runtime-image-fixture` uses `ubuntu-22.04`. Other lanes, Static Checks and audit use `blacksmith-16vcpu-ubuntu-2404`.
 
+Runner labels and concurrency follow [CI settings](../testing/ci.md). On AppArmor
+hosts, native startup uses `oce-ci-codex-bwrap`; the shared action removes it after
+container cleanup. It permits nested mounts under the reviewed seccomp policy
+and dropped capabilities, retaining Docker’s other restrictions. Production
+policy and host sysctls stay unchanged.
+
 The selector verifies that the tested merge has the event head as its second parent. It
 compares that tree with its first parent, the current base, using policy from the base.
 Git path decoding preserves a leading UTF-8 BOM. Only a nonempty set of allowlisted
@@ -247,6 +253,7 @@ External reconciliation awaits an approved resource ledger.
 - 2026-10-23 03:43: Order Docker timestamps and retain twelve latest retry kinds independently of locale. (authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d - 9bca605f5175bb225a522c3d5537a7ee6e1a7751)
 
 - 2026-10-21 04:42: Preserve submillisecond Docker event order. (authoring-run/458f4777-70d1-4992-a922-ab387c6a4aba - e8185dac805b737363c7178d3068b310a53a7c24)
+- 2026-10-20 12:14: Honor configured runner capacity while preserving coverage, default labels and same-source qualification. (authoring-run/025b1d17-5ded-4263-b58b-345fbafcddbb - a77594a92203b9da12690591554b385d9970d904)
 
 - 2026-10-14 22:31: Complete all selection. (authoring-run/d5130a41-8ae6-4a80-aef3-32d61a53348c - 9b50982b75a578d6967ee12befb1fa3904e20a38)
 

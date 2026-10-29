@@ -1,0 +1,133 @@
+---
+created: 2026-10-14
+updated: 2026-10-28
+last_updated_session: authoring-run/096f88e1-170b-4633-9cba-7b607caade55
+---
+
+# Agent channel runtime
+
+## Overview
+
+An authorized Agent deployment freezes native channel settings and Secret bindings
+into its revision. Kubernetes Compute prepares credentials and channel egress,
+then publishes the native Teams callback for the serving revision. This flow
+describes evaluation-branch source, not production or live-provider qualification.
+
+## Entry Points
+
+- `packages/occ/src/index.ts:deployAgentWithAuthorization`: exact Agent operation,
+  Configuration ownership and Secret grants before revision admission.
+- `apps/controller/src/drivers/compute/kubernetes/index.ts:validateHarnessAuth`:
+  topology, trusted Installation channel runtime and native settings admission.
+- `apps/controller/src/drivers/compute/kubernetes/index.ts:activateRevision`:
+  worker-owned revision activation and serving callback reconciliation.
+
+## Flow
+
+```mermaid
+graph TD
+  REQUEST[Authorized Agent deployment] --> ADMIT[Compute checks trusted topology and channel settings]
+  ADMIT -->|Refused| DENIED[No revision or credential delivery]
+  ADMIT -->|Admitted| FREEZE[OCC freezes revision and Secret references]
+  FREEZE --> PREPARE[Compute prepares exact Agent Secrets and proxy policy]
+  PREPARE -->|Serving predecessor exists| KEEP[Keep predecessor callback]
+  PREPARE --> ACTIVATE[Compute fences and activates the revision]
+  KEEP --> ACTIVATE
+  ACTIVATE --> TEAMS{Teams enabled?}
+  TEAMS -->|Yes| ROUTE[Publish exact native POST callback]
+  TEAMS -->|No| REMOVE[Remove previous callback]
+  ROUTE --> STOP[Stop removes route before workload teardown]
+  REMOVE --> STOP
+```
+
+## Execution Trace
+
+### 1. Admit the caller's configuration
+
+`packages/occ/src/index.ts:deployAgentWithAuthorization` authorizes the exact Agent
+and validates same-Namespace resource references. Configuration save and Preset
+save keep drafts independent of deployment prerequisites. Configuration save
+checks channel Secret bindings through the shared `requireChannelSecretBindings`
+rule, including string references and fallback expressions.
+
+Kubernetes `validateHarnessAuth` repeats the binding check at deployment, then
+applies `requireTeamsConfiguration` before a revision can stop predecessors.
+Preparation and activation repeat these runtime checks. Teams requires explicit
+Public-cloud IDs, an environment Secret reference (an object, `${NAME}` or `$NAME`),
+the native `/api/messages` path and the packaged plugin. Teams also requires an Installation public callback
+hostname. Native JSON cannot provision a listener or change trusted Compute options.
+The temporary `runtime.channels.experimentalEmbeddedChannels` option permits
+embedded OpenClaw only when the Installation administrator explicitly enables it.
+The same option advertises embedded provisioning to the regular API; its default
+remains dedicated provisioning and embedded-channel refusal.
+
+### 2. Prepare owned credentials and networking
+
+`apps/controller/src/drivers/compute/kubernetes/index.ts:prepareRevision` receives
+the immutable revision and resolved Secret locators through the regular worker.
+`deliverGatewaySecrets` verifies source ownership and projects credentials only
+into the owning Gateway. Dedicated Harnesses receive model authentication separately. Opted-in embedded
+OpenClaw instead receives both channel and model credentials in its combined
+Gateway/execution Pod. This preserves exact resource ownership but weakens
+credential separation within that Agent.
+`reconcileChannelNetworkPolicy` permits the configured exact proxy endpoint; its
+hostname policy belongs to the external proxy or opt-in chart-managed process.
+`deployment` applies `HTTPS_PROXY`, `NODE_USE_ENV_PROXY` and internal `NO_PROXY`
+settings to the whole channel-enabled Gateway. Native integrations using that
+proxy need its destination authorization too. Embedded processes retain their
+existing direct public egress and can bypass these environment settings.
+
+The runtime image selects upstream `msteams` in
+`deploy/runtime/Dockerfile` and `scripts/build-runtime-assets.mjs`. No independent
+Teams message engine or channel credential broker is introduced.
+
+### 3. Publish the serving callback
+
+`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback`
+reads the owned Gateway Deployment. A candidate whose revision does not match
+that Deployment cannot claim or delete its predecessor's callback.
+`activateRevisionWorkloads` rejects stale activation before publishing the new route.
+
+The `channels` HTTPS listener accepts an exact Agent path and POST method, rewrites
+to `/api/messages` through a Service selecting that exact Gateway revision and strips OCE identity, cookie,
+API-key and forwarded identity headers. Authorization remains intact for the native
+Microsoft SDK. A route-scoped SecurityPolicy replaces inherited OCE administration
+authentication only for this route. Its NetworkPolicy admits the exact owning
+Envoy Gateway peer to the native Gateway port; other tenants gain no ingress grant.
+
+### 4. Disable, stop or delete
+
+`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback` removes obsolete callback resources when the activated
+revision disables Teams. `stopRevision` removes the serving route first.
+`deleteGatewayUnauthenticatedRoutes` deletes HTTPRoute before its revision-selecting Service and SecurityPolicy,
+then its NetworkPolicy, using the exact revision, observed UID and resourceVersion.
+Retiring an older revision cannot delete a newer callback. Existing Agent deletion
+uses the same owned Gateway cleanup and removes retained credential artifacts.
+Stop/delete do not consult the opt-in topology gate: disabling the trusted option
+must not prevent credential withdrawal from an existing trial workload.
+
+## Debugging and Verification
+
+Run focused Kubernetes Compute conformance and the regular real-cluster provisioning
+integration. Conformance proves manifest and admission contracts; it does not prove
+Envoy enforcement, native SDK startup or provider authentication. Live delivery
+requires the trial image, public DNS/certificate, enforcing NetworkPolicies, provider
+credentials and scoped posting authorization. A CONNECT `403` proves proxy denial;
+it does not establish native plugin support or execution containment.
+
+## Related docs
+
+- [Teams trial setup](../guides/integrations/teams.md)
+- [Gateway isolation](../reference/drivers/kubernetes-compute/networking-and-isolation.md)
+- [Configuration revision admission](configuration-driver/persistence-and-revisions.md)
+- [Kubernetes verification](../testing/kubernetes.md)
+
+## Manual Notes
+
+## Changelog
+
+- 2026-10-28 21:12: Keep Configuration drafts separate from Teams deployment prerequisites and preserve shared Secret validation. (authoring-run/096f88e1-170b-4633-9cba-7b607caade55 - 94346f8101230627f206ed9731f2c32beba27bad)
+
+- 2026-10-14 11:41: Trace trusted opt-in, shared credential execution and exact callback Service fencing. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
+
+- 2026-10-14 10:36: Trace fresh Teams callback admission, activation and cleanup. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - d7595b9ce392c0558cf84c268bc31f093aba36bf)

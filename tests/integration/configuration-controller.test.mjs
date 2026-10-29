@@ -2320,11 +2320,16 @@ for (const computeImplementation of ["occ/kubernetes", "kubernetes-local"]) {
     for (const appPassword of [
       "${MSTEAMS_APP_PASSWORD}$${MSTEAMS_TENANT_SECRET}",
       "$MSTEAMS_APP_PASSWORD",
+      { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
     ]) {
       const accepted = await request(context.app, "PATCH", `${collection}/${saved.body.data.id}`, {
         body: { values: withAppPassword(appPassword), secretBindings: allBindings },
       });
       assert.equal(accepted.status, 200, `${appPassword}: ${JSON.stringify(accepted.body)}`);
+      // Saving a bound Teams draft must not require deployment IDs or a callback listener.
+      const reread = await request(context.app, "GET", `${collection}/${saved.body.data.id}`);
+      assert.equal(reread.status, 200, JSON.stringify(reread.body));
+      assert.deepEqual(reread.body.data.values.channels.msteams.appPassword, appPassword);
     }
     // A Preset carries no Secret bindings, so its defaults are not checked against any: the
     // Configuration created from it is checked with its own bindings.

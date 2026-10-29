@@ -481,7 +481,9 @@
                   {
                     "page": "guides/integrations/slack",
                     "label": "Slack"
-                  }
+                  },
+                  { "page": "guides/integrations/teams", "label": "Teams Trial" },
+                  { "page": "guides/integrations/embedded-channel-trial", "label": "Embedded Trial" }
                 ]
               }
             ],
@@ -1053,6 +1055,7 @@
               "flows/driver-plugin-loading",
               "flows/agent-plugins",
               "flows/agent-channel-directory",
+              "flows/agent-channel-runtime",
               "flows/agent-plugin-approvals",
               "flows/agent-provisioning",
               "flows/agent-native-admin",
@@ -1072,6 +1075,7 @@
               "testing/docker",
               "testing/ssh",
               "testing/kubernetes",
+              "testing/channel-runtime",
               "testing/slack",
               "testing/plugins",
               "testing/openshell",

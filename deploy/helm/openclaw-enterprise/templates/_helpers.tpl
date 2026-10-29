@@ -641,6 +641,8 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- end -}}
 {{- end -}}
 {{- if and .Values.gatewayRouting.sandbox.enabled (not .Values.gatewayRouting.enabled) -}}{{- fail "gatewayRouting.sandbox requires gatewayRouting.enabled" -}}{{- end -}}
+{{- if and .Values.gatewayRouting.channels.enabled (not .Values.gatewayRouting.enabled) -}}{{- fail "gatewayRouting.channels requires gatewayRouting.enabled" -}}{{- end -}}
+{{- if not (kindIs "bool" .Values.slackProxy.teamsEnabled) -}}{{- fail "slackProxy.teamsEnabled must be a boolean" -}}{{- end -}}
 {{- if .Values.gatewayRouting.enabled -}}
 {{- $routing := .Values.gatewayRouting -}}
 {{- if and (hasKey $routing "hostname") (not (kindIs "string" $routing.hostname)) -}}{{- fail "gatewayRouting.hostname must be a string when supplied" -}}{{- end -}}
@@ -701,6 +703,13 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- else if not (kindIs "invalid" $routing.remoteNodeCidrs) -}}
 {{- fail "gatewayRouting.remoteNodeCidrs must be a list of IPv4 or IPv6 CIDR strings" -}}
 {{- end -}}
+{{- if $routing.channels.enabled -}}
+{{- if or (gt (len $routing.channels.hostname) 253) (not (regexMatch "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$" $routing.channels.hostname)) -}}{{- fail "gatewayRouting.channels.hostname must be a public DNS hostname" -}}{{- end -}}
+{{- if eq $routing.channels.hostname $routing.hostname -}}{{- fail "gatewayRouting.channels.hostname must differ from administration" -}}{{- end -}}
+{{- if not $routing.channels.tlsSecretName -}}{{- fail "gatewayRouting.channels.tlsSecretName must reference a public certificate Secret" -}}{{- end -}}
+{{- if or (not (regexMatch "^[1-9][0-9]*$" (toString $routing.channels.listenerPort))) (lt (int $routing.channels.listenerPort) 1024) (gt (int $routing.channels.listenerPort) 65535) (eq (int $routing.channels.listenerPort) (int $routing.envoyHttpsTargetPort)) (and $routing.sandbox.enabled (eq (int $routing.channels.listenerPort) (int $routing.sandbox.listenerPort))) -}}{{- fail "gatewayRouting.channels.listenerPort must be an unprivileged port distinct from other HTTPS listeners" -}}{{- end -}}
+{{- if not $routing.channels.ingressPeers -}}{{- fail "gatewayRouting.channels.ingressPeers must explicitly select public ingress sources" -}}{{- end -}}
+{{- end -}}
 {{- if $routing.sandbox.enabled -}}
 {{- if not (regexMatch "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$" $routing.sandbox.domain) -}}{{- fail "gatewayRouting.sandbox.domain must be a DNS hostname without wildcard, scheme, port or path" -}}{{- end -}}
 {{- /* Sandbox domain is a suffix: a direct IPv4 host cannot follow the Agent label. */ -}}
@@ -739,6 +748,7 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- $roles = append $roles (list "database.caSecretName" .Values.database.caSecretName "ca") -}}
 {{- if $routing.enabled -}}
 {{- if $routing.sandbox.enabled -}}{{- $roles = append $roles (list "gatewayRouting.sandbox.tlsSecretName" $routing.sandbox.tlsSecretName) -}}{{- end -}}
+{{- if $routing.channels.enabled -}}{{- $roles = append $roles (list "gatewayRouting.channels.tlsSecretName" $routing.channels.tlsSecretName) -}}{{- end -}}
 {{- $roles = concat $roles (list (list "gatewayRouting.apiKeySecretName" $routing.apiKeySecretName) (list "gatewayRouting.caSecretName" $routing.caSecretName "ca")) -}}
 {{- end -}}
 {{- range $provider := list "github" "google" "oidc" -}}

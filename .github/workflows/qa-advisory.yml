@@ -14,6 +14,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CI_RUNNER_FILE_CONCURRENCY: ${{ vars.CI_RUNNER_FILE_CONCURRENCY }}
+
 # Finish every main commit. For an opted-in PR, a new commit replaces the old run.
 # An unrelated label event gets its own group so it cannot cancel that qualification.
 concurrency:
@@ -80,7 +83,7 @@ jobs:
   qa:
     name: QA advisory (${{ matrix.installation }})
     needs: eligibility
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_LARGE_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: 120
     environment: integration-qa-pr
     strategy:

@@ -24,6 +24,7 @@ concurrency:
 
 env:
   CI: "1"
+  CI_RUNNER_FILE_CONCURRENCY: ${{ vars.CI_RUNNER_FILE_CONCURRENCY }}
   NODE_VERSION: "24.22.1"
   # Metadata gates use the same patched runtime as the other CI lanes.
   GATE_NODE_VERSION: "24.22.1"
@@ -264,7 +265,7 @@ jobs:
     # Both run in every mode. Start beside CI Impact, audit the workflow and
     # suite first, then reuse this checkout, Node and runner for static checks.
     # 16vcpu rarely waits for a runner (see the CI Impact lane table).
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -354,7 +355,7 @@ jobs:
     needs: impact
     if: ${{ needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ startsWith(matrix.lane, 'images-runtime-startup') && vars.CI_SANDBOX_RUNNER || vars.CI_LARGE_RUNNER || matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false

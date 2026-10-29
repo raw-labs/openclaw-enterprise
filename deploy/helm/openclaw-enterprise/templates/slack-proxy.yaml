@@ -45,6 +45,8 @@ spec:
               value: production
             - name: OCC_SLACK_PROXY_PORT
               value: {{ .Values.slackProxy.port | quote }}
+            - name: OCC_CHANNEL_PROXY_TEAMS
+              value: {{ .Values.slackProxy.teamsEnabled | quote }}
           ports:
             - name: proxy
               containerPort: {{ .Values.slackProxy.port }}

@@ -69,22 +69,53 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     }),
   );
 
-  assert.deepEqual(await reviewedCodexSeccompSecurityOptions({ profile, ciStatePath: statePath }), [
-    "--security-opt",
-    "no-new-privileges",
-    "--security-opt",
-    `seccomp=${profile}`,
-  ]);
+  assert.deepEqual(
+    await reviewedCodexSeccompSecurityOptions({
+      appArmorProfile: "",
+      profile,
+      ciStatePath: statePath,
+    }),
+    ["--security-opt", "no-new-privileges", "--security-opt", `seccomp=${profile}`],
+  );
+
+  assert.deepEqual(
+    await reviewedCodexSeccompSecurityOptions({
+      profile,
+      ciStatePath: statePath,
+      appArmorProfile: "oce-ci-codex-bwrap",
+    }),
+    [
+      "--security-opt",
+      "no-new-privileges",
+      "--security-opt",
+      "apparmor=oce-ci-codex-bwrap",
+      "--security-opt",
+      `seccomp=${profile}`,
+    ],
+  );
+  await assert.rejects(
+    reviewedCodexSeccompSecurityOptions({
+      profile,
+      ciStatePath: statePath,
+      appArmorProfile: "unconfined",
+    }),
+    /must select the named CI Codex profile/,
+  );
 
   await assert.rejects(
-    reviewedCodexSeccompSecurityOptions({ profile, ciStatePath: "" }),
+    reviewedCodexSeccompSecurityOptions({ appArmorProfile: "", profile, ciStatePath: "" }),
     /must be prepared by image CI state/,
   );
 
   // Without a profile, only a local run (no CI, no CI state) may fall back to
   // Docker's default seccomp; CI fails instead of running the case unconfined.
   assert.deepEqual(
-    await reviewedCodexSeccompSecurityOptions({ profile: "", ciStatePath: "", ci: "" }),
+    await reviewedCodexSeccompSecurityOptions({
+      appArmorProfile: "",
+      profile: "",
+      ciStatePath: "",
+      ci: "",
+    }),
     ["--security-opt", "no-new-privileges"],
   );
   for (const environment of [
@@ -93,7 +124,7 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     { ciStatePath: statePath, ci: "" },
   ]) {
     await assert.rejects(
-      reviewedCodexSeccompSecurityOptions({ profile: "", ...environment }),
+      reviewedCodexSeccompSecurityOptions({ appArmorProfile: "", profile: "", ...environment }),
       /OCC_TEST_CODEX_SECCOMP_PROFILE is required in CI/,
     );
   }
@@ -110,7 +141,7 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     }),
   );
   await assert.rejects(
-    reviewedCodexSeccompSecurityOptions({ profile, ciStatePath: statePath }),
+    reviewedCodexSeccompSecurityOptions({ appArmorProfile: "", profile, ciStatePath: statePath }),
     /must match the CI-prepared Codex seccomp profile path/,
   );
 
@@ -126,7 +157,7 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     }),
   );
   await assert.rejects(
-    reviewedCodexSeccompSecurityOptions({ profile, ciStatePath: statePath }),
+    reviewedCodexSeccompSecurityOptions({ appArmorProfile: "", profile, ciStatePath: statePath }),
     /must match the CI-prepared Codex seccomp profile digest/,
   );
 });
@@ -355,14 +386,13 @@ function assertBundledCodexPluginLoaded(pluginList) {
   assert.deepEqual(codexPlugin.dependencyStatus?.missing, []);
 }
 
-function assertBundledSlackPluginLoaded(pluginList) {
-  const slackPlugin = assertBundledPluginLoaded(pluginList, "slack");
-  assert.match(
-    slackPlugin.source,
-    /\/app\/node_modules\/openclaw\/dist\/extensions\/slack\/index\.js$/,
-  );
-  assert.equal(slackPlugin.dependencyStatus?.requiredInstalled, true);
-  assert.deepEqual(slackPlugin.dependencyStatus?.missing, []);
+function assertBundledChannelPluginsLoaded(pluginList) {
+  for (const id of ["slack", "msteams"]) {
+    const plugin = assertBundledPluginLoaded(pluginList, id);
+    assert.equal(plugin.source, `/app/node_modules/openclaw/dist/extensions/${id}/index.js`);
+    assert.equal(plugin.dependencyStatus?.requiredInstalled, true);
+    assert.deepEqual(plugin.dependencyStatus?.missing, []);
+  }
 }
 
 function assertBundledPluginLoaded(pluginList, pluginId) {
@@ -667,17 +697,24 @@ test(
   "runtime image starts an embedded OpenClaw gateway with the Docker driver entrypoint",
   imageTestOptions,
   async (t) => {
+    const configuration = createAdmittedRuntimeImageConfiguration("openclaw", {
+      enableSlack: true,
+    });
+    // Load the packaged Teams plugin and its SDK dependencies without starting a
+    // provider account. Missing/pruned modules must fail this fresh-image smoke;
+    // callback authentication and message delivery require separate provider proof.
+    configuration.plugins.allow.push("msteams");
+    configuration.plugins.entries.msteams = { enabled: true };
+    configuration.channels.msteams = { enabled: false };
     const { logs, pluginList } = await runGatewaySmoke(t, "openclaw", {
       collectPlugins: true,
-      configuration: createAdmittedRuntimeImageConfiguration("openclaw", {
-        enableSlack: true,
-      }),
+      configuration,
     });
 
     const entries = jsonLogEntries(logs);
     assertGatewayReadyLog(entries);
     assertGatewayModelLog(entries, `openai/${runtimeImageModel}`);
-    assertBundledSlackPluginLoaded(pluginList);
+    assertBundledChannelPluginsLoaded(pluginList);
     assertNoPackagingFailure(logs);
   },
 );

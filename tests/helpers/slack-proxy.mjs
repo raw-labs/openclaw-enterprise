@@ -20,7 +20,7 @@ import { temporaryDirectory } from "./temporary-directory.mjs";
  */
 export async function startSlackProxy(
   t,
-  { fixedPort = false, upstreamPort, upstreamHosts = ["slack.com"] } = {},
+  { fixedPort = false, upstreamPort, upstreamHosts = ["slack.com"], teamsEnabled = false } = {},
 ) {
   const preload =
     upstreamPort === undefined
@@ -33,6 +33,7 @@ export async function startSlackProxy(
       t,
       [...(reservation ? reservedPortArgs(reservation) : []), ...preload],
       port,
+      teamsEnabled,
     ).finally(() => reservation?.release());
     if (proxy.port === undefined && fixedPort && attempt < 5 && /EADDRINUSE/.test(proxy.stderr())) {
       continue;
@@ -47,10 +48,14 @@ export async function startSlackProxy(
   }
 }
 
-async function spawnSlackProxy(t, preload, port) {
+async function spawnSlackProxy(t, preload, port, teamsEnabled) {
   const child = spawn(process.execPath, [...preload, "apps/controller/src/slack-proxy.mjs"], {
     cwd: new URL("../../", import.meta.url),
-    env: { ...process.env, OCC_SLACK_PROXY_PORT: String(port) },
+    env: {
+      ...process.env,
+      OCC_SLACK_PROXY_PORT: String(port),
+      OCC_CHANNEL_PROXY_TEAMS: String(teamsEnabled),
+    },
     stdio: ["ignore", "ignore", "pipe"],
   });
   t.after(() => child.kill());

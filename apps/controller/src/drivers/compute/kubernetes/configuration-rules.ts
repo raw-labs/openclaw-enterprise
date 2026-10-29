@@ -10,6 +10,8 @@ import {
   keyedSettingPath,
   PROVIDER_MODELS_LIST,
   quotedSettingKey,
+  secretInputShorthandName,
+  wholeEnvironmentReferenceName,
 } from "@openclaw-enterprise/occ";
 import { asRecord, splitModelRef } from "@openclaw-enterprise/utils";
 import type { HarnessAuthMethodRule } from "../harness-auth-method.ts";
@@ -76,20 +78,27 @@ export function requireWorkspaceNodePlugins(
 }
 
 /**
- * Enabled channels need a dedicated Agent workload and an Installation channel runtime
- * (`runtime.channels`: isolated credentials and a reviewed proxy). `providers` lists the
+ * Enabled channels need a dedicated workload (unless the trusted evaluation option is
+ * enabled) and an Installation channel runtime
+ * (`runtime.channels`: credential delivery and a reviewed proxy). `providers` lists the
  * enabled channel providers, in Configuration order.
  */
 export function requireChannelTopology(
   providers: readonly string[],
-  topology: { readonly embedded: boolean; readonly channelRuntime: boolean },
+  topology: {
+    readonly embedded: boolean;
+    readonly channelRuntime: boolean;
+    readonly experimentalEmbeddedChannels?: boolean;
+  },
   createError: SettingError,
 ): void {
   const [provider] = providers;
   if (provider === undefined) {
     return;
   }
-  if (topology.embedded) {
+  // TODO(dedicated native parity): remove this evaluation exception once dedicated
+  // OpenClaw supplies the required models and native integrations.
+  if (topology.embedded && topology.experimentalEmbeddedChannels !== true) {
     throw createError(
       `channels.${provider}`,
       "is enabled, but channels require a dedicated Agent workload",
@@ -100,6 +109,95 @@ export function requireChannelTopology(
       `channels.${provider}`,
       "is enabled, but this Installation has no channel runtime: enabled channels require isolated credentials and a reviewed proxy",
     );
+  }
+}
+
+/** The packaged Teams trial uses Microsoft Public cloud and one native SDK callback. */
+export function requireTeamsConfiguration(
+  configuration: Readonly<OpenClawConfigurationDocument>,
+  createError: SettingError,
+): void {
+  const value = asRecord(configuration.channels)?.msteams;
+  const teams = asRecord(value);
+  if (value === undefined || teams?.enabled === false) {
+    return;
+  }
+  if (teams === undefined) {
+    throw createError("channels.msteams", "must be an object");
+  }
+  for (const field of ["appId", "tenantId"] as const) {
+    if (
+      typeof teams[field] !== "string" ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(teams[field])
+    ) {
+      throw createError(
+        `channels.msteams.${field}`,
+        "must be an explicit Microsoft application or tenant UUID",
+      );
+    }
+  }
+  const password = asRecord(teams.appPassword);
+  const stringReference =
+    typeof teams.appPassword === "string"
+      ? wholeEnvironmentReferenceName(teams.appPassword) ??
+        secretInputShorthandName(teams.appPassword)
+      : undefined;
+  if (
+    stringReference === undefined &&
+    (password?.source !== "env" ||
+      (password.provider !== undefined && password.provider !== "default") ||
+      typeof password.id !== "string" ||
+      !/^[A-Za-z_][A-Za-z0-9_]{0,252}$/.test(password.id))
+  ) {
+    throw createError(
+      "channels.msteams.appPassword",
+      "must reference an environment Secret binding",
+    );
+  }
+  if (teams.cloud !== undefined && teams.cloud !== "Public") {
+    throw createError("channels.msteams.cloud", "must be Public for this channel runtime");
+  }
+  if (teams.webhook !== undefined && asRecord(teams.webhook) === undefined) {
+    throw createError("channels.msteams.webhook", "must be an object");
+  }
+  if (
+    asRecord(teams.webhook)?.path !== undefined &&
+    asRecord(teams.webhook)?.path !== "/api/messages"
+  ) {
+    throw createError("channels.msteams.webhook.path", "must be /api/messages");
+  }
+  if (teams.legacyWebhook !== undefined && teams.legacyWebhook !== false) {
+    throw createError(
+      "channels.msteams.legacyWebhook",
+      "must be false: callbacks use the Gateway listener",
+    );
+  }
+  for (const field of [
+    "certificatePath",
+    "certificateThumbprint",
+    "managedIdentityClientId",
+    "useManagedIdentity",
+    "serviceUrl",
+    "delegatedAuth",
+    "sso",
+  ] as const) {
+    if (teams[field] !== undefined) {
+      throw createError(
+        `channels.msteams.${field}`,
+        "is outside the supported app-password callback trial",
+      );
+    }
+  }
+  if (teams.authType !== undefined && teams.authType !== "secret") {
+    throw createError("channels.msteams.authType", "must be secret");
+  }
+  const plugins = asRecord(configuration.plugins);
+  if (
+    (Array.isArray(plugins?.deny) && plugins.deny.includes("msteams")) ||
+    asRecord(asRecord(plugins?.entries)?.msteams)?.enabled === false ||
+    (Array.isArray(plugins?.allow) && !plugins.allow.includes("msteams"))
+  ) {
+    throw createError("plugins", "must allow the msteams channel plugin");
   }
 }
 

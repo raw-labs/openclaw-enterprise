@@ -10,6 +10,13 @@ const SHUTDOWN_DRAIN_MS = 2_000;
 const CLIENT_DRAIN_TIMEOUT_MS = 10_000;
 const ALLOWED_SUFFIXES = [".slack.com", ".slack-edge.com", ".slack-msgs.com"];
 const ALLOWED_HOSTS = new Set(["slack.com", "slack-edge.com", "slack-msgs.com"]);
+const MICROSOFT_PUBLIC_HOSTS = new Set([
+  "login.microsoftonline.com",
+  "login.botframework.com",
+  "api.botframework.com",
+  "graph.microsoft.com",
+  "smba.trafficmanager.net",
+]);
 
 function parsePort(value) {
   if (value === undefined || value === "") {
@@ -37,14 +44,15 @@ function parseConnectTarget(target) {
   return { host: match[1].toLowerCase(), port };
 }
 
-function isAllowedSlackConnectTarget(target) {
+function isAllowedSlackConnectTarget(target, teamsEnabled) {
   const parsed = parseConnectTarget(target);
   if (parsed === undefined || parsed.port !== 443) {
     return false;
   }
   return (
     ALLOWED_HOSTS.has(parsed.host) ||
-    ALLOWED_SUFFIXES.some((suffix) => parsed.host.endsWith(suffix))
+    ALLOWED_SUFFIXES.some((suffix) => parsed.host.endsWith(suffix)) ||
+    (teamsEnabled && MICROSOFT_PUBLIC_HOSTS.has(parsed.host))
   );
 }
 
@@ -98,7 +106,10 @@ function closeClientWhenDrained(clientSocket, drainTimeoutMs) {
   clientSocket.once("close", () => clearTimeout(timer));
 }
 
-export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS } = {}) {
+export function createSlackProxyServer({
+  clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS,
+  teamsEnabled = false,
+} = {}) {
   const server = createServer((request, response) => {
     response.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
     response.end("CONNECT required\n");
@@ -109,7 +120,7 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
     // EPIPE or ECONNRESET while the 403 is written; without a listener
     // that error exits the process.
     closeOnSocketError(clientSocket);
-    if (!isAllowedSlackConnectTarget(request.url)) {
+    if (!isAllowedSlackConnectTarget(request.url, teamsEnabled)) {
       reject(clientSocket, 403, "Forbidden");
       closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
       return;
@@ -151,7 +162,11 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = parsePort(process.env.OCC_SLACK_PROXY_PORT);
-  const server = createSlackProxyServer();
+  const teams = process.env.OCC_CHANNEL_PROXY_TEAMS;
+  if (teams !== undefined && teams !== "true" && teams !== "false") {
+    throw new Error("OCC_CHANNEL_PROXY_TEAMS must be true or false.");
+  }
+  const server = createSlackProxyServer({ teamsEnabled: teams === "true" });
   const sockets = new Set();
   server.on("connection", (socket) => {
     sockets.add(socket);
