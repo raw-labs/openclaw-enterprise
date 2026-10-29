@@ -1469,9 +1469,7 @@ async function seedCanonicalData(
                     },
                     {
                       source: "msteams",
-                      destinations: [
-                        { host: "smba.trafficmanager.net", includeSubdomains: false },
-                      ],
+                      destinations: [{ host: "smba.trafficmanager.net", includeSubdomains: false }],
                     },
                   ],
                   denyCidrs: ["10.0.0.0/8"],
@@ -1804,7 +1802,10 @@ async function assertUpgradedRevisionReadable(db) {
     assert.deepEqual(found.executionAdmission, legacyExecutionAdmission);
     assert.equal(found.egressPlan, undefined);
     const snapshot = (
-      await db.app.query("SELECT admitted_spec->'gateway_outbound' AS outbound FROM occ.agent_revisions WHERE id=$1", [id])
+      await db.app.query(
+        "SELECT admitted_spec->'gateway_outbound' AS outbound FROM occ.agent_revisions WHERE id=$1",
+        [id],
+      )
     ).rows[0].outbound;
     assert.deepEqual(found.gatewayOutbound, snapshot ?? undefined);
     const listed = await state.read((view) => view.revisions.listRevisions(namespaceId, agentId));
@@ -2065,11 +2066,7 @@ test(
           );
           await db.app.query(
             "INSERT INTO occ.iam_roles(id,namespace_id,permissions) VALUES($1,$2,$3)",
-            [
-              roleId,
-              namespaceId,
-              JSON.stringify([{ action: "use", resourceKind: "agent" }]),
-            ],
+            [roleId, namespaceId, JSON.stringify([{ action: "use", resourceKind: "agent" }])],
           );
           await db.app.query(
             "INSERT INTO occ.iam_access_bindings(id,namespace_id,identity_subject_id,role_id,resource_kind,resource_id,runtime_role) SELECT $1,$2,$3,$4,'agent',id,'reviewer' FROM occ.agents WHERE namespace_id=$2",
@@ -2713,6 +2710,66 @@ test(
         });
         assert.deepEqual(await historySnapshot(drifted), beforeRefusal);
       }
+    }
+
+    // Restored supported prefixes must pass the same production guard before
+    // upgrading. Cover an older catalog, the published prefix, and both new boundaries.
+    for (const [prefix, history] of [
+      [24, "prePresetsMain"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [66, "preGatewayManagedMode"],
+    ]) {
+      await context.test(`restored ${history} upgrade and grant drift`, async (child) => {
+        const source = await historyDatabase(child, fixture, "dump", { prefix });
+        await source.app.query(
+          "INSERT INTO occ.iam_identities(id,kind,issuer,subject) VALUES ('restore-human','principal','restore-fixture','human')",
+        );
+        const native = await logicalRestoreSnapshot(source);
+        const { stdout: archive } = await execFileAsync(
+          "docker",
+          ["exec", fixture.container, "pg_dump", "-U", "postgres", "-Fc", source.name],
+          { encoding: "buffer", timeout: 180_000, maxBuffer: 32 * 1024 * 1024 },
+        );
+        const restored = await restoreHistoryArchive(child, fixture, archive);
+        const accepted = await logicalRestoreSnapshot(restored);
+        assert.notEqual(catalogDigest(accepted.occ), catalogDigest(native.occ));
+        assert.deepEqual(accepted.receipts, native.receipts);
+        assert.deepEqual(accepted.identities, native.identities);
+        assert.deepEqual(accepted.sequence, native.sequence);
+        assert.deepEqual(await runHistoryCommand(restored, "production", "--check"), {
+          ok: true,
+          history,
+        });
+        assert.deepEqual(await logicalRestoreSnapshot(restored), accepted);
+
+        // A measured restore must not admit changed application grants or apply
+        // pending migrations before refusing that drift.
+        const drifted = await restoreHistoryArchive(child, fixture, archive);
+        await drifted.migrator.query("REVOKE SELECT ON occ.iam_identities FROM occ_app");
+        const beforeRefusal = await historySnapshot(drifted);
+        assert.deepEqual(
+          await runHistoryCommand(
+            drifted,
+            "production",
+            undefined,
+            /catalog objects or effective grants differ/,
+          ),
+          { ok: false, code: "MIGRATION_HISTORY_UNSUPPORTED" },
+        );
+        assert.deepEqual(await historySnapshot(drifted), beforeRefusal);
+
+        assert.deepEqual(await runHistoryCommand(restored, "production"), { ok: true, history });
+        const upgraded = await logicalRestoreSnapshot(restored);
+        assert.deepEqual(upgraded.receipts.slice(0, prefix), native.receipts);
+        assert.deepEqual(upgraded.identities, native.identities);
+        await assertCredentialSchemaPrivileges(restored.app);
+        assert.deepEqual(await runHistoryCommand(restored, "production", "--check"), {
+          ok: true,
+          history: "completed",
+        });
+        assert.deepEqual(await logicalRestoreSnapshot(restored), upgraded);
+      });
     }
   },
 );
