@@ -10,15 +10,17 @@ author: miguelbranco80
 
 A dedicated Gateway runs Channels, plugins and integrations that call external services. Its [bundled Slack proxy](../../apps/controller/src/slack-proxy.mjs) allows Slack destinations on TCP/443 and rejects other services. Kubernetes blocks direct Internet access. A plugin therefore needs a route to the additional services approved for its Agent.
 
+This proposal applies to dedicated mode. Embedded mode keeps its existing behavior.
+
 ## Proposed change
 
-Give each Agent its own outbound destination list and enforce it through the selected Credential Proxy capability:
+Give each dedicated Agent's Gateway its own outbound destination list and enforce it through the selected Credential Proxy capability:
 
 **Gateway → OpenShell proxy → services approved for that Agent.**
 
 The selected OpenShell Driver runs one proxy Pod per Agent revision, using OpenShell's existing proxy software and policy engine. Enabled Channels automatically contribute their required destinations. Each revision saves its Agent's approved destinations and Channel requirements.
 
-Every dedicated Gateway in a single-cluster Kubernetes deployment uses this route for external HTTPS. Gateway and Harness placement and the Harness's existing protections stay unchanged. Embedded networking and separate execution clusters retain their existing behavior.
+Every dedicated Gateway in a single-cluster Kubernetes deployment uses this route for external HTTPS. Gateway and Harness placement and the Harness's existing protections stay unchanged. Separate execution clusters retain their existing behavior.
 
 <a id="one-request-before-and-after"></a>
 
