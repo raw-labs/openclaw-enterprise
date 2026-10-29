@@ -345,9 +345,12 @@ export interface InstallationCapabilities {
   /**
    * The OpenClaw execution modes an Agent can deploy in; empty when none. sandboxDriverUnavailable
    * marks an empty list caused by a selected Sandbox Driver outage, not the Installation's shape.
+   * settingRefusals holds admission's refusal for a mode the Sandbox Driver could provision but
+   * its settings refuse, naming the setting.
    */
   readonly openclaw?: {
     readonly executionModes: readonly HarnessExecutionMode[];
+    readonly settingRefusals?: { readonly dedicated?: string };
     readonly sandboxDriverUnavailable?: true;
   };
 }
@@ -771,6 +774,8 @@ export interface PluginToolCatalogEntry {
 }
 
 export interface PluginPolicyCapabilities {
+  /** An entry limits this plugin to its master switch. Unlisted plugins use the Driver defaults. */
+  readonly policyScopeByPlugin?: Readonly<Record<string, "enablement_only">>;
   readonly approvers?: {
     readonly agent: boolean;
     readonly plugin: boolean;
@@ -787,6 +792,15 @@ export interface PluginPolicyCapabilities {
     readonly reviewer: readonly PluginReviewer[];
   };
   readonly driverPolicySchema: JSONSchema;
+}
+
+/** Ready choices for a slot in the saved Agent's plugin picker. */
+export interface AgentPluginCredentialSlot {
+  readonly pluginId: string;
+  readonly releaseSha256: string;
+  readonly id: string;
+  readonly label: string;
+  readonly sources: readonly { readonly id: string; readonly name: string }[];
 }
 
 export interface PluginCatalogLink {
@@ -895,6 +909,112 @@ export function validPluginRevisionState(value: unknown): value is PluginRevisio
   return true;
 }
 
+/**
+ * The Harness a bundled Plugin Driver's runtime artifacts run in, or undefined when the pair
+ * is supported (or the Driver is not bundled). Compute refuses any other pair when it prepares
+ * a revision; OCC applies the same rule at Agent save, provisioning and deployment, before a
+ * dedicated deployment stops the running revision.
+ */
+export const OPENCLAW_PLUGIN_DRIVER_IMPLEMENTATION = "occ/openclaw-plugin";
+export const CODEX_PLUGIN_DRIVER_IMPLEMENTATION = "occ/codex-plugin";
+
+export function pluginRuntimeHarnessRequirement(
+  implementation: string,
+  harness: Readonly<Pick<RevisionHarnessDescriptor, "id" | "mode">>,
+): string | undefined {
+  if (implementation === CODEX_PLUGIN_DRIVER_IMPLEMENTATION) {
+    return (harness.id === "codex" && harness.mode === "dedicated") ||
+      (harness.id === "openclaw" && harness.mode === "embedded")
+      ? undefined
+      : "a dedicated Codex Harness or embedded OpenClaw Harness";
+  }
+  if (implementation === OPENCLAW_PLUGIN_DRIVER_IMPLEMENTATION) {
+    return harness.id === "openclaw" &&
+      (harness.mode === "embedded" || harness.mode === "dedicated")
+      ? undefined
+      : "an OpenClaw Harness";
+  }
+  return undefined;
+}
+
+/**
+ * Whether this Harness reaches the repository credential broker through the Codex network
+ * proxy when Compute delivers repository material to it: a dedicated Codex Harness, or an
+ * embedded OpenClaw Harness whose plugins run in the Codex Plugin Driver.
+ */
+export function codexProxiesRepositoryBroker(
+  harness: Readonly<Pick<RevisionHarnessDescriptor, "id" | "mode">>,
+  pluginDriverImplementation: string | undefined,
+): boolean {
+  return (
+    (harness.id === "codex" && harness.mode === "dedicated") ||
+    (harness.id === "openclaw" &&
+      harness.mode === "embedded" &&
+      pluginDriverImplementation === CODEX_PLUGIN_DRIVER_IMPLEMENTATION)
+  );
+}
+
+const CODEX_NETWORK_PROXY_SETTING = "plugins.entries.codex.config.appServer.networkProxy";
+
+/**
+ * The Codex network proxy domain decisions of a Configuration whose Harness reaches the
+ * repository credential broker through that proxy, or the refusal of a setting that blocks the
+ * broker. Compute applies it when it prepares a revision, with the broker host from the prepared
+ * material. OCC applies it without the host at Agent save, provisioning and deployment, before a
+ * dedicated deployment stops the running revision (finding 2350).
+ */
+export function codexRepositoryBrokerNetworkProxy(
+  configuration: unknown,
+  brokerHost?: string,
+): { readonly domains: Readonly<Record<string, "allow" | "deny">> } | { readonly refusal: string } {
+  const refuse = (setting: string, problem: string, change: string) => ({
+    refusal: `Configuration setting ${CODEX_NETWORK_PROXY_SETTING}.${setting} ${problem}, so Codex cannot reach the repository credential broker. ${change}, or remove the repository bindings.`,
+  });
+  const appServer = asRecord(
+    asRecord(asRecord(asRecord(asRecord(configuration)?.plugins)?.entries)?.codex)?.config,
+  )?.appServer;
+  const policy = asRecord(asRecord(appServer)?.networkProxy);
+  if (policy?.enabled === false) {
+    return refuse("enabled", "is false", "Set it to true or delete it");
+  }
+  if (policy?.mode !== undefined && policy.mode !== "limited" && policy.mode !== "full") {
+    return refuse("mode", 'is not "limited" or "full"', "Set it to one of those or delete it");
+  }
+  if (policy?.allowLocalBinding !== undefined && typeof policy.allowLocalBinding !== "boolean") {
+    return refuse(
+      "allowLocalBinding",
+      "is not true or false",
+      "Set it to true or false or delete it",
+    );
+  }
+  const domainsInput = policy?.domains === undefined ? undefined : asRecord(policy.domains);
+  if (policy?.domains !== undefined && domainsInput === undefined) {
+    return refuse("domains", "is not an object", 'Map each host to "allow" or "deny"');
+  }
+  const domains: Record<string, "allow" | "deny"> = {};
+  for (const [entry, decision] of Object.entries(domainsInput ?? {})) {
+    if (decision !== "allow" && decision !== "deny") {
+      return refuse(
+        "domains",
+        'maps a host to neither "allow" nor "deny"',
+        'Set each host to "allow" or "deny"',
+      );
+    }
+    const host = entry.trim().toLowerCase();
+    if (host.length === 0) {
+      return refuse("domains", "has an empty host", "Delete that entry");
+    }
+    // A deny of a host wins over an allow of the same host in another spelling.
+    domains[host] = domains[host] === "deny" || decision === "deny" ? "deny" : "allow";
+  }
+  if (brokerHost !== undefined && domains[brokerHost] === "deny") {
+    // The text leaves out the host: the worker drops a preparation failure message over 256
+    // characters, and a Namespace name can make the host long.
+    return refuse("domains", "denies the repository credential broker's host", "Delete that deny");
+  }
+  return { domains };
+}
+
 export interface Configuration extends Scope {
   readonly id: string;
   readonly namespaceId: string;
@@ -944,6 +1064,8 @@ export interface Agent extends Scope {
   readonly harnessAuth: HarnessAuthBinding | null;
   readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode: HarnessExecutionMode;
+  /** Desired Gateway administration mode; each deployment snapshots the selected value. */
+  readonly gatewayManagedMode: boolean;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingSelection[];
@@ -1022,6 +1144,7 @@ export interface AgentRevision extends Scope {
   readonly configurationKind: ConfigurationKind;
   readonly configurationGeneration: number;
   readonly configuration: OpenClawConfigurationDocument;
+  readonly gatewayManagedMode: boolean;
   readonly harness: RevisionHarnessDescriptor;
   readonly compute: {
     readonly id: string;
@@ -1760,6 +1883,13 @@ export interface ExternalChatgptAuth {
 export interface CredentialSourceAttachment {
   readonly sourceId: string;
   readonly ref: string;
+  /** Non-secret limits of the attached OAuth provider for a Sandbox request guard. */
+  readonly requestScope?: {
+    readonly host: string;
+    readonly port: number;
+    readonly path: string;
+    readonly scopes: readonly string[];
+  };
   /** External Codex authentication carries no refresh token into the workload. */
   readonly externalChatgptAuth?: ExternalChatgptAuth;
 }
@@ -1926,6 +2056,11 @@ export interface SandboxDriver extends Driver {
     harness: Readonly<RevisionHarnessDescriptor>,
     configuration: Readonly<OpenClawConfigurationDocument>,
   ): void;
+  /**
+   * The Agent Configuration this Driver admits for a dedicated Harness. Refusals that Driver
+   * settings alone decide throw ConfigurationHarnessError, also for an empty Configuration:
+   * the Installation's OpenClaw execution modes probe it that way.
+   */
   configureAgent?(
     configuration: Readonly<OpenClawConfigurationDocument>,
     harness: Readonly<RevisionHarnessDescriptor>,
@@ -2036,6 +2171,15 @@ export interface PluginDiscoveryAuthentication {
 export interface PluginDriver extends Driver {
   readonly capability: "plugin";
   readonly policyCapabilities: PluginPolicyCapabilities;
+  /** Matches only source metadata authorized by OCC. The Driver never receives credential values. */
+  readonly credentials?: {
+    choices(sources: readonly CredentialSource[]): readonly AgentPluginCredentialSlot[];
+    validate(
+      selections: PluginDesiredState,
+      sources: readonly CredentialSource[],
+      modelSourceId?: string,
+    ): void;
+  };
   /** Checks policy support without installing plugins or performing authenticated discovery. */
   validatePolicies(selections: PluginDesiredState, defaultApprovers?: PluginApprovers): void;
   /**
@@ -2046,6 +2190,16 @@ export interface PluginDriver extends Driver {
   validateAgentConfiguration?(
     selections: PluginDesiredState,
     configuration: Readonly<OpenClawConfigurationDocument>,
+  ): void;
+  /** Refuses a selection the Agent's Harness and the Installation's Compute cannot deliver. */
+  validatePlacement?(
+    selections: PluginDesiredState,
+    harness: Readonly<Pick<RevisionHarnessDescriptor, "id" | "mode">>,
+    computeImplementation: string,
+    credentialRuntime?: {
+      readonly sandbox: string | undefined;
+      readonly gateway: string | undefined;
+    },
   ): void;
   listCatalog(context: PluginDriverContext): Promise<readonly PluginCatalogEntry[]>;
   /** Pre-Agent discovery defaults to requiring a transient credential. Results are not persisted. */
@@ -2307,6 +2461,8 @@ export interface ComputeDriver extends Driver {
     revision: Readonly<AgentRevision>,
   ): (() => Promise<void>) | undefined;
   readonly supportsWorkspaceSetup?: true;
+  /** Enforces Gateway administration restrictions for managed Agent revisions. */
+  readonly supportsGatewayManagedMode?: true;
   readonly capability: "compute";
   /** Deployment must observe and provision Agent-owned runtime credentials before revision admission. */
   readonly requiresAgentRuntimeCredentials?: true;

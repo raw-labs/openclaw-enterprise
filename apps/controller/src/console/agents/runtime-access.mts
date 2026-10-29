@@ -4,7 +4,7 @@ import type { AgentAccessContext } from "./credential-access.mjs";
 import { message } from "./list.mjs";
 
 const warning =
-  "Use OCE for durable configuration; native changes are not recorded in Agent versions and may be overwritten by deployment.";
+  "Gateway managed mode restricts administrative changes by default. OCE deployments can overwrite changes made while managed mode is off.";
 
 type Availability =
   | { status: "available"; url: string }
@@ -60,20 +60,36 @@ export function renderRuntimeAccess(
     };
   },
   path: string,
+  options?: {
+    versionLabel(): string;
+    recovery(status: Availability["status"]): HTMLElement | null;
+  },
 ) {
   const statusPath = `${path}/native-admin`;
-  const status = element("p", { className: "hint", role: "status" }, "Checking access…");
-  const error = element("p", { className: "error", role: "alert" });
+  const status = element(
+    "p",
+    { id: "native-admin-availability", className: "hint", role: "status" },
+    "Checking access…",
+  );
+  const error = element("p", { id: "native-admin-error", className: "error", role: "alert" });
+  const target = element("p", { id: "native-admin-target", className: "native-admin-target" });
+  const unavailable = button("Open Agent UI", () => {}, {
+    tone: "primary",
+    disabled: true,
+    hidden: true,
+    "aria-describedby": `${status.id} ${error.id}`,
+  });
+  const recovery = element("div", { className: "native-admin-recovery" });
   const launch = element(
     "a",
     {
-      className: "overview-primary",
+      className: "button button--primary agent-ui-launch",
       target: "_blank",
       rel: "noopener noreferrer",
-      "aria-describedby": "native-admin-scope native-admin-warning",
+      "aria-describedby": "native-admin-target native-admin-scope native-admin-warning",
       hidden: true,
     },
-    "Open OpenClaw",
+    "Open Agent UI",
     element("span", { "aria-hidden": "true" }, "↗"),
   );
   const reload = button(
@@ -93,12 +109,13 @@ export function renderRuntimeAccess(
   const section = element(
     "section",
     { className: "native-admin-access", "aria-label": "OpenClaw access" },
-    element("div", { className: "native-admin-heading" }, element("h2", {}, "OpenClaw"), launch),
+    target,
     scope,
     caution,
     status,
     error,
     reload,
+    recovery,
   );
 
   let current: Availability | undefined;
@@ -127,6 +144,18 @@ export function renderRuntimeAccess(
       !failed &&
       !assignmentRequired &&
       (current === undefined || current.status === "disabled" || current.status === "denied");
+    unavailable.hidden = section.hidden || !launch.hidden;
+    target.hidden = launch.hidden;
+    updateTarget();
+    const nextRecovery = current && launch.hidden ? options?.recovery(current.status) : null;
+    // An unchanged recovery link keeps focus if the reader moved there during the access read.
+    const shownRecovery = recovery.firstElementChild;
+    if (nextRecovery ? !nextRecovery.isEqualNode(shownRecovery) : shownRecovery !== null) {
+      recovery.replaceChildren(...(nextRecovery ? [nextRecovery] : []));
+    }
+  }
+  function updateTarget() {
+    target.textContent = `Opens selected version · ${options?.versionLabel() ?? "current version"} in a new tab.`;
   }
 
   function showDeniedAccess() {
@@ -201,6 +230,9 @@ export function renderRuntimeAccess(
 
   return {
     section,
+    launch,
+    unavailable,
+    updateTarget,
     ready: load(),
     // Rereads access once, for example after the active version or runtime state changes.
     refresh() {

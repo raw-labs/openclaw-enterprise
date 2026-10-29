@@ -23,6 +23,8 @@ import {
   createKubernetesInstallationConfiguration,
   createRealKubernetesFixture,
   kubernetesHash as hash,
+  productionGatewayMemoryLimit,
+  productionGatewayMemoryLimitGi,
   withBoundedTeardown,
 } from "../helpers/kubernetes-real.mjs";
 import {
@@ -911,8 +913,9 @@ function installationConfiguration(authentication, platformNamespace, slack, opt
       process.env.OCC_TEST_CODEX_OPENAI_BASE_URL;
   }
   configuration.drivers.plugin = { id: "codex-plugin", configuration: {} };
-  // The real Gateway was OOMKilled at 2Gi during a model turn; 4Gi passed the rerun.
-  configuration.drivers.compute.configuration.resources.gateway.limits.memory = "4Gi";
+  // The real Gateway loads its plugins during the first model request.
+  configuration.drivers.compute.configuration.resources.gateway.limits.memory =
+    productionGatewayMemoryLimit;
   const pluginStatusProxyCidrs = process.env.OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS;
   if (pluginStatusProxyCidrs !== undefined && pluginStatusProxyCidrs.trim().length > 0) {
     configuration.drivers.compute.configuration.network.pluginStatusProxySourceCidrs =
@@ -931,7 +934,7 @@ function installationConfiguration(authentication, platformNamespace, slack, opt
     "requests.memory": "2Gi",
     "limits.cpu": "8",
     // Two embedded Agents plus one replacement Gateway may coexist during cutover.
-    "limits.memory": "12Gi",
+    "limits.memory": `${3 * productionGatewayMemoryLimitGi}Gi`,
   };
   configuration.drivers.compute.configuration.servicePrincipalCredentials.expirationSeconds = 3_600;
   if (options.gatewayRouting !== undefined) {
@@ -1127,9 +1130,11 @@ async function createApiSecret(request, namespaceId, name, value) {
     200,
     `Secret read failed with HTTP ${read.status} (${read.error?.code ?? "unknown"})`,
   );
-  // Detail reads include consumers; a newly created, unbound Secret has none.
+  // Detail reads include consumers; a newly created, unbound Secret has none. Only the exact
+  // read reports what its caller may do next: every caller here holds Secret update and delete.
   assert.deepEqual(read.data, {
     ...response.data,
+    callerPermissions: { update: true, delete: true },
     consumers: {
       agents: [],
       configurations: [],

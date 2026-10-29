@@ -50,8 +50,8 @@ graph TD
 `apps/controller/src/console/agents/access.mts:renderAgentAccess`
 
 The Access tab mounts sharing independently of version/configuration reads and
-native admission. Agent detail leaves the tab out when the console's observability
-probe already showed the person lacks Installation administration: the policy
+native admission. Agent detail leaves the tab out when the console's Installation-access
+answer already showed the person lacks Installation administration: the policy
 endpoints require it and the API audits each denial. The panel reads `/agents/:agentId/runtime-roles` and the selected Namespace’s
 `/iam/roles` and `/iam/access-bindings` endpoints. A policy `403` hides the
 panel and the tab, opens Configuration, and leaves the other panels usable; a current `401` retains global

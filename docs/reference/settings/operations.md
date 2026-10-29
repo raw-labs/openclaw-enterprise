@@ -80,8 +80,10 @@ has 46 through `0046_model_probe_failure_cause`;
 through `0049_codex_pat_sources`; `preCredentialWithdrawalRequester` has 50
 through `0050_agent_credential_sources`; later `pre*` shapes add one each, through
 `preCredentialProxy` (59) and `prePreparedAttemptSettlement` (62, through
-`0062_credential_delivery_custody`) and `preRuntimeRoles` (63, through
-`0063_prepared_attempt_settlement`). Migration brings each to `completed` with 64 receipts.
+`0062_credential_delivery_custody`), `preGatewayManagedMode` (63, through
+`0063_prepared_attempt_settlement`), and `preRuntimeRoles` (64, through
+`0064_gateway_managed_mode`). The runtime-role migration follows this prefix;
+its completed catalog must be qualified against PostgreSQL before migration is enabled.
 The [canonical manifest](../../../migrations/meta/_canonical-history.json) records
 accepted source and catalog hashes. Never delete or relabel unsupported preview
 receipts. Empty schemas may be absent or owner-only, with no objects or
@@ -357,8 +359,7 @@ NODE_ENV=development node apps/controller/src/server.mjs
 
 Installation, Namespace, Agent, native IAM, audit, and controller-work state
 survive restart in both Compose and database-only modes. The full Compose path
-also starts the worker and selects Docker Compute-backed Namespace and
-AgentRevision execution by default.
+also starts the worker and selects Docker Compute by default.
 
 Compose keeps relational OCC metadata in the `occ_postgres_data` named volume
 and native development Configuration documents in the `occ_configuration_data`
