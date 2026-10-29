@@ -27,8 +27,10 @@ node scripts/render-installation-profile.mjs \
 Paths resolve from the working directory. The file replaces the bundled profile;
 its `name` must match `--profile` (`openclaw` or `codex`). Unknown fields,
 unreadable files, invalid JSON and mismatched names fail without fallback.
-A failed rerender removes prior generated outputs; success writes `values.yaml`,
-`installation.yaml` and `preflight.json`. Continue with
+Keep the profile and site input separate from generated output paths. The renderer
+refuses file collisions, including symbolic and hard links, before cleanup and
+leaves existing files unchanged. Other failed rerenders remove prior generated
+outputs; success writes `values.yaml`, `installation.yaml` and `preflight.json`. Continue with
 [Use rendered files](installation-profiles.md#use-rendered-files).
 
 Only the selection under `installation.drivers.plugin` is copied. Its `id` must

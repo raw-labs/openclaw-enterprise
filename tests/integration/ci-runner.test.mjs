@@ -2013,6 +2013,52 @@ test("failure text is bounded and redacts env values and credential shapes", asy
   assert.doesNotMatch(straddle.message, /jobonly/);
   assert.equal((await render("thrown string")).message, "thrown string");
   assert.equal((await render(undefined)).message, undefined);
+  assert.equal((await render(42)).message, "42");
+});
+
+// Finding 2785: a DOMException (a fetch timeout or abort) crosses node:test's process
+// boundary as a bare stack with an empty message, so its failure had no text at all.
+test("run names DOMException and empty-message failures", async (t) => {
+  const root = await fixture(t);
+  const file = "tests/integration/errors.test.mjs";
+  const resultsPath = join(root, "results/errors.json");
+  await writeFile(
+    join(root, file),
+    [
+      'import test from "node:test";',
+      'test("timeout", () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); });',
+      'test("abort", () => { const controller = new AbortController(); controller.abort(); throw controller.signal.reason; });',
+      'test("empty", () => { throw new Error(""); });',
+      "",
+    ].join("\n"),
+  );
+  await writeJson(join(root, "manifest.json"), {
+    version: 1,
+    lanes: { errors: { files: [{ path: file }] } },
+    groups: { ci: ["errors"] },
+  });
+
+  const result = run(root, laneArgs(root, "errors", "state/errors.jsonl", resultsPath));
+  assert.equal(result.status, 1);
+  const summary = JSON.parse(await readFile(resultsPath, "utf8"));
+  const failure = (name) => summary.files[0].tests.find((entry) => entry.name === name).error;
+  // The stack header names the exception, and the frame skips Node's DOMException constructor.
+  for (const [name, message, line] of [
+    ["timeout", "TimeoutError: The operation was aborted due to timeout", 2],
+    ["abort", "AbortError: This operation was aborted", 3],
+    ["empty", "Error", 4],
+  ]) {
+    assert.equal(failure(name).message, message);
+    assert.match(
+      failure(name).frame,
+      new RegExp(`\\(${file.replaceAll(".", "\\.")}:${line}:\\d+\\)$`),
+    );
+  }
+  // The job log names the failure too.
+  assert.match(
+    result.stderr,
+    /run-tests: failed tests\/integration\/errors\.test\.mjs:2 "timeout": TimeoutError: The operation was aborted due to timeout \(at /,
+  );
 });
 
 test("the reporter forwards a failed file's output tail and whole stack only", async () => {
@@ -4834,6 +4880,34 @@ for (const scenario of [
       code: "CI_PREPARATION_COMMAND_FAILED",
       stage: "database-schema",
       failure: "spawn",
+    },
+  },
+  // A refused statement or no session, from the direct connection to the lane's server
+  // (scripts/ci/postgres-admin.mjs), which has no process exit code or signal.
+  {
+    name: "query",
+    input: {
+      code: "CI_PREPARATION_COMMAND_FAILED",
+      stage: "database-create",
+      failure: "query",
+      timedOut: false,
+    },
+    expected: {
+      name: "Error",
+      code: "CI_PREPARATION_COMMAND_FAILED",
+      stage: "database-create",
+      failure: "query",
+      timedOut: false,
+    },
+  },
+  {
+    name: "connect",
+    input: { code: "CI_PREPARATION_COMMAND_FAILED", stage: "database-schema", failure: "connect" },
+    expected: {
+      name: "Error",
+      code: "CI_PREPARATION_COMMAND_FAILED",
+      stage: "database-schema",
+      failure: "connect",
     },
   },
   {
