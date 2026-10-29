@@ -23,6 +23,7 @@ service OpenShell {
   rpc GetSandboxPolicyStatus(GetSandboxPolicyStatusRequest) returns (GetSandboxPolicyStatusResponse);
   rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
   rpc ExecSandbox(ExecSandboxRequest) returns (stream ExecSandboxEvent);
+  rpc ForwardTcp(stream TcpForwardFrame) returns (stream TcpForwardFrame);
   // Operator mTLS only; upstream v0.1.4 (5a7728c3) credential retrieval.
   rpc GetProviderCredentials(GetProviderCredentialsRequest) returns (GetProviderCredentialsResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
@@ -1261,4 +1262,17 @@ message SandboxPolicyRevision {
 message CredentialConnector {
   string path = 1;
   string sha256 = 2;
+}
+
+// Pinned bdb956f2: private loopback TCP forwarding, authenticated sandbox:write.
+message TcpRelayTarget { string host = 1; uint32 port = 2; }
+message TcpForwardInit {
+  string sandbox = 1;
+  string workspace = 3;
+  string service_id = 4;
+  oneof target { TcpRelayTarget tcp = 6; }
+  string authorization_token = 7;
+}
+message TcpForwardFrame {
+  oneof payload { TcpForwardInit init = 1; bytes data = 2; }
 }

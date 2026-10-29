@@ -42,6 +42,7 @@
     "runtime-image-fixture": "./test-suites/runtime-image-fixture.json",
     "qa-matrix": "./test-suites/qa-matrix.json",
     "keycloak-oidc": "./test-suites/keycloak-oidc.json",
+    "gateway-containment": "./test-suites/gateway-containment.json",
     "egress-connected": "./test-suites/egress-connected.json",
     "skipper-prepared-git-installed": "./test-suites/skipper-prepared-git-installed.json",
     "egress-custody-installed": "./test-suites/egress-custody-installed.json"

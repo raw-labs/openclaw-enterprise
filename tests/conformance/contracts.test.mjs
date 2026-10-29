@@ -303,6 +303,11 @@ test("an admitted AgentRevision is a detached and deeply immutable deployment sn
     configurationKind: "agent",
     configurationGeneration: 1,
     configuration: { model: "gpt-test", temperature: "0", tool: "lookup" },
+    gatewayOutbound: { mode: "restricted", hosts: ["api.github.com"] },
+    gatewayOutboundAdmission: {
+      ceiling: { allowPublicHttps: false, hosts: ["api.github.com"] },
+      channelDestinations: [{ host: "*.slack.com", ports: [443], protocol: "wss" }],
+    },
     harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
     compute: { id: "compute-test", implementation: "deterministic-fake" },
     harnessAuth: {
@@ -367,6 +372,19 @@ test("an admitted AgentRevision is a detached and deeply immutable deployment sn
   assert.equal(admitted.configurationKind, "agent");
   assert.equal(admitted.configurationGeneration, 1);
 
+  mutableRevision.gatewayOutboundAdmission.ceiling.hosts.push("registry.npmjs.org");
+  mutableRevision.gatewayOutboundAdmission.channelDestinations[0].host = "api.github.com";
+  assert.deepEqual(admitted.gatewayOutboundAdmission, {
+    ceiling: { allowPublicHttps: false, hosts: ["api.github.com"] },
+    channelDestinations: [{ host: "*.slack.com", ports: [443], protocol: "wss" }],
+  });
+  assert.throws(
+    () => admitted.gatewayOutboundAdmission.channelDestinations[0].ports.push(80),
+    TypeError,
+  );
+  mutableRevision.gatewayOutbound.hosts.push("registry.npmjs.org");
+  assert.deepEqual(admitted.gatewayOutbound, { mode: "restricted", hosts: ["api.github.com"] });
+  assert.throws(() => admitted.gatewayOutbound.hosts.push("registry.npmjs.org"), TypeError);
   mutableRevision.configuration.model = "modified-after-admission";
   mutableRevision.configuration.temperature = "1";
   mutableRevision.configuration.tool = "mutated-tool";

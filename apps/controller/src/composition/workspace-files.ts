@@ -6,6 +6,7 @@ import type { ComputeDriver } from "@openclaw-enterprise/contracts";
 import type { ControllerWorkspaceFilesAccess } from "../gateway/contracts.ts";
 import { createNativeWorkspaceFilesAccess } from "../gateway/workspace-files-client.ts";
 import { DEVELOPMENT_HARNESS_DESCRIPTOR } from "./production-harness.ts";
+import { gatewayIngressTarget, type GatewayIngressAuthority } from "./gateway-ingress.ts";
 
 const NATIVE_AGENT_ID = "main";
 const GATEWAY_API_KEY_MAX_BYTES = 4 * 1024;
@@ -36,6 +37,7 @@ function validateUrl(value: string): string {
 export function createWorkspaceFilesAccess(
   computeDriver: ComputeDriver,
   apiKeyPath: string,
+  gatewayIngressAuthority?: GatewayIngressAuthority,
 ): ControllerWorkspaceFilesAccess {
   validateGatewayApiKeyPath(apiKeyPath);
   return createNativeWorkspaceFilesAccess(async (request) => {
@@ -43,8 +45,10 @@ export function createWorkspaceFilesAccess(
     if (endpoint === undefined) {
       return undefined;
     }
+    const ingress = gatewayIngressTarget(gatewayIngressAuthority, request.revision, endpoint);
     return {
       url: validateUrl(endpoint),
+      ...(ingress === undefined ? {} : { ingress }),
       nativeAgentId: NATIVE_AGENT_ID,
       ...(request.revision.harness.id === DEVELOPMENT_HARNESS_DESCRIPTOR.id &&
       request.revision.harness.mode === "embedded"

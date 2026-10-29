@@ -1083,6 +1083,7 @@
               "testing/static-egress",
               "testing/protected-repository-custody",
               "reference/sandbox-policies",
+              "reference/gateway-containment",
               "guides/topics/agent-sandbox-policy",
               "flows/agent-sandbox-policy"
             ]

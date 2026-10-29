@@ -7,6 +7,7 @@ import {
   resolveApprovedProductionHarness,
 } from "../../apps/controller/src/composition/production-harness.ts";
 import { NativeIAMDriver } from "../../packages/iam/src/index.ts";
+import { SlackChannelDriver } from "../../apps/controller/src/drivers/channel/slack.ts";
 import {
   AuthorizationDeniedError,
   ConfigurationHarnessError,
@@ -1792,6 +1793,18 @@ test("one installation admits embedded and dedicated revisions without rewriting
 for (const scope of ["primary", "default-fallback", "entry-fallback", "provider-policy-fallback"]) {
   test(`actual OCC admission accepts a same-Harness OpenAI Codex ${scope} selection`, async () => {
     const { bindHarnessAuth, controller, namespace } = await fixture();
+    // These Harness-policy cases exercise real Slack destination admission, not Slack
+    // credential validation or directory I/O. Both exposed methods use the bundled Driver.
+    const slack = new SlackChannelDriver();
+    registerAndSelectDrivers(controller, [
+      {
+        id: slack.id,
+        capability: slack.capability,
+        implementation: slack.implementation,
+        gatewayDestinations: slack.gatewayDestinations.bind(slack),
+        lookupDirectory: slack.lookupDirectory.bind(slack),
+      },
+    ]);
     const selection = {
       primary: "openai/gpt-4.1",
       fallbacks: ["openai/gpt-4.1-mini", "openai/gpt-4.1-nano"],

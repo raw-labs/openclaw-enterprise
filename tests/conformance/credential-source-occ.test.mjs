@@ -517,6 +517,65 @@ test("an OpenShell Backend names its refresh Driver, and the selected one must b
     /drivers\.credential_refresh must be a Driver ID/,
   );
   const gateway = createTestCredentialGateway();
+  // Gateway-only containment does not select a model Credential Gateway. An undeclared
+  // credential member must still fail rather than gaining authority through the Sandbox.
+  const gatewayOnly = backend(undefined);
+  delete gatewayOnly.drivers.credential_gateway;
+  const containment = new OpenClawController(installation, { backends: [gatewayOnly] });
+  const sandbox = createTestSandbox();
+  containment.registerDriver(sandbox);
+  containment.selectDriver("sandbox", sandbox.id);
+  await containment.validateBackendConfiguration();
+  // The Gateway-only capability can satisfy membership without selecting or replacing
+  // the Harness Sandbox. Exact Backend IDs still bound the independent reference.
+  const independent = new OpenClawController(installation, {
+    backends: [gatewayOnly],
+    gatewaySandboxDriver: sandbox,
+  });
+  independent.registerDriver(sandbox);
+  await independent.validateBackendConfiguration();
+  assert.throws(() => independent.selectedDriver("sandbox"), DriverSelectionError);
+  const harnessSandbox = { ...createTestSandbox(), id: "separate-harness-sandbox" };
+  independent.registerDriver(harnessSandbox);
+  independent.selectDriver("sandbox", harnessSandbox.id);
+  await independent.validateBackendConfiguration();
+  assert.equal(independent.selectedDriver("sandbox"), harnessSandbox);
+  const mismatch = new OpenClawController(installation, {
+    backends: [gatewayOnly],
+    gatewaySandboxDriver: { ...sandbox, id: "wrong-gateway-sandbox" },
+  });
+  mismatch.registerDriver(sandbox);
+  mismatch.selectDriver("sandbox", sandbox.id);
+  await assert.rejects(
+    mismatch.validateBackendConfiguration(),
+    /Gateway Sandbox Driver must belong to a configured Backend/,
+  );
+  const wrongCredential = new OpenClawController(installation, {
+    backends: [backend(undefined)],
+    gatewaySandboxDriver: sandbox,
+  });
+  const foreignGateway = { ...gateway, id: "other-credential-gateway" };
+  wrongCredential.registerDriver(foreignGateway);
+  wrongCredential.selectDriver("credential_gateway", foreignGateway.id);
+  await assert.rejects(
+    wrongCredential.validateBackendConfiguration(),
+    /Backend requires its Credential Gateway Driver/,
+  );
+  containment.registerDriver(gateway);
+  containment.selectDriver("credential_gateway", gateway.id);
+  await assert.rejects(
+    containment.validateBackendConfiguration(),
+    /Credential Gateway Driver must belong to a configured Backend/,
+  );
+  assert.throws(
+    () =>
+      new OpenClawController(installation, {
+        backends: [
+          { ...gatewayOnly, drivers: { ...gatewayOnly.drivers, credential_refresh: "refresh" } },
+        ],
+      }),
+    /credential_refresh requires a credential_gateway member/,
+  );
   for (const declared of ["credential-refresh-test", undefined]) {
     const controller = new OpenClawController(installation, {
       state: new InMemoryPlatformState(),

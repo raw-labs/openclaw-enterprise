@@ -4,10 +4,18 @@ import type { Socket } from "node:net";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { hasControlCharacter } from "@openclaw-enterprise/utils";
 
+import {
+  GATEWAY_INGRESS_HEADER,
+  GATEWAY_INGRESS_BODY_LIMIT,
+  signGatewayIngress,
+  type GatewayIngressSigningTarget,
+} from "./contained-ingress.ts";
+
 export interface NativeAdminProxyContext {
   readonly gatewayBase: string;
   readonly agentOrigin: string;
   readonly apiKey: string;
+  readonly ingress?: GatewayIngressSigningTarget;
 }
 
 export type NativeAdminWebSocketCloseReason =
@@ -64,6 +72,7 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   "x-forwarded-for",
   "x-real-ip",
   "x-occ-identity",
+  GATEWAY_INGRESS_HEADER,
   "x-occ-session-key",
   "x-openclaw-scopes",
 ]);
@@ -345,6 +354,38 @@ export async function proxyNativeAdminHttp(options: {
     return;
   }
 
+  let body: Buffer | undefined;
+  if (options.context.ingress !== undefined) {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    try {
+      for await (const chunk of options.request.raw) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        bytes += buffer.length;
+        if (bytes > GATEWAY_INGRESS_BODY_LIMIT) {
+          options.reply.code(413).header("cache-control", "no-store").send();
+          return;
+        }
+        chunks.push(buffer);
+      }
+      body = Buffer.concat(chunks);
+      headers[GATEWAY_INGRESS_HEADER] = signGatewayIngress(options.context.ingress, {
+        method: options.request.method,
+        path: upstream.pathname + upstream.search,
+        origin: options.request.headers.origin,
+        contentType:
+          typeof headers["content-type"] === "string" ? headers["content-type"] : undefined,
+        contentEncoding:
+          typeof headers["content-encoding"] === "string" ? headers["content-encoding"] : undefined,
+        body,
+      });
+      headers["content-length"] = String(body.length);
+    } catch {
+      options.reply.code(503).header("cache-control", "no-store").send();
+      return;
+    }
+  }
+
   const avatarRequest = USER_AVATAR_PATH.test(options.request.url.split("?", 1)[0] ?? "");
   options.reply.hijack();
   const upstreamRequest = https.request(
@@ -380,7 +421,11 @@ export async function proxyNativeAdminHttp(options: {
     options.request.raw.off("aborted", abort);
     options.reply.raw.off("close", abort);
   });
-  options.request.raw.pipe(upstreamRequest);
+  if (body === undefined) {
+    options.request.raw.pipe(upstreamRequest);
+  } else {
+    upstreamRequest.end(body);
+  }
 }
 
 function appendDefinedHeader(
@@ -495,6 +540,23 @@ export function proxyNativeAdminWebSocket(options: {
     "sec-websocket-extensions",
     options.request.headers["sec-websocket-extensions"],
   );
+
+  if (options.context.ingress !== undefined) {
+    try {
+      headers[GATEWAY_INGRESS_HEADER] = signGatewayIngress(options.context.ingress, {
+        method: "GET",
+        path: upstream.pathname + upstream.search,
+        origin: options.request.headers.origin,
+        websocketKey:
+          typeof options.request.headers["sec-websocket-key"] === "string"
+            ? options.request.headers["sec-websocket-key"]
+            : undefined,
+      });
+    } catch {
+      options.socket.destroy();
+      return;
+    }
+  }
 
   let upstreamSocket: Socket | undefined;
   let closed = false;

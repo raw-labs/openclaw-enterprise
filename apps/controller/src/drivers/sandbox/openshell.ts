@@ -130,6 +130,8 @@ import {
 
 type ConfigurationRecord = Readonly<Record<string, unknown>>;
 
+import { OpenShellGatewaySandboxCapability } from "./openshell-gateway-sandbox.ts";
+
 export interface OpenShellKubernetesNetworkPeer {
   readonly namespaceName: string;
   readonly podLabels: Readonly<Record<string, string>>;
@@ -2851,6 +2853,7 @@ export function validateConfiguration(
 export const configurationContributions = Object.freeze([SandboxNetworkPolicyConfiguration]);
 
 export class OpenShellSandboxDriver implements SandboxDriver {
+  readonly gateway: OpenShellGatewaySandboxCapability;
   static readonly configurationSchema = configurationSchema;
 
   readonly id: string;
@@ -2911,6 +2914,52 @@ export class OpenShellSandboxDriver implements SandboxDriver {
       );
     }
     this.backend = selection.backend;
+    this.gateway = new OpenShellGatewaySandboxCapability(
+      options,
+      selection.backend,
+      (context) => this.ensureNamespace(context),
+      async (context, sandbox) => {
+        const mounts = context.requirements.state.mounts ?? [];
+        const stateRoot = "gateway-preparation-root";
+        const requirements: HarnessWorkloadRequirements = {
+          image: context.requirements.image,
+          command: [],
+          loginMode: "api_key",
+          files: [],
+          credentialAttachments: [],
+          labels: context.requirements.labels,
+          workspaceMounts: [
+            {
+              claimName: context.requirements.state.claimName,
+              subPath: stateRoot,
+              mountPath: "/sandbox/gateway",
+              readOnly: false,
+            },
+            ...mounts.map((mount) => ({
+              claimName: context.requirements.state.claimName,
+              subPath: mount.subPath,
+              mountPath: mount.mountPath,
+              readOnly: false,
+            })),
+          ],
+          environment: [],
+        };
+        const preparationOptions: OpenShellSandboxDriverOptions = {
+          ...options,
+          kubernetes: {
+            ...options.kubernetes,
+            sandboxDataMount: {
+              claimName: context.requirements.state.claimName,
+              subPath: stateRoot,
+              mountPath: "/sandbox/gateway",
+              readOnly: false,
+            },
+          },
+        };
+        await prepareNativeWorkspace({ ...context, requirements }, preparationOptions, sandbox);
+      },
+      { id: this.id, implementation: this.implementation },
+    );
     this.operatorOwnedKubernetesResources = selection.operatorOwnedKubernetesResources === true;
   }
 

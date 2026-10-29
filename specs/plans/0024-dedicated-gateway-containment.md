@@ -6,7 +6,7 @@ rfc: ../rfcs/0024-dedicated-gateway-containment.md
 
 - **ID:** RFC-0024
 - **Delivery status:** In progress
-- **Implementation hold:** Await the RFC owner's review; no implementation is authorized.
+- **Implementation scope:** Authorized on 2026-10-29 for the dedicated-only proposal in PR #25; keep embedded execution and the separate Harness unchanged.
 - **Authority:** [Gateway containment RFC](../rfcs/0024-dedicated-gateway-containment.md)
 - **Source baseline:** `33c47d4099ec27d7c73abe50137a95cdf6abdecd`
 
@@ -28,16 +28,15 @@ Agent deployment. An ingress dependency is not a separate completed experiment.
 
 Source review uses the branch baseline above and upstream
 `1156880e23375c2cfcfc706e646693db7c1b4c01` (October 28, 2026). The required
-Gateway containment and channel destination integration are absent. The RFC
-owns the decision; this plan tracks code and actual proof.
+Gateway containment and channel destination integration were absent at that
+baseline. Implementation is in progress in the assigned draft PR. The RFC owns
+the decision; this plan tracks code and actual proof.
 
 ## Runtime and request scope
 
-Before containment, the Gateway Node process runs in an ordinary Compute-owned
-Pod. Enabled channels receive `HTTPS_PROXY` and an approved channel-proxy
-network grant. The separate Harness's egress policy does not affect a Slack SDK
-request made by that Gateway. See the RFC's
-[concrete request](../rfcs/0024-dedicated-gateway-containment.md#one-outbound-request-before-and-after).
+The RFC's [concrete request](../rfcs/0024-dedicated-gateway-containment.md#one-outbound-request-before-and-after)
+compares ordinary Gateway channel-proxy traffic with the proposed contained path.
+Harness policy does not constrain requests made by the separate Gateway.
 
 In the proposed dedicated path, OpenShell owns the Gateway workload Pod and its
 existing separate supervisor Pod, using its [Kubernetes runtime layout](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-driver-kubernetes/src/driver.rs). The workload's boundary process mediates native Gateway sockets;
@@ -129,9 +128,10 @@ fail closed or require explicit additional access; never add a broad default.
 ## Minimum ingress dependency
 
 The RFC is submitted in [draft PR #25](https://github.com/raw-labs/openclaw-enterprise/pull/25).
-Implementation remains blocked on native authentication support, not RFC
-submission or complete Pod-template support. The recommendation below is a
-source-backed candidate, not an approved protocol or runtime result.
+The runtime build now carries a native authentication compatibility patch.
+Its real native HTTP/WebSocket tests pass, but provider-relayed ingress and
+complete Agent deployment still require runtime verification. The integration
+below does not require complete Pod-template support.
 
 ### Reuse the service relay; extend native verification
 
@@ -211,6 +211,21 @@ uses in-process request provenance for an admitted plugin, not a trusted HTTP
 header, and does not replace node and private-status routes. Authenticating
 only OpenShell's external relay still leaves final-hop verification unresolved.
 
+### Verified provider listener behavior
+
+The pinned OpenShell CLI permits TLS connections without a client certificate
+while verifying certificates that clients do present. Keep the client CA,
+`mtls_auth.enabled = true` and `allow_unauthenticated_users = false`. The
+`require_client_auth` member belongs to the internal runtime configuration,
+not the public TOML schema: adding it to Helm values fails startup. Envoy needs no provider control credential.
+
+A real pinned-provider check on October 29, 2026 confirmed that controller mTLS
+can create, read and remove a Workspace. Certificate-free HTTPS requests to
+`GetWorkspace` and the private `ForwardTcp` RPC both return gRPC
+`UNAUTHENTICATED`. This establishes the control-listener boundary, not a
+complete signed native Gateway relay or an Agent model turn. Compute must
+still configure server trust and the advertised service Host correctly.
+
 ## Implementation
 
 1. Design and review native verified ingress, carrying required changes through
@@ -233,43 +248,45 @@ only OpenShell's external relay still leaves final-hop verification unresolved.
    behavior and reject dedicated deployment without containment. Preserve
    unrelated infrastructure and remove only run-owned effects.
 
-Steps 2–5 are not implemented or qualified. Do not mark the experiment complete
-when step 1 is documented or when a fixture passes.
+Policy admission, persistence, independent provider selection, native ingress
+and the Gateway provider capability have source implementations. Compute
+lifecycle integration and the required runtime qualification remain in progress.
+Do not mark the experiment complete when a source or fixture check passes.
 
 ## Verification
 
-| Required outcome                                            | Check                                                       | Result or remaining proof                                            |
-| ----------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| Gateway-specific capability reaches normal Agent deployment | Compute/controller integration                              | Pending implementation                                               |
-| Authenticated ingress rejects forged identity               | Normal route and direct/provider-relayed negative controls  | Blocked on ingress capability                                        |
-| Harness and embedded placement/auth/model custody unchanged | Normal Agent deployment and workload inspection             | Not run                                                              |
-| Real full containment rather than proxy attachment          | Linux supervisor, process/filesystem and runtime inspection | Not run                                                              |
-| Native outbound HTTPS and long-lived transport work         | Real contained Gateway traffic                              | Not run                                                              |
-| Default-deny and explicit widening work                     | Policy cases in the verification procedure                  | Not run                                                              |
-| Enabled channels contribute destinations                    | Driver/Compute integration; live channel separately         | Not run                                                              |
-| Private state survives replacement                          | Real Agent redeploy/restart                                 | Not run                                                              |
-| Failure cannot activate an uncontained fallback             | Failure integration and real runtime negative control       | Not run                                                              |
-| Stop/delete remove owned resources                          | Real Agent lifecycle                                        | Not run                                                              |
-| Source/doc checks                                           | Scoped formatting, workspace, local links and diff checks   | Passed; canonical docs/spec/length blocked on docs-site dependencies |
+| Required outcome                                            | Check                                                       | Result or remaining proof                                              |
+| ----------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Gateway-specific capability reaches normal Agent deployment | Compute/controller integration                              | Source integration in progress; real workflow proof pending            |
+| Authenticated ingress rejects forged identity               | Native suites plus real provider authentication negatives   | Native suites pass; signed end-to-end relay proof remains pending      |
+| Harness and embedded placement/auth/model custody unchanged | Normal Agent deployment and workload inspection             | Not run                                                                |
+| Real full containment rather than proxy attachment          | Linux supervisor, process/filesystem and runtime inspection | Not run                                                                |
+| Native outbound HTTPS and long-lived transport work         | Real contained Gateway traffic                              | Not run                                                                |
+| Default-deny and explicit widening work                     | Policy cases in the verification procedure                  | Not run                                                                |
+| Enabled channels contribute destinations                    | Driver/OCC frozen snapshot; live channel separately         | Contract/API checks pass; live channel and final Compute proof pending |
+| Private state survives replacement                          | Real Agent redeploy/restart                                 | Not run                                                                |
+| Failure cannot activate an uncontained fallback             | Failure integration and real runtime negative control       | Not run                                                                |
+| Stop/delete remove owned resources                          | Real Agent lifecycle                                        | Not run                                                                |
+| Source/doc checks                                           | Scoped formatting, workspace, local links and diff checks   | Passed; canonical docs/spec/length blocked on docs-site dependencies   |
 
 ### Current Linux prerequisites
 
-Read-only preflight on October 28, 2026 found Node 24, Docker and the pinned pnpm
-available, but no project dependencies, Go, k3d, kubectl, Helm, built CLI,
-OpenShell/runtime images or model credentials. There is no disposable cluster
-or prepared database. No deployment or model/channel proof has run. A later
-read-only recheck found k3d and base k3s images available, but still no Go,
-kubectl, Helm, built CLI or genuine Gateway/Harness/OpenShell runtime images.
-The formatting invocation then prepared the locked root dependencies and the
-repository-managed pre-push hook automatically. No tracked manifest or lockfile
-changed; the hook matches its tracked source. The separate docs-site graph
-remains absent. Do not alter another task's cluster or images.
+On October 29, 2026, the owned environment has pinned tooling, root workspace
+dependencies, a built CLI and an isolated disposable Kubernetes cluster. Its
+kubeconfig and context are explicit; the default configuration is unchanged.
+A genuine Linux AMD64 runtime image built successfully from the pinned native
+source plus the ingress patch. That build passed 100 native bridge tests,
+98 existing UI bridge tests and four native typecheck graphs. These are image
+build checks, not contained-Gateway or model-turn proof.
 
-Prepare an isolated environment with the repository's documented tooling and
-approved immutable runtime images. Supply existing authorized model credentials
-through protected files, never command arguments or logs. Live Slack requires
-separately authorized Slack credentials and a test channel. Preserve default
-kubeconfig and unrelated infrastructure; remove only run-owned resources.
+The policy/API/State slice passed 33 focused checks and fresh owned PostgreSQL
+checks. The database resources were removed after verification. The separate
+docs-site dependency graph and authorized model/channel credentials remain
+unavailable. No real model turn or live Slack delivery is established.
+
+Follow the [verification procedure](../../docs/testing/gateway-containment.md)
+for protected credential files, immutable images, disposable infrastructure and
+run-owned cleanup. Model and live Slack execution require separate authorization.
 
 The existing OpenShell Harness suite is not proof of this feature: it changes
 Harness placement and model delivery. The new scenario must retain the ordinary

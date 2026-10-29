@@ -584,6 +584,7 @@ export function createWorkerRevisionFixtures(
         agentId: owner.id,
         revision: number,
         gatewayManagedMode: owner.gatewayManagedMode,
+        gatewayOutbound: owner.gatewayOutbound,
         backendId: owner.backendId,
         configuration: { revision: String(number) },
         configurationId: owner.configurationId,

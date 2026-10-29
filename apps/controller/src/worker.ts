@@ -1,6 +1,7 @@
 import { reduceCredentialPolicy } from "@openclaw-enterprise/occ";
 import {
   assertExecutionReleaseAllowed,
+  normalizeGatewayOutboundPolicyCeiling,
   credentialSourceMatchesSnapshot,
   revisionCredentialSourceSnapshot,
 } from "@openclaw-enterprise/contracts";
@@ -37,6 +38,8 @@ import type {
   RepositoryCredentialMaterialRef,
   ComputeRevisionContext,
   ConfigurationDriver,
+  ChannelDriver,
+  GatewayOutboundPolicyCeiling,
   Driver,
   IAMDriver,
   Installation,
@@ -1144,6 +1147,9 @@ export class ControllerWorker {
   private readonly secretDriver: SecretDriver | undefined;
   private provisioningController: OpenClawController | undefined;
   private readonly sandbox: SandboxDriver | undefined;
+  private readonly gatewaySandbox: SandboxDriver | undefined;
+  private readonly gatewayOutboundPolicyCeiling: GatewayOutboundPolicyCeiling;
+  private readonly channelDriver: ChannelDriver | undefined;
   private readonly credentialGateway: CredentialGatewayDriver | undefined;
   private readonly proxyDriver: CredentialProxyDriver | undefined;
   private readonly protectedDriver: InstalledDriver | undefined;
@@ -1229,6 +1235,11 @@ export class ControllerWorker {
       this.configurations.register(definition);
     }
     this.policyCeiling = drivers?.installation.sandboxNetworkPolicyCeiling ?? [];
+    this.gatewayOutboundPolicyCeiling = normalizeGatewayOutboundPolicyCeiling(
+      drivers?.installation.gatewayOutboundPolicyCeiling,
+    );
+    this.gatewaySandbox = drivers?.gatewaySandboxDriver;
+    this.channelDriver = drivers?.channelDriver;
     this.configuredServiceAccountDriverId = drivers?.installation.drivers.service_account?.id;
     this.nativeWorkerSupport = drivers?.installation.runtime?.nativeWorkerSupport;
     if (this.mode === "production" && drivers === undefined) {
@@ -1307,11 +1318,28 @@ export class ControllerWorker {
     if (this.credentialGateway !== undefined && this.sandbox === undefined) {
       throw new Error("The selected Credential Gateway Driver requires a paired Sandbox Driver.");
     }
-    if (
-      (drivers?.installation.drivers.sandbox === undefined) !==
-      (drivers?.sandboxDriver === undefined)
-    ) {
+    const sandboxConfiguration = drivers?.installation.drivers.sandbox;
+    const harnessSandboxConfigured =
+      sandboxConfiguration !== undefined && sandboxConfiguration.useForHarness !== false;
+    if (harnessSandboxConfigured !== (drivers?.sandboxDriver !== undefined)) {
       throw new Error("The selected Sandbox Driver requires shared startup configuration.");
+    }
+    const gatewaySelection = drivers?.installation.gatewaySandbox;
+    const gatewaySandbox = drivers?.gatewaySandboxDriver;
+    if (gatewaySelection === undefined) {
+      if (gatewaySandbox !== undefined) {
+        throw new Error("The Gateway Sandbox Driver requires shared startup configuration.");
+      }
+    } else if (
+      gatewaySandbox === undefined ||
+      !validSandboxDriver(gatewaySandbox) ||
+      gatewaySandbox.gateway === undefined ||
+      gatewaySandbox.id !== gatewaySelection.driverId ||
+      gatewaySandbox.id !== sandboxConfiguration?.id
+    ) {
+      throw new Error(
+        "The selected Gateway Sandbox Driver does not match Installation configuration.",
+      );
     }
     if (this.sandbox !== undefined) {
       if (!validSandboxDriver(this.sandbox)) {
@@ -1386,6 +1414,8 @@ export class ControllerWorker {
       preparedTokens: this.preparedTokens,
       state: this.state,
       sandboxNetworkPolicyCeiling: this.policyCeiling,
+      gatewayOutboundPolicyCeiling: this.gatewayOutboundPolicyCeiling,
+      ...(this.gatewaySandbox === undefined ? {} : { gatewaySandboxDriver: this.gatewaySandbox }),
       driverConfigurations: this.driverConfigurations,
       backends: this.backends,
       recordOperations: true,
@@ -1402,6 +1432,7 @@ export class ControllerWorker {
     }
     for (const driver of [
       this.configuration,
+      this.channelDriver,
       ...(protectedDriver ? [] : [this.sandbox, this.proxyDriver]),
       this.credentialGateway,
       this.iam,

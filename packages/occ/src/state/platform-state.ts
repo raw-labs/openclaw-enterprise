@@ -1,3 +1,9 @@
+import {
+  normalizeGatewayOutboundPolicy,
+  normalizeGatewayOutboundAdmission,
+  assertGatewayOutboundWithinCeiling,
+  type GatewayOutboundPolicy,
+} from "@openclaw-enterprise/contracts";
 import type { PreparedTokenCurrentProof } from "@openclaw-enterprise/contracts";
 import { assertExecutionAdmission } from "@openclaw-enterprise/contracts";
 import { memoryEgressSendReceipts } from "./egress-send-receipts.ts";
@@ -207,7 +213,10 @@ export interface AgentReadRepository {
 
 export interface AgentRepository extends AgentReadRepository {
   createAgent(
-    agent: Omit<Agent, "gatewayManagedMode"> & { readonly gatewayManagedMode?: boolean },
+    agent: Omit<Agent, "gatewayManagedMode" | "gatewayOutbound"> & {
+      readonly gatewayManagedMode?: boolean;
+      readonly gatewayOutbound?: GatewayOutboundPolicy;
+    },
   ): Promise<Readonly<Agent>>;
   setSandboxPolicyEditing(
     namespaceId: string,
@@ -228,6 +237,7 @@ export interface AgentRepository extends AgentReadRepository {
     repositoryAccess?: RepositoryAccess | null,
     credentialSources?: readonly AgentCredentialSourceBinding[],
     gatewayManagedMode?: boolean,
+    gatewayOutbound?: GatewayOutboundPolicy,
   ): Promise<Readonly<Agent> | undefined>;
   compareAndSetActiveRevision(
     namespaceId: string,
@@ -827,6 +837,19 @@ export function validCredentialSourceSnapshots(value: unknown): boolean {
   });
 }
 
+function assertGatewayOutboundState(
+  policy: GatewayOutboundPolicy,
+  mode: HarnessExecutionMode,
+): void {
+  if (policy === undefined) {
+    throw new ScopeViolationError("Gateway outbound policy snapshot is required.");
+  }
+  const normalized = normalizeGatewayOutboundPolicy(policy);
+  if (mode === "embedded" && (normalized.mode !== "restricted" || normalized.hosts.length > 0)) {
+    throw new ScopeViolationError("Embedded Agents cannot use dedicated Gateway outbound policy.");
+  }
+}
+
 function assertAdmittedAgentRevision(revision: AgentRevision): void {
   assertExecutionAdmission(revision);
   if (
@@ -875,6 +898,21 @@ function assertAdmittedAgentRevision(revision: AgentRevision): void {
   ) {
     throw new ScopeViolationError(
       "An AgentRevision requires valid Configuration metadata, a native document, and pinned Harness and Compute descriptors.",
+    );
+  }
+  assertGatewayOutboundState(revision.gatewayOutbound, revision.harness.mode);
+  if (revision.harness.mode === "dedicated") {
+    try {
+      const admission = normalizeGatewayOutboundAdmission(revision.gatewayOutboundAdmission);
+      assertGatewayOutboundWithinCeiling(revision.gatewayOutbound, admission.ceiling);
+    } catch {
+      throw new ScopeViolationError(
+        "A dedicated AgentRevision requires valid Gateway outbound admission.",
+      );
+    }
+  } else if (revision.gatewayOutboundAdmission !== undefined) {
+    throw new ScopeViolationError(
+      "Embedded AgentRevisions cannot hold Gateway outbound admission.",
     );
   }
 }
@@ -2839,9 +2877,14 @@ function repositories(
         repositoryAccess: _providedRepositoryAccess,
         ...withoutPlugins
       } = agent;
+      assertGatewayOutboundState(
+        normalizeGatewayOutboundPolicy(agent.gatewayOutbound),
+        agent.executionMode,
+      );
       const saved = immutableCopy({
         ...withoutPlugins,
         gatewayManagedMode: agent.gatewayManagedMode ?? true,
+        gatewayOutbound: normalizeGatewayOutboundPolicy(agent.gatewayOutbound),
         ...(plugins === undefined ? {} : { plugins }),
         ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
         ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -2924,6 +2967,7 @@ function repositories(
       nextRepositoryAccess,
       nextCredentialSources,
       gatewayManagedMode,
+      gatewayOutbound,
     ) => {
       const current = await agents.findAgent(namespaceId, agentId);
       if (!current) {
@@ -2988,12 +3032,17 @@ function repositories(
         credentialSources: _currentCredentialSources,
         ...withoutPlugins
       } = current;
+      assertGatewayOutboundState(
+        gatewayOutbound ?? current.gatewayOutbound,
+        executionMode ?? current.executionMode,
+      );
       const updated = immutableCopy({
         ...withoutPlugins,
         configurationId,
         backendId: nextBackendId,
         executionMode: executionMode ?? current.executionMode,
         gatewayManagedMode: gatewayManagedMode ?? current.gatewayManagedMode,
+        gatewayOutbound: normalizeGatewayOutboundPolicy(gatewayOutbound ?? current.gatewayOutbound),
         harnessAuth: association,
         ...(agentCredentialSources === undefined || agentCredentialSources.length === 0
           ? {}
@@ -3142,6 +3191,7 @@ function repositories(
         owner.servicePrincipalId !== revision.servicePrincipalId ||
         owner.backendId !== revision.backendId ||
         revision.gatewayManagedMode !== owner.gatewayManagedMode ||
+        !isDeepStrictEqual(revision.gatewayOutbound, owner.gatewayOutbound) ||
         !harnessAuthMatches(owner.harnessAuth, revision.harnessAuth) ||
         !credentialSourcesMatch(owner.credentialSources, revision.credentialSources)
       ) {

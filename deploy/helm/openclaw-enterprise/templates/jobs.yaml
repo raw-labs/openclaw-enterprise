@@ -38,6 +38,14 @@ spec:
       volumes:
         {{- if .Release.IsUpgrade }}
         # The installation-check container reads what API startup reads from these.
+        {{- if .Values.gatewayIngress.secretName }}
+        - name: gateway-ingress-signing
+          secret:
+            secretName: {{ .Values.gatewayIngress.secretName | quote }}
+            defaultMode: 288
+            items:
+              - {key: private.pem, path: private.pem}
+        {{- end }}
         - name: installation-startup
           secret:
             secretName: {{ .Values.installation.secretName | quote }}
@@ -111,6 +119,12 @@ spec:
               value: /etc/openclaw/console-theme
             {{- end }}
           volumeMounts:
+            {{- if .Values.gatewayIngress.secretName }}
+            - name: gateway-ingress-signing
+              mountPath: /etc/openclaw/gateway-ingress/private-key.pem
+              subPath: private.pem
+              readOnly: true
+            {{- end }}
             - name: installation-startup
               mountPath: /etc/openclaw/installation
               readOnly: true

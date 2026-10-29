@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { kubernetesNamespaceName } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
-import { conformanceKubernetesOptions } from "./kubernetes-compute.mjs";
+import { gatewayOutboundFixture, conformanceKubernetesOptions } from "./kubernetes-compute.mjs";
 
 export const tenant = {
   id: "ns_00000000-0000-4000-8000-000000000001",
@@ -99,6 +99,7 @@ export function routedRevision(driver, overrides = {}) {
     configurationKind: "agent",
     configurationGeneration: 1,
     gatewayManagedMode: driver.options?.runtime !== undefined,
+    ...gatewayOutboundFixture(),
     configuration: {
       agents: { defaults: { model: "codex/gpt-5" } },
       logging: {

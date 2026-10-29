@@ -11,7 +11,9 @@ revisions. OCC selects one Driver per Installation, authorizes operations, and
 saves the configuration used for each deployment. Compute owns gateway, workload
 identity, routing, activation, and readiness; its backend owns underlying
 resources. A selected [SandboxDriver](sandbox.md) can create a dedicated Harness
-workload.
+workload. Installation-selected `SandboxDriver.gateway` independently supplies
+[dedicated Gateway containment](../gateway-containment.md); embedded execution
+keeps its existing path.
 
 See [Driver selection](selection.md) for supported combinations and package trust,
 the [feature matrix](compute-matrix.md), and
@@ -51,6 +53,12 @@ Optional `startHarnessDeviceAuthorization(harnessId)` returns a public challenge
 and opaque private state; `pollHarnessDeviceAuthorization(privateState)` returns
 pending or a native credential bundle. OCC owns authorization, scope, and Secret
 custody. See the [device login flow](../../flows/native-service-account-credential-delivery.md).
+
+Optional `validateGatewayOutbound(policy, executionMode)` checks dedicated
+Gateway policy at Agent save, preflight and deployment. Omission rejects
+dedicated execution. Bundled Kubernetes Compute requires the selected Gateway
+capability, ingress verification keys, runtime and Installation ceiling; it
+does not fall back to an ordinary Gateway.
 
 ### Core lifecycle operations
 

@@ -55,6 +55,67 @@ export class OpenShellGateway {
     this.injectedClient = selection.gatewayClient;
   }
 
+  /** Gateway startup material and private status require authenticated TLS, not isolation declarations. */
+  assertAuthenticatedGatewayTransport(): void {
+    const configuration = this.configuration;
+    const auth = configuration.auth;
+    const scheme =
+      configuration.scheme ?? (configuration.rootCertificatePath === undefined ? "http" : "https");
+    let secure: boolean;
+    if (configuration.endpoint !== undefined) {
+      try {
+        const endpoint = new URL(configuration.endpoint);
+        secure =
+          endpoint.protocol === "https:" &&
+          endpoint.hostname.length > 0 &&
+          endpoint.username === "" &&
+          endpoint.password === "" &&
+          endpoint.search === "" &&
+          endpoint.hash === "" &&
+          endpoint.pathname === "/";
+      } catch {
+        secure = false;
+      }
+    } else {
+      secure = isNonEmptyString(configuration.serviceName) && scheme === "https";
+    }
+    const authenticated =
+      auth?.mode === "mtls"
+        ? isAbsolute(auth.certificatePath) && isAbsolute(auth.privateKeyPath)
+        : auth?.mode === "bearerTokenFile" && isAbsolute(auth.path);
+    if (configuration.insecureTransport !== undefined || !secure || !authenticated) {
+      throw new OpenShellBackendConfigurationFailure(
+        "Dedicated Gateway containment requires HTTPS and an explicit mTLS or bearer-token-file control identity; insecure provider transport is unsupported.",
+      );
+    }
+  }
+
+  /** Opaque stable control-owner selection; never includes credential file contents. */
+  gatewayOwnerSelection(): string {
+    const c = this.configuration;
+    const auth = Object.fromEntries(
+      Object.entries(c.auth ?? { mode: "omitted" }).sort(([a], [b]) => a.localeCompare(b)),
+    );
+    return sha256Hex(
+      JSON.stringify({
+        endpoint: c.endpoint,
+        scheme: c.scheme,
+        serviceName: c.serviceName,
+        port: c.port,
+        rootCertificatePath: c.rootCertificatePath,
+        insecureTransport: c.insecureTransport,
+        auth,
+      }),
+      64,
+    );
+  }
+
+  /** The private control listener origin, without control credentials or local file paths. */
+  gatewayControlOrigin(namespace: string): string {
+    this.assertAuthenticatedGatewayTransport();
+    return new URL(this.clientOptions(namespace).endpoint).origin;
+  }
+
   clientForNamespace(namespace: string): OpenShellGatewayClient {
     if (this.injectedClient !== undefined) {
       return this.injectedClient;

@@ -33,6 +33,41 @@ test additionally needs authorized channel credentials and a test destination.
 Synthetic channel configuration proves policy contribution only, not provider
 login, WebSocket operation or message delivery.
 
+## Run the Agent lifecycle case
+
+The manual [`gateway-containment` lane](../../scripts/ci/test-suites/gateway-containment.json)
+runs `tests/integration/kubernetes-gateway-containment-real.test.ts`. It starts
+the authenticated Fastify API and PostgreSQL worker with the selected real
+Compute and Gateway Sandbox. Ordinary CI admission checks do not run this lane.
+
+Prepare a fresh migrated loopback `openclaw_k8s_*` database with separate
+migrator and application roles. Supply these process-scoped inputs:
+
+- `OCC_TEST_KUBERNETES_KUBECONFIG` and `OCC_TEST_KUBERNETES_CONTEXT`: the owned
+  disposable cluster with enforcing networking.
+- `OCC_TEST_DATABASE_URL`: its application-role database URL.
+- `OCC_TEST_GATEWAY_CONTAINMENT_INSTALLATION_FILE`: protected Installation JSON
+  with real routing, authenticated provider transport, independent Gateway
+  selection and digest-pinned images. It references key and certificate files,
+  not inline credentials.
+- `OCC_TEST_GATEWAY_CONTAINMENT_MODEL_CREDENTIAL_FILE`: an authorized owner-only
+  credential file for the ordinary dedicated Codex Harness.
+- `OCC_TEST_OPENAI_MODEL`: the model authorized for that credential.
+
+From the repository root, run with those inputs already set:
+
+```sh
+OCC_TEST_GATEWAY_CONTAINMENT_REAL=1 \
+  node --test tests/integration/kubernetes-gateway-containment-real.test.ts
+```
+
+Explicit selection fails when an input is unavailable. The test checks missing
+Harness credentials before provider effects, then attempts the real Agent
+lifecycle. A successful refusal is not successful Gateway startup. Keep the
+positive case blocked until authorized credentials are available; do not
+substitute a synthetic model or change the Harness topology. Remove only the
+run-owned tenant namespaces and disposable database after the worker stops.
+
 ## Required observations
 
 ### Default-deny policy cases
@@ -164,10 +199,20 @@ source checks, Kubernetes fixtures, real containment, model execution and live
 channel proof. No item can be marked passed because its prerequisite was absent.
 
 The [plan's prerequisite record](../../specs/plans/0024-dedicated-gateway-containment.md#current-linux-prerequisites)
-tracks the October 28, 2026 preflight and later tooling changes. Native verified
-ingress is unavailable at the pin; genuine runtime images, an owned prepared
-environment and authorized credentials remain missing. No Linux containment,
-model-turn or live-channel success is recorded.
+tracks the owned Linux environment. On October 29, 2026, the AMD64 runtime image
+built with the native ingress patch and passed its selected native checks.
+The pinned OpenShell deployment accepted controller mTLS Workspace operations
+and rejected certificate-free control and private-forwarding RPCs. These checks
+do not prove the signed Gateway relay, native outbound enforcement, or normal
+Agent deployment. Authorized model and channel credentials remain unavailable;
+no model turn or live-channel delivery is established.
+
+The actual PostgreSQL/Fastify/worker/Kubernetes run passed the missing-Harness-
+authentication refusal: no Agent, provider Sandbox or fallback Deployment was
+created. Its positive lifecycle case failed at the required model-credential
+file precondition. Native startup, relay readiness, replacement and model
+execution did not run. Provider-owned Harness bootstrap and remaining
+conformance failures also block qualification.
 
 ## Related
 

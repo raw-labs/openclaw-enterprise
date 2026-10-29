@@ -1,3 +1,4 @@
+import { type GatewayOutboundPolicy } from "@openclaw-enterprise/contracts";
 import type {
   HarnessAuthBinding,
   HarnessExecutionMode,
@@ -41,6 +42,7 @@ export interface ProvisionAgentInput {
   readonly harnessAuth?: HarnessAuthBinding | null;
   readonly executionMode?: HarnessExecutionMode;
   readonly gatewayManagedMode?: boolean;
+  readonly gatewayOutbound?: GatewayOutboundPolicy;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingRequest[];

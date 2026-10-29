@@ -96,7 +96,10 @@ The auth snapshot contains no credential bytes; public Agent revisions omit priv
 backend locators and Backend/workspace metadata. Native Configuration values must use
 unresolved inline SecretRefs because the saved document is persisted and
 returned through the API; see [secret boundaries](../configuration/secrets.md#secret-boundaries).
-Nested objects and arrays are immutable.
+The revision also freezes `gatewayOutbound` and, for dedicated execution,
+`gatewayOutboundAdmission` with the Installation ceiling and enabled-channel
+destinations. See [Gateway containment](../gateway-containment.md) for authority
+and runtime limits. Nested objects and arrays are immutable.
 
 When a SandboxDriver is selected, its `configureAgent` hook can transform a
 copy of the source document before OCC checks and saves it; it does not

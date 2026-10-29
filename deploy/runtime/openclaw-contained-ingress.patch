@@ -1,0 +1,984 @@
+diff --git a/src/config/zod-schema.gateway.ts b/src/config/zod-schema.gateway.ts
+index 52be66c5d..f31e0abc5 100644
+--- a/src/config/zod-schema.gateway.ts
++++ b/src/config/zod-schema.gateway.ts
+@@ -50,7 +50,11 @@ const GatewayGitHubEndpointSchema = z
+     }
+     const host = value.host?.toLowerCase();
+     if (!host || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(host) || host.includes("..")) {
+-      ctx.addIssue({ code: "custom", path: ["host"], message: "GitHub host must be a hostname" });
++      ctx.addIssue({
++        code: "custom",
++        path: ["host"],
++        message: "GitHub host must be a hostname",
++      });
+       return;
+     }
+     if (!value.apiBaseUrl) {
+@@ -322,6 +326,21 @@ export const GatewayConfigSchema = z
+             z.literal("trusted-proxy"),
+           ])
+           .optional(),
++        /** OCE-owned contained ingress; verification material only. */
++        containedIngress: z
++          .strictObject({
++            audience: z.string().min(1).max(1024),
++            verificationKeys: z
++              .array(
++                z.strictObject({
++                  keyId: z.string().min(1).max(128),
++                  publicKeyPem: z.string().min(1).max(8192),
++                }),
++              )
++              .min(1)
++              .max(4),
++          })
++          .optional(),
+         /** Shared secret selected by token mode (plaintext or SecretRef). */
+         token: SecretInputSchema.optional().register(sensitive),
+         /** Shared secret selected by password mode (plaintext or SecretRef; consider env instead). */
+@@ -442,9 +461,17 @@ export const GatewayConfigSchema = z
+           const normalizedLogin = normalizeGitHubLogin(login)?.toLowerCase();
+           const path = ["assignments", "byGithubLogin", login];
+           if (!normalizedLogin) {
+-            ctx.addIssue({ code: "custom", message: "Invalid GitHub login", path });
++            ctx.addIssue({
++              code: "custom",
++              message: "Invalid GitHub login",
++              path,
++            });
+           } else if (githubLogins.has(normalizedLogin)) {
+-            ctx.addIssue({ code: "custom", message: "Duplicate GitHub login", path });
++            ctx.addIssue({
++              code: "custom",
++              message: "Duplicate GitHub login",
++              path,
++            });
+           } else {
+             githubLogins.add(normalizedLogin);
+           }
+diff --git a/src/gateway/auth-policy.ts b/src/gateway/auth-policy.ts
+index 8fcf9bc38..1b11ddfd3 100644
+--- a/src/gateway/auth-policy.ts
++++ b/src/gateway/auth-policy.ts
+@@ -50,6 +50,7 @@ export function captureGatewayAuthPolicy(
+         trustedProxies: gateway?.trustedProxies?.toSorted(),
+         allowRealIpFallback: gateway?.allowRealIpFallback,
+         allowTailscale: gateway?.auth?.allowTailscale,
++        containedIngress: gateway?.auth?.containedIngress,
+         trustedProxy: trustedProxy && {
+           ...trustedProxy,
+           requiredHeaders: (trustedProxy.requiredHeaders ?? []).toSorted(),
+diff --git a/src/gateway/auth-resolve.ts b/src/gateway/auth-resolve.ts
+index 8d1f04f1e..df9227896 100644
+--- a/src/gateway/auth-resolve.ts
++++ b/src/gateway/auth-resolve.ts
+@@ -25,6 +25,7 @@ export type ResolvedGatewayAuth = {
+   password?: string;
+   allowTailscale: boolean;
+   trustedProxy?: GatewayTrustedProxyConfig;
++  containedIngress?: GatewayAuthConfig["containedIngress"];
+ };
+ 
+ /** Merge sparse runtime auth overrides without erasing configured values. */
+@@ -43,6 +44,7 @@ export function mergeGatewayAuthConfig(
+     "allowTailscale",
+     "rateLimit",
+     "trustedProxy",
++    "containedIngress",
+   ] as const) {
+     if (override[key] !== undefined) {
+       Object.assign(merged, { [key]: override[key] });
+@@ -80,6 +82,7 @@ export function resolveGatewayAuthFromCredentials(params: {
+       authConfig.allowTailscale ??
+       (params.tailscaleMode === "serve" && mode !== "password" && mode !== "trusted-proxy"),
+     trustedProxy: authConfig.trustedProxy,
++    containedIngress: authConfig.containedIngress,
+   };
+ }
+ 
+@@ -140,7 +143,10 @@ export function canHotReloadGatewayAuthCredentials(
+     ) {
+       return undefined;
+     }
+-    return resolveGatewayAuth({ authConfig, tailscaleMode: config.gateway?.tailscale?.mode }).mode;
++    return resolveGatewayAuth({
++      authConfig,
++      tailscaleMode: config.gateway?.tailscale?.mode,
++    }).mode;
+   });
+   return (modes[0] === "token" || modes[0] === "password") && modes[0] === modes[1];
+ }
+diff --git a/src/gateway/auth.ts b/src/gateway/auth.ts
+index 9769ec169..5a30f51eb 100644
+--- a/src/gateway/auth.ts
++++ b/src/gateway/auth.ts
+@@ -8,6 +8,7 @@ import type { GatewayAuthConfig, GatewayTrustedProxyConfig } from "../config/typ
+ import { safeEqualSecret } from "../security/secret-equal.js";
+ import { AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET, type AuthRateLimiter } from "./auth-rate-limit.js";
+ import type { ResolvedGatewayAuth } from "./auth-resolve.js";
++import { readContainedIngress, validateContainedIngressConfig } from "./contained-ingress.js";
+ import { getHeader } from "./http-header-value.js";
+ import {
+   prepareGatewayIngressAttribution,
+@@ -163,6 +164,12 @@ export function assertGatewayAuthConfigured(
+       `gateway auth mode is password, but no password was configured.${LEGACY_OPENCLAW_ENV_NOTE}`,
+     );
+   }
++  if (auth.containedIngress) {
++    if (auth.mode !== "trusted-proxy") {
++      throw new Error("Contained ingress requires trusted-proxy authentication mode.");
++    }
++    validateContainedIngressConfig(auth.containedIngress);
++  }
+   if (auth.mode === "trusted-proxy") {
+     if (!auth.trustedProxy) {
+       throw new Error(
+@@ -372,6 +379,7 @@ async function authorizeGatewayConnect(
+           trustedProxies: params.trustedProxies,
+           allowRealIpFallback: params.allowRealIpFallback,
+           tailscaleWhois: params.tailscaleWhois,
++          containedIngress: auth.containedIngress,
+         })
+       : undefined);
+   if (ingressAttribution?.kind === "unattributable-proxy") {
+@@ -440,6 +448,28 @@ async function authorizeGatewayConnectCore(
+     if (!auth.trustedProxy) {
+       return { ok: false, reason: "trusted_proxy_config_missing" };
+     }
++    if (auth.containedIngress) {
++      const contained = req ? readContainedIngress(req, auth.containedIngress) : undefined;
++      if (
++        contained?.kind !== "operator" ||
++        contained.proof.expiresAt <= Date.now() ||
++        ingressAttribution?.kind !== "trusted-proxy" ||
++        !ingressAttribution.containedOperator
++      ) {
++        // This ordinary auth failure still permits the native device/bootstrap owners
++        // to authenticate a node. It grants neither local nor proxy identity authority.
++        return { ok: false, reason: "contained_native_credentials_required" };
++      }
++      const user = ingressAttribution.containedOperator.identity;
++      if (auth.trustedProxy.allowUsers?.length && !auth.trustedProxy.allowUsers.includes(user)) {
++        return { ok: false, reason: "trusted_proxy_user_not_allowed" };
++      }
++      const originResult = authorizeTrustedProxyBrowserOrigin({
++        authSurface,
++        browserOriginPolicy: params.browserOriginPolicy,
++      });
++      return originResult ?? { ok: true, method: "trusted-proxy", user };
++    }
+     const result = authorizeTrustedProxy({
+       req,
+       trustedProxies,
+@@ -460,7 +490,11 @@ async function authorizeGatewayConnectCore(
+       return { ok: true, method: "trusted-proxy", user: result.user };
+     }
+     if (localDirect && auth.password && connectAuth?.password) {
+-      const rateLimitResult = rejectIfRateLimited({ limiter, ip: subject, rateLimitScope });
++      const rateLimitResult = rejectIfRateLimited({
++        limiter,
++        ip: subject,
++        rateLimitScope,
++      });
+       if (rateLimitResult) {
+         return rateLimitResult;
+       }
+@@ -517,7 +551,11 @@ async function authorizeGatewayConnectCore(
+     }
+   }
+ 
+-  const rateLimitResult = rejectIfRateLimited({ limiter, ip: subject, rateLimitScope });
++  const rateLimitResult = rejectIfRateLimited({
++    limiter,
++    ip: subject,
++    rateLimitScope,
++  });
+   if (rateLimitResult) {
+     return rateLimitResult;
+   }
+diff --git a/src/gateway/ingress-attribution.ts b/src/gateway/ingress-attribution.ts
+index e8e210dd3..430ee56e3 100644
+--- a/src/gateway/ingress-attribution.ts
++++ b/src/gateway/ingress-attribution.ts
+@@ -2,6 +2,7 @@ import type { IncomingMessage } from "node:http";
+ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+ import { createDedupeCache } from "../infra/dedupe.js";
+ import type { TailscaleWhoisIdentity } from "../infra/tailscale.js";
++import { readContainedIngress, type ContainedIngressConfig } from "./contained-ingress.js";
+ import { firstHeaderValue } from "./http-header-value.js";
+ import {
+   hasForwardedRequestHeaders,
+@@ -54,11 +55,18 @@ type AttributedGatewayIngress = {
+ export type GatewayIngressAttribution =
+   | (AttributedGatewayIngress & { kind: "direct-local" })
+   | (AttributedGatewayIngress & { kind: "direct-remote" })
++  | (AttributedGatewayIngress & { kind: "contained-credentials" })
+   | (AttributedGatewayIngress & { kind: "remote-forwarded" })
+   | (AttributedGatewayIngress & {
+       kind: "trusted-proxy";
+       /** Deny-only observation; this never grants managed Tailscale provenance. */
+       externalTailscaleExposure?: "funnel";
++      containedOperator?: Readonly<{
++        identity: string;
++        clientInstanceId: string;
++        bodySha256: string;
++        expiresAt: number;
++      }>;
+     })
+   | (AttributedGatewayIngress & {
+       kind: "tailscale-serve";
+@@ -246,12 +254,33 @@ function resolveGatewayIngressAttribution(params: {
+   trustedProxies?: string[];
+   allowRealIpFallback?: boolean;
+   tailscaleWhois?: TailscaleWhoisLookup;
++  containedIngress?: ContainedIngressConfig;
+ }): GatewayIngressAttribution {
+   const { req } = params;
+   const remoteAddress =
+     resolveClientIp({ remoteAddr: req.socket?.remoteAddress }) ??
+     req.socket?.remoteAddress ??
+     "unknown";
++  if (params.containedIngress) {
++    const ingress = readContainedIngress(req, params.containedIngress);
++    if (ingress.kind === "invalid") {
++      return unattributableProxy(remoteAddress);
++    }
++    const rateLimit = Object.freeze({
++      subject: Object.freeze({
++        key: "contained-relay:" + params.containedIngress.audience,
++      }),
++      resetOnSuccess: true as const,
++    });
++    return ingress.kind === "operator"
++      ? {
++          kind: "trusted-proxy",
++          clientIp: remoteAddress,
++          rateLimit,
++          containedOperator: ingress.proof,
++        }
++      : { kind: "contained-credentials", clientIp: remoteAddress, rateLimit };
++  }
+   const transport = requestTransport.get(req) ?? { kind: "ordinary" as const };
+ 
+   if (transport.kind === "remote-forwarded") {
+@@ -259,7 +288,9 @@ function resolveGatewayIngressAttribution(params: {
+       kind: "remote-forwarded",
+       clientIp: remoteAddress,
+       rateLimit: Object.freeze({
+-        subject: Object.freeze({ key: `remote-control-ui:${transport.context.pluginId}` }),
++        subject: Object.freeze({
++          key: `remote-control-ui:${transport.context.pluginId}`,
++        }),
+         resetOnSuccess: true as const,
+       }),
+     });
+diff --git a/src/gateway/server-http-request.ts b/src/gateway/server-http-request.ts
+index b47c34d3d..3f135d26f 100644
+--- a/src/gateway/server-http-request.ts
++++ b/src/gateway/server-http-request.ts
+@@ -15,6 +15,7 @@ import { parseDevicePairingJoinRequestPath } from "../pairing/join-code.js";
+ import { getWebhookLegacyListener } from "../plugins/http-legacy-listener.js";
+ import { NODE_WORKER_BUNDLE_TRANSFER_PATH } from "../worker/node-bundle-install-protocol.js";
+ import { resolveAssistantAgentId } from "./assistant-identity.js";
++import { containedCredentialHttpPath, prepareContainedHttpRequest } from "./contained-ingress.js";
+ import { parseControlUiResourcePath } from "./control-ui-contract.js";
+ import { respondNotFound, respondPlainText } from "./control-ui-http-utils.js";
+ import {
+@@ -240,6 +241,19 @@ export function createGatewayHttpRequestHandler(
+         await opts.waitForRequestRuntime?.();
+       }
+       const configSnapshot = loadGatewayConfig();
++      const admitted = await prepareContainedHttpRequest(
++        req,
++        configSnapshot.gateway?.auth?.containedIngress,
++      );
++      if (!admitted) {
++        sendGatewayAuthFailure(res, {
++          ok: false,
++          reason: "contained_ingress_invalid",
++        });
++        return undefined;
++      }
++      req = admitted;
++
+       const controlUiEnabled =
+         opts.controlUiEnabled ?? configSnapshot.gateway?.controlUi?.enabled ?? true;
+       // Pin endpoint admission and input limits to the same request snapshot.
+@@ -257,10 +271,14 @@ export function createGatewayHttpRequestHandler(
+         req,
+         trustedProxies,
+         allowRealIpFallback,
++        containedIngress: configSnapshot.gateway?.auth?.containedIngress,
+         // HTTP authorization must observe Tailnet revocation on the next request.
+         // WebSocket upgrades retain the ordinary cache because they authenticate once.
+         tailscaleWhois: (ip) =>
+-          readTailscaleWhoisIdentity(ip, undefined, { cacheTtlMs: 0, errorTtlMs: 0 }),
++          readTailscaleWhoisIdentity(ip, undefined, {
++            cacheTtlMs: 0,
++            errorTtlMs: 0,
++          }),
+       });
+       const scopedNodeCapability = normalizePluginNodeCapabilityScopedUrl(req.url ?? "/");
+       if (scopedNodeCapability.malformedScopedPath) {
+@@ -308,10 +326,26 @@ export function createGatewayHttpRequestHandler(
+         ) {
+           return undefined;
+         }
+-        sendGatewayAuthFailure(res, { ok: false, reason: ingressAttribution.reason });
++        sendGatewayAuthFailure(res, {
++          ok: false,
++          reason: ingressAttribution.reason,
++        });
+         return undefined;
+       }
+-      const requestClientIp = ingressAttribution.clientIp;
++      if (
++        ingressAttribution.kind === "contained-credentials" &&
++        !containedCredentialHttpPath(scopedRequestPath)
++      ) {
++        sendGatewayAuthFailure(res, {
++          ok: false,
++          reason: "contained_native_credentials_required",
++        });
++        return undefined;
++      }
++      const requestClientIp =
++        ingressAttribution.kind === "contained-credentials"
++          ? ingressAttribution.rateLimit.subject.key
++          : ingressAttribution.clientIp;
+       const routeAuth = {
+         auth: resolvedAuthValue,
+         cfg: configSnapshot,
+@@ -632,7 +666,10 @@ export function createGatewayHttpRequestHandler(
+           },
+           () => {
+             if (pluginAuthorization?.requestAuth.hasCurrentClientAuthority?.() === false) {
+-              sendGatewayAuthFailure(res, { ok: false, reason: "unauthorized" });
++              sendGatewayAuthFailure(res, {
++                ok: false,
++                reason: "unauthorized",
++              });
+               return true;
+             }
+             return handlePluginRequest(req, res, pluginPathContext, {
+@@ -655,7 +692,11 @@ export function createGatewayHttpRequestHandler(
+           (await getManagedMediaAttachmentsModule()).handleManagedOutgoingMediaHttpRequest(
+             req,
+             res,
+-            { ...routeAuth, basePath: controlUiRouteBasePath, clients },
++            {
++              ...routeAuth,
++              basePath: controlUiRouteBasePath,
++              clients,
++            },
+           ),
+         false,
+         "outgoing-media",
+@@ -732,5 +773,7 @@ export function createGatewayHttpRequestHandler(
+     }
+   }
+ 
+-  return Object.assign(handleServerRequest, { dispose: () => publicSessionRoute.dispose() });
++  return Object.assign(handleServerRequest, {
++    dispose: () => publicSessionRoute.dispose(),
++  });
+ }
+diff --git a/src/gateway/server-http-upgrades.ts b/src/gateway/server-http-upgrades.ts
+index feda83bc7..aa27e1729 100644
+--- a/src/gateway/server-http-upgrades.ts
++++ b/src/gateway/server-http-upgrades.ts
+@@ -230,15 +230,30 @@ export function attachGatewayUpgradeHandler(opts: {
+         req,
+         trustedProxies,
+         allowRealIpFallback,
++        containedIngress: configSnapshot.gateway?.auth?.containedIngress,
+       });
++      if (
++        configSnapshot.gateway?.auth?.containedIngress &&
++        ingressAttribution.kind === "unattributable-proxy"
++      ) {
++        rejectUpgradeAuth(socket, {
++          ok: false,
++          reason: ingressAttribution.reason,
++        });
++        return;
++      }
+       const requestClientIp =
+         ingressAttribution.kind === "unattributable-proxy"
+           ? ingressAttribution.remoteAddress
+-          : ingressAttribution.clientIp;
++          : ingressAttribution.kind === "contained-credentials"
++            ? ingressAttribution.rateLimit.subject.key
++            : ingressAttribution.clientIp;
+       const preauthBudgetKey =
+         ingressAttribution.kind === "remote-forwarded"
+           ? ingressAttribution.rateLimit.subject.key
+-          : requestClientIp;
++          : ingressAttribution.kind === "contained-credentials"
++            ? ingressAttribution.rateLimit.subject.key
++            : requestClientIp;
+       const originalRequestPath = URL.parse(req.url ?? "/", "http://localhost")?.pathname;
+       const originalWorkerGatewayRoute = originalRequestPath
+         ? classifyWorkerGatewayPath(originalRequestPath)
+@@ -248,7 +263,32 @@ export function attachGatewayUpgradeHandler(opts: {
+         ingressAttribution.kind === "unattributable-proxy"
+       ) {
+         opts.reportUnattributableProxy?.(ingressAttribution);
+-        rejectUpgradeAuth(socket, { ok: false, reason: ingressAttribution.reason });
++        rejectUpgradeAuth(socket, {
++          ok: false,
++          reason: ingressAttribution.reason,
++        });
++        return;
++      }
++      if (
++        ingressAttribution.kind === "trusted-proxy" &&
++        ingressAttribution.containedOperator &&
++        originalWorkerGatewayRoute !== "outside"
++      ) {
++        rejectUpgradeAuth(socket, {
++          ok: false,
++          reason: "contained_operator_role_mismatch",
++        });
++        return;
++      }
++      if (
++        ingressAttribution.kind === "contained-credentials" &&
++        originalWorkerGatewayRoute === "outside" &&
++        originalRequestPath !== "/"
++      ) {
++        rejectUpgradeAuth(socket, {
++          ok: false,
++          reason: "contained_native_credentials_required",
++        });
+         return;
+       }
+       if (originalWorkerGatewayRoute === "worker" && !workerIngressEnabled) {
+@@ -315,7 +355,10 @@ export function attachGatewayUpgradeHandler(opts: {
+       if (ingressAttribution.kind === "unattributable-proxy") {
+         opts.reportUnattributableProxy?.(ingressAttribution);
+         if (nodeCapability || !opts.isPluginAuthenticatedRoute?.(pathContext)) {
+-          rejectUpgradeAuth(socket, { ok: false, reason: ingressAttribution.reason });
++          rejectUpgradeAuth(socket, {
++            ok: false,
++            reason: ingressAttribution.reason,
++          });
+           return;
+         }
+       }
+@@ -391,7 +434,10 @@ export function attachGatewayUpgradeHandler(opts: {
+         }
+       }
+       if (ingressAttribution.kind === "unattributable-proxy") {
+-        rejectUpgradeAuth(socket, { ok: false, reason: ingressAttribution.reason });
++        rejectUpgradeAuth(socket, {
++          ok: false,
++          reason: ingressAttribution.reason,
++        });
+         return;
+       }
+       if (requestPath === "/desktop/observe" || requestPath === "/desktop/audio") {
+diff --git a/src/gateway/server/ws-connection/connect-auth.ts b/src/gateway/server/ws-connection/connect-auth.ts
+index 708e34da5..1cfa8db25 100644
+--- a/src/gateway/server/ws-connection/connect-auth.ts
++++ b/src/gateway/server/ws-connection/connect-auth.ts
+@@ -113,6 +113,25 @@ async function authenticateGatewayConnectCore(
+     sendHandshakeErrorResponse,
+   } = context;
+   const resolvedAuth = getResolvedAuth();
++  if (resolvedAuth.containedIngress) {
++    const ingress = context.handler.ingressAttribution;
++    const operator = ingress.kind === "trusted-proxy" ? ingress.containedOperator : undefined;
++    if (
++      (operator &&
++        (connectParams.role !== "operator" ||
++          (operator.clientInstanceId !== "" &&
++            operator.clientInstanceId !== connectParams.client.instanceId))) ||
++      (!operator && connectParams.role !== "node")
++    ) {
++      markHandshakeFailure("contained-ingress-role-mismatch");
++      sendHandshakeErrorResponse(
++        ErrorCodes.INVALID_REQUEST,
++        "Contained ingress role or client binding mismatch.",
++      );
++      close(1008, "contained ingress role mismatch");
++      return undefined;
++    }
++  }
+   const hasRequestedScopes = Array.isArray(connectParams.scopes);
+   const admission = await admitGatewayConnect(context);
+   if (!admission) {
+@@ -305,7 +324,9 @@ async function authenticateGatewayConnectCore(
+         insecureAuthConfigured: false,
+       });
+       sendHandshakeErrorResponse(ErrorCodes.INVALID_REQUEST, errorMessage, {
+-        details: { code: ConnectErrorDetailCodes.CONTROL_UI_DEVICE_IDENTITY_REQUIRED },
++        details: {
++          code: ConnectErrorDetailCodes.CONTROL_UI_DEVICE_IDENTITY_REQUIRED,
++        },
+       });
+       close(1008, errorMessage);
+       return false;
+@@ -356,7 +377,10 @@ async function authenticateGatewayConnectCore(
+         deviceId: device.id,
+       });
+       sendHandshakeErrorResponse(ErrorCodes.INVALID_REQUEST, message, {
+-        details: { code: resolveDeviceAuthConnectErrorDetailCode(reason), reason },
++        details: {
++          code: resolveDeviceAuthConnectErrorDetailCode(reason),
++          reason,
++        },
+       });
+       close(1008, message);
+       await settleRejectedSharedAuthFailure();
+diff --git a/src/gateway/contained-ingress.ts b/src/gateway/contained-ingress.ts
+new file mode 100644
+index 000000000..770ce70e0
+--- /dev/null
++++ b/src/gateway/contained-ingress.ts
+@@ -0,0 +1,209 @@
++import { createHash, createPublicKey, verify } from "node:crypto";
++import { IncomingMessage } from "node:http";
++import type { GatewayAuthConfig } from "../config/types.gateway.js";
++
++export type ContainedIngressConfig = NonNullable<GatewayAuthConfig["containedIngress"]>;
++export const CONTAINED_INGRESS_HEADER = "x-oce-ingress";
++const MAX_BODY_BYTES = 25 * 1024 * 1024;
++const MAX_PROOFS = 8192;
++// Proofs issued before this process existed cannot become reusable after a restart.
++const processStartedAt = Date.now();
++const replay = new Map<string, number>();
++
++type OperatorProof = Readonly<{
++  identity: string;
++  clientInstanceId: string;
++  bodySha256: string;
++  expiresAt: number;
++}>;
++export type ContainedIngress =
++  | { kind: "operator"; proof: OperatorProof }
++  | { kind: "credentials" }
++  | { kind: "invalid" };
++const requests = new WeakMap<IncomingMessage, { generation: string; ingress: ContainedIngress }>();
++
++function generation(config: ContainedIngressConfig): string {
++  return JSON.stringify([
++    config.audience,
++    config.verificationKeys
++      .map((key) => [key.keyId, key.publicKeyPem])
++      .sort(([left], [right]) => left!.localeCompare(right!)),
++  ]);
++}
++
++function header(req: IncomingMessage, name: string): string {
++  const value = req.headers[name];
++  return typeof value === "string" ? value : "";
++}
++
++/** Reject unusable verification material before the contained runtime becomes ready. */
++export function validateContainedIngressConfig(config: ContainedIngressConfig): void {
++  const ids = new Set<string>();
++  for (const selected of config.verificationKeys) {
++    if (
++      ids.has(selected.keyId) ||
++      createPublicKey(selected.publicKeyPem).asymmetricKeyType !== "ed25519"
++    ) {
++      throw new Error("Contained ingress requires unique Ed25519 verification keys.");
++    }
++    ids.add(selected.keyId);
++  }
++}
++
++/** Only this verifier produces operator facts; forwarded identities never do. */
++export function readContainedIngress(
++  req: IncomingMessage,
++  config: ContainedIngressConfig,
++): ContainedIngress {
++  const existing = requests.get(req);
++  const current = generation(config);
++  if (existing) {
++    return existing.generation === current ? existing.ingress : { kind: "invalid" };
++  }
++  const result = verifyRequest(req, config);
++  requests.set(req, { generation: current, ingress: result });
++  return result;
++}
++
++function verifyRequest(req: IncomingMessage, config: ContainedIngressConfig): ContainedIngress {
++  if (req.headers[CONTAINED_INGRESS_HEADER] === undefined) {
++    return { kind: "credentials" };
++  }
++  try {
++    const raw = header(req, CONTAINED_INGRESS_HEADER);
++    if (raw.length > 8192 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(raw)) {
++      return { kind: "invalid" };
++    }
++    const [encoded, signature] = raw.split(".");
++    const claim: unknown = JSON.parse(Buffer.from(encoded!, "base64url").toString("utf8"));
++    if (!claim || typeof claim !== "object" || Array.isArray(claim)) {
++      return { kind: "invalid" };
++    }
++    const c = claim as Record<string, unknown>;
++    const now = Date.now();
++    const upgrade = header(req, "upgrade").toLowerCase() === "websocket";
++    if (
++      c.version !== 1 ||
++      c.audience !== config.audience ||
++      c.identity !== "occ-workspace-files" ||
++      typeof c.keyId !== "string" ||
++      typeof c.nonce !== "string" ||
++      !/^[0-9a-f-]{36}$/u.test(c.nonce) ||
++      typeof c.issuedAt !== "number" ||
++      !Number.isSafeInteger(c.issuedAt) ||
++      typeof c.expiresAt !== "number" ||
++      !Number.isSafeInteger(c.expiresAt) ||
++      c.issuedAt < processStartedAt ||
++      c.issuedAt > now + 1000 ||
++      c.expiresAt <= now ||
++      c.expiresAt <= c.issuedAt ||
++      c.expiresAt - c.issuedAt > 30_000 ||
++      c.method !== req.method ||
++      c.path !== req.url ||
++      c.origin !== header(req, "origin") ||
++      c.contentType !== header(req, "content-type") ||
++      c.contentEncoding !== header(req, "content-encoding") ||
++      typeof c.bodySha256 !== "string" ||
++      !/^[0-9a-f]{64}$/u.test(c.bodySha256) ||
++      typeof c.websocketKey !== "string" ||
++      typeof c.clientInstanceId !== "string" ||
++      (upgrade
++        ? Boolean(c.websocketKey) === Boolean(c.clientInstanceId) ||
++          (Boolean(c.websocketKey) && c.websocketKey !== header(req, "sec-websocket-key"))
++        : c.websocketKey !== "" || c.clientInstanceId !== "")
++    ) {
++      return { kind: "invalid" };
++    }
++    const selected = config.verificationKeys.find((key) => key.keyId === c.keyId);
++    if (!selected) {
++      return { kind: "invalid" };
++    }
++    const key = createPublicKey(selected.publicKeyPem);
++    if (
++      key.asymmetricKeyType !== "ed25519" ||
++      !verify(null, Buffer.from(encoded!), key, Buffer.from(signature!, "base64url"))
++    ) {
++      return { kind: "invalid" };
++    }
++    for (const [nonce, expiry] of replay) {
++      if (expiry <= now) {
++        replay.delete(nonce);
++      }
++    }
++    const replayKey = config.audience + ":" + c.nonce;
++    if (replay.has(replayKey) || replay.size >= MAX_PROOFS) {
++      return { kind: "invalid" };
++    }
++    replay.set(replayKey, c.expiresAt);
++    return {
++      kind: "operator",
++      proof: Object.freeze({
++        identity: c.identity,
++        clientInstanceId: c.clientInstanceId,
++        bodySha256: c.bodySha256,
++        expiresAt: c.expiresAt,
++      }),
++    };
++  } catch {
++    return { kind: "invalid" };
++  }
++}
++
++/** Capability lanes remain independently authenticated by their existing route owners. */
++export function containedCredentialHttpPath(path: string): boolean {
++  const pathname = path.split("?", 1)[0];
++  return [
++    "/__openclaw__/worker-bundle/v1/",
++    "/__openclaw__/worker-transfer/v1/",
++    "/__openclaw__/native-hook/",
++  ].some((prefix) => pathname?.startsWith(prefix));
++}
++
++/** Verify the complete signed body before any administrative route can act on it. */
++export async function prepareContainedHttpRequest(
++  req: IncomingMessage,
++  config: ContainedIngressConfig | undefined,
++): Promise<IncomingMessage | undefined> {
++  if (!config) {
++    return req;
++  }
++  const ingress = readContainedIngress(req, config);
++  if (ingress.kind === "invalid") {
++    return undefined;
++  }
++  if (ingress.kind === "credentials") {
++    return req;
++  }
++  const chunks: Buffer[] = [];
++  let size = 0;
++  for await (const chunk of req) {
++    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
++    size += bytes.length;
++    if (size > MAX_BODY_BYTES) {
++      return undefined;
++    }
++    chunks.push(bytes);
++  }
++  const body = Buffer.concat(chunks);
++  if (
++    Date.now() >= ingress.proof.expiresAt ||
++    createHash("sha256").update(body).digest("hex") !== ingress.proof.bodySha256
++  ) {
++    return undefined;
++  }
++  // Administrative route owners consume the same verified bytes through their usual
++  // IncomingMessage body readers. The original socket and lifecycle remain in use.
++  const admitted = new IncomingMessage(req.socket);
++  admitted.method = req.method;
++  admitted.url = req.url;
++  admitted.headers = req.headers;
++  admitted.rawHeaders = req.rawHeaders;
++  admitted.httpVersion = req.httpVersion;
++  admitted.httpVersionMajor = req.httpVersionMajor;
++  admitted.httpVersionMinor = req.httpVersionMinor;
++  admitted.complete = true;
++  requests.set(admitted, { generation: generation(config), ingress });
++  admitted.push(body);
++  admitted.push(null);
++  return admitted;
++}
+diff --git a/src/gateway/server.contained-ingress.test.ts b/src/gateway/server.contained-ingress.test.ts
+new file mode 100644
+index 000000000..024afa218
+--- /dev/null
++++ b/src/gateway/server.contained-ingress.test.ts
+@@ -0,0 +1,229 @@
++import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
++import { expect, test } from "vitest";
++import type { GatewayAuthConfig } from "../config/types.gateway.js";
++import { decodePairingSetupCode } from "../pairing/setup-code.js";
++import { captureGatewayAuthPolicy, isGatewayAuthPolicyCurrent } from "./auth-policy.js";
++import { loadDeviceIdentity } from "./device-authz.test-helpers.js";
++import * as gateway from "./server.auth.test-helpers.js";
++
++gateway.installGatewayTestHooks({ scope: "suite" });
++const pair = generateKeyPairSync("ed25519");
++const publicKeyPem = pair.publicKey.export({ type: "spki", format: "pem" }).toString();
++const audience = "agent-test/revision-1/workload-1";
++const origin = gateway.BROWSER_ORIGIN;
++const auth: GatewayAuthConfig = {
++  mode: "trusted-proxy",
++  containedIngress: {
++    audience,
++    verificationKeys: [{ keyId: "test", publicKeyPem }],
++  },
++  trustedProxy: {
++    userHeader: "x-occ-identity",
++    allowLoopback: false,
++    allowUsers: ["occ-workspace-files"],
++  },
++  identityScopes: { "occ-workspace-files": ["operator.admin"] },
++};
++
++function proof(
++  path: string,
++  options: {
++    method?: string;
++    body?: string;
++    instanceId?: string;
++    overrides?: Record<string, unknown>;
++  } = {},
++) {
++  const now = Date.now();
++  const encoded = Buffer.from(
++    JSON.stringify({
++      version: 1,
++      keyId: "test",
++      audience,
++      identity: "occ-workspace-files",
++      issuedAt: now,
++      expiresAt: now + 30_000,
++      nonce: randomUUID(),
++      method: options.method ?? "GET",
++      path,
++      origin: options.instanceId ? "" : origin,
++      websocketKey: "",
++      clientInstanceId: options.instanceId ?? "",
++      contentType: options.body === undefined ? "" : "application/json",
++      contentEncoding: "",
++      bodySha256: createHash("sha256")
++        .update(options.body ?? "")
++        .digest("hex"),
++      ...options.overrides,
++    }),
++  ).toString("base64url");
++  return encoded + "." + sign(null, Buffer.from(encoded), pair.privateKey).toString("base64url");
++}
++
++// Reach the real HTTP route/auth owners, not an imitation verifier.
++test("contained HTTP binds authority to request, body, origin, audience and one nonce", async () => {
++  await gateway.configureBrowserAuth(auth);
++  await gateway.withGatewayServer(async ({ port }) => {
++    const url = "http://127.0.0.1:" + port + "/tools/invoke";
++    const body = "{}";
++    const acceptedProof = proof("/tools/invoke", { method: "POST", body });
++    const send = (token: string, bytes = body, requestOrigin = origin) =>
++      fetch(url, {
++        method: "POST",
++        body: bytes,
++        headers: {
++          "content-type": "application/json",
++          origin: requestOrigin,
++          "x-oce-ingress": token,
++        },
++      });
++    const accepted = await send(acceptedProof);
++    expect(accepted.status, await accepted.text()).toBe(400);
++    // Replaying a correct signed mutation must not reach its route again.
++    expect((await send(acceptedProof)).status).toBe(401);
++    expect(
++      (await send(proof("/tools/invoke", { method: "POST", body }), '{"changed":true}')).status,
++    ).toBe(401);
++    expect(
++      (await send(proof("/tools/invoke", { method: "POST", body }), body, "https://other.invalid"))
++        .status,
++    ).toBe(401);
++    for (const overrides of [{ audience: "another-agent" }, { expiresAt: 1 }, { method: "GET" }]) {
++      expect((await send(proof("/tools/invoke", { method: "POST", body, overrides }))).status).toBe(
++        401,
++      );
++    }
++    expect((await send(proof("/another-path", { method: "POST", body }))).status).toBe(401);
++    expect((await send("forged.invalid")).status).toBe(401);
++    const unsigned = await fetch(url, {
++      method: "POST",
++      body,
++      headers: {
++        "content-type": "application/json",
++        "x-occ-identity": "occ-workspace-files",
++        "x-forwarded-for": "127.0.0.1",
++      },
++    });
++    expect(unsigned.status).toBe(401);
++    expect((await fetch("http://127.0.0.1:" + port + "/healthz")).status).toBe(200);
++  });
++});
++
++// Use the native setup RPC, signed device challenge, pairing store and issued node token.
++test("contained operator evidence cannot become node authority and unsigned nodes retain native credentials", async () => {
++  await gateway.configureBrowserAuth(auth);
++  await gateway.withGatewayServer(async ({ port }) => {
++    const sockets: Awaited<ReturnType<typeof gateway.openWs>>[] = [];
++    const instanceId = randomUUID();
++    const operator = await gateway.openWs(port, {
++      "x-oce-ingress": proof("/", { instanceId }),
++    });
++    sockets.push(operator);
++    const connected = await gateway.connectReq(operator, {
++      client: { ...gateway.BACKEND_GATEWAY_CLIENT, instanceId },
++      role: "operator",
++      scopes: [],
++      device: null,
++      skipDefaultAuth: true,
++    });
++    expect(connected.ok, JSON.stringify(connected.error)).toBe(true);
++    expect(connected.payload?.auth).toMatchObject({
++      role: "operator",
++      scopes: ["operator.admin"],
++    });
++    try {
++      const setup = await gateway.rpcReq<{ setupCode: string }>(operator, "device.pair.setupCode", {
++        bootstrapProfile: "node",
++        includeQr: false,
++        publicUrl: "wss://node.example.invalid",
++      });
++      expect(setup.ok, JSON.stringify(setup.error)).toBe(true);
++      const payload = decodePairingSetupCode(setup.payload!.setupCode);
++      const identity = loadDeviceIdentity("contained-node");
++      const connectNode = async (
++        options: Parameters<typeof gateway.connectReq>[1],
++        signed = false,
++      ) => {
++        const ws = await gateway.openWs(
++          port,
++          signed
++            ? { "x-oce-ingress": proof("/", { instanceId }) }
++            : {
++                "x-forwarded-for": "127.0.0.1",
++                "x-occ-identity": "occ-workspace-files",
++              },
++        );
++        sockets.push(ws);
++        return gateway.connectReq(ws, {
++          role: "node",
++          scopes: [],
++          client: gateway.NODE_CLIENT,
++          deviceIdentityPath: identity.identityPath,
++          skipDefaultAuth: true,
++          ...options,
++        });
++      };
++      const node = await connectNode({
++        bootstrapToken: payload.bootstrapToken,
++      });
++      expect(node.ok, JSON.stringify(node.error)).toBe(true);
++      expect(node.payload?.auth).toMatchObject({ role: "node", scopes: [] });
++      const nodeAuth = node.payload?.auth;
++      if (
++        !nodeAuth ||
++        typeof nodeAuth !== "object" ||
++        !("deviceToken" in nodeAuth) ||
++        typeof nodeAuth.deviceToken !== "string"
++      ) {
++        throw new Error("Native node bootstrap did not issue its device token.");
++      }
++      const nodeToken = nodeAuth.deviceToken;
++      expect((await connectNode({ deviceToken: nodeToken })).ok).toBe(true);
++      expect((await connectNode({ deviceToken: "invalid-node-token" })).ok).toBe(false);
++      expect(
++        (
++          await connectNode({
++            deviceToken: nodeToken,
++            role: "operator",
++            scopes: ["operator.admin"],
++          })
++        ).ok,
++      ).toBe(false);
++      expect((await connectNode({ bootstrapToken: payload.bootstrapToken }, true)).ok).toBe(false);
++      const revoked = await gateway.rpcReq(operator, "device.token.revoke", {
++        deviceId: identity.identity.deviceId,
++        role: "node",
++      });
++      expect(revoked.ok, JSON.stringify(revoked.error)).toBe(true);
++      expect((await connectNode({ deviceToken: nodeToken })).ok).toBe(false);
++    } finally {
++      for (const socket of sockets) {
++        socket.close();
++      }
++    }
++  });
++});
++
++// Existing sockets must lose transport authority when their verification policy changes.
++test("contained key and audience changes invalidate captured Gateway authority", () => {
++  const config = { gateway: { auth } };
++  const policy = captureGatewayAuthPolicy(config, {
++    role: "operator",
++    authMethod: "trusted-proxy",
++    verifiedIdentity: "occ-workspace-files",
++  });
++  expect(isGatewayAuthPolicyCurrent(policy, config)).toBe(true);
++  for (const containedIngress of [
++    { ...auth.containedIngress!, audience: "another-workload" },
++    {
++      ...auth.containedIngress!,
++      verificationKeys: [{ keyId: "rotated", publicKeyPem }],
++    },
++  ]) {
++    expect(
++      isGatewayAuthPolicyCurrent(policy, {
++        gateway: { auth: { ...auth, containedIngress } },
++      }),
++    ).toBe(false);
++  }
++});

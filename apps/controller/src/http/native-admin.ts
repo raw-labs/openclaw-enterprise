@@ -52,6 +52,7 @@ import {
 import { GENERIC_DENIAL, NATIVE_ADMIN_DENIAL } from "./caller-denial.ts";
 import { RequestRateLimiter } from "./request-rate-limiter.ts";
 import type { RequestContext } from "./types.ts";
+import type { GatewayIngressSigningTarget } from "../gateway/contained-ingress.ts";
 
 interface NativeAdminOptions {
   readonly app: FastifyInstance;
@@ -65,6 +66,10 @@ interface NativeAdminOptions {
   readonly auth: ControllerAuth;
   readonly nativeAdmin: NativeAdminAccessConfig | undefined;
   readonly nativeAdminGatewayApiKey: (() => Promise<string>) | undefined;
+  readonly nativeAdminGatewayIngress?: (
+    revision: Readonly<AgentRevision>,
+    endpoint: string,
+  ) => GatewayIngressSigningTarget | undefined;
   readonly webSocketLeaseIntervalMs: number | undefined;
   readonly auditSink: AuditSink;
 }
@@ -78,6 +83,7 @@ interface NativeAdminProxyResolution {
   readonly agentId: string;
   readonly revisionId: string;
   readonly target: NativeAdminTarget;
+  readonly revision: Readonly<AgentRevision>;
   readonly gatewayBase: string;
 }
 
@@ -652,10 +658,15 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
       if (!isNonEmptyString(apiKey)) {
         return undefined;
       }
+      const ingress = options.nativeAdminGatewayIngress?.(
+        resolution.revision,
+        resolution.gatewayBase,
+      );
       return {
         gatewayBase: resolution.gatewayBase,
         agentOrigin: resolution.target.origin,
         apiKey,
+        ...(ingress === undefined ? {} : { ingress }),
       };
     } catch {
       return undefined;
@@ -1051,6 +1062,7 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
         agentId: resolved.agent.id,
         revisionId: resolved.revision.id,
         target: resolved.target,
+        revision: resolved.revision,
         gatewayBase: resolved.gatewayBase,
       };
     } catch (error) {

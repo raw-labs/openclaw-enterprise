@@ -20,6 +20,53 @@ const { Agent, fetch: undiciFetch } = createRequire(
 
 const token = "xoxb-fixture";
 
+test("Slack Gateway grants follow channel activation without granting unrelated destinations", () => {
+  const driver = new SlackChannelDriver();
+  const enabled = { channels: { slack: { enabled: true, accounts: { team: {} } } } };
+  const grants = driver.gatewayDestinations(enabled, "slack");
+  // Socket Mode hosts vary; apex and wildcard grants are distinct, and no
+  // package registry or unrelated integration is part of Slack authority.
+  assert.deepEqual([...new Set(grants.map(({ host }) => host))].sort(), [
+    "*.slack-edge.com",
+    "*.slack-msgs.com",
+    "*.slack.com",
+    "slack-edge.com",
+    "slack-msgs.com",
+    "slack.com",
+  ]);
+  assert.ok(grants.every(({ ports }) => ports.length === 1 && ports[0] === 443));
+  assert.deepEqual([...new Set(grants.map(({ protocol }) => protocol))].sort(), ["https", "wss"]);
+  assert.deepEqual(driver.gatewayDestinations({}, "slack"), []);
+  assert.deepEqual(
+    driver.gatewayDestinations({ channels: { slack: { enabled: false } } }, "slack"),
+    [],
+  );
+  assert.throws(
+    () => driver.gatewayDestinations({ channels: { msteams: {} } }, "msteams"),
+    /cannot authorize/,
+  );
+  assert.deepEqual(driver.gatewayDestinations({ channels: { slack: {} } }, "slack"), grants);
+  assert.deepEqual(
+    driver.gatewayDestinations(
+      { channels: { slack: { accounts: { team: { enabled: false } } } } },
+      "slack",
+    ),
+    [],
+  );
+  // Top-level tokens still start the implicit default when no named account owns it.
+  assert.deepEqual(
+    driver.gatewayDestinations(
+      {
+        channels: {
+          slack: { botToken: "${BOT}", appToken: "${APP}", accounts: { team: { enabled: false } } },
+        },
+      },
+      "slack",
+    ),
+    grants,
+  );
+});
+
 test("Slack directory sends HTTPS requests through its selected CONNECT proxy", async (t) => {
   const targets = [];
   const proxy = createServer();

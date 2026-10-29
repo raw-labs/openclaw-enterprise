@@ -73,7 +73,7 @@ import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs
 import { syntheticCredentialUrl } from "../fixtures/synthetic-credential-url.mjs";
 import { createOccLogger, emitOccLogEvent } from "../../apps/controller/src/logging.ts";
 import { harnessTlsFixture } from "../helpers/harness-tls.mjs";
-import { conformanceKubeconfig } from "../helpers/kubernetes-compute.mjs";
+import { conformanceKubeconfig, controlledGatewayFixture } from "../helpers/kubernetes-compute.mjs";
 import {
   unboundReferenceRefusal,
   unreadableSlackTokenRefusal,
@@ -98,6 +98,28 @@ import {
   supervisorPeerLabels,
 } from "../fixtures/kubernetes-provider-readiness.mjs";
 import { writeSafeKubeconfig, writeUnsafeKubeconfigs } from "../helpers/unsafe-kubeconfigs.mjs";
+
+test("dedicated Gateway admission refuses missing containment before Kubernetes effects", () => {
+  const driver = new KubernetesComputeDriver(options());
+  // Empty external grants require containment too; ordinary Deployments are not a fallback.
+  for (const policy of [
+    { mode: "restricted", hosts: [] },
+    { mode: "restricted", hosts: ["api.github.com"] },
+    { mode: "publicHttps" },
+  ]) {
+    assert.throws(
+      () => driver.validateGatewayOutbound(policy, "dedicated"),
+      /Dedicated execution requires selected Gateway containment/,
+    );
+  }
+  assert.doesNotThrow(() =>
+    driver.validateGatewayOutbound({ mode: "restricted", hosts: [] }, "embedded"),
+  );
+  assert.throws(
+    () => driver.validateGatewayOutbound({ mode: "publicHttps" }, "embedded"),
+    /Embedded execution/,
+  );
+});
 import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 
 const { kubeconfigPath, context: contextName } = conformanceKubeconfig;
@@ -1037,8 +1059,43 @@ function dedicatedFirstDeployFixture({
     // With a fake clock: observe poll by poll, asking `stopWaiting` between reads.
     stepObservations: false,
   };
+  const containedGateway = controlledGatewayFixture({
+    readStatus(context, path) {
+      if (path === "/openclaw/runtime/status") {
+        return {
+          revisionId: context.revision.id,
+          container: "gateway",
+          podUid: "gateway-instance-1",
+          ...(state.gatewayWorkspaceNodeId === undefined
+            ? {}
+            : { workspaceNodeId: state.gatewayWorkspaceNodeId }),
+          ...(state.gatewayWorkspaceNodeFailure === undefined
+            ? {}
+            : { workspaceNodeFailure: state.gatewayWorkspaceNodeFailure }),
+          ...(state.gatewayRuntimeFailure === undefined
+            ? {}
+            : { runtimeFailure: state.gatewayRuntimeFailure }),
+        };
+      }
+      return {
+        revisionId: context.revision.id,
+        container: "gateway",
+        podUid: "gateway-instance-1",
+        startupId: "gateway-startup",
+        phase: "ready",
+        successfulPluginIds: ["codex-plugin:example"],
+        failures: [],
+      };
+    },
+    updateNodeBinding(_context, binding) {
+      if (state.gatewayAppliesBinding) {
+        state.gatewayWorkspaceNodeId = binding.nodeId;
+      }
+    },
+  });
   const driver = new KubernetesComputeDriver(
     routedOptions({
+      gatewayRouting: { ...gatewayRouting, hostname: "localhost" },
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
@@ -1046,9 +1103,18 @@ function dedicatedFirstDeployFixture({
       },
       // The API server proxy can reach private status, so activation reads the
       // node OpenClaw applied.
-      ...(statusProxy ? { network: { pluginStatusProxySourceCidrs: ["192.0.2.20/32"] } } : {}),
+      ...(statusProxy
+        ? {
+            network: {
+              pluginStatusProxySourceCidrs: ["192.0.2.20/32"],
+              providerHarness: containedGateway.peer,
+            },
+          }
+        : {}),
+      ...(!statusProxy ? { network: { providerHarness: containedGateway.peer } } : {}),
     }),
     {
+      ...containedGateway.selection,
       sandboxDriver,
       ...(openShellGit === undefined ? {} : { openShellGit }),
       credentialGatewayDriver,
@@ -1211,7 +1277,14 @@ function dedicatedFirstDeployFixture({
   }
   // Only transport observations are supplied. Startup order and readiness use
   // the real driver; successful writes do not make a Deployment ready.
-  const clients = { core: {}, apps: {}, networking: {}, objects: {}, discovery: {} };
+  const clients = {
+    server: "https://10.43.0.1:443",
+    core: {},
+    apps: {},
+    networking: {},
+    objects: {},
+    discovery: {},
+  };
   for (const [api, kinds] of [
     [
       clients.core,
@@ -1283,6 +1356,9 @@ function dedicatedFirstDeployFixture({
             ]),
           );
         }
+        if (kind === "Service") {
+          value.spec.clusterIP = previous?.spec?.clusterIP ?? "10.43.0.81";
+        }
         save(value);
         return value;
       };
@@ -1296,7 +1372,48 @@ function dedicatedFirstDeployFixture({
   clients.objects.read = async (object) =>
     read(object.kind, object.metadata.name, object.metadata.namespace);
   clients.objects.patch = async (object) => {
-    save(object);
+    const previous = objects.get(key(object.kind, object.metadata.name, object.metadata.namespace));
+    const readiness = containedGateway.calls.some(({ operation }) => operation === "endpoint");
+    const parent = {
+      name: driver.options.gatewayRouting.gatewayName,
+      namespace: driver.options.gatewayRouting.gatewayNamespace,
+    };
+    const observedStatus = !readiness
+      ? undefined
+      : object.kind === "HTTPRoute"
+        ? {
+            parents: [
+              {
+                parentRef: parent,
+                conditions: ["Accepted", "ResolvedRefs"].map((type) => ({
+                  type,
+                  status: "True",
+                  observedGeneration: 1,
+                })),
+              },
+            ],
+          }
+        : object.kind === "BackendTLSPolicy"
+          ? {
+              ancestors: [
+                {
+                  ancestorRef: parent,
+                  conditions: [{ type: "Accepted", status: "True", observedGeneration: 1 }],
+                },
+              ],
+            }
+          : undefined;
+    save({
+      ...previous,
+      ...object,
+      ...(observedStatus === undefined ? {} : { status: observedStatus }),
+      metadata: {
+        ...previous?.metadata,
+        ...object.metadata,
+        uid: object.metadata.name + "-uid",
+        generation: 1,
+      },
+    });
     return object;
   };
   clients.discovery.listNamespacedEndpointSlice = async () => ({
@@ -1425,6 +1542,47 @@ function dedicatedFirstDeployFixture({
   driver.apiClients = Promise.resolve(clients);
   const prepare = () => driver.prepareRevision(revision, context ?? authContext(revision));
   const markReady = (name) => {
+    if (name === gatewayName) {
+      containedGateway.setReady();
+      for (const object of objects.values()) {
+        if (!["HTTPRoute", "BackendTLSPolicy"].includes(object.kind)) {
+          continue;
+        }
+        const parent = {
+          name: driver.options.gatewayRouting.gatewayName,
+          namespace: driver.options.gatewayRouting.gatewayNamespace,
+        };
+        object.status =
+          object.kind === "HTTPRoute"
+            ? {
+                parents: [
+                  {
+                    parentRef: parent,
+                    conditions: ["Accepted", "ResolvedRefs"].map((type) => ({
+                      type,
+                      status: "True",
+                      observedGeneration: object.metadata.generation,
+                    })),
+                  },
+                ],
+              }
+            : {
+                ancestors: [
+                  {
+                    ancestorRef: parent,
+                    conditions: [
+                      {
+                        type: "Accepted",
+                        status: "True",
+                        observedGeneration: object.metadata.generation,
+                      },
+                    ],
+                  },
+                ],
+              };
+      }
+      return;
+    }
     const object = read(
       "Deployment",
       name,
@@ -1440,6 +1598,7 @@ function dedicatedFirstDeployFixture({
   };
   return {
     state,
+    containedGateway,
     driver,
     revision,
     context,
@@ -2845,110 +3004,134 @@ test("a first dedicated deploy pins its workload starts through activation", asy
   const clock = { now: 0 };
   const {
     state,
+    containedGateway,
     driver,
     revision,
     gatewayName,
     agentName,
     templates,
     podPatches,
-    read,
+    objects,
     prepare,
     markReady,
   } = dedicatedFirstDeployFixture({ clock });
-  // Activation's ack poll waits on the same clock, so a missing ack fails instead of spinning.
   driver.delay = async (ms) => {
     clock.now += ms;
   };
-  const environment = (template) =>
-    new Set(template.spec.containers[0].env.map(({ name }) => name));
-  // Workloads become ready as soon as the controller waits on them, so every
-  // pending pass below is a wait on a workload start, not on test timing.
-  let pendingPasses = 0;
-  const pass = async () => {
-    const { ready } = await prepare();
-    pendingPasses += Number(!ready);
-    return ready;
-  };
-  assert.equal(
-    await pass(),
-    false,
-    "the Harness starts with its node wiring, and the Gateway alongside it",
-  );
-  // Both start in the first pass (the Gateway Deployment is reconciled first).
+  assert.equal((await prepare()).ready, false);
+  // The ordinary Harness still starts once. The Gateway is owned by the selected
+  // provider, never an uncontained Kubernetes Deployment.
   assert.deepEqual(
-    templates.map(({ name }) => (name === agentName ? "harness" : name)),
-    [gatewayName, "harness"],
+    templates.map(({ name }) => name),
+    [agentName],
+  );
+  assert.equal(
+    [...objects.values()].some(
+      (object) => object.kind === "Deployment" && object.metadata.name === gatewayName,
+    ),
+    false,
+  );
+  const initial = [...containedGateway.launches.values()][0];
+  assert.ok(initial);
+  assert.equal(initial.requirements.configuration.gateway.bind, "loopback");
+  assert.equal(initial.requirements.labels["openclaw.dev/network-profile"], "provider-fenced-v1");
+  assert.equal(
+    initial.requirements.environment.some(({ name }) => name === "OPENCLAW_MODEL_API_KEY"),
+    false,
+  );
+  assert.equal(
+    initial.requirements.environment.some(({ name }) => name === "OPENCLAW_WORKSPACE_NODE_ID"),
+    false,
   );
   markReady(agentName);
   markReady(gatewayName);
-  // The setup reaches the running Harness through its volume and the node pairs
-  // a moment later, without a workload start. The pass that delivered the setup
-  // sees the pairing and completes: no pending pass once the workloads are ready.
   state.pairAfterSetupMs = 10;
-  assert.equal(await pass(), true);
-  assert.equal(pendingPasses, 1);
-  // That pass also handed the node to the Gateway (binding plus one Pod nudge),
-  // so the hot-apply overlaps the worker's commit and activation's own work.
+  // A ready process publishes the relay first; Gateway API acceptance follows its creation.
+  await prepare();
+  markReady(gatewayName);
+  assert.equal((await prepare()).ready, true);
   assert.equal(state.gatewayWorkspaceNodeId, "node-1");
-  let statusReads = 0;
-  const clients = await driver.apiClients;
-  const proxy = clients.core.connectGetNamespacedPodProxyWithPath;
-  clients.core.connectGetNamespacedPodProxyWithPath = async (request) => {
-    if (request.path === "openclaw/runtime/status" && request.name.startsWith("gateway-")) {
-      statusReads++;
-    }
-    return proxy(request);
-  };
+  const before = containedGateway.calls.length;
   await driver.activateRevision(revision, authContext(revision));
-  assert.equal(statusReads, 1, "activation finds the Gateway's ack on its first read");
+  assert.ok(
+    containedGateway.calls.slice(before).some(({ operation }) => operation === "readStatus"),
+  );
   assert.equal(state.setupCalls, 1);
   assert.equal(
-    podPatches.filter(({ name }) => name === "gateway-pod").length,
+    podPatches.some(({ name }) => name === "gateway-pod"),
+    false,
+  );
+  assert.equal(templates.length, 1, "activation must not restart the ordinary Harness");
+  assert.equal(
+    containedGateway.launches.size,
     1,
-    "the running Gateway Pod is nudged once, by preparation",
+    "reconciliation adopts one immutable launch generation",
   );
+});
 
-  assert.deepEqual(
-    templates.map(({ name }) => (name === agentName ? "harness" : name)),
-    [gatewayName, "harness"],
+test("contained Gateway provider identity changes refuse activation before provider effects", async () => {
+  const { state, containedGateway, driver, revision, gatewayName, agentName, prepare, markReady } =
+    dedicatedFirstDeployFixture();
+  await prepare();
+  markReady(agentName);
+  markReady(gatewayName);
+  state.connected = true;
+  assert.equal((await prepare()).ready, true);
+  const before = containedGateway.calls.length;
+  containedGateway.selection.gatewaySandbox.identity = "different-provider-owner";
+  await assert.rejects(
+    driver.activateRevision(revision, authContext(revision)),
+    /pinned Gateway containment provider is unavailable/,
   );
-  const [gateway, harness] = templates.map(({ template }) => template);
-  // Harness start 1 already runs the node supervisor; no setup code in its pod spec.
-  assert.equal(environment(harness).has("OPENCLAW_NODE_SETUP_CODE"), false);
-  assert.equal(environment(harness).has("OPENCLAW_NODE_SETUP_PATH"), true);
-  // Gateway start 1 carries the optional binding volume from its first render;
-  // the node id never enters its pod spec.
-  assert.equal(environment(gateway).has("OPENCLAW_WORKSPACE_NODE_ID"), false);
-  assert.equal(environment(gateway).has("OPENCLAW_WORKSPACE_NODE_PATH"), true);
-  assert.deepEqual(
-    gateway.spec.volumes.find(({ name }) => name === "openclaw-workspace-node"),
-    {
-      name: "openclaw-workspace-node",
-      configMap: {
-        name: `${gatewayName}-workspace-node`,
-        items: [{ key: "workspace-node.json", path: "workspace-node.json" }],
-        optional: true,
-      },
-    },
+  assert.equal(
+    containedGateway.calls.length,
+    before,
+    "provider ownership must be fenced before observe, status or mutation",
   );
-  assert.deepEqual(
-    read("Deployment", gatewayName, kubernetesNamespaceName(tenant.id)).spec.template,
-    gateway,
+});
+
+test("contained Gateway runtime readback rejects a main process replacement during status", async () => {
+  const { state, containedGateway, driver, revision, gatewayName, agentName, prepare, markReady } =
+    dedicatedFirstDeployFixture();
+  await prepare();
+  markReady(agentName);
+  markReady(gatewayName);
+  state.connected = true;
+  assert.equal((await prepare()).ready, true);
+  const provider = containedGateway.selection.gatewaySandbox;
+  const readback = provider.readStatus;
+  provider.readStatus = async (context, path) => {
+    const report = await readback(context, path);
+    containedGateway.setProcessInstanceId("gateway-main-replacement");
+    return report;
+  };
+  // Activation can reuse an already acknowledged node. Read the actual status
+  // boundary so this case proves the process fence, not that acknowledgement cache.
+  assert.equal(
+    await driver.privateStatusReadback(
+      revision,
+      { name: kubernetesNamespaceName(revision.namespaceId), plane: "execution" },
+      "gateway",
+      "/openclaw/runtime/status",
+    ),
+    undefined,
   );
-  // A Gateway respawns its OpenClaw process in place when its Harness peer
-  // restarts (GATEWAY_RUNTIME_ENTRYPOINT peer poll). The Gateway starts alongside the
-  // first Harness, whose status it waits for, and the Harness template never
-  // changes afterwards, so there is no such restart.
-  const inPodGatewayRestarts = templates.filter(({ name }) => name === agentName).slice(1).length;
-  assert.equal(inPodGatewayRestarts, 0);
-  assert.equal(templates.length + inPodGatewayRestarts, 2, "Harness 1 + Gateway 1");
 });
 
 // The pass that sees the node pair hands it to the Gateway. Activation still
 // waits for the Gateway's own report of that node, and does not nudge again.
 test("activation waits for the Gateway to report the node preparation handed it", async () => {
-  const { state, driver, revision, gatewayName, agentName, podPatches, prepare, markReady } =
-    dedicatedFirstDeployFixture();
+  const {
+    state,
+    containedGateway,
+    driver,
+    revision,
+    gatewayName,
+    agentName,
+    podPatches,
+    prepare,
+    markReady,
+  } = dedicatedFirstDeployFixture();
   assert.equal((await prepare()).ready, false);
   markReady(agentName);
   markReady(gatewayName);
@@ -2958,20 +3141,20 @@ test("activation waits for the Gateway to report the node preparation handed it"
   assert.equal((await prepare()).ready, true);
   assert.equal(state.gatewayWorkspaceNodeId, undefined);
   let statusReads = 0;
-  const clients = await driver.apiClients;
-  const proxy = clients.core.connectGetNamespacedPodProxyWithPath;
-  clients.core.connectGetNamespacedPodProxyWithPath = async (request) => {
-    if (request.path === "openclaw/runtime/status" && request.name.startsWith("gateway-")) {
+  const provider = containedGateway.selection.gatewaySandbox;
+  const readback = provider.readStatus;
+  provider.readStatus = async (context, path) => {
+    if (path === "/openclaw/runtime/status") {
       statusReads++;
       if (statusReads === 2) {
         state.gatewayWorkspaceNodeId = "node-1";
       }
     }
-    return proxy(request);
+    return readback(context, path);
   };
   await driver.activateRevision(revision, authContext(revision));
   assert.equal(statusReads, 2);
-  assert.equal(podPatches.filter(({ name }) => name === "gateway-pod").length, 1);
+  assert.equal(podPatches.filter(({ name }) => name === "gateway-pod").length, 0);
 });
 
 // Activation that fails for want of the Gateway's ack is retried, and the worker
@@ -3734,7 +3917,7 @@ test("another Agent's due Work ends a first deploy's pairing wait at once", asyn
 // an invalid status is still refused (D221).
 test("another Agent's due Work ends an activation's ack wait at once", async () => {
   const clock = { now: 0 };
-  const { state, driver, revision, gatewayName, agentName, prepare, markReady } =
+  const { state, containedGateway, driver, revision, gatewayName, agentName, prepare, markReady } =
     dedicatedFirstDeployFixture({ clock });
   driver.delay = async (ms) => {
     clock.now += ms;
@@ -3745,16 +3928,16 @@ test("another Agent's due Work ends an activation's ack wait at once", async () 
   state.connected = true;
   state.gatewayAppliesBinding = false;
   assert.equal((await prepare()).ready, true);
-  const clients = await driver.apiClients;
-  const proxy = clients.core.connectGetNamespacedPodProxyWithPath;
+  const provider = containedGateway.selection.gatewaySandbox;
+  const readback = provider.readStatus;
   let ackAtMs;
   let invalidStatus = false;
-  clients.core.connectGetNamespacedPodProxyWithPath = async (request) => {
+  provider.readStatus = async (context, path) => {
     if (ackAtMs !== undefined && clock.now >= ackAtMs) {
       state.gatewayWorkspaceNodeId = "node-1";
     }
-    const status = await proxy(request);
-    return invalidStatus && request.path === "openclaw/runtime/status"
+    const status = await readback(context, path);
+    return invalidStatus && path === "/openclaw/runtime/status"
       ? { ...status, revisionId: "another-revision" }
       : status;
   };
@@ -3829,17 +4012,16 @@ test("activation fails with OpenClaw's reason when the Gateway cannot apply its 
   // Neither failure replaced the serving Gateway.
   assert.deepEqual(
     templates.map(({ name }) => (name === agentName ? "harness" : name)),
-    [gatewayName, "harness"],
+    ["harness"],
   );
 });
 
-// The start-count ratchet for installs without network.pluginStatusProxySourceCidrs.
-// The second Gateway start is the price of omitting them: the development
-// launcher sets them (internal/occdev status_proxy_k3d.go), so its first deploys
-// take the single-start path pinned above.
-test("without a status proxy a dedicated Codex Gateway keeps its workspace node in the pod spec", async () => {
+// Contained Gateways have a provider-authenticated private status channel; Kubernetes
+// Pod proxy CIDRs no longer select a weaker restart-and-env fallback.
+test("without a Kubernetes status proxy a dedicated Gateway still hot-binds through its provider", async () => {
   const {
     state,
+    containedGateway,
     driver,
     revision,
     gatewayName,
@@ -3849,38 +4031,23 @@ test("without a status proxy a dedicated Codex Gateway keeps its workspace node 
     prepare,
     markReady,
   } = dedicatedFirstDeployFixture({ statusProxy: false });
-  const environment = (template) =>
-    Object.fromEntries(template.spec.containers[0].env.map(({ name, value }) => [name, value]));
   assert.equal((await prepare()).ready, false);
   markReady(agentName);
-  assert.equal((await prepare()).ready, false);
   markReady(gatewayName);
   state.connected = true;
   assert.equal((await prepare()).ready, true);
-  // The controller cannot read an ack, so the node is applied at Gateway start.
-  await assert.rejects(
-    driver.activateRevision(revision, authContext(revision)),
-    /gateway is not ready/,
-  );
-  markReady(gatewayName);
   await driver.activateRevision(revision, authContext(revision));
-  const gateways = templates.filter(({ name }) => name === gatewayName);
-  assert.equal(gateways.length, 2, "activation replaces the Gateway once");
-  assert.deepEqual(
-    templates.map(({ name }) => (name === agentName ? "harness" : name)),
-    [gatewayName, "harness", gatewayName],
-    "Harness 1 + Gateway 2",
+  assert.equal(templates.length, 1, "only the ordinary Harness has a Deployment");
+  assert.equal(containedGateway.launches.size, 1);
+  assert.ok(
+    containedGateway.calls.some(
+      ({ operation, binding }) => operation === "updateNodeBinding" && binding.nodeId === "node-1",
+    ),
   );
-  const activated = gateways.at(-1).template;
-  assert.equal(environment(activated).OPENCLAW_WORKSPACE_NODE_ID, "node-1");
-  assert.equal(environment(activated).OPENCLAW_WORKSPACE_NODE_PATH, undefined);
-  assert.equal(
-    activated.spec.volumes.some(({ name }) => name === "openclaw-workspace-node"),
-    false,
-  );
+  assert.ok(containedGateway.calls.some(({ operation }) => operation === "readStatus"));
   assert.equal(
     [...objects.values()].some(
-      (object) => object.kind === "ConfigMap" && object.metadata.name.endsWith("-workspace-node"),
+      ({ kind, metadata }) => kind === "Deployment" && metadata.name === gatewayName,
     ),
     false,
   );
@@ -17745,9 +17912,31 @@ function workspaceSetupFixture(
     secretFailure: false,
     failedInitializer: false,
   };
+  const containedGateway = controlledGatewayFixture({
+    readStatus(context) {
+      return {
+        revisionId: context.revision.id,
+        container: "gateway",
+        podUid: "gateway-instance-1",
+        workspaceNodeId: "node-1",
+      };
+    },
+  });
+  let observedReady = state.ready;
+  Object.defineProperty(state, "ready", {
+    get() {
+      return observedReady;
+    },
+    set(value) {
+      observedReady = value;
+      containedGateway.setReady(value);
+    },
+    enumerable: true,
+  });
   const driver = new KubernetesComputeDriver(
     routedOptions({
-      ...(network === undefined ? {} : { network }),
+      gatewayRouting: { ...gatewayRouting, hostname: "127.0.0.1" },
+      network: { ...network, providerHarness: containedGateway.peer },
       resources: {
         gateway: {
           requests: { cpu: "200m", memory: "256Mi" },
@@ -17765,6 +17954,7 @@ function workspaceSetupFixture(
       ...computeOptions,
     }),
     {
+      ...containedGateway.selection,
       ...driverDependencies,
       nodeEnrollment: {
         async createSetup() {
@@ -17820,6 +18010,12 @@ function workspaceSetupFixture(
       resourceVersion: String(Number(existing?.metadata.resourceVersion ?? 0) + 1),
       generation: 1,
     };
+    if (body.kind === "Service") {
+      object.spec.clusterIP = existing?.spec?.clusterIP ?? "10.43.0.81";
+    }
+    if (existing?.status) {
+      object.status = structuredClone(existing.status);
+    }
     objects.set(key(body.kind, body.metadata.name, body.metadata.namespace), object);
     return object;
   };
@@ -17906,6 +18102,40 @@ function workspaceSetupFixture(
               ? [{ type: "Complete", status: "True" }]
               : [],
         };
+      }
+      if (["HTTPRoute", "BackendTLSPolicy"].includes(kind) && state.ready) {
+        const parent = {
+          name: driver.options.gatewayRouting.gatewayName,
+          namespace: driver.options.gatewayRouting.gatewayNamespace,
+        };
+        observed.status =
+          kind === "HTTPRoute"
+            ? {
+                parents: [
+                  {
+                    parentRef: parent,
+                    conditions: ["Accepted", "ResolvedRefs"].map((type) => ({
+                      type,
+                      status: "True",
+                      observedGeneration: observed.metadata.generation,
+                    })),
+                  },
+                ],
+              }
+            : {
+                ancestors: [
+                  {
+                    ancestorRef: parent,
+                    conditions: [
+                      {
+                        type: "Accepted",
+                        status: "True",
+                        observedGeneration: observed.metadata.generation,
+                      },
+                    ],
+                  },
+                ],
+              };
       }
       return observed;
     };
@@ -18026,6 +18256,7 @@ function workspaceSetupFixture(
   core.createNamespacedSecret = write;
   core.replaceNamespacedSecret = write;
   driver.apiClients = Promise.resolve({
+    server: "https://10.43.0.1:443",
     core,
     apps: {
       readNamespacedDeployment: read("Deployment"),
@@ -18078,7 +18309,7 @@ function workspaceSetupFixture(
     completed: false,
   };
   const context = { ...authContext(revision, control), workspaceSetup: setup };
-  return { driver, revision, namespace, objects, records, state, setup, context };
+  return { driver, containedGateway, revision, namespace, objects, records, state, setup, context };
 }
 
 test("external ChatGPT source preparation delivers the exact placeholder and account only to its Harness", async (t) => {
@@ -19130,7 +19361,7 @@ for (const embedded of [true, false]) {
 for (const method of ["api_key", "codex_pat"]) {
   test(`dedicated ${method} preparation shares the tenant namespace while separating Gateway state and credentials`, async () => {
     const fixture = workspaceSetupFixture(false);
-    const { driver, revision, namespace, context, objects, records } = fixture;
+    const { driver, containedGateway, revision, namespace, context, objects, records } = fixture;
     revision.harnessAuth = { ...revision.harnessAuth, method };
     context.harnessAuth = { ...context.harnessAuth, method };
     const modelEnvironment = method === "api_key" ? "OPENAI_API_KEY" : "CODEX_ACCESS_TOKEN";
@@ -19168,36 +19399,27 @@ for (const method of ["api_key", "codex_pat"]) {
     const gatewayNamespace = kubernetesNamespaceName(tenant.id);
     assert.equal(gatewayNamespace, namespace);
     const values = [...objects.values()];
-    const gateway = values.find(
-      ({ kind, metadata }) => kind === "Deployment" && metadata.name.startsWith("gateway-"),
+    assert.equal(
+      values.some(
+        ({ kind, metadata }) => kind === "Deployment" && metadata.name.startsWith("gateway-"),
+      ),
+      false,
     );
+    const gateway = [...containedGateway.launches.values()][0].requirements;
     const harness = values.find(
       ({ kind, metadata }) => kind === "Deployment" && metadata.name.startsWith("agent-"),
     );
-    const configurationName = gateway.spec.template.spec.volumes.find(
-      ({ name }) => name === "openclaw-configuration",
-    ).configMap.name;
-    const configuration = values.find(
-      ({ kind, metadata }) => kind === "ConfigMap" && metadata.name === configurationName,
-    );
-    const callback = JSON.parse(configuration.data["openclaw.json"]).plugins.entries.codex.config
-      .appServer.nativeHookRelay;
+    const configuration = gateway.configuration;
+    const callback = configuration.plugins.entries.codex.config.appServer.nativeHookRelay;
     assert.deepEqual(callback, {
       url:
         driver.getGatewayEndpoint(revision).replace(/^wss:/, "https:") +
         "/node/__openclaw__/native-hook",
       credentialDirectory: "/home/node/.oce-native-hooks",
     });
-    assert.equal(gateway.metadata.namespace, gatewayNamespace);
     assert.equal(harness.metadata.namespace, namespace);
-    assert.equal(gateway.spec.template.spec.automountServiceAccountToken, false);
-    assert.equal(
-      gateway.spec.template.spec.volumes.some(({ name }) => name === "openclaw-service-principal"),
-      false,
-    );
-    const env = Object.fromEntries(
-      gateway.spec.template.spec.containers[0].env.map((item) => [item.name, item]),
-    );
+    assert.equal(gateway.configuration.gateway.bind, "loopback");
+    const env = Object.fromEntries(gateway.environment.map((item) => [item.name, item]));
     assert.equal(
       env.APP_SERVER_URL.value,
       `ws://agent-${digest(revision.agentId)}.${namespace}.svc:18790`,
@@ -19210,11 +19432,10 @@ for (const method of ["api_key", "codex_pat"]) {
         metadata.name.startsWith("transport-"),
     );
     assert.deepEqual(Object.keys(copied.data), ["app-server-token"]);
-    assert.equal(env.APP_SERVER_TOKEN.valueFrom.secretKeyRef.name, copied.metadata.name);
-    assert.deepEqual(env.SLACK_BOT_TOKEN.valueFrom.secretKeyRef, {
+    assert.equal(env.APP_SERVER_TOKEN.secretKeyRef.name, copied.metadata.name);
+    assert.deepEqual(env.SLACK_BOT_TOKEN.secretKeyRef, {
       name: "channel-source",
       key: "value",
-      optional: false,
     });
     const material = values.find(
       ({ kind, metadata }) =>

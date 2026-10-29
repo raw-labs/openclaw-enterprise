@@ -12,6 +12,7 @@ import {
 } from "../drivers/egress-proxy/openshell-registration.ts";
 import type { OpenShellSandboxDriverSelection } from "../drivers/sandbox/openshell.ts";
 import type { OpenShellSandboxDriverOptions } from "../drivers/sandbox/openshell.ts";
+import { SlackChannelDriver } from "../drivers/channel/slack.ts";
 import type { CredentialProxyDriver } from "@openclaw-enterprise/contracts";
 import {
   OpenShellCredentialProxyDriver,
@@ -26,6 +27,13 @@ import {
 } from "./installation-fields.ts";
 import { requireConfiguration } from "@openclaw-enterprise/contracts";
 import { validateSandboxNetworkGrants } from "@openclaw-enterprise/contracts";
+import { normalizeGatewayOutboundPolicyCeiling } from "@openclaw-enterprise/contracts";
+import {
+  gatewayIngressTarget,
+  loadGatewayIngressAuthority,
+  type GatewayIngressAuthority,
+  type GatewayIngressConfiguration,
+} from "./gateway-ingress.ts";
 import type { SandboxNetworkGrant } from "@openclaw-enterprise/contracts";
 import { asRecord } from "@openclaw-enterprise/utils";
 import { readFile } from "node:fs/promises";
@@ -36,6 +44,7 @@ import type {
   Backend,
   ComputeDriver,
   ConfigurationDriver,
+  ChannelDriver,
   CredentialGatewayDriver,
   CredentialRefreshDriver,
   DriverImplementation,
@@ -134,6 +143,15 @@ export interface SelectedDriverConfiguration<T = ConfigurationRecord> {
 export interface InstallationStartupConfiguration {
   readonly repository?: SelectedDriverConfiguration;
   readonly sandboxNetworkPolicyCeiling?: readonly SandboxNetworkGrant[];
+  /** Installation choice only; Agent sandboxDriverId continues to select the Harness. */
+  readonly gatewaySandbox?: {
+    readonly driverId: string;
+    readonly ingress: GatewayIngressConfiguration;
+  };
+  readonly gatewayOutboundPolicyCeiling?: {
+    readonly allowPublicHttps: boolean;
+    readonly hosts: readonly string[];
+  };
   readonly occ: { readonly cluster: string };
   readonly logging: LoggingConfiguration;
   readonly presets?: { readonly includeDefaults: boolean; readonly files?: readonly string[] };
@@ -148,7 +166,7 @@ export interface InstallationStartupConfiguration {
     readonly iam: SelectedDriverConfiguration<ConfigurationRecord>;
     readonly compute: SelectedDriverConfiguration;
     readonly secret: SelectedDriverConfiguration;
-    readonly sandbox?: SelectedDriverConfiguration;
+    readonly sandbox?: SelectedDriverConfiguration & { readonly useForHarness?: boolean };
     readonly credential_gateway?: SelectedDriverConfiguration;
     readonly credential_refresh?: SelectedDriverConfiguration;
     readonly credential_proxy?: SelectedDriverConfiguration;
@@ -189,12 +207,16 @@ export function installationControllerOptions(
   ControllerOptions,
   | "driverConfigurations"
   | "sandboxNetworkPolicyCeiling"
+  | "gatewayOutboundPolicyCeiling"
   | "nativeWorkerSupport"
   | "credentialProxyCapacity"
 > {
   return {
     driverConfigurations: installationDriverConfigurations(installation),
     sandboxNetworkPolicyCeiling: installation?.sandboxNetworkPolicyCeiling ?? [],
+    gatewayOutboundPolicyCeiling: normalizeGatewayOutboundPolicyCeiling(
+      installation?.gatewayOutboundPolicyCeiling,
+    ),
     ...(installation?.runtime === undefined
       ? {}
       : { nativeWorkerSupport: installation.runtime.nativeWorkerSupport }),
@@ -217,9 +239,13 @@ export interface InstallationRuntimeDrivers {
   readonly bundledPresetVersions?: readonly BundledPresetVersion[];
   readonly installation: InstallationStartupConfiguration;
   readonly computeDriver: ComputeDriver;
+  /** Signing custody remains inside controller composition, never workload configuration. */
+  readonly gatewayIngressAuthority?: GatewayIngressAuthority;
   readonly configurationDriver: ConfigurationDriver;
+  readonly channelDriver?: ChannelDriver;
   readonly secretDriver: SecretDriver;
   readonly sandboxDriver?: SandboxDriver;
+  readonly gatewaySandboxDriver?: SandboxDriver;
   readonly credentialGatewayDriver?: CredentialGatewayDriver;
   readonly credentialRefreshDriver?: CredentialRefreshDriver;
   readonly protectedDriver?: InstalledDriver;
@@ -642,6 +668,39 @@ export async function loadInstallationConfiguration(options: {
   if (sandboxNetworkPolicyCeiling !== undefined) {
     validateSandboxNetworkGrants(sandboxNetworkPolicyCeiling, "/sandboxNetworkPolicyCeiling");
   }
+  let gatewaySandbox: InstallationStartupConfiguration["gatewaySandbox"];
+  if (configuration.gatewaySandbox !== undefined) {
+    const selection = object(configuration.gatewaySandbox, "gatewaySandbox");
+    closed(selection, ["driverId", "ingress"], "gatewaySandbox");
+    const ingress = object(selection.ingress, "gatewaySandbox.ingress");
+    closed(ingress, ["keyId", "privateKeyPath"], "gatewaySandbox.ingress");
+    const keyId = nonempty(ingress.keyId, "gatewaySandbox.ingress.keyId");
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)) {
+      throw new Error("gatewaySandbox.ingress.keyId must be a bounded key identifier.");
+    }
+    gatewaySandbox = Object.freeze({
+      driverId: nonempty(selection.driverId, "gatewaySandbox.driverId"),
+      ingress: Object.freeze({
+        keyId,
+        privateKeyPath: nonempty(ingress.privateKeyPath, "gatewaySandbox.ingress.privateKeyPath"),
+      }),
+    });
+  }
+  let gatewayOutboundPolicyCeiling: InstallationStartupConfiguration["gatewayOutboundPolicyCeiling"];
+  if (configuration.gatewayOutboundPolicyCeiling !== undefined) {
+    const ceiling = object(
+      configuration.gatewayOutboundPolicyCeiling,
+      "gatewayOutboundPolicyCeiling",
+    );
+    closed(ceiling, ["allowPublicHttps", "hosts"], "gatewayOutboundPolicyCeiling");
+    if (ceiling.allowPublicHttps !== undefined && typeof ceiling.allowPublicHttps !== "boolean") {
+      throw new Error("gatewayOutboundPolicyCeiling.allowPublicHttps must be a boolean.");
+    }
+    gatewayOutboundPolicyCeiling = normalizeGatewayOutboundPolicyCeiling({
+      allowPublicHttps: ceiling.allowPublicHttps === true,
+      hosts: ceiling.hosts ?? [],
+    });
+  }
   const observability = observabilityConfiguration(configuration.observability);
   const runtime = runtimeConfiguration(configuration.runtime);
   const drivers = object(configuration.drivers, "drivers");
@@ -732,8 +791,21 @@ export async function loadInstallationConfiguration(options: {
       OpenShellCredentialRefreshDriver,
     );
   }
-  const sandboxSelection =
+  const rawSandboxSelection =
     drivers.sandbox === undefined ? undefined : object(drivers.sandbox, "drivers.sandbox");
+  if (
+    rawSandboxSelection?.useForHarness !== undefined &&
+    typeof rawSandboxSelection.useForHarness !== "boolean"
+  ) {
+    throw new Error("drivers.sandbox.useForHarness must be a boolean.");
+  }
+  const useSandboxForHarness = rawSandboxSelection?.useForHarness !== false;
+  const sandboxSelection =
+    rawSandboxSelection === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(rawSandboxSelection).filter(([key]) => key !== "useForHarness"),
+        );
   let proxySelection: SelectedDriverConfiguration | undefined;
   let packageProxyId: string | undefined;
   let egressAuthority: EgressAuthorityConfiguration | undefined;
@@ -993,6 +1065,18 @@ export async function loadInstallationConfiguration(options: {
       },
     ]);
   }
+  if (
+    !useSandboxForHarness &&
+    (gatewaySandbox === undefined ||
+      credentialGateway !== undefined ||
+      credentialRefresh !== undefined ||
+      proxySelection !== undefined ||
+      packageProxyId !== undefined)
+  ) {
+    throw new Error(
+      "drivers.sandbox.useForHarness=false requires Gateway-only containment without Harness credential capabilities.",
+    );
+  }
   const sandbox =
     sandboxSelection === undefined
       ? undefined
@@ -1013,6 +1097,14 @@ export async function loadInstallationConfiguration(options: {
         validateConfiguration: (input) => sandbox.definition.validateConfiguration(input),
       },
     };
+  }
+  if (
+    gatewaySandbox !== undefined &&
+    (!kubernetesCompute || sandbox?.id !== gatewaySandbox.driverId)
+  ) {
+    throw new Error(
+      "gatewaySandbox.driverId must select an installed Sandbox Driver with the bundled Kubernetes Compute Driver.",
+    );
   }
   if (sandbox !== undefined && computePackage !== undefined) {
     throw new Error("drivers.sandbox requires the bundled Kubernetes Compute Driver.");
@@ -1065,6 +1157,8 @@ export async function loadInstallationConfiguration(options: {
   const installation = Object.freeze({
     occ: Object.freeze({ cluster }),
     ...(sandboxNetworkPolicyCeiling === undefined ? {} : { sandboxNetworkPolicyCeiling }),
+    ...(gatewaySandbox === undefined ? {} : { gatewaySandbox }),
+    ...(gatewayOutboundPolicyCeiling === undefined ? {} : { gatewayOutboundPolicyCeiling }),
     presets: Object.freeze({ includeDefaults }),
     logging,
     ...(observability === undefined ? {} : { observability }),
@@ -1077,7 +1171,9 @@ export async function loadInstallationConfiguration(options: {
       iam,
       compute,
       secret,
-      ...(sandbox === undefined ? {} : { sandbox }),
+      ...(sandbox === undefined
+        ? {}
+        : { sandbox: { ...sandbox, ...(useSandboxForHarness ? {} : { useForHarness: false }) } }),
       ...(credentialGateway === undefined ? {} : { credential_gateway: credentialGateway }),
       ...(credentialRefresh === undefined ? {} : { credential_refresh: credentialRefresh }),
       ...(proxySelection === undefined ? {} : { credential_proxy: proxySelection }),
@@ -1254,6 +1350,16 @@ export async function loadInstallationConfiguration(options: {
   // This check admits an implementation to try installation. Compute still verifies its
   // actual recipient and enforcement before release or the first eligible material read.
   repositoryGitDriver?.requireRepositoryGitTransport();
+  const gatewayCapability = gatewaySandbox === undefined ? undefined : sandboxDriver?.gateway;
+  if (gatewaySandbox !== undefined && gatewayCapability === undefined) {
+    throw new Error(
+      "gatewaySandbox.driverId must provide the dedicated Gateway containment capability.",
+    );
+  }
+  const gatewayIngressAuthority =
+    gatewaySandbox === undefined
+      ? undefined
+      : await loadGatewayIngressAuthority(gatewaySandbox.ingress);
   let computeDriver: ComputeDriver;
   if (computePackage !== undefined) {
     computeDriver = createExternalDriver(
@@ -1277,7 +1383,19 @@ export async function loadInstallationConfiguration(options: {
         id: compute.id,
         implementation: compute.implementation,
         lifecycleDrivers: [configurationDriver],
-        ...(sandboxDriver === undefined ? {} : { sandboxDriver }),
+        ...(sandboxDriver === undefined || !useSandboxForHarness ? {} : { sandboxDriver }),
+        ...(gatewayCapability === undefined ? {} : { gatewaySandbox: gatewayCapability }),
+        ...(gatewayIngressAuthority === undefined
+          ? {}
+          : {
+              gatewayIngress: {
+                keyId: gatewayIngressAuthority.keyId,
+                publicKeyPem: gatewayIngressAuthority.publicKeyPem,
+              },
+            }),
+        gatewayOutboundPolicyCeiling: normalizeGatewayOutboundPolicyCeiling(
+          gatewayOutboundPolicyCeiling,
+        ),
         ...(credentialGatewayDriver === undefined ? {} : { credentialGatewayDriver }),
         ...(protectedDriver === undefined ? {} : { protectedDriver }),
         preparedTokens: tokenService,
@@ -1285,11 +1403,21 @@ export async function loadInstallationConfiguration(options: {
           ? {}
           : { preparedRepositoryIngress: true }),
         preprovisionedNamespace,
-        nodeEnrollment: createGatewayNodeEnrollment(() =>
-          readWorkspaceFilesApiKey(
-            nonempty(environment.OCC_GATEWAY_API_KEY_PATH, "OCC_GATEWAY_API_KEY_PATH"),
+        nodeEnrollment: {
+          ...createGatewayNodeEnrollment(() =>
+            readWorkspaceFilesApiKey(
+              nonempty(environment.OCC_GATEWAY_API_KEY_PATH, "OCC_GATEWAY_API_KEY_PATH"),
+            ),
           ),
-        ),
+          forRevision: (revision) =>
+            createGatewayNodeEnrollment(
+              () =>
+                readWorkspaceFilesApiKey(
+                  nonempty(environment.OCC_GATEWAY_API_KEY_PATH, "OCC_GATEWAY_API_KEY_PATH"),
+                ),
+              async (url) => gatewayIngressTarget(gatewayIngressAuthority, revision, url),
+            ),
+        },
         readNodeCa: () => readHarnessNodeCa(environment),
       },
     );
@@ -1315,9 +1443,15 @@ export async function loadInstallationConfiguration(options: {
     bundledPresetVersions,
     installation,
     computeDriver,
+    // Worker deployment admission derives destinations without token reads or network I/O.
+    channelDriver: new SlackChannelDriver(),
+    ...(gatewayIngressAuthority === undefined ? {} : { gatewayIngressAuthority }),
     configurationDriver,
     secretDriver,
-    ...(sandboxDriver === undefined ? {} : { sandboxDriver }),
+    ...(sandboxDriver === undefined || !useSandboxForHarness ? {} : { sandboxDriver }),
+    ...(gatewayCapability === undefined || sandboxDriver === undefined
+      ? {}
+      : { gatewaySandboxDriver: sandboxDriver }),
     ...(credentialGatewayDriver === undefined ? {} : { credentialGatewayDriver }),
     ...(credentialRefreshDriver === undefined ? {} : { credentialRefreshDriver }),
     ...(protectedDriver === undefined

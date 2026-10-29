@@ -44,6 +44,7 @@ Stores Agent drafts, their desired runtime state, and the selected version refer
 - `configuration_id`
 - `backend_id`
 - `execution_mode`
+- `gateway_outbound` (requested dedicated Gateway access)
 - `gateway_managed_mode`
 - `plugins`
 - `plugin_approvers`
@@ -75,7 +76,9 @@ See [per-Agent policies](../sandbox-policies.md).
 ### `agent_revisions`
 
 Stores numbered, immutable snapshots of Agent settings accepted for deployment.
-`admitted_spec` includes the explicit v2
+`admitted_spec` includes the requested `gateway_outbound` and the dedicated
+Gateway's frozen `gateway_outbound_admission` ceiling and channel requirements.
+It also includes the explicit v2
 [execution admission decision](../credential-sources/protected-inference.md#execution-admission-cutoff).
 
 - `id`

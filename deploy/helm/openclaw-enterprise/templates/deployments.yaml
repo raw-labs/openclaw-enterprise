@@ -65,6 +65,14 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumes:
+        {{- if $.Values.gatewayIngress.secretName }}
+        - name: gateway-ingress-signing
+          secret:
+            secretName: {{ $.Values.gatewayIngress.secretName | quote }}
+            defaultMode: 288 # 0440: only the root owner and controller filesystem group.
+            items:
+              - {key: private.pem, path: private.pem}
+        {{- end }}
         {{- if $.Values.backend.openshell.clientSecretName }}
         - name: openshell-client
           secret:
@@ -495,6 +503,12 @@ spec:
               value: {{ include "openclaw.positiveSafeInteger" (dict "name" "worker.convergenceTimeoutMs" "value" $.Values.worker.convergenceTimeoutMs) | quote }}
             {{- end }}
           volumeMounts:
+            {{- if $.Values.gatewayIngress.secretName }}
+            - name: gateway-ingress-signing
+              mountPath: /etc/openclaw/gateway-ingress/private-key.pem
+              subPath: private.pem
+              readOnly: true
+            {{- end }}
             {{- if $.Values.backend.openshell.clientSecretName }}
             - name: openshell-client
               mountPath: /etc/openclaw/openshell

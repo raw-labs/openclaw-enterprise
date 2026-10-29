@@ -2004,6 +2004,7 @@ Create a Namespace-owned Agent
 | `credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `executionMode` | `"embedded" or "dedicated"` | No | — |
 | `gatewayManagedMode` | `boolean` | No | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `gatewayOutbound` | `object or object` | No | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `harnessAuth` | `object or object or object or object or null` | No | — |
 | `initialWorkspaceFiles` | `object` | No | — |
 | `initialWorkspaceFiles.AGENTS.md` | `string` | No | max length: 16384; pattern: `^[^\u0000]*$` |
@@ -2054,6 +2055,7 @@ Create a Namespace-owned Agent
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
 | `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `data.gatewayOutbound` | `object or object` | Yes | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
@@ -2490,6 +2492,7 @@ Create a new Agent and queue first-time provisioning
 | `configuration.values` | `object<string, SafeJsonValue>` | Yes | A native OpenClaw configuration document. |
 | `executionMode` | `"embedded" or "dedicated"` | No | — |
 | `gatewayManagedMode` | `boolean` | No | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `gatewayOutbound` | `object or object` | No | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `harnessAuth` | `object or object or object or object or null` | No | Dedicated Harness authentication, required. Omitted, null and `runtime` are refused with 400 INVALID_REQUEST. A ready model `credential_source` is supported when the selected Credential Gateway owns it and the caller has source `operate` permission. |
 | `initialWorkspaceFiles` | `object` | No | — |
 | `initialWorkspaceFiles.AGENTS.md` | `string` | No | max length: 16384; pattern: `^[^\u0000]*$` |
@@ -2767,6 +2770,7 @@ Check an unsaved Agent Configuration, plugin selections, initial workspace files
 | `configuration.values` | `object<string, SafeJsonValue>` | Yes | A native OpenClaw configuration document. |
 | `executionMode` | `"embedded" or "dedicated"` | No | — |
 | `gatewayManagedMode` | `boolean` | No | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `gatewayOutbound` | `object or object` | No | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `harnessAuth` | `object or object or object or object or object or null` | No | The Harness authentication Agent create will name, so Agent save's check of it against the execution mode and Compute settings runs here too. For a Secret the caller saves next, send only its `method`. The Secret and credential source are not read; omitted or null skips this check. |
 | `initialWorkspaceFiles` | `object` | No | — |
 | `initialWorkspaceFiles.AGENTS.md` | `string` | No | max length: 16384; pattern: `^[^\u0000]*$` |
@@ -2842,6 +2846,7 @@ Begin or retry deletion of the requested Agent and its Agent revisions
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
 | `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `data.gatewayOutbound` | `object or object` | Yes | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
@@ -2945,6 +2950,7 @@ Replace an exact Namespace-owned Agent's editable draft
 | `credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `executionMode` | `"embedded" or "dedicated"` | No | — |
 | `gatewayManagedMode` | `boolean` | No | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `gatewayOutbound` | `object or object` | No | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `harnessAuth` | `object or object or object or object or null` | No | — |
 | `pluginApprovers` | `PluginApprovers or null` | No | — |
 | `plugins` | `PluginDesiredState` | No | Agent plugin selection map. Keys must be 1-253 characters matching ^[A-Za-z0-9._~:@-]{1,253}$. |
@@ -2987,6 +2993,7 @@ Replace an exact Namespace-owned Agent's editable draft
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
 | `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `data.gatewayOutbound` | `object or object` | Yes | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
@@ -3174,6 +3181,7 @@ Save an Agent revision from the Agent's saved settings
 | `data.credentialSources` | `array<object>` | No | max items: 8; Every credential source the Agent uses, at each source's endpoints. A credential-source harnessAuth names one entry. The selected Credential Gateway injects them at deployment; the Agent never receives their values. |
 | `data.credentialSources[].sourceId` | `string` | Yes | pattern: `^cs_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.gatewayManagedMode` | `boolean` | Yes | Gateway managed mode requested for this Agent version. It does not report Gateway runtime state. |
+| `data.gatewayOutbound` | `object or object` | Yes | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `data.harness` | `object` | Yes | — |
 | `data.harness.id` | `string` | Yes | min length: 1 |
 | `data.harness.mode` | `"embedded" or "dedicated"` | Yes | — |
@@ -4593,6 +4601,7 @@ Temporarily enable or disable future policy edits for one Agent
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
 | `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `data.gatewayOutbound` | `object or object` | Yes | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |
@@ -4719,6 +4728,7 @@ Stop one Agent and keep its saved Agent revision and persistent state
 | `data.desiredRuntimeState` | `"running" or "stopped"` | Yes | — |
 | `data.executionMode` | `"embedded" or "dedicated"` | Yes | — |
 | `data.gatewayManagedMode` | `boolean` | Yes | Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment. |
+| `data.gatewayOutbound` | `object or object` | Yes | Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission. |
 | `data.harnessAuth` | `object or object or object or object or null` | Yes | — |
 | `data.id` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
 | `data.name` | `string` | Yes | min length: 1; max length: 200; pattern: `^(?!\s)(?!.*\s$)[^\u0000-\u001f\u007f-\u009f\u2028\u2029]+$` |

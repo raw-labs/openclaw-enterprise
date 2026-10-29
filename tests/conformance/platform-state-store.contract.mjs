@@ -88,6 +88,7 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     harnessAuth: apiKeyBinding,
     executionMode: "embedded",
     gatewayManagedMode: true,
+    gatewayOutbound: { mode: "restricted", hosts: [] },
     sandboxPolicyEditing: false,
     servicePrincipalId: identifier("service-agent"),
     desiredRuntimeState: "stopped",
@@ -102,6 +103,7 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     agentId: agent.id,
     revision: 1,
     gatewayManagedMode: true,
+    gatewayOutbound: { mode: "restricted", hosts: [] },
     backendId: null,
     configurationId: configuration.id,
     configurationKind: configuration.kind,
@@ -924,6 +926,7 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     backendId: null,
     executionMode: "dedicated",
     gatewayManagedMode: true,
+    gatewayOutbound: { mode: "restricted", hosts: [] },
     sandboxPolicyEditing: false,
     servicePrincipalId: identifier("service-agent"),
     harnessAuth: {
@@ -948,6 +951,10 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
     configurationId: accountConfiguration.id,
     configurationGeneration: accountConfiguration.generation,
     servicePrincipalId: accountAgent.servicePrincipalId,
+    gatewayOutboundAdmission: {
+      ceiling: { allowPublicHttps: false, hosts: [] },
+      channelDestinations: [],
+    },
     harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
     harnessAuth: {
       method: "codex_pat",
@@ -987,6 +994,30 @@ export async function verifyPlatformStateStoreContract(store, options = {}) {
       accountRevision,
     );
   });
+
+  // A dedicated revision must freeze its Installation ceiling and channel grants, not
+  // inherit later configuration. Both adapters reject missing or malformed authority.
+  for (const gatewayOutboundAdmission of [
+    undefined,
+    {
+      ceiling: { allowPublicHttps: false, hosts: [] },
+      channelDestinations: [{ host: "*.github.com", ports: [80], protocol: "https" }],
+    },
+    { ceiling: { allowPublicHttps: false, hosts: ["127.0.0.1"] }, channelDestinations: [] },
+    { ceiling: { allowPublicHttps: false, hosts: [] }, channelDestinations: [], extra: true },
+  ]) {
+    await assert.rejects(
+      store.transact((transaction) =>
+        transaction.revisions.createRevision({
+          ...accountRevision,
+          id: identifier("rev"),
+          revision: 2,
+          gatewayOutboundAdmission,
+        }),
+      ),
+      { name: "ScopeViolationError" },
+    );
+  }
 
   const oauthCredential = {
     kind: "oauth_access_token",
@@ -2895,6 +2926,10 @@ async function verifyCredentialSourceContract(
     id: identifier("rev"),
     agentId: externalAgent.id,
     servicePrincipalId: externalAgent.servicePrincipalId,
+    gatewayOutboundAdmission: {
+      ceiling: { allowPublicHttps: false, hosts: [] },
+      channelDestinations: [],
+    },
     harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
     sandboxDriverId: "sandbox-contract",
     credentialSources: [

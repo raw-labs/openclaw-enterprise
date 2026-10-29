@@ -1,6 +1,6 @@
 ---
 status: Proposed
-implementation_status: Not implemented
+implementation_status: In progress
 author: miguelbranco80
 ---
 
@@ -206,11 +206,16 @@ There is no credential substitution, request rewriting or interception CA.
 
 The Installation administrator selects the Gateway Sandbox provider through
 the proposed `gatewaySandbox` setting in Installation configuration. Agent
-authors choose outbound policy, not the provider. Compute uses the selected
-Driver's `SandboxDriver.gateway` capability for Gateway startup/configuration,
+authors choose outbound policy, not the provider. The Installation can set
+`drivers.sandbox.useForHarness: false` for Gateway-only containment without
+moving the ordinary Harness or selecting model credential capabilities.
+Compute uses the selected Driver's `SandboxDriver.gateway` capability for Gateway startup/configuration,
 private state, resources, policy, endpoint and cleanup. This capability is
-Gateway-specific, not a general workload executor. OpenShell translation stays
-in its Driver and reuses the provider's existing enforcement and proxy.
+Gateway-specific, not a general workload executor. Its observation supplies the
+exact network peer that opens Gateway connections. Compute uses that peer for
+Harness transport and status grants; it does not infer provider Pod labels.
+OpenShell translation stays in its Driver and reuses the provider's existing
+enforcement and proxy.
 
 ## Ingress integration and open questions
 

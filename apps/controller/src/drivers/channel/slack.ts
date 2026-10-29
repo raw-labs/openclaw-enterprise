@@ -1,5 +1,7 @@
 import type {
   ChannelCredentialReader,
+  ChannelGatewayDestination,
+  OpenClawConfigurationDocument,
   ChannelDirectoryResult,
   ChannelDriver,
 } from "@openclaw-enterprise/contracts";
@@ -161,6 +163,34 @@ export class SlackChannelDriver implements ChannelDriver {
       }
       this.proxy = new ProxyAgent(proxyUrl);
     }
+  }
+
+  gatewayDestinations(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+    provider: string,
+  ): readonly ChannelGatewayDestination[] {
+    if (provider !== "slack") {
+      throw new Error("The selected Slack Channel Driver cannot authorize this channel provider.");
+    }
+    const slack = asRecord(asRecord(configuration.channels)?.slack);
+    if (
+      slack === undefined ||
+      slack.enabled === false ||
+      slackAccountTargets(slack).every(({ config }) => config.enabled === false)
+    ) {
+      return [];
+    }
+    // Socket Mode returns temporary WSS hosts. Preserve the existing proxy domains;
+    // native OpenClaw still owns TLS, credentials, reconnects and Slack operations.
+    return ["slack.com", "slack-edge.com", "slack-msgs.com"].flatMap((host) =>
+      [host, `*.${host}`].flatMap((destination) =>
+        (["https", "wss"] as const).map((protocol) => ({
+          host: destination,
+          ports: [443],
+          protocol,
+        })),
+      ),
+    );
   }
 
   async validateCredentials(

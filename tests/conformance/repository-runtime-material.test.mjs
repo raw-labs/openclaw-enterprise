@@ -5,6 +5,10 @@ import {
   KubernetesComputeDriver,
   kubernetesNamespaceName,
 } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
+import {
+  controlledGatewayFixture,
+  gatewayOutboundFixture,
+} from "../helpers/kubernetes-compute.mjs";
 import { ControllerWorker } from "../../apps/controller/src/worker.ts";
 import { protectedRepositoryGitRelease } from "../helpers/protected-repository-git-release.ts";
 import { staticEgressFixture } from "../helpers/static-egress.mjs";
@@ -87,6 +91,32 @@ function workloadPod(deployment, namespace, name, ready = true) {
 }
 
 async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
+  // PROVIDER DEPENDENCY: controlled responses exercise actual Compute material
+  // ownership and routing, not OpenShell enforcement or live native execution.
+  const bindings = new Map();
+  let providerStatus;
+  const containedGateway =
+    mode === "dedicated"
+      ? controlledGatewayFixture({
+          updateNodeBinding(context, binding) {
+            bindings.set(context.revision.id, binding.nodeId);
+          },
+          readStatus(context, path) {
+            return (
+              providerStatus?.(context, path) ?? {
+                revisionId: context.revision.id,
+                container: "gateway",
+                podUid: "gateway-instance-1",
+                workspaceNodeId: bindings.get(context.revision.id),
+                startupId: "gateway-startup",
+                phase: "ready",
+                failures: [],
+                successfulPluginIds: Object.keys(context.revision.plugins?.plugins ?? {}),
+              }
+            );
+          },
+        })
+      : undefined;
   const alreadyEnrolled = mode === "dedicated" && nodeEnrollment === undefined;
   if (alreadyEnrolled) {
     nodeEnrollment = {
@@ -114,6 +144,7 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
       network: {
         dns: { namespace: "kube-system", podLabels: { app: "dns" } },
         gatewayPort: 8080,
+        ...(containedGateway ? { providerHarness: containedGateway.peer } : {}),
         gatewayTrustedProxyCidrs:
           nodeEnrollment === undefined ? ["127.0.0.1/32"] : ["10.42.0.0/16"],
         ...(nodeEnrollment === undefined
@@ -138,7 +169,7 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
         ? {}
         : {
             gatewayRouting: {
-              hostname: "agents.example.test",
+              hostname: "192.0.2.40",
               gatewayName: "gateways",
               gatewayNamespace: "controller",
               envoyNamespace: "envoy",
@@ -152,6 +183,7 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
       },
     },
     {
+      ...containedGateway?.selection,
       nodeEnrollment,
       preparedRepositoryIngress: options.preparedRepositoryIngress,
       sandboxDriver: options.sandboxDriver,
@@ -193,6 +225,7 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
     },
     compute: { id: driver.id, implementation: driver.implementation },
     executionAdmission: { version: 2, mode: "unprotected" },
+    ...gatewayOutboundFixture(),
     servicePrincipalId: "principal-repository-material",
     createdAt: "2026-09-18T00:00:00.000Z",
     repositoryCredentials: {
@@ -236,6 +269,25 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
   const calls = [];
   let pods = [];
   let observePods;
+  let gatewayApiReady = false;
+  const acceptRoute = (object) => {
+    if (!gatewayApiReady || !["HTTPRoute", "BackendTLSPolicy"].includes(object.kind)) {
+      return;
+    }
+    const http = object.kind === "HTTPRoute";
+    object.status = {
+      [http ? "parents" : "ancestors"]: [
+        {
+          [http ? "parentRef" : "ancestorRef"]: { name: "gateways", namespace: "controller" },
+          conditions: (http ? ["Accepted", "ResolvedRefs"] : ["Accepted"]).map((type) => ({
+            type,
+            status: "True",
+            observedGeneration: object.metadata.generation,
+          })),
+        },
+      ],
+    };
+  };
   const key = (kind, name, target = namespace) =>
     `${kind}:${kind === "Namespace" ? "" : target}:${name}`;
   const failure = (statusCode) => Object.assign(new Error(`HTTP ${statusCode}`), { statusCode });
@@ -266,19 +318,34 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
     },
     status: { phase: "Active" },
   });
-  const clients = { core: {}, apps: {}, networking: {}, discovery: {}, objects: {} };
+  const clients = {
+    server: "https://192.0.2.41:6443",
+    core: {},
+    apps: {},
+    networking: {},
+    discovery: {},
+    objects: {},
+  };
   clients.objects.read = async ({ kind, metadata }) => {
     const object = objects.get(key(kind, metadata.name));
     if (!object) {
       throw failure(404);
     }
-    return structuredClone(object);
+    const observed = structuredClone(object);
+    acceptRoute(observed);
+    return observed;
   };
   clients.objects.patch = async (object) => {
     const previous = objects.get(key(object.kind, object.metadata.name));
     const stored = structuredClone(object);
     stored.metadata.uid = previous?.metadata.uid ?? `${object.kind}-${object.metadata.name}-uid`;
     stored.metadata.resourceVersion = String(Number(previous?.metadata.resourceVersion ?? 0) + 1);
+    stored.metadata.generation =
+      (previous?.metadata.generation ?? 0) +
+      (previous && isDeepStrictEqual(previous.spec, stored.spec) ? 0 : 1);
+    if (previous?.status) {
+      stored.status = structuredClone(previous.status);
+    }
     save(stored);
     return structuredClone(stored);
   };
@@ -403,6 +470,10 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
         calls.push({ operation: "write", kind, name: body.metadata.name });
         const previous = objects.get(key(kind, body.metadata.name, body.metadata.namespace));
         const object = structuredClone(body);
+        if (kind === "Service") {
+          // Model the API allocation; Compute pins this exact private transport peer.
+          object.spec.clusterIP = previous?.spec?.clusterIP ?? "10.43.0.30";
+        }
         if (object.stringData) {
           object.data = Object.fromEntries(
             Object.entries(object.stringData).map(([name, value]) => [
@@ -502,6 +573,9 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
   calls.length = 0;
   const apiCalls = [];
   for (const [group, api] of Object.entries(clients)) {
+    if (typeof api !== "object") {
+      continue;
+    }
     for (const [method, invoke] of Object.entries(api)) {
       api[method] = async (...args) => {
         apiCalls.push(`${group}.${method}`);
@@ -558,6 +632,13 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
     enroll(revision);
   }
   const markReady = () => {
+    containedGateway?.setReady();
+    gatewayApiReady = true;
+    // Simulate the independent route controller after the provider process starts.
+    for (const object of objects.values()) {
+      acceptRoute(object);
+      save(object);
+    }
     for (const object of deployments()) {
       object.status = {
         observedGeneration: object.metadata.generation,
@@ -573,6 +654,10 @@ async function fixture(mode = "embedded", nodeEnrollment, options = {}) {
   };
   return {
     driver,
+    containedGateway,
+    setProviderStatus(value) {
+      providerStatus = value;
+    },
     enroll,
     clients,
     revision,
@@ -630,6 +715,26 @@ function preparedNativeDocument(f) {
   return configurations[0].data["openclaw.json"];
 }
 
+function containedLaunch(f, revision = f.revision) {
+  const snapshots = [...f.objects.values()].filter(
+    (object) =>
+      object.kind === "ConfigMap" &&
+      object.data?.requirements &&
+      object.metadata.labels?.["openclaw.dev/revision"] === revision.id,
+  );
+  assert.equal(snapshots.length, 1, "one immutable provider launch per revision");
+  assert.equal(snapshots[0].immutable, true);
+  assert.equal(
+    snapshots[0].data.providerIdentity,
+    f.containedGateway.selection.gatewaySandbox.identity,
+  );
+  return snapshots[0];
+}
+
+function containedRequirements(f, revision = f.revision) {
+  return JSON.parse(containedLaunch(f, revision).data.requirements);
+}
+
 function runtimeWrites(calls) {
   return calls.filter(
     ({ operation, kind }) =>
@@ -652,7 +757,7 @@ test("Dedicated repository custody and networking belong only to Codex", async (
   const original = JSON.stringify(f.revision.configuration);
   await f.driver.prepareRevision(f.revision, f.context([runtimeBinding()]));
   const agent = f.consumer();
-  const gateway = f.deployments().find((deployment) => deployment !== agent);
+  const gateway = containedLaunch(f);
   const gatewayConfiguration = JSON.parse(preparedNativeDocument(f));
   // Compute owns the hook callback and Gateway's local logical workspace
   // independently of repository credential custody.
@@ -660,33 +765,42 @@ test("Dedicated repository custody and networking belong only to Codex", async (
   delete gatewayConfiguration.plugins.entries.codex.config.appServer.nativeHookRelay;
   const expectedGatewayConfiguration = JSON.parse(original);
   expectedGatewayConfiguration.agents.defaults.workspace = "/home/node/workspace";
+  expectedGatewayConfiguration.gateway.bind = "loopback";
+  expectedGatewayConfiguration.gateway.auth.trustedProxy.allowLoopback = false;
+  expectedGatewayConfiguration.gateway.auth.containedIngress = {
+    audience: `urn:oce:gateway:${f.revision.agentId}:${f.revision.id}`,
+    verificationKeys: [f.containedGateway.selection.gatewayIngress],
+  };
   assert.deepEqual(
     gatewayConfiguration,
     expectedGatewayConfiguration,
     "repository material does not change the separate Gateway's execution configuration",
   );
   assert.equal(JSON.stringify(f.revision.configuration), original);
-  const assertGatewayIsolated = (deployment) => {
-    const pod = deployment.spec.template.spec;
+  const assertGatewayIsolated = (snapshot) => {
+    const requirements = JSON.parse(snapshot.data.requirements);
     assert.equal(
-      deployment.metadata.annotations["openclaw.dev/repository-material-generation"],
+      snapshot.metadata.annotations?.["openclaw.dev/repository-material-generation"],
       undefined,
     );
-    assert.ok(pod.volumes.every(({ name }) => !name.startsWith("repository-material")));
-    assert.ok(pod.initContainers.every(({ name }) => name !== "prepare-repository-material"));
-    for (const container of pod.containers) {
-      assert.ok(
-        container.env.every(
-          ({ name, value }) =>
-            name !== "OPENAI_API_KEY" &&
-            name !== "OPENCLAW_GATEWAY_TOKEN" &&
-            !value?.includes("repository-credentials"),
-        ),
-      );
-      assert.ok(
-        container.volumeMounts.every(({ name }) => !name.startsWith("repository-material")),
+    assert.deepEqual(requirements.files, []);
+    for (const secret of f.secrets()) {
+      assert.equal(
+        JSON.stringify(requirements).includes(secret.metadata.name),
+        false,
+        "repository custody cannot enter a contained Gateway launch",
       );
     }
+    assert.ok(
+      requirements.environment.every(
+        ({ name, value, secretKeyRef }) =>
+          name !== "OPENAI_API_KEY" &&
+          name !== "OPENCLAW_GATEWAY_TOKEN" &&
+          !value?.includes("repository-credentials") &&
+          !secretKeyRef?.name.startsWith("repository-material"),
+      ),
+    );
+    assert.equal(f.deployments().length, 1, "only the Harness is Deployment-backed");
   };
   assertGatewayIsolated(gateway);
   const environment = agent.spec.template.spec.containers[0].env;
@@ -719,9 +833,7 @@ test("Dedicated repository custody and networking belong only to Codex", async (
     assert.equal(policy.spec.podSelector.matchLabels["openclaw.dev/workload-role"], "agent");
     assert.equal(policy.spec.podSelector.matchLabels["openclaw.dev/revision"], f.revision.id);
   }
-  assertGatewayIsolated(
-    f.deployments().find((deployment) => deployment.metadata.name === gateway.metadata.name),
-  );
+  assertGatewayIsolated(containedLaunch(f));
 });
 
 async function preparedIngressFixture({ hostname, servicePort = 443, targetPort = 8443 } = {}) {
@@ -881,13 +993,7 @@ test("Dedicated credential refresh preserves its enrolled workspace node", async
   // Gateway readiness permits enrollment. The setup reaches the running Harness
   // through its volume without replacing it, and this fixture pairs at once.
   assert.equal((await f.driver.prepareRevision(f.revision, f.context([original]))).ready, true);
-  // Without a status proxy the controller cannot read the Gateway's ack, so
-  // activation binds the recorded node ID into the Gateway's pod spec and waits.
-  await assert.rejects(
-    f.driver.activateRevision(f.revision, f.context([original])),
-    /gateway is not ready/,
-  );
-  f.markReady();
+  // The provider hot-binds the enrolled node and reports its exact acknowledgment.
   await f.driver.activateRevision(f.revision, f.context([original]));
   const before = structuredClone(f.consumer());
   const nodeSecret = [...f.objects.values()].find(
@@ -900,9 +1006,7 @@ test("Dedicated credential refresh preserves its enrolled workspace node", async
   assert.ok(nodeMount, "the enrolled identity lives in the revision's private state directory");
   const originalGeneration =
     before.metadata.annotations["openclaw.dev/repository-material-generation"];
-  const gateway = structuredClone(
-    f.deployments().find((deployment) => deployment !== f.consumer()),
-  );
+  const gateway = structuredClone(containedLaunch(f));
   const replacement = runtimeBinding("session_workspace_refresh");
   await assert.rejects(
     f.driver.activateRevision(f.revision, f.context([replacement])),
@@ -935,7 +1039,7 @@ test("Dedicated credential refresh preserves its enrolled workspace node", async
     nodeSecret,
   );
   assert.deepEqual(
-    f.objects.get(`Deployment:${gateway.metadata.namespace}:${gateway.metadata.name}`),
+    f.objects.get(`ConfigMap:${gateway.metadata.namespace}:${gateway.metadata.name}`),
     gateway,
     "an unready credential replacement must not change the serving Gateway",
   );
@@ -1045,6 +1149,19 @@ for (const mode of ["embedded", "dedicated"]) {
         failures: [],
       };
     };
+    if (mode === "dedicated") {
+      f.setProviderStatus(async (context, path) => {
+        const status = await f.clients.core.connectGetNamespacedPodProxyWithPath({
+          name: "gateway-contained:18791",
+          path,
+        });
+        return {
+          ...status,
+          podUid: "gateway-instance-1",
+          workspaceNodeId: "node-" + context.revision.id,
+        };
+      });
+    }
     const prepare = () => f.driver.prepareRevision(f.revision, f.context([runtimeBinding()]));
     // Observe each startup generation, including the Gateway's enrolled-node binding.
     for (let generation = 0; generation < 6; generation++) {
@@ -1123,13 +1240,8 @@ test("Dedicated successor material is rechecked after workspace-node status", as
   await prepare();
   f.markReady();
   assert.equal((await prepare()).ready, true);
-  const gateway = f
-    .deployments()
-    .find(
-      (deployment) =>
-        deployment.spec.template.metadata.labels["openclaw.dev/workload-role"] === "gateway",
-    );
-  assert.equal(gateway.spec.template.metadata.labels["openclaw.dev/revision"], f.revision.id);
+  assert.equal(containedRequirements(f).labels["openclaw.dev/revision"], f.revision.id);
+  assert.equal(containedRequirements(f, successor).labels["openclaw.dev/revision"], successor.id);
   loseMaterialReadiness = true;
   assert.equal((await prepare()).ready, false);
   assert.equal(statusObserved, true);
@@ -1299,11 +1411,7 @@ test("Dedicated retirement preserves the successor gateway, Agent and repository
   await f.driver.prepareRevision(successor, f.context([replacement]));
   f.markReady();
   assert.equal((await f.driver.prepareRevision(successor, f.context([replacement]))).ready, true);
-  await assert.rejects(
-    f.driver.activateRevision(successor, f.context([replacement])),
-    /gateway is not ready/,
-  );
-  f.markReady();
+  // The selected provider is already ready and acknowledges the successor node.
   await f.driver.activateRevision(successor, f.context([replacement]));
   // Kubernetes completes old Pod deletion while the current consumers remain running.
   f.observePods(() =>
@@ -1322,7 +1430,9 @@ test("Dedicated retirement preserves the successor gateway, Agent and repository
   await f.driver.retireRevision(f.revision);
   assert.equal(f.secrets().length, 1);
   assert.notEqual(f.secrets()[0].metadata.name, oldSecret);
-  assert.equal(f.deployments().length, 2);
+  assert.equal(f.deployments().length, 1);
+  assert.equal(f.containedGateway.launches.size, 1);
+  assert.equal(containedRequirements(f, successor).labels["openclaw.dev/revision"], successor.id);
   assert.ok(
     f
       .deployments()
@@ -1592,7 +1702,10 @@ function computeAfterProxyCutover(fixture) {
   const { owner } = protectedRepositoryGitRelease(() =>
     assert.fail("Reader withdrawal must never use protected repository access"),
   );
-  const driver = new KubernetesComputeDriver(fixture.driver.options, { protectedDriver: owner });
+  const driver = new KubernetesComputeDriver(fixture.driver.options, {
+    ...fixture.containedGateway.selection,
+    protectedDriver: owner,
+  });
   driver.apiClients = Promise.resolve(fixture.clients);
   return driver;
 }
@@ -1794,6 +1907,7 @@ test("API-admitted protected credential-free metadata projects no inference tool
   assert.equal(r.egressPlan.routes[0].binding.grant.kind, "credential_free_repository_metadata");
   const { driver: ordinary, admission } = await publicReaderAdmission();
   const driver = new KubernetesComputeDriver(ordinary.options, {
+    ...controlledGatewayFixture().selection,
     protectedDriver: f.installedDriver,
   });
   // The production Compute release gate and the exact projection prepareRevisionWorkloads uses.
@@ -2054,6 +2168,9 @@ test("a repository-access Sandbox revision stops, retires and is deleted without
           revisionId: context.revision.id,
         };
       },
+      async harnessEndpoint() {
+        return { url: "ws://tenant--sandbox.openshell.localhost:8080/" };
+      },
       async cleanup(context) {
         cleanups.push(context.revision.id);
       },
@@ -2180,18 +2297,15 @@ test("ordinary dedicated revision gets only the public reader peer and skill; a 
     const mounts = agent.containers[0].volumeMounts;
     const skill = mounts.find(({ mountPath }) => mountPath.endsWith("public-github-read/SKILL.md"));
     assert.equal(Boolean(skill), allowed, JSON.stringify(proxy));
-    const gateway = f
-      .deployments()
-      .find(({ spec }) => spec.template.metadata.labels["openclaw.dev/workload-role"] === "gateway")
-      .spec.template.spec;
-    const gatewaySkill = gateway.containers[0].volumeMounts.find(({ mountPath }) =>
-      mountPath.endsWith("public-github-read/SKILL.md"),
+    const requirements = containedRequirements(f);
+    const skillPath =
+      f.containedGateway.selection.gatewaySandbox.home +
+      "/.openclaw/skills/public-github-read/SKILL.md";
+    assert.equal(
+      requirements.command.some((argument) => argument.includes(skillPath)),
+      allowed,
+      "contained launch projects only the admitted managed skill",
     );
-    assert.equal(Boolean(gatewaySkill), allowed, "Gateway managed skill discovery");
-    if (allowed) {
-      assert.equal(gatewaySkill.readOnly, true);
-      assert.equal(gatewaySkill.subPath, skill.subPath);
-    }
     // Prepare the private parent as the runtime user before projecting a read-only
     // file there. A root-owned .openclaw would break the node's existing skill publication.
     const prepareHome = agent.initContainers.find(({ name }) => name === "prepare-private-state");
@@ -2262,16 +2376,20 @@ for (const [change, previouslySelected] of [
             spec.template.metadata.labels["openclaw.dev/revision"] === revision.id,
         );
     const assertGatewaySkill = (selected) => {
-      const gateway = f
-        .deployments()
-        .find(
-          ({ spec }) => spec.template.metadata.labels["openclaw.dev/workload-role"] === "gateway",
-        );
-      const mounts = gateway.spec.template.spec.containers[0].volumeMounts;
+      const service = [...f.objects.values()].find(
+        ({ kind, metadata }) =>
+          kind === "Service" && metadata.annotations?.["openclaw.dev/provider-authority"],
+      );
+      assert.ok(service, "the serving provider relay is explicit");
+      const serving = { id: service.metadata.annotations["openclaw.dev/agent-revision-id"] };
+      const requirements = containedRequirements(f, serving);
+      const skillPath =
+        f.containedGateway.selection.gatewaySandbox.home +
+        "/.openclaw/skills/public-github-read/SKILL.md";
       assert.equal(
-        mounts.some(({ mountPath }) => mountPath.endsWith("public-github-read/SKILL.md")),
+        requirements.command.some((argument) => argument.includes(skillPath)),
         selected,
-        "the serving Gateway follows its selected revision",
+        "the serving provider launch follows its selected revision",
       );
     };
     const assertAccess = (revision, selected) => {
@@ -2298,8 +2416,7 @@ for (const [change, previouslySelected] of [
     assertGatewaySkill(previouslySelected);
     f.markReady();
     assert.equal((await f.driver.prepareRevision(next, context)).ready, true);
-    await assert.rejects(f.driver.activateRevision(next, context), /gateway is not ready/);
-    f.markReady();
+    // The candidate provider process is ready; node binding is hot-applied.
     await f.driver.activateRevision(next, context);
     assertGatewaySkill(!previouslySelected);
     assertAccess(current, previouslySelected);

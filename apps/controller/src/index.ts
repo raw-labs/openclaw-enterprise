@@ -23,6 +23,7 @@ import {
   PRESET_JSON_MAX_BYTES,
   SecretResponse,
   type Agent,
+  type AgentRevision,
   type AgentRuntimeLogsQuery,
   type AuditEvent,
   type AuditEventKind,
@@ -188,6 +189,10 @@ export interface ControllerAppOptions {
   readonly workspaceFileRequestTimeoutMs?: number;
   readonly nativeAdmin?: NativeAdminAccessConfig;
   readonly nativeAdminGatewayApiKey?: () => Promise<string>;
+  readonly nativeAdminGatewayIngress?: (
+    revision: Readonly<AgentRevision>,
+    endpoint: string,
+  ) => import("./gateway/contained-ingress.ts").GatewayIngressSigningTarget | undefined;
   /**
    * How often a native admin WebSocket rechecks its admission (default 25 s). The server
    * leaves it unset; tests shorten it so revocation closes do not wait the full interval.
@@ -1754,6 +1759,9 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     auth: options.auth,
     nativeAdmin: options.nativeAdmin,
     nativeAdminGatewayApiKey: options.nativeAdminGatewayApiKey,
+    ...(options.nativeAdminGatewayIngress === undefined
+      ? {}
+      : { nativeAdminGatewayIngress: options.nativeAdminGatewayIngress }),
     webSocketLeaseIntervalMs: nativeAdminWebSocketLeaseIntervalMs,
     auditSink: options.auditSink,
   });

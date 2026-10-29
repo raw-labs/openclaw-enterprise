@@ -324,6 +324,7 @@ and [exact manifest](../../scripts/ci/test-suites/k3d-observability-demo.json).
 
 These lanes are excluded from `ci`, `full`, and Full Integration dispatch:
 
+- [`gateway-containment`](gateway-containment.md#run-the-agent-lifecycle-case): requires a prepared authenticated OpenShell deployment, independent Gateway selection, an owned Kubernetes/PostgreSQL environment, and an authorized model credential file. This experimental lane is separate from Harness-only OpenShell qualification.
 - [`egress-connected`](static-egress.md#select-the-prepared-connected-lane): select explicitly after preparing the protected controller, database, authenticated OpenShell stack, and synthetic HTTPS origin. CI runs the request preflight in `checks-baseline-2`; the generic `openshell` lane does not run this qualification.
 - [`egress-custody-installed`](protected-repository-custody.md): qualify repository dispatch and response custody on a separately prepared controller and OpenShell pair, with an independent dispatch observer.
 - `repository-credentials-live`: requires an authorized disposable repository and cleanup. See [repository credentials](repository-credentials.md).
