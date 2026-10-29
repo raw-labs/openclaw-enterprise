@@ -12,7 +12,7 @@ Gateway-hosted plugins, Channels and integrations need external connections. A s
 
 Kubernetes already uses default-deny networking. The [bundled Slack proxy](../../apps/controller/src/slack-proxy.mjs) permits Slack hostnames on TCP/443 and refuses other integrations. The missing capability is administrator-approved HTTPS for trusted Gateway code beyond that Slack-only route.
 
-**This RFC proposes extending the platform's Credential Proxy capability with Gateway destination rules.** The Gateway uses the selected proxy; Kubernetes blocks direct Internet connections. Gateway and Harness placement stays unchanged. Credential Proxy is the platform interface, not another name for OpenShell.
+**This RFC proposes extending the platform's Credential Proxy capability with Gateway destination rules.** The Gateway uses the selected proxy; Kubernetes blocks direct Internet connections. The extension must preserve existing Harness containment and protected credential handling. Enabling Gateway destination control must not require choosing a destination-only mode instead of that protection. Credential Proxy is the platform interface, not another name for OpenShell.
 
 The bundled OpenShell implementation realizes this proposal with a new proxy-only Pod for each opted-in Agent revision. It reuses OpenShell’s existing proxy and policy engine, not an already running proxy instance. This proposal does not move or newly sandbox the Gateway or Harness. Existing Harness sandboxing stays unchanged.
 
@@ -103,7 +103,7 @@ This PR does **not** remove the bundled Slack proxy Deployment. API credential v
 
 **Dedicated:** the option applies to supported single-cluster Kubernetes deployments when `runtime.gatewayOutbound` is configured. The Gateway stays in its Pod; the Harness keeps its placement, workspace and model credentials. The controller starts the proxy before the Gateway uses it. Required Gateway–Harness and workspace transports remain direct. Deployments without this option keep their existing routes.
 
-The selected implementation must support destination policy and proxy resources. The current prototype rejects combinations with protected execution, repository credential authority, anonymous GitHub-read admission or separate execution clusters. These are experimental implementation limits, not requirements that every implementation of the proposed capability must impose.
+The selected implementation must support destination policy and proxy resources. The current prototype rejects combinations with protected Harness execution; removing that mutual exclusion is required to demonstrate the proposed extension alongside existing protection. It also rejects repository credential authority, anonymous GitHub-read admission and separate execution clusters. These are prototype limits, not general requirements of Gateway destination control.
 
 **Embedded:** Gateway and Harness share their existing runtime. This PR adds no destination proxy or network change. Existing refusal of enabled Channels in embedded mode remains; the bundled Slack proxy does not make embedded Slack supported.
 
@@ -128,9 +128,9 @@ The controller divides this work among existing platform interfaces:
 - **OpenShell Sandbox Driver** already manages OpenShell runtime resources. Extend it to create, check and remove the separate proxy Pod, Service, policy files and network rules. This is resource management, not placement of the Gateway inside a sandbox.
 - **Channel Drivers** supply nonsecret destination requirements from the enabled configuration, not permission to use a provider account or API action.
 
-The new generic ports are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) for policy validation and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts) for proxy resources. Compute calls those ports, not an OpenShell-specific forwarding engine. The OpenShell registration constructs both implementations with the same selection and resource ownership. Other implementations must supply those contracts or the deployment is refused.
+The new generic ports are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) for policy validation and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts) for proxy resources. Compute calls those ports, not an OpenShell-specific forwarding engine. Sandbox and Credential Proxy retain the existing [paired Driver registration](../../docs/reference/drivers/selection.md#select-a-protected-sender). The selected Driver supplies both interfaces and manages their runtime resources; this does not require one running proxy process for both traffic paths. Other implementations must supply those contracts or the deployment is refused.
 
-Destination rules run in the selected proxy engine, separate from the request-time credential exchange in OpenClaw Control Plane (OCC). The current [destination-only adapter](../../apps/controller/src/drivers/egress-proxy/openshell.ts) refuses `configureRevision` and other protected-credential methods. This describes the prototype’s supported mode; it does not establish a requirement to combine credential mediation and destination control in one running proxy.
+Gateway destination checks and protected credential requests are separate operations of the selected capability. OpenClaw Control Plane (OCC) keeps its existing credential authorization responsibilities. The current [destination-only adapter](../../apps/controller/src/drivers/egress-proxy/openshell.ts) refuses `configureRevision` and other protected-credential methods. That exclusive mode is an implementation gap, not the proposed design. The Driver must support both operations together; they may use separate proxy instances.
 
 Before starting the Gateway, verify resource ownership, immutable policy, pinned images and readiness of OpenShell itself, not just the relay. Refuse changed or missing dependencies. Proxy or relay failure must not open a direct route.
 
@@ -142,6 +142,7 @@ The prototype demonstrates a source implementation of the proposed contracts and
 
 Acceptance requires the regular Agent deploy, worker, activation, replacement and stop path to demonstrate:
 
+- Approved Gateway HTTPS while the same Agent retains working protected Harness credential requests and containment. Neither traffic path may inherit the other’s permissions.
 - Non-Slack HTTPS, preserved Gateway Slack API/Socket Mode behavior after route replacement, unchanged API Slack validation/directory access, TLS verification and Harness/model/workspace behavior.
 - Denied hosts and ports, wrong-policy refusal, proxy/relay outage and tamper rejection.
 - Direct TCP, raw-IP, HTTP, UDP/QUIC and alternate-proxy attempts denied, including without proxy variables; private-address protection and cross-Agent isolation.
