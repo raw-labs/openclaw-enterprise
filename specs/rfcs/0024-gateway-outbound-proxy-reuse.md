@@ -6,30 +6,35 @@ author: miguelbranco80
 
 # Gateway outbound destination control via a standalone OpenShell proxy
 
-## Problem and proposed solution
+## Problem
 
-Gateway-hosted plugins, Channels and integrations need external connections. A separate Harness's network access does not carry Gateway requests. Kubernetes already uses default-deny networking, but the [bundled Slack proxy](../../apps/controller/src/slack-proxy.mjs) permits only Slack destinations on TCP/443.
+A dedicated Gateway runs Channels, plugins and integrations that call external services. Today, its outbound route uses the [bundled Slack proxy](../../apps/controller/src/slack-proxy.mjs), which allows Slack destinations on TCP/443 and rejects other services. Kubernetes blocks direct Internet access. A plugin therefore cannot call an administrator-approved non-Slack service through this route.
 
-**Extend the platform's Credential Proxy capability with Gateway destination authorization.** For supported dedicated Gateways, the selected proxy becomes the sole route to external HTTPS services. It replaces the Gateway's Slack-proxy route; it is not an optional second route. Kubernetes blocks direct Internet access and access through the old proxy.
+## Proposed change
 
-The OpenShell implementation uses one proxy-only Pod per Agent revision. It reuses OpenShell's proxy software and policy engine, not an already running proxy instance. Gateway and Harness placement stays unchanged. Existing Harness containment and protected credential handling must continue alongside Gateway destination control.
+Replace the Gateway's Slack-only route with a destination-controlled proxy:
 
-## Gateway and control-plane scope
+**Gateway → OpenShell proxy → Slack or another approved HTTPS service.**
 
-The Gateway and the OpenClaw Control Plane (OCC) API have different callers, policies and lifetimes:
+Extend the existing Credential Proxy capability to authorize Gateway destinations. The selected OpenShell Driver runs one proxy Pod per Agent revision, using OpenShell's existing proxy software and policy engine.
 
-| Workload                | External requests                                                                                                | Route under this proposal                               |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Dedicated Agent Gateway | Enabled Channels, plugins and integrations; destinations vary with the Agent                                     | Its revision's OpenShell proxy, including Slack traffic |
-| OCC API                 | Platform operations selected by installation configuration, including Slack setup, sign-in and provider services | Existing installation-level routes, unchanged           |
+Every supported dedicated Gateway uses this route. It cannot fall back to the old Slack proxy or direct Internet access. Gateway and Harness placement stays unchanged, as do the Harness's existing protections.
 
-The OCC API does not run the Agent's OpenClaw plugins. Its destination requirements change with configured platform features and endpoints, not with each Agent's plugin list. They are installation-scoped, rather than permanently fixed.
+This proposal covers dedicated execution on single-cluster Kubernetes deployments. Embedded networking and separate execution clusters are outside its scope.
 
-**The bundled Slack proxy remains only for OCC API Slack requests:** bot-token validation and user/channel directory lookups. The API implements those operations by calling Slack; the proxy only provides their network route. These calls can occur before any Agent is deployed. The proxy remains an installation resource, independent of Agent revisions. It is not retained for embedded mode or as a fallback for dedicated Gateways.
+<a id="one-request-before-and-after"></a>
 
-Keeping this route avoids expanding a Gateway connectivity change into a redesign of control-plane networking. The tradeoff is retaining the small Slack-only proxy alongside OpenShell. Replacing it with a general control-plane proxy is separate work: it would need installation-owned policy and HTTP-client wiring for the affected platform features, not an Agent's destination list.
+## How a request works
 
-This proposal covers dedicated execution on single-cluster Kubernetes deployments. Embedded networking and separate execution clusters are outside its scope. It does not introduce an installation-level OpenShell proxy for the OCC API.
+Suppose a Gateway plugin needs `api.example.com:443`:
+
+1. The administrator adds that destination to the allowed list.
+2. At deployment, the controller saves the policy and starts the revision's proxy before its Gateway.
+3. The plugin's HTTP client requests a CONNECT tunnel through the proxy.
+4. OpenShell checks the destination. If allowed, it opens the tunnel; otherwise it refuses the request. HTTPS remains end-to-end between the Gateway and the external service.
+5. Kubernetes blocks attempts to bypass the proxy.
+
+Gateway HTTP and WebSocket clients must use this explicit proxy; connections are not intercepted transparently. Enabled Slack supplies its required destinations and uses the same route as other integrations. Its API and Socket Mode connections must continue working.
 
 ## Destination policy and configuration
 
@@ -55,22 +60,6 @@ The common baseline makes administrator configuration simple, but grants each li
 The destination list uses exact administrator DNS hosts on TCP/443 and trusted Channel suffix wildcards. An initially permissive compatibility policy is acceptable, but it must preserve the private-address restrictions below. Permissions apply to hosts and ports, not encrypted API actions.
 
 Compute saves the combined policy in the immutable Agent revision. Editing installation configuration does not change an existing revision's policy; deploying with changed destinations requires a new revision.
-
-## One request before and after
-
-Consider a trusted integration sending HTTPS to `api.example.com:443`.
-
-**Before:** the bundled Slack proxy refuses this non-Slack destination.
-
-**With this proposal:**
-
-1. The administrator approves the destination in the common list.
-2. At deployment, the controller saves the combined policy and prepares that revision's proxy before starting its Gateway.
-3. The Gateway client requests an HTTP CONNECT tunnel through its proxy Service. The Service and TCP forwarder carry the connection to OpenShell.
-4. OpenShell permits or refuses the destination. For a permitted tunnel, HTTPS remains end-to-end between the Gateway and the external service.
-5. Kubernetes blocks connections that bypass the proxy, including attempts to use the bundled Slack proxy.
-
-This is an explicit proxy, not transparent interception. Gateway HTTP and WebSocket clients must support the route. A client that ignores proxy settings cannot use a direct fallback. Enabled Slack contributes the destinations required to preserve API and Socket Mode behavior; the two proxies are not chained.
 
 ## Processes, Pods and connections
 
@@ -103,7 +92,7 @@ flowchart TB
   end
   E["<b>Approved destinations</b><br/>Slack and integrations"]
   H["<b>Existing Harness</b><br/>Separate workload"]
-  A["<b>OCC API</b><br/>Slack setup and directory"]
+  A["<b>Control-plane API</b><br/>Slack setup and directory"]
   L["<b>Bundled Slack proxy</b><br/>Installation resource"]
   Slack["<b>Slack API</b><br/>Existing platform calls"]
   G -.->|HTTP proxy connection| S
@@ -133,6 +122,14 @@ One proxy per Agent revision keeps policy and cleanup independent. Stopping one 
 The cost grows with deployed revisions: 100 running dedicated revisions require 100 additional proxy Pods, each with a Deployment, Service, policy files and network rules. Existing Harness-side proxying and the control-plane Slack proxy remain separate. Scheduling, resource use, readiness and cleanup add operational work.
 
 A shared Gateway proxy would reduce instance count, but would need to identify the originating Agent and revision, select the correct policy, and close one revision's connections without disrupting others. Keeping a proxy across revisions of one Agent would also require policy updates and connection draining. This proposal chooses per-revision instances to avoid those shared lifecycle requirements. Reusing the Credential Proxy interface or OpenShell engine does not require sharing one running process.
+
+## Why control-plane networking stays unchanged
+
+The OpenClaw Control Plane (OCC) API does not run Agent plugins. Its external requests serve installation-level features such as sign-in, provider services and Slack setup. Their destinations depend on the installation's configuration, not on each Agent's plugin list.
+
+The OCC API keeps its existing routes. In particular, it uses the bundled Slack proxy for bot-token validation and user/channel directory lookups. The API performs those operations by calling Slack; the proxy only supplies the network route. These calls can occur before any Agent is deployed, so their route must not depend on an Agent revision.
+
+**The bundled Slack proxy remains for those control-plane calls, not for dedicated Gateways.** Keeping it avoids expanding this Gateway change into a control-plane egress redesign. The cost is retaining a separate Slack-only proxy implementation. Replacing it later would require installation-owned policy and client configuration for the affected platform features. This RFC does not add an installation-level OpenShell proxy.
 
 ## Platform responsibilities and enforcement
 
