@@ -40,7 +40,6 @@ function expectedNativeAdminTarget(topology, publicOrigin, domain) {
     publicOrigin,
     installationId: topology.installation.id,
     agent: topology.agent,
-    revision: topology.revision,
     domain,
   });
 }
@@ -250,40 +249,8 @@ async function readOceControlState(topology) {
   };
 }
 
-async function redeployWithNativeAdminAccess(topology, publicOrigin, nativeDomain) {
-  const targetForStableOrigin = expectedNativeAdminTarget(topology, publicOrigin, nativeDomain);
-  const current = await topology.request(
-    "GET",
-    `/namespaces/${topology.agent.namespaceId}/configurations/${topology.agent.configurationId}`,
-  );
-  assert.equal(current.status, 200, JSON.stringify(current.error));
-  const values = structuredClone(current.data.values);
-  values.gateway = {
-    ...values.gateway,
-    controlUi: {
-      ...(values.gateway?.controlUi ?? {}),
-      enabled: true,
-      allowedOrigins: [targetForStableOrigin.origin],
-    },
-    auth: {
-      ...(values.gateway?.auth ?? {}),
-      trustedProxy: {
-        ...(values.gateway?.auth?.trustedProxy ?? {}),
-        deviceAutoApprove: { enabled: true, scopes: ["operator.admin"] },
-      },
-    },
-  };
-  const patched = await topology.request(
-    "PATCH",
-    `/namespaces/${topology.agent.namespaceId}/configurations/${topology.agent.configurationId}`,
-    {
-      values,
-      ...(current.data.secretBindings === undefined
-        ? {}
-        : { secretBindings: current.data.secretBindings }),
-    },
-  );
-  assert.equal(patched.status, 200, JSON.stringify(patched.error));
+async function deployUnmanagedRevision(topology) {
+  await saveGatewayManagedMode(topology, false);
   const previousGatewayUid = topology.gatewayPod.metadata.uid;
   const deployed = await topology.request(
     "POST",
@@ -320,7 +287,7 @@ async function redeployWithNativeAdminAccess(topology, publicOrigin, nativeDomai
     topology.revision.id,
     previousGatewayUid,
   );
-  return expectedNativeAdminTarget(topology, publicOrigin, nativeDomain);
+  assert.equal(topology.revision.gatewayManagedMode, false);
 }
 
 async function assertNoNativeCredentialLeak(page, protectedValues) {
@@ -911,22 +878,14 @@ test(
     assert.equal(topology.revision.gatewayManagedMode, true);
     await assertActualModelTurn(topology);
 
-    const unadmittedTarget = expectedNativeAdminTarget(topology, ingress.origin, nativeDomain);
-    assert.match(unadmittedTarget.host, hostSuffixPattern(nativeDomain));
-    const initialStatus = await nativeAdminStatus(topology);
-    assert.notEqual(
-      initialStatus.status,
-      "available",
-      "native admin must fail closed before the active runtime admits the exact browser origin and device approval policy",
+    const expectedTarget = expectedNativeAdminTarget(topology, ingress.origin, nativeDomain);
+    assert.match(expectedTarget.host, hostSuffixPattern(nativeDomain));
+    assert.equal(
+      topology.revision.revision,
+      1,
+      "native admin must work on the first admitted revision",
     );
-
-    await saveGatewayManagedMode(topology, false);
-    const expectedTarget = await redeployWithNativeAdminAccess(
-      topology,
-      ingress.origin,
-      nativeDomain,
-    );
-    assert.equal(topology.revision.gatewayManagedMode, false);
+    assert.equal(topology.revision.gatewayManagedMode, true);
     const status = await nativeAdminStatus(topology);
     assert.equal(status.status, "available");
     assert.equal(status.host, expectedTarget.host, "Agent native host must be deterministic");
@@ -1011,6 +970,11 @@ test(
     });
     await assertServiceWorkerRegistrationBlockedByCsp(nativePage);
 
+    // First deployment is available with managed mode on. Native writes require an
+    // explicit opt-out and a new revision; preparation must not bypass this boundary.
+    await assertManagedNativeConfigWriteRejected(nativePage, status.origin, topology);
+    await deployUnmanagedRevision(topology);
+    await nativePage.reload({ waitUntil: "domcontentloaded" });
     const beforeNativeEdit = await readOceControlState(topology);
     const expectedManagedAccent = configAccent(beforeNativeEdit.configuration.values);
     await assertReversibleNativeConfigEdit(nativePage, status.origin);
@@ -1141,7 +1105,11 @@ test(
       workspaceGateway: true,
     });
     ingress.setUpstream(topology.controllerUrl);
-    await redeployWithNativeAdminAccess(topology, ingress.origin, nativeDomain);
+    assert.equal(
+      topology.revision.revision,
+      1,
+      "embedded native admin must work on the first admitted revision",
+    );
     const status = await nativeAdminStatus(topology);
     assert.equal(status.status, "available");
     const browser = await launchBrowser(context, ingress);

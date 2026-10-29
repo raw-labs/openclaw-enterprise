@@ -324,7 +324,11 @@
         "native admin status requires exact Agent administer and reports lifecycle availability",
         "native admin disabled status still requires exact Agent administer",
         "native admin shared session configuration validates cookie scope and rejects keys",
-        "native admin proxy strips browser credentials and preserves the Agent gateway base path"
+        "native admin proxy strips browser credentials and preserves the Agent gateway base path",
+        "first openclaw deployment admits isolated native admin policy without a Configuration PATCH",
+        "first codex deployment admits isolated native admin policy without a Configuration PATCH",
+        "native admin admission preserves explicit opt-outs and refuses conflicting policy",
+        "Installation native admin disablement leaves UI-enabled first revisions unchanged"
       ]
     },
     {

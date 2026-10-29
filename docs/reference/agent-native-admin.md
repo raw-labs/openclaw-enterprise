@@ -1,33 +1,66 @@
 # Agent native admin UI
 
-Agent native admin UI access lets an authorized operator open the selected Agent's native OpenClaw administration UI from the platform console. It is an explicit pilot capability for trusted operators. It exposes the stock native administrator surface for one Agent Gateway, subject to [Gateway managed mode](#gateway-managed-mode).
-
-The feature is disabled by default. When enabled, the console shows **Native admin UI** on the Agent detail tabs only for callers with exact Agent `administer` permission. Opening the Agent host uses the operator's ordinary OCE console session cookie, resolves the exact Agent represented by that host, then serves native HTTP and WebSocket traffic through OCC.
+This trusted-operator pilot exposes one Agent Gateway's stock OpenClaw UI,
+subject to [Gateway managed mode](#gateway-managed-mode). It is disabled by default.
+With exact Agent `administer` permission, operators can select **Open Agent UI**
+on Agent detail. OCC authenticates their ordinary console session and proxies
+native HTTP and WebSocket traffic through an isolated Agent host.
 
 ## Who can open it
 
-Native admin UI is the only Agent chat surface in the console, and it is for exact Agent `administer` holders with a human session (see [Authorization and availability](#authorization-and-availability)). Other people message the Agent through a channel its Configuration sets up, such as [Slack](../guides/integrations/slack.md), or ask someone who can edit that Configuration to let them in. An operator with cluster access can check a real response with [model verification](../guides/operate/model-verification.md) or the [OpenClaw TUI](../guides/deploy/production-tui.md).
+The console's only Agent chat surface requires a human session and exact Agent
+`administer` permission. Other users need a configured channel such as
+[Slack](../guides/integrations/slack.md); a Configuration editor can grant channel
+access. Cluster operators can use [model verification](../guides/operate/model-verification.md)
+or the [OpenClaw TUI](../guides/deploy/production-tui.md).
 
-Native admin UI is unavailable under GitHub, Google, or OIDC sign-in: startup rejects enablement (`<Provider> sign-in does not support native administration.`). That profile issues a host-only `__Host-openclaw_occ.session_token` session cookie on HTTPS, which cannot carry the `Domain` attribute that lets Agent hosts read the [shared session](authentication.md#native-admin-shared-sessions).
+GitHub, Google and OIDC sign-in reject enablement at startup:
+`<Provider> sign-in does not support native administration.` Their host-only
+`__Host-openclaw_occ.session_token` cookie cannot carry the Domain attribute
+required for [shared sessions](authentication.md#native-admin-shared-sessions).
 
 ## Requirements
 
-- `agentNativeAdmin.enabled: true` in Helm, which sets `OCC_AGENT_NATIVE_ADMIN_ENABLED=true` on the API.
-- `agentNativeAdmin.domain` set to the Agent host suffix, such as `agents.oce.example.com`, without scheme, wildcard, port, or path. Helm passes it as `OCC_AGENT_NATIVE_ADMIN_DOMAIN`. Use a previously unused DNS suffix for the first pilot rollout; the proxy blocks new service-worker registration but does not evict service workers that a prior experiment registered on the same origin.
-- `agentNativeAdmin.sharedCookieDomain` set to the explicit shared OCE session cookie parent domain, such as `oce.example.com`. Helm passes it as `OCC_AUTH_COOKIE_DOMAIN` when `agentNativeAdmin.enabled` is true. The console host and Agent host suffix must both be inside this parent on DNS-label boundaries. Public suffixes, malformed domains, and DNS-label boundary violations fail closed. Helm has no public suffix list, so it renders a suffix such as `co.uk` or `github.io`; the installation profile renderer refuses it, and so does API startup (`AUTH_BASE_URL_INVALID`). The Agent suffix may equal the cookie domain; OCC excludes its configured Console hostname from native proxy routing.
-- `gatewayRouting.enabled: true`. Helm rejects native admin enablement without private gateway routing because the API process must reach each Agent gateway through the private route.
-- `OCC_AUTH_BASE_URL` set to the public OCC origin that serves the console, for example `https://console.oce.example.com`.
-- Better Auth cookie configuration using the shared cookie parent domain while preserving `Secure`, `HttpOnly`, appropriate `SameSite`, CSRF, and trusted-origin protections. A domain-scoped cookie cannot use a host-only `__Host-` prefix. The shared-domain session uses the `openclaw_occ_shared` cookie prefix and clears prior host-only `openclaw_occ` and `openclaw_occ_shared` session-cookie names during sign-in/sign-out migration. When native admin is disabled, OCC ignores leftover shared-cookie-domain configuration and keeps the legacy host-only `openclaw_occ` session cookie scope.
-- Private Agent gateway routing configured through [Gateway routing with Envoy](gateway-routing.md).
+- `agentNativeAdmin.enabled: true` in Helm, which sets `OCC_AGENT_NATIVE_ADMIN_ENABLED=true` on the API and worker.
+- `agentNativeAdmin.domain` is a DNS suffix such as `agents.oce.example.com`, without scheme, wildcard, port or path. Helm passes `OCC_AGENT_NATIVE_ADMIN_DOMAIN`. Use a previously unused suffix: the proxy blocks new service workers but cannot evict previously registered workers.
+- `agentNativeAdmin.sharedCookieDomain` is the explicit cookie parent, passed as API `OCC_AUTH_COOKIE_DOMAIN` when enabled. It must contain console and Agent hosts on DNS-label boundaries. Malformed domains and public suffixes fail closed in the profile renderer and API startup (`AUTH_BASE_URL_INVALID`); Helm has no public suffix list. The Agent suffix may equal the cookie domain: OCC excludes the Console hostname from native routing.
+- `gatewayRouting.enabled: true` with [private Gateway routing](gateway-routing.md). Helm rejects native admin enablement without it: the API must reach each Agent gateway through the private route.
+- `OCC_AUTH_BASE_URL` on API and worker set to the public OCC origin that serves the console, for example `https://console.oce.example.com`.
+- Better Auth must use the [shared session cookie](authentication.md#native-admin-shared-sessions), preserving Secure, HttpOnly, SameSite, CSRF and trusted-origin protections. Domain cookies cannot use a `__Host-` prefix. Sign in again after enabling shared cookies to clear prior host-only cookies. Disabling native admin restores host-only scope.
 - The Agent must be running with a selected version owned by the selected Compute Driver: both Driver ID and implementation must match the version. Its `ComputeDriver.getGatewayEndpoint` value must map from private `wss:` to private `https:`.
 - The native Agent configuration must keep the trusted-proxy `occ-workspace-files` identity with `operator.admin`, enable native `controlUi`, allow the derived Agent origin, and enable trusted-proxy admin device auto-approval. The support check rejects token auth, disabled device auth, and host-header origin fallback.
 
-The local Compose-control-plane profile enables this capability only when both
-Kubernetes Compute and OpenShell are selected. Its development proxy terminates
-HTTPS on host loopback for the installation's console and wildcard Agent hosts;
-the private Envoy route in k3d still carries OCC-to-gateway traffic. The
-first-Agent helper's `--control-ui` option supplies the exact per-Agent native
-configuration. Other Compose profiles do not expose this browser endpoint.
+Local Compose exposes the browser endpoint only with Kubernetes Compute and
+OpenShell. The development proxy terminates HTTPS on loopback; k3d Envoy carries
+private gateway traffic. The [first-Agent helper](../guides/first-agent.md)
+accepts `--control-ui` for per-Agent configuration.
+
+## First-deployment configuration
+
+With Installation access and private Kubernetes routing enabled, Kubernetes
+Compute prepares native administration for `gateway.controlUi.enabled: true`,
+which both Standard Presets select. Deployment and guided provisioning add the
+trusted-proxy identity, administrator device approval, exact Agent `allowedOrigins`
+entry and `gateway.publicOrigin`. Origins derive from Installation, Namespace and
+Agent IDs, preserving the public scheme and port.
+
+Only the new Agent revision receives this policy. Saved Configuration values,
+generations and historical revisions stay unchanged. Shared Configurations receive
+separate Agent origins without accumulating sibling origins. Existing Agents adopt
+the policy on their next explicit deployment.
+
+Disabled or omitted UI, disabled device approval or disabled Installation access
+leaves policy unprepared. Disabled device authentication and host-header fallback
+cannot enable access. Conflicting authentication, approval scopes, `publicOrigin`,
+wildcards or other Agent-domain origins refuse deployment with the setting to fix.
+This includes a Console origin under the Agent suffix. Omit managed origins from
+reusable Configurations. Compatible SecretRefs, loopback policy, other exact origins,
+model, Harness, plugin settings and Secret bindings remain intact.
+
+Preparation adds no OCE grants, changes no native tool restrictions and does not
+support external sign-in. Native administrator authority remains subject to
+[Gateway managed mode](#gateway-managed-mode). Drivers without this hook retain
+the existing availability requirements.
 
 ## Authorization and availability
 
@@ -43,7 +76,7 @@ The response reports:
 | `unavailable` | No version is serving yet: the Agent has no selected version, or a newer version is replacing it.               |
 | `available`   | The caller may open the returned `url` for the selected version.                                                |
 
-A stopped Agent with no selected version returns only `status: "stopped"`, including before its first deployment and after stop reconciliation clears its selected version. A stopped Agent with a version that OCC can select still includes its target fields. If a desired-running Agent has no selected version, OCC returns `unavailable` in the success envelope so the console can show a retryable state. A dependency outage, the IAM Driver included, returns `503 DEPENDENCY_UNAVAILABLE`. Malformed requests, denied IAM access and missing sessions also use the normal protected-route error envelope.
+A stopped Agent without a selected version returns only `status: "stopped"`, before first deployment or after stop reconciliation clears the version. A stopped Agent with a selectable version includes target fields. A desired-running Agent without a selected version returns `unavailable` in the success envelope, so the console can retry. Dependency outages, including IAM, return `503 DEPENDENCY_UNAVAILABLE`. Malformed requests, IAM denials and missing sessions use the protected-route error envelope.
 
 Changing the selected Compute Driver does not migrate existing versions. After
 lifecycle and native-configuration checks, OCC compares the selected Driver's ID
@@ -133,10 +166,10 @@ device state, plugins, or other persistent gateway data.
 - Helm rendering fails when `agentNativeAdmin.enabled` is true without `gatewayRouting.enabled`, or with an `auth.baseUrl` that is not HTTPS or whose host is outside `agentNativeAdmin.sharedCookieDomain`.
 - Better Auth setup runs before the native admin checks below and reports its own codes instead: `AUTH_BASE_URL_INVALID` for a malformed or public-suffix shared cookie domain, one that does not contain the public origin's host, or a non-HTTPS public origin with that cookie domain set, and `AUTH_SECRET_INVALID` for an auth secret under 32 characters. A missing `OCC_GATEWAY_API_KEY_PATH` reports `GATEWAY_API_KEY_UNAVAILABLE`.
 - Startup fails with `AGENT_NATIVE_ADMIN_INVALID` when enablement, Agent domain, shared cookie domain, public origin, Better Auth cookie scope, or cookie-secret requirements are invalid.
-- Availability returns `stopped` for a stopped Agent with no selected version; `unavailable` means a desired-running Agent has no selected version yet or a newer version is replacing it. Dependency outages return `503`. Gateway routing, unsupported native configuration, or a selected Compute Driver without a clean endpoint returns `unsupported` after OCC has a selected version and derived Agent origin.
-- The console hides the panel for disabled and denied states, shows operator-readable stopped, unsupported, or unavailable messages, and opens the returned `url` in a new tab when available.
+- See [Authorization and availability](#authorization-and-availability) for lifecycle states and error envelopes. Gateway routing, unsupported native configuration, or a selected Compute Driver without a clean endpoint returns `unsupported` after OCC has a selected version and derived Agent origin.
+- The console hides disabled or denied access, explains stopped, unsupported and unavailable states, and opens an available `url` in a new tab.
 - Attributable IAM denials remain audit events for status checks, native-host proxy admission, and recurring WebSocket lease renewal. Those denial paths preserve the human IAM principal and exact Agent target instead of collapsing into unaudited dependency failures.
-- Proxied HTTP and WebSocket requests strip browser credentials, service keys, forwarded headers, native identity/scope headers, and native `Set-Cookie` before responding through OCC. WebSocket upgrades require a non-null exact Agent `Origin`; accepted `101` connections audit `websocket.connect` with `connectionId` and `websocket.close` with the same `connectionId` plus `closeReason`, refresh authorization every 25 seconds, close when a lease check fails or takes more than 5 seconds, set `closeReason` to distinguish lifecycle, revocation, dependency, client, upstream, and shutdown paths, and are destroyed during API `preClose`.
+- WebSocket upgrades require a non-null exact Agent `Origin`; accepted `101` connections audit `websocket.connect` with `connectionId` and `websocket.close` with the same `connectionId` plus `closeReason`, refresh authorization every 25 seconds, close when a lease check fails or takes more than 5 seconds, set `closeReason` to distinguish lifecycle, revocation, dependency, client, upstream, and shutdown paths, and are destroyed during API `preClose`.
 
 ## Related
 

@@ -1,18 +1,18 @@
 ---
 created: "2026-09-19"
 updated: 2026-10-28
-last_updated_session: codex/01a1558e-c27f-7bc0-a403-af59e9364ddf
+last_updated_session: authoring-run/5f285180-08bf-4414-abea-d615c472c459
 ---
 
 # Agent Native Admin UI Flow
 
 ## Overview
 
-The console checks exact-Agent `administer` access and returns a stable native admin URL for the selected gateway version. The Agent host uses the OCE session cookie; OCC rechecks access before proxying HTTP and WebSocket traffic.
+Deployment prepares enabled Kubernetes native admin policy in an immutable revision, preserving the reusable Configuration. The console checks exact-Agent `administer` access and returns a stable native admin URL for the selected gateway version. The Agent host uses the OCE session cookie; OCC rechecks access before proxying HTTP and WebSocket traffic.
 
 ## Entry Points
 
-- Trigger: Console opens an Agent native admin URL, or `scripts/first-agent.mjs --control-ui` creates a compatible local Compose/OpenShell Agent.
+- Trigger: Deployment or provisioning admits a revision; Console opens an Agent native admin URL, or `scripts/first-agent.mjs --control-ui` creates a compatible local Compose/OpenShell Agent.
 - Source: `scripts/first-agent.mjs:nativeConfiguration`
 - Source: `apps/controller/src/console/agents/native-admin.mjs:renderNativeAdminAccess`
 - Source: `apps/controller/src/http/native-admin.ts:resolveNativeAdminAvailability`
@@ -22,11 +22,17 @@ The console checks exact-Agent `administer` access and returns a stable native a
 
 ```mermaid
 graph TD
-  L["Local first-Agent selects Control UI"] --> L2["Create Agent, derive exact origin,<br/>and save Configuration generation 2"]
-  L2 --> A
-  A["Console opens Agent detail tab"] --> P{"administer answer false?"}
-  P -->|yes| PH["Hide card, no request"]
-  P -->|"no or unknown"| B["GET exact Agent native-admin status"]
+  LOCAL["Local first-Agent selects Control UI"] --> LOCAL2["Create Agent, derive exact origin,<br/>and save Configuration generation 2"]
+  LOCAL2 --> DEP
+  DEP["Deploy or provision Agent"] --> OPT{"Installation/routing/UI enabled?"}
+  OPT -->|yes| PREP["Compute prepares native policy"]
+  OPT -->|no| COPY["Preserve explicit opt-out"]
+  PREP -->|accepted| SNAP["Validate and freeze revision"]
+  PREP -->|setting conflict| REFUSE["Refuse admission"]
+  COPY --> SNAP
+  SNAP --> A["Console opens Agent detail tab"] --> PERM{"administer answer false?"}
+  PERM -->|yes| PH["Hide card, no request"]
+  PERM -->|"no or unknown"| B["GET exact Agent native-admin status"]
   B --> C["Resolve OCC session and exact Agent administrator principal"]
   C --> D{"Exact Agent exists?"}
   D -->|no| E["Return protected-route error"]
@@ -34,34 +40,34 @@ graph TD
   F -->|no| G["Return disabled"]
   F -->|yes| H["Call resolveNativeAdminAvailability"]
   H --> I{"Selected version available?"}
-  I -->|no| J{"Authorized stopped Agent without a selected version?"}
-  J -->|yes| X["Return stopped without an origin"]
+  I -->|no| J{"Stopped without selected version?"}
+  J -->|yes| X["Stopped; no origin"]
   J -->|no| Y["Return unavailable"]
   I -->|yes| K{"Agent desired running?"}
-  K -->|no| L["Return stopped with derived origin"]
-  K -->|yes| R2{"Newer version replacing it on an exclusive Compute Driver?"}
+  K -->|no| L["Stopped; derived origin"]
+  K -->|yes| R2{"Exclusive replacement pending?"}
   R2 -->|yes| Y
   R2 -->|no| M{"Native config supported?"}
-  M -->|no| N["Return unsupported with derived origin"]
-  M -->|yes| CO{"Compute ID and implementation match selected version?"}
-  CO -->|no| CF["Return 503 dependency error"]
-  CO -->|yes| EP{"Private gateway endpoint supported?"}
+  M -->|no| N["Unsupported; derived origin"]
+  M -->|yes| CO{"Compute matches selected version?"}
+  CO -->|no| CF["503 dependency error"]
+  CO -->|yes| EP{"Private endpoint supported?"}
   EP -->|no| N
-  EP -->|yes| O["Return available Agent URL"]
-  O --> P["Browser opens derived Agent host with shared OCE session cookie"]
-  P -->|HTTP| Q["OCC resolves host to exact Agent using platform state"]
+  EP -->|yes| O["Available; Agent URL"]
+  O --> P["Browser opens Agent host with shared cookie"]
+  P -->|HTTP| Q["Resolve host to exact Agent"]
   P -->|WebSocket| V["OCC guards client socket during admission"]
   V --> Q
-  Q --> R{"Shared session and exact Agent administer still valid?"}
-  R -->|no| S["Reject request; audit exact-Agent authorization denial"]
-  R -->|yes| T["Resolve current version, native config and Compute owner"]
-  T -->|owner mismatch| RF["Refuse before key lookup or gateway connection"]
-  T -->|matching owner| U["OCC strips browser credentials and proxies HTTP to private gateway"]
-  T -->|WebSocket client reset| VB["Stop before gateway connection"]
-  T -->|WebSocket client connected with matching owner and exact Origin| VC["Proxy 101 upgrade with version lease"]
-  U -->|HTML preview with sandbox routing enabled| W["Browser loads public shell from separate preview origin"]
-  W --> Z["Envoy sandbox listener routes to Agent sandbox port"]
-  Z --> AA["Native UI delivers HTML into runtime-isolated iframe"]
+  Q --> R{"Session and exact-Agent grant valid?"}
+  R -->|no| S["Reject and audit denial"]
+  R -->|yes| T["Resolve selected version, policy and Compute owner"]
+  T -->|owner mismatch| RF["Refuse before key/connection"]
+  T -->|matching owner| U["Strip browser credentials; proxy HTTP"]
+  T -->|WebSocket client reset| VB["No upstream connection"]
+  T -->|WebSocket, matching owner and exact Origin| VC["Proxy 101 upgrade with revision lease"]
+  U -->|Sandbox preview enabled| W["Load separate-origin public shell"]
+  W --> Z["Envoy routes to sandbox port"]
+  Z --> AA["Native UI delivers isolated iframe HTML"]
 ```
 
 ## Execution Trace
@@ -77,6 +83,25 @@ Configuration generation 1, creates the Agent, then derives its origin. Before
 deployment, generation 2 enables `controlUi`, pins origins, and grants
 `occ-workspace-files` trusted-proxy `operator.admin` with device auto-approval.
 An existing helper-owned name cannot change this selection.
+
+### 0.5. Deployment admission prepares the Agent copy
+
+`apps/controller/src/gateway/native-admin-origin.ts:nativeAdminOriginResolver`
+`packages/occ/src/index.ts:deployAgentWithAuthorization`
+`apps/controller/src/drivers/compute/kubernetes/index.ts:configureAgent`
+
+API and worker derive trusted Installation origins through `nativeAdminTarget`.
+Helm supplies matching inputs. For the Compose/OpenShell profile,
+`compose.native-admin.yaml:services` supplies the same enablement, Agent domain
+and public HTTPS origin to the controller and Kubernetes worker. Cookie settings
+remain API-only. Deployment and provisioning pass the allocated
+Agent and frozen Sandbox copy to Compute through `agentRuntimeConfiguration`.
+Agent save remains unchanged. Kubernetes prepares gateway identity, device
+approval and exact origins; conflicts refuse admission and opt-outs stay disabled.
+OCC then applies Gateway security defaults, logging and validation. It adds the
+Agent display name and freezes the result in an Agent revision.
+The source Configuration and history stay unchanged. `admitRevision` records
+separate Compute metadata; the runtime renders a writable copy.
 
 ### 1. Console renders native admin availability
 
@@ -228,21 +253,23 @@ admin Configuration remains Pod-local.
 
 ## Debugging and Verification
 
-- `AGENT_NATIVE_ADMIN_INVALID` at startup points to native admin enablement, the Agent domain, or a missing shared cookie domain. A bad shared cookie domain or public origin reports `AUTH_BASE_URL_INVALID`, short auth secret material `AUTH_SECRET_INVALID`, and a missing gateway API key path `GATEWAY_API_KEY_UNAVAILABLE`.
-- `disabled` means the Installation has not enabled the feature.
-- `stopped` means the exact Agent is not desired running. Its response has no origin or version after stop reconciliation clears the selected version, or before the first deployment.
-- `unavailable` means a desired-running Agent has no selected version, or a newer version on a Compute Driver with `requiresStoppedPredecessors` has stopped the active workload. If replacement fails, the old version remains selected without a workload.
-- `unsupported` means the selected Compute Driver, gateway endpoint, or native trusted-proxy/control UI configuration cannot support the selected version.
-- Wrong or unknown Agent hosts fail before gateway proxying. Check the derived host calculation, Agent lifecycle state, and `agentNativeAdmin.domain`.
-- Browser requests contain no native-admin exchange, callback, verifier, or Agent-specific session-cookie traffic.
-- IAM denial audits should appear for attributable denied status checks, proxy admission, and WebSocket lease renewal, with the human principal and exact Agent target preserved.
-- A TCP reset during WebSocket admission leaves the API running and preserves a later authorization-denial audit without opening an upstream connection.
-- WebSocket connect and close audits share `connectionId`; close audits add a `closeReason` category from step 7.
-- Service-worker registration failure is expected: the HTTP proxy rejects `Service-Worker: script` requests and adds `worker-src 'none'` to proxied responses.
-- Browser tests cover panel visibility, warnings, availability, and URL opening. Integration proof covers shared-cookie admission, denied service keys and unknown hosts, assets, WebSocket leases and reconnects, and a reversible native edit.
+- Startup rejects invalid settings with `AGENT_NATIVE_ADMIN_INVALID`,
+  `AUTH_BASE_URL_INVALID`, `AUTH_SECRET_INVALID` or `GATEWAY_API_KEY_UNAVAILABLE`.
+  Follow [troubleshooting](../guides/deploy/native-admin.md#troubleshooting).
+- Check [availability outcomes](../reference/agent-native-admin.md#authorization-and-availability)
+  against the selected Agent version and runtime state; unknown hosts never reach
+  the gateway. The gateway must not receive OCE cookies.
+- Verify attributable IAM denials, including after a reset during WebSocket
+  admission. No connection opens for a disconnected client.
+- WebSocket connect/close audits must share `connectionId`; close includes
+  `closeReason`. Service-worker registration must fail.
+- Browser tests cover visibility and launch. Integration and WebSocket cases
+  cover admission, assets, leases, reconnects and denied effects. Genuine native
+  UI proof uses the [Kubernetes procedure](../testing/kubernetes.md#native-gateway-sharing).
 
 ## Related docs
 
+- [Proposed Compute preparation contract](../../specs/rfcs/0024-native-admin-deployment-preparation.md)
 - [Agent native admin UI](../reference/agent-native-admin.md)
 - [Platform console](../reference/console.md#open-the-native-admin-ui)
 - [Gateway routing with Envoy](../reference/gateway-routing.md#native-admin-ui-routing)
@@ -254,6 +281,8 @@ admin Configuration remains Pod-local.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 21:19: Preserve deployment preparation with Gateway security defaults, Agent naming and managed-mode write restrictions. Accompanying uncommitted refresh. (authoring-run/5f285180-08bf-4414-abea-d615c472c459 - 37fac70dfb784351544189ad07909588b327ef47)
 
 - 2026-10-28 19:58: Document how managed deployments supply read-only configuration guidance. (codex/01a1558e-c27f-7bc0-a403-af59e9364ddf - aa352e92bcdc7cab58364c692a01042c5e459db0)
 

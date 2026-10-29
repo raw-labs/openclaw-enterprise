@@ -231,7 +231,10 @@ into the `AgentRevision.configuration` field and records
 `configurationId`, `configurationKind`, and `configurationGeneration` beside
 it. A selected [SandboxDriver](drivers/sandbox.md) may
 transform a copy through `configureAgent` before admission; the reusable
-Configuration and its generation remain unchanged. The snapshot adds the
+Configuration and its generation remain unchanged. The selected Compute Driver
+may then transform the deployment copy through `configureAgent`, including
+[first-deployment native admin policy](agent-native-admin.md#first-deployment-configuration)
+for enabled Kubernetes Agents. The snapshot adds the
 [Agent display name](agents/deployment.md#versions-and-deployment) to that document;
 its metadata names the source generation. Where unset, OCC sets
 `tools.exec.applyPatch.workspaceOnly: true` and `agents.defaults.sandbox.mode: "off"`.

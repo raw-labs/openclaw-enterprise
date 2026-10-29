@@ -8,6 +8,14 @@ This record preserves the dated changes to the Agent native admin flow. See the 
 
 ## Changelog
 
+- 2026-10-23 18:34: Pass matching native-admin origin inputs to the Compose Kubernetes worker for guided provisioning. (authoring-run/fe91b832-589c-438d-88f4-117e449312fe - f3fbd358b87b6e0fc0090ba55e6d12fa6de2b1ef)
+- 2026-10-17 19:03: Linked the submitted Compute contract proposal and refreshed upstream provisioning support. (authoring-run/400ef44f-ab67-4b2e-901a-064afa6e9e12 - 54614e31d67a9825684d1906feed3a6ab1c671c9)
+- 2026-10-16 12:59: Retained copied-chat recovery and first-deployment preparation while adopting the current Sandbox contract. (authoring-run/5e253249-62fe-4167-90cb-1b82da91396c - 9c309cf67287428bdd762232d542759db7465198)
+- 2026-10-15 13:30: Merged deployment preparation with upstream local first-Agent and Compute-owner flows. (authoring-run/40b9b9bd-a17c-4a00-8101-d13ebd2facd5 - 128433480bdc186f460312eece38a8ad486ecdeb)
+- 2026-10-12 15:30: Refreshed first-deployment admission for the shared configuration helper on latest inspected upstream; Agent save remains unchanged. (authoring-run/522f2037-41de-4f2e-ae7b-8b26a769aa47 - b195e54e9b0ce98ead2b2306015a5209325e837b)
+- 2026-10-12 14:04: Ported first-deployment admission onto inspected pure-main baseline with accompanying code changes. (authoring-run/c4085970-fd77-4614-a01b-95819dc08e6f - 80725162a946f80652b939a32a57ee4e922eeb5c)
+- 2026-10-12 12:20: Documented first-deployment Compute admission and provisioning origin preparation. (authoring-run/ed71af64-d4b4-45ac-9ad4-6c2d65a97d17 - b195e54e9b0ce98ead2b2306015a5209325e837b)
+
 - 2026-10-19 23:14: Retain Gateway client state and reuse the exact generated native worker profile on restart. (authoring-run/45df354e-6d46-4430-83a5-3885d8a9fb76 - c584934287f78a4f3cf7c84cfb02febd9f3437ab)
 - 2026-10-19 22:11: Document return to the requested page after session expiry. (authoring-run/e63eaa44-e02d-49aa-b1c6-4711bd49d919 - 332455338271720ef29c63e5e7fb209fa3da6ec2)
 - 2026-10-15 21:30: Present the authorized launch and its access boundaries in the Agent overview. (authoring-run/6d9b833d-e4fc-4f58-98a8-f0fac29f709d - 7adac57cc03545bdd3cdc383c88219396a677fd9)

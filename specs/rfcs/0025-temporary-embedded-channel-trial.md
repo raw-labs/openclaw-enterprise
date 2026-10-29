@@ -6,7 +6,7 @@ author: miguelbranco80
 
 # Proposal: Temporarily trial channels in embedded OpenClaw
 
-- **ID:** RFC-0024
+- **ID:** RFC-0025
 - **Created:** 2026-10-14
 - **Last updated:** 2026-10-14
 - **Related:** [Harness execution](../../docs/reference/harness-execution.md),

@@ -1,3 +1,4 @@
+import { configureNativeAdmin, nativeAdminRequested } from "./native-admin.ts";
 import type { CredentialPolicyWithdrawalOptions } from "@openclaw-enterprise/contracts";
 import { networkPolicySpecToJson } from "../../kubernetes/network-policy.ts";
 import {
@@ -4486,6 +4487,32 @@ export class KubernetesComputeDriver implements ComputeDriver {
         mode: input.executionMode,
       },
     });
+  }
+
+  configureAgent(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+    context: { readonly nativeAdminOrigin?: string },
+  ): OpenClawConfigurationDocument {
+    if (
+      context.nativeAdminOrigin === undefined ||
+      this.options.gatewayRouting === undefined ||
+      !nativeAdminRequested(configuration)
+    ) {
+      return configuration;
+    }
+    const allowUsers = asRecord(
+      asRecord(asRecord(configuration.gateway)?.auth)?.trustedProxy,
+    )?.allowUsers;
+    if (allowUsers !== undefined && !isDeepStrictEqual(allowUsers, [TRUSTED_PROXY_IDENTITY])) {
+      throw new ComputeGatewaySettingError(
+        "gateway.auth.trustedProxy.allowUsers",
+        `must contain only ${TRUSTED_PROXY_IDENTITY} for native admin access`,
+      );
+    }
+    return configureNativeAdmin(
+      this.namedGatewayConfigurationDocument(configuration),
+      context.nativeAdminOrigin,
+    );
   }
 
   validateGatewaySettings(configuration: Readonly<OpenClawConfigurationDocument>): void {

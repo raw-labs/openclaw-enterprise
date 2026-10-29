@@ -1755,6 +1755,22 @@ test("production settings coexist in fresh and upgrade chart renders", tooling, 
       api.env.find(({ name }) => name === "OCC_AGENT_NATIVE_ADMIN_ENABLED"),
       { name: "OCC_AGENT_NATIVE_ADMIN_ENABLED", value: "true" },
     );
+    // Provisioning hands off revisions in the worker, so origin preparation must receive
+    // the same Installation inputs as ordinary API deployment on install and upgrade.
+    const workerPod = deployment("worker").spec.template.spec;
+    const worker = [...(workerPod.initContainers ?? []), ...workerPod.containers].find(
+      ({ name }) => name === "worker",
+    );
+    for (const name of [
+      "OCC_AGENT_NATIVE_ADMIN_ENABLED",
+      "OCC_AGENT_NATIVE_ADMIN_DOMAIN",
+      "OCC_AUTH_BASE_URL",
+    ]) {
+      assert.deepEqual(
+        worker.env.find((entry) => entry.name === name),
+        api.env.find((entry) => entry.name === name),
+      );
+    }
     const broker = deployment("worker").spec.template.spec.containers.find(
       ({ name }) => name === "repository-credentials",
     );
@@ -1897,7 +1913,16 @@ test(
       apiEnvironment.filter(({ name }) => name === "OCC_AUTH_COOKIE_DOMAIN"),
       [{ name: "OCC_AUTH_COOKIE_DOMAIN", value: "example.invalid" }],
     );
-    assert.ok(!workerEnvironment.some(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")));
+    assert.deepEqual(
+      workerEnvironment.filter(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")),
+      apiEnvironment.filter(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")),
+    );
+    for (const environment of [apiEnvironment, workerEnvironment]) {
+      assert.deepEqual(
+        environment.filter(({ name }) => name === "OCC_AUTH_BASE_URL"),
+        [{ name: "OCC_AUTH_BASE_URL", value: values["auth.baseUrl"] }],
+      );
+    }
     assert.ok(!workerEnvironment.some(({ name }) => name === "OCC_AUTH_COOKIE_DOMAIN"));
     assert.ok(apiEnvironment.some(({ name }) => name === "OCC_GATEWAY_API_KEY_PATH"));
     assert.ok(objects.some(({ kind }) => kind === "Gateway"));
@@ -1910,10 +1935,13 @@ test(
           kind === "Deployment" && metadata.labels["app.kubernetes.io/component"] === component,
       );
     const disabledApiEnvironment = disabledDeployment("api").spec.template.spec.containers[0].env;
-    assert.deepEqual(
-      disabledApiEnvironment.filter(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")),
-      [{ name: "OCC_AGENT_NATIVE_ADMIN_ENABLED", value: "false" }],
-    );
+    for (const component of ["api", "worker"]) {
+      const environment = disabledDeployment(component).spec.template.spec.containers[0].env;
+      assert.deepEqual(
+        environment.filter(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")),
+        [{ name: "OCC_AGENT_NATIVE_ADMIN_ENABLED", value: "false" }],
+      );
+    }
     assert.ok(!disabledApiEnvironment.some(({ name }) => name === "OCC_AUTH_COOKIE_DOMAIN"));
   },
 );
