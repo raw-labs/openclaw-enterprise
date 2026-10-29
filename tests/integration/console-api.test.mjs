@@ -1946,14 +1946,26 @@ test("Gateway outbound approval is exact-Agent authority and deployment freezes 
     env: { vars: { HTTP_PROXY: "http://proxy.example:3128" } },
   });
   // A reusable Configuration can save proxy settings. Once this Agent requests managed
-  // transport, deployment refuses the override before recording a runnable version.
-  const conflictingTransport = await fixture.request("POST", `${path}/deploy`);
-  assert.equal(conflictingTransport.status, 400, JSON.stringify(conflictingTransport.body));
-  assert.match(
-    conflictingTransport.body.error.message,
-    /proxy transport is owned by Kubernetes Compute/,
-  );
-  assert.deepEqual((await fixture.request("GET", `${path}/revisions`)).data, []);
+  // transport, deployment refuses the override before recording a runnable version,
+  // whether native Gateway administration is managed or unmanaged.
+  for (const gatewayManagedMode of [true, false]) {
+    await fixture.updateAgent(namespace.id, agent.id, { gatewayManagedMode });
+    const conflictingTransport = await fixture.request("POST", `${path}/deploy`);
+    assert.equal(conflictingTransport.status, 400, JSON.stringify(conflictingTransport.body));
+    assert.match(
+      conflictingTransport.body.error.message,
+      /proxy transport is owned by Kubernetes Compute/,
+    );
+    assert.deepEqual((await fixture.request("GET", `${path}/revisions`)).data, []);
+  }
+  // The same Configuration remains deployable for an Agent with no managed outbound
+  // snapshot. Gateway managed mode alone does not transfer proxy transport ownership.
+  await fixture.updateAgent(namespace.id, other.id, {
+    configurationId: agent.configurationId,
+  });
+  const ordinaryRevision = await fixture.deployAgent(namespace.id, other.id);
+  assert.equal(ordinaryRevision.gatewayOutbound, undefined);
+  assert.equal(ordinaryRevision.gatewayManagedMode, true);
   await fixture.updateConfiguration(namespace.id, agent.configurationId, values);
   const revision = await fixture.deployAgent(namespace.id, agent.id);
   assert.equal(revision.gatewayManagedMode, false);
