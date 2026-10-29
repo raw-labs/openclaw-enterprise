@@ -158,8 +158,9 @@ Switching methods hides that feedback without changing the lookup or saved choic
 
 - `tests/browser/console-agents.test.ts`, `console-agent-presets.test.ts`, and
   `console-agent-repositories.test.ts` exercise the form against the real controller.
-  The bound-Secret Preset case checks duplicate sources, a refused tool Secret grant
-  after the model grant succeeds, and retry without duplicate resources or grants.
+  The bound-Secret Preset case checks duplicate sources and a refused Configuration
+  Secret grant after the model and another bound Secret grant succeed. Retry creates
+  no duplicate resources or grants.
   These tests use in-memory state; they do not prove runtime delivery.
 - A refused write shows the API's reason and a request ID; inspect saved
   Configuration and Agent IDs before retrying.

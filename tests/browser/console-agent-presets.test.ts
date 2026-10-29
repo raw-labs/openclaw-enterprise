@@ -2614,6 +2614,11 @@ test("Embedded Preset grants all bound Secrets and retries denied access without
   const modelSecret = await fixture.createSecret(namespace.id, "Model token", "hidden-model-token");
   // A distinct generic source prevents the model grant from masking missing Configuration grants.
   const toolSecret = await fixture.createSecret(namespace.id, "Tool token", "hidden-tool-token");
+  const searchSecret = await fixture.createSecret(
+    namespace.id,
+    "Search token",
+    "hidden-search-token",
+  );
   const unusedSecret = await fixture.createSecret(
     namespace.id,
     "Unbound token",
@@ -2627,6 +2632,7 @@ test("Embedded Preset grants all bound Secrets and retries denied access without
   artifact.template.configuration.secretBindings = {
     TOOL_TOKEN: { source: toolSecret.ref },
     SECOND_TOOL_TOKEN: { source: toolSecret.ref, delivery: { type: "env" } },
+    SEARCH_TOKEN: { source: searchSecret.ref },
   };
   const preset: FixtureResponse<Preset> = await fixture.request(
     "POST",
@@ -2643,15 +2649,15 @@ test("Embedded Preset grants all bound Secrets and retries denied access without
   await page.getByLabel("Name", { exact: true }).fill("Bound Secret Agent");
   await page.getByLabel("Model", { exact: true }).fill("gpt-4.1");
   await page.getByRole("button", { name: "Use Preset" }).click();
-  // Revoke only the tool Secret's read after creation. The model grant can succeed,
-  // but the real IAM binding route must refuse the generic grant. Administration remains valid.
+  // Refuse the second distinct Configuration Secret after creation. The model and first
+  // Configuration grants succeed, so retry must retain both. Administration remains valid.
   let denial: ReturnType<typeof restrict> | undefined;
   await page.route(`${fixture.origin}/namespaces/${namespace.id}/agents`, async (route) => {
     const response = await route.fetch();
     if (route.request().method() === "POST" && response.status() === 201) {
       denial = restrict(fixture.policy, "read", "secret", {
         namespaceId: namespace.id,
-        resourceId: toolSecret.id,
+        resourceId: searchSecret.id,
       });
     }
     await route.fulfill({ response });
@@ -2679,14 +2685,21 @@ test("Embedded Preset grants all bound Secrets and retries denied access without
     bindingPath,
   );
   assert.equal(partial.status, 200);
-  assert.equal(partial.data.length, 1);
-  const [modelBinding] = partial.data;
-  assert.ok(modelBinding && "resourceKind" in modelBinding);
-  assert.equal(modelBinding.subjectId, created.servicePrincipalId);
-  assert.equal(modelBinding.resourceId, modelSecret.id);
+  assert.equal(partial.data.length, 2);
+  assert.deepEqual(
+    partial.data
+      .map((binding) => {
+        assert.ok("resourceKind" in binding);
+        assert.equal(binding.subjectId, created.servicePrincipalId);
+        assert.equal(binding.resourceKind, "secret");
+        return binding.resourceId;
+      })
+      .sort(),
+    [modelSecret.id, toolSecret.id].sort(),
+  );
 
-  // Repairing that exact denial retries the generic grant without duplicating the model grant
-  // or either saved resource. It must not require restoring Installation administration.
+  // Repairing that exact denial retries the remaining grant without duplicating either
+  // successful grant or saved resource. It does not restore Installation administration.
   assert.ok(denial);
   liftRestriction(fixture.policy, denial);
   await page.getByRole("button", { name: "Retry credential access" }).click();
@@ -2719,7 +2732,7 @@ test("Embedded Preset grants all bound Secrets and retries denied access without
         };
       })
       .sort((a, b) => a.resourceId.localeCompare(b.resourceId)),
-    [modelSecret, toolSecret]
+    [modelSecret, toolSecret, searchSecret]
       .map((secret) => ({
         subjectKind: "identity",
         subjectId: created.servicePrincipalId,
@@ -2729,7 +2742,7 @@ test("Embedded Preset grants all bound Secrets and retries denied access without
       }))
       .sort((a, b) => a.resourceId.localeCompare(b.resourceId)),
   );
-  assert.equal(pathRequests(requests, "POST", bindingPath).length, 3);
+  assert.equal(pathRequests(requests, "POST", bindingPath).length, 4);
   assert.equal(configurationPostRequests(requests, namespace.id).length, 1);
   assert.equal(agentPostRequests(requests, namespace.id).length, 1);
   const savedConfiguration: FixtureResponse<ConfigurationWire> = await fixture.request(
