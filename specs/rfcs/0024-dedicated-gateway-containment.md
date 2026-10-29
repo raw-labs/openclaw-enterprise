@@ -222,11 +222,6 @@ first deployment, replacement, interrupted transitions and cleanup with both
 Harness placements. Embedded execution does not acquire this separate-worker
 sequence.
 
-**Implementation gap:** the experimental source freezes one contained Gateway
-launch per Agent revision and leaves the OpenShell Harness startup transition
-unimplemented. The sequence above is a proposed requirement, not a completed
-feature or successful runtime proof.
-
 ## Gateway and control-plane egress
 
 The Slack HTTP proxy remains in use by the control-plane API. Its Slack Channel
