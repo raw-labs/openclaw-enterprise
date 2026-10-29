@@ -27,8 +27,9 @@ supervisor. The Gateway no longer uses the Slack HTTP proxy. Native OpenClaw
 keeps the integration logic, credentials and TLS verification.
 
 The control-plane API continues using the Slack HTTP proxy for credential
-checks and directory lookups. Its networking, the separate Harness and embedded
-execution stay unchanged.
+checks and directory lookups. Its networking, the separate Harness's placement,
+workspace and credentials, and embedded execution stay unchanged. Dedicated
+startup must support the registration sequence described below.
 
 ## One outbound request, before and after
 
@@ -151,16 +152,80 @@ flowchart TB
 
 ## Dedicated and embedded behavior
 
-**Dedicated:** Gateway containment is required. Egress selections change
-permissions, not whether containment applies. Compute replaces the ordinary
-Gateway workload; it does not run an uncontained serving copy alongside it.
-Missing containment support or failed setup rejects deployment without a
-fallback to the old Gateway or channel proxy.
+**Dedicated** means the Gateway and Harness run as separate processes. The
+Harness is the Codex or OpenClaw worker that executes Agent tasks; dedicated
+mode does not itself select OpenShell for that worker. An Installation can
+select a Sandbox Driver for the Harness. With no Harness Sandbox selected,
+Kubernetes starts the ordinary separate Harness workload. When the Installation
+selects `drivers.sandbox`, it uses that Driver for the Harness unless
+`useForHarness: false` selects Gateway-only containment. Gateway and Harness
+containment are independent choices; when both use OpenShell, they remain
+separate Sandboxes.
+
+This proposal makes **Gateway containment required for dedicated execution**.
+That changes the existing option to run an ordinary Kubernetes Gateway, even
+when the Harness stays in Kubernetes. Egress selections change permissions,
+not whether containment applies. Compute replaces the ordinary Gateway
+workload; it does not run an uncontained serving copy alongside it. Missing
+containment support or failed setup rejects deployment without a fallback to
+an uncontained Gateway or channel proxy.
 
 **Embedded:** the combined Gateway/Harness workload, workspace, credentials and
 networking remain unchanged. This proposal does not add embedded containment
 or channel support. An explicit request for the dedicated-only capability in
 embedded mode is rejected rather than changing execution mode.
+
+## Dedicated startup and worker registration
+
+Compute must use one dedicated startup sequence for Kubernetes and
+Sandbox-managed Harnesses. A Gateway that can register a worker is not yet an
+Agent ready to execute tasks. Driver-specific launch and connection mechanics
+stay in the selected Driver, not a parallel OpenShell startup sequence.
+
+A Kubernetes Service gives the ordinary Harness a stable address before its
+process starts. The OpenShell Harness integration instead returns its
+connection address and TLS trust after creating the Sandbox. That creation
+requires worker registration material issued by a running Gateway. Waiting for
+the final Harness address before starting the Gateway therefore prevents both
+from starting. Freezing one Gateway configuration for the whole Agent revision
+also prevents adding that address afterward.
+
+The proposed shared sequence is:
+
+1. Prepare a contained Gateway that can issue authenticated worker registration
+   material. If the final Harness connection details are not known, start it
+   in setup mode without enabling Agent task execution.
+2. Obtain registration material and start the Harness through its selected
+   Driver. Read and validate the returned connection address and TLS trust.
+3. Complete the Gateway configuration. If setup mode was necessary, replace
+   that Gateway process with a final launch while preserving the private
+   state needed for registration and reconnection. If all connection details
+   were known beforehand, use the final configuration from the first launch;
+   do not require an extra restart.
+4. Verify the final Gateway, registered Harness and installed policy before
+   activation. Registration alone does not establish readiness.
+
+Each launch keeps immutable requirements. Compute must record the setup-to-final
+transition for the same Agent revision and distinguish the two launches; it
+must not overwrite a launch snapshot or accept arbitrary configuration changes.
+The transition preserves Agent identity, outbound authorization and credential
+separation. Setup does not grant broader network access or bypass native
+authentication. Late results from the setup process must not activate or
+configure the final process.
+
+Retries must resume from the recorded stage and reconcile owned resources
+before repeating provider effects. A failure or uncertain transition keeps the
+candidate unready; an already serving predecessor remains selected until a
+verified replacement activates. Stop and delete must clean up both launches
+without deleting another revision's resources. Integration proof must cover
+first deployment, replacement, interrupted transitions and cleanup with both
+Harness placements. Embedded execution does not acquire this separate-worker
+sequence.
+
+**Implementation gap:** the experimental source freezes one contained Gateway
+launch per Agent revision and leaves the OpenShell Harness startup transition
+unimplemented. The sequence above is a proposed requirement, not a completed
+feature or successful runtime proof.
 
 ## Gateway and control-plane egress
 
