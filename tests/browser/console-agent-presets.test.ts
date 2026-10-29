@@ -4009,71 +4009,194 @@ test("a delayed restored Preset list cannot read a selection after starting with
 });
 
 test("denied Preset reads do not automatically start an Agent form", async (t) => {
-  const fixture = await createConsoleAppFixture(t);
-  await fixture.bootstrap();
-  const namespace = await fixture.createNamespace("Denied Preset", { ready: true });
-  const starter = await defaultPresetSummary(fixture, namespace.id);
-  const { page } = await newPage(t, fixture);
-  await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
-  await page
-    .getByRole("button", { name: "Start with default Preset" })
-    .waitFor({ state: "visible" });
-  await page.waitForFunction(
-    () => globalThis.document.querySelector<HTMLSelectElement>("#agent-preset")?.disabled === false,
-  );
-  // Deny the exact read after the list is visible to exercise a changed grant.
-  restrict(fixture.policy, "read", "preset", { namespaceId: namespace.id, resourceId: starter.id });
-  const denied = page.waitForResponse((response) =>
-    response.url().endsWith(`/namespaces/${namespace.id}/presets/${starter.id}`),
-  );
-  await page.getByRole("button", { name: "Start with default Preset" }).click();
-  assert.equal((await denied).status(), 403);
-  // The API's named denial (finding 2534) names the Preset the request sent.
-  await page
-    .getByRole("alert")
-    .filter({ hasText: callerDenied("Preset read", `Preset ${starter.id}`) })
-    .waitFor();
-  assert.equal(await page.locator("#create-agent-form").count(), 0);
-  await page.getByRole("button", { name: "Start without Preset" }).click();
-  assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
-  // A later list filters the now-unreadable Preset; the independent action remains available.
-  // Cancel discards the untouched form without asking.
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  await page.getByText(/^No Presets available to you in this Namespace\./).waitFor();
-  await page.getByRole("button", { name: "Start without Preset" }).click();
-  assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
+  for (const starterName of ["default-codex", "Custom starter"]) {
+    await t.test(starterName, async (t) => {
+      const fixture = await createConsoleAppFixture(t);
+      await fixture.bootstrap();
+      const namespace = await fixture.createNamespace("Denied Preset", { ready: true });
+      const starter = await defaultPresetSummary(fixture, namespace.id);
+      if (starterName !== "default-codex") {
+        // Rename the only installed Preset through the API so quick-start must use its custom name.
+        const renamed = await fixture.request(
+          "PATCH",
+          `/namespaces/${namespace.id}/presets/${starter.id}`,
+          { body: { name: starterName } },
+        );
+        assert.equal(renamed.status, 200);
+      }
+      const shortcutName =
+        starterName === "default-codex" ? "Start with default Preset" : `Start with ${starterName}`;
+      const { page } = await newPage(t, fixture);
+      const requests = apiRequests(page, fixture.origin);
+      await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
+      await page
+        .getByRole("button", { name: shortcutName, exact: true })
+        .waitFor({ state: "visible" });
+      await page.waitForFunction(
+        () =>
+          globalThis.document.querySelector<HTMLSelectElement>("#agent-preset")?.disabled === false,
+      );
+      // Deny the exact read after the list is visible to exercise a changed grant.
+      restrict(fixture.policy, "read", "preset", {
+        namespaceId: namespace.id,
+        resourceId: starter.id,
+      });
+      const denied = page.waitForResponse((response) =>
+        response.url().endsWith(`/namespaces/${namespace.id}/presets/${starter.id}`),
+      );
+      await page.getByRole("button", { name: shortcutName, exact: true }).click();
+      assert.equal((await denied).status(), 403);
+      // The API's named denial (finding 2534) names the Preset the request sent.
+      await page
+        .getByRole("alert")
+        .filter({ hasText: callerDenied("Preset read", `Preset ${starter.id}`) })
+        .waitFor();
+      assert.equal(await page.locator("#create-agent-form").count(), 0);
+      assert.deepEqual(nonAuthWriteRequests(requests), []);
+      await page.getByRole("button", { name: "Start without Preset" }).click();
+      assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
+      // A later list filters the now-unreadable Preset; the independent action remains available.
+      // Cancel discards the untouched form without asking.
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      await page.getByRole("button", { name: "Create Agent", exact: true }).click();
+      await page.getByText(/^No Presets available to you in this Namespace\./).waitFor();
+      await page.getByRole("button", { name: "Start without Preset" }).click();
+      assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
+    });
+  }
 });
 
-test("The console requires a readable installed default for quick-start and still allows other Presets", async (t) => {
-  const fixture = await createConsoleAppFixture(t, {
-    defaultPresets: [],
-    filesystemConfiguration: true,
-  });
-  await fixture.bootstrap();
-  const namespace = await fixture.createNamespace("No installed starter", { ready: true });
-  const alternative: FixtureResponse<Preset> = await fixture.request(
-    "POST",
-    `/namespaces/${namespace.id}/presets`,
-    {
-      body: { name: "Custom starter", template: { agent: { name: "Custom Agent" } } },
-    },
-  );
-  assert.equal(alternative.status, 201);
-  const { page } = await newPage(t, fixture);
-  await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
-  await page
-    .getByText("Choose a Preset. default-codex is not available to you in this Namespace.", {
+test("The console quick-start prefers the readable installed default, then the first readable Preset by name", async (t) => {
+  for (const installedDefault of ["readable", "absent", "denied"]) {
+    const fixture = await createConsoleAppFixture(t, {
+      defaultPresets: installedDefault === "absent" ? [] : [defaultCodexPreset],
+      filesystemConfiguration: true,
+    });
+    await fixture.bootstrap();
+    const namespace = await fixture.createNamespace("Readable starters", { ready: true });
+    // Creation order differs from display order, and an installed default is not first by name.
+    for (const [name, agentName] of [
+      ["Zulu starter", "Zulu Agent"],
+      ["First tied starter", "Lowercase Alpha Agent"],
+      ["Second tied starter", "Alpha Agent"],
+    ]) {
+      const created = await fixture.request("POST", `/namespaces/${namespace.id}/presets`, {
+        body: { name, template: { agent: { name: agentName } } },
+      });
+      assert.equal(created.status, 201);
+    }
+    // OCC lists by generated ID, so use real updates to guarantee lowercase-first delivery.
+    // The shortcut must choose the uppercase name even when both names collate equally.
+    const seeded: FixtureResponse<PresetSummaryWire[]> = await fixture.request(
+      "GET",
+      `/namespaces/${namespace.id}/presets`,
+    );
+    const tied = seeded.data.filter((preset) => preset.name.endsWith("tied starter"));
+    assert.equal(tied.length, 2);
+    for (const [index, preset] of tied.entries()) {
+      const renamed = await fixture.request(
+        "PATCH",
+        `/namespaces/${namespace.id}/presets/${preset.id}`,
+        {
+          body: {
+            name: index === 0 ? "alpha starter" : "Alpha starter",
+            template: { agent: { name: index === 0 ? "Lowercase Alpha Agent" : "Alpha Agent" } },
+          },
+        },
+      );
+      assert.equal(renamed.status, 200);
+    }
+    if (installedDefault === "denied") {
+      const presets: FixtureResponse<PresetSummaryWire[]> = await fixture.request(
+        "GET",
+        `/namespaces/${namespace.id}/presets`,
+      );
+      const starter = presets.data.find((preset) => preset.name === "default-codex");
+      assert.ok(starter);
+      // Exact-resource denial filters the stock default before the Console chooses a starter.
+      fixture.policy.restrictions.push({
+        id: "deny-unreadable-default",
+        namespaceId: namespace.id,
+        resourceKind: "preset",
+        resourceId: starter.id,
+        action: "read",
+        effect: "deny",
+      });
+    }
+    const { page } = await newPage(t, fixture);
+    const requests = apiRequests(page, fixture.origin);
+    await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
+    const starterName = installedDefault === "readable" ? "the default Preset" : "Alpha starter";
+    await page
+      .getByText(`Choose a Preset or start with ${starterName}.`, { exact: true })
+      .waitFor();
+    const shortcut = page.getByRole("button", {
+      name:
+        installedDefault === "readable" ? "Start with default Preset" : "Start with Alpha starter",
       exact: true,
-    })
-    .waitFor();
-  assert.equal(
-    await page.getByRole("button", { name: "Start with default Preset" }).isDisabled(),
-    true,
-  );
-  await page.getByLabel("Preset template", { exact: true }).selectOption(alternative.data.id);
-  await page.getByRole("button", { name: "Use Preset" }).click();
-  assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "Custom Agent");
+    });
+    assert.equal(await shortcut.isEnabled(), true);
+    // The accessible hint must name the actual readable starter, including custom-only installs.
+    const hint = page.locator("#agent-preset-default-hint");
+    assert.equal(await hint.isVisible(), true);
+    assert.equal(
+      await hint.textContent(),
+      installedDefault === "readable"
+        ? "The default Preset is default-codex."
+        : "The starter Preset is Alpha starter.",
+    );
+    assert.equal(await shortcut.getAttribute("aria-describedby"), await hint.getAttribute("id"));
+    await shortcut.click();
+    assert.equal(
+      await page.getByLabel("Agent name", { exact: true }).inputValue(),
+      installedDefault === "readable" ? "" : "Alpha Agent",
+    );
+    const listed: FixtureResponse<PresetSummaryWire[]> = await fixture.request(
+      "GET",
+      `/namespaces/${namespace.id}/presets`,
+    );
+    const expected = listed.data.find(
+      (preset) =>
+        preset.name === (installedDefault === "readable" ? "default-codex" : "Alpha starter"),
+    );
+    assert.ok(expected);
+    assert.deepEqual(
+      requests
+        .filter(
+          (request) =>
+            request.method === "GET" &&
+            request.path.startsWith(`/namespaces/${namespace.id}/presets/`),
+        )
+        .map((request) => request.path),
+      [`/namespaces/${namespace.id}/presets/${expected.id}`],
+    );
+    if (installedDefault !== "readable") {
+      // Custom shortcuts retain edits just like the installed default; navigation is not discard.
+      await page.getByRole("link", { name: "← Agents" }).click();
+      await page.getByRole("button", { name: "Create Agent", exact: true }).click();
+      assert.equal(
+        await page.getByLabel("Agent name", { exact: true }).inputValue(),
+        "Alpha Agent",
+      );
+    }
+    if (installedDefault === "absent") {
+      // The custom-only shortcut must reach the regular Agent creation API, not just open a form.
+      await routeInstallationWithoutProvisioning(page, fixture);
+      await enterManualModel(page, "synthetic-custom-preset-key", "gpt-4.1");
+      const saved = page.waitForResponse(
+        (response) =>
+          response.url() === `${fixture.origin}/namespaces/${namespace.id}/agents` &&
+          response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Create Agent", exact: true }).click();
+      assert.equal((await saved).status(), 201);
+      const agents: FixtureResponse<AgentWire[]> = await fixture.request(
+        "GET",
+        `/namespaces/${namespace.id}/agents`,
+      );
+      assert.equal(agents.data[0]?.name, "Alpha Agent");
+    }
+  }
 });
 
 test("Preset with a managed PAT account creates a draft without a Secret grant", async (t) => {

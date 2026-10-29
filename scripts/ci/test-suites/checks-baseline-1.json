@@ -313,7 +313,10 @@
     },
     {
       "path": "tests/integration/profile-renderer.test.mjs",
-      "expectedTests": ["preflight rejects noncanonical SHA-256 image digests"]
+      "expectedTests": [
+        "preflight rejects noncanonical SHA-256 image digests",
+        "installation profiles carry the trusted embedded channel opt-in into paired controller rollouts"
+      ]
     },
     {
       "path": "tests/integration/profile-public-github-read.test.mjs",
