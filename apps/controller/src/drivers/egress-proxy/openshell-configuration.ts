@@ -18,20 +18,21 @@ export function openShellProxyConfiguration(
   input: unknown,
   mode: "development" | "production",
   repository: OpenShellGitRuntimeConfiguration | undefined,
+  gatewayOnly = false,
 ) {
   const egress = object(input, "drivers.credential_proxy.configuration");
-  if (
-    egress.gatewayDestinations !== undefined &&
-    egress.middlewareName === undefined &&
-    !repository
-  ) {
-    closed(egress, ["gatewayDestinations"], "drivers.credential_proxy.configuration");
-    return {
-      policy: { gatewayDestinations: gatewayDestinationsOptions(egress.gatewayDestinations) },
-    };
-  }
+  const gatewayDestinations =
+    egress.gatewayDestinations === undefined
+      ? {}
+      : {
+          gatewayDestinations: gatewayDestinationsOptions(egress.gatewayDestinations),
+        };
   if (repository) {
-    closed(egress, ["observedHookPreviewWorkspace"], "drivers.credential_proxy.configuration");
+    closed(
+      egress,
+      ["observedHookPreviewWorkspace", "gatewayDestinations"],
+      "drivers.credential_proxy.configuration",
+    );
     const preview =
       egress.observedHookPreviewWorkspace === undefined
         ? {}
@@ -44,6 +45,7 @@ export function openShellProxyConfiguration(
     return {
       repository: { ...repository, ...preview },
       policy: {
+        ...gatewayDestinations,
         middlewareName: repository.registrationName,
         repositoryMiddlewareName: repository.registrationName,
         authorityScope: "execution",
@@ -53,12 +55,20 @@ export function openShellProxyConfiguration(
   }
   closed(
     egress,
-    ["middlewareName", "authorityScope", "authority", "preparedGitHub"],
+    ["middlewareName", "authorityScope", "authority", "preparedGitHub", "gatewayDestinations"],
     "drivers.credential_proxy.configuration",
   );
   const { authority, preparedGitHub, ...policy } = egress;
+  if (gatewayOnly) {
+    if (authority !== undefined || preparedGitHub !== undefined) {
+      throw new Error(
+        "Gateway-only selection cannot configure credential authority or provider custody.",
+      );
+    }
+    return { policy: { ...policy, ...gatewayDestinations } };
+  }
   return {
-    policy,
+    policy: { ...policy, ...gatewayDestinations },
     authority: egressAuthorityConfiguration(
       authority,
       mode,

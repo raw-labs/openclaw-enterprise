@@ -4467,6 +4467,97 @@ export const scenarios = {
     description:
       "A pending save blocks further Configuration edits and deployment; a timed-out write requires draft readback.",
   },
+  gatewayOutbound: {
+    group: "Pages/Agent detail",
+    name: "Gateway outbound hosts",
+    path: `${draft}&tab=gateway-outbound`,
+    gatewayOutbound: { destinations: [{ host: "api.example.com", port: 443 }] },
+    description:
+      "Additional Gateway HTTPS hosts belong to this Agent, not native Configuration. Save and deploy a new version to apply changes.",
+    steps: [
+      "Add another exact DNS host and save. Reload to read the saved hosts.",
+      "Clear the field and save to remove all additional hosts. Channel requirements remain automatic.",
+    ],
+  },
+  gatewayOutboundNoCredentials: {
+    group: "Pages/Agent detail",
+    name: "Gateway outbound hosts, missing model credentials",
+    path: `${draft}&tab=gateway-outbound`,
+    auth: null,
+    description:
+      "Missing model credentials prevent deployment, not an authorized edit of this Agent’s destination list. No host permissions are granted automatically.",
+  },
+  gatewayOutboundEmpty: {
+    group: "Pages/Agent detail",
+    name: "Gateway outbound hosts, empty",
+    path: `${draft}&tab=gateway-outbound`,
+    description:
+      "No additional destinations are approved. Enabled Channels supply their own requirements.",
+  },
+  gatewayOutboundDenied: {
+    group: "Pages/Agent detail",
+    name: "Gateway outbound hosts, administer denied",
+    path: `${draft}&tab=gateway-outbound`,
+    agentPermissionSummary: { update: true, administer: false, configurationRead: true },
+    description:
+      "Agent update alone cannot edit outbound destinations. Both update and administer on this Agent are required.",
+  },
+  gatewayOutboundLoading: {
+    group: "Pages/Agent detail",
+    name: "Gateway outbound hosts, checking permissions",
+    path: `${draft}&tab=gateway-outbound`,
+    rules: [{ method: "GET", suffix: "/permissions", hold: true }],
+    description: "The editor stays disabled until both Agent grants are confirmed.",
+  },
+  gatewayOutboundSaving: {
+    group: "Pages/Agent detail",
+    name: "Gateway outbound hosts, saving",
+    path: `${draft}&tab=gateway-outbound`,
+    actions: [
+      { selector: "#gateway-outbound-hosts", value: "api.example.com" },
+      click("Save outbound hosts"),
+    ],
+    rules: [
+      { method: "PATCH", suffix: "/agents/agt_00000000-0000-4000-8000-000000000001", hold: true },
+    ],
+    description: "A pending outbound save holds edits, deployment and navigation.",
+  },
+  gatewayOutboundRefused: {
+    group: "Pages/Agent detail",
+    name: "Gateway outbound hosts, save refused",
+    path: `${draft}&tab=gateway-outbound`,
+    actions: [
+      { selector: "#gateway-outbound-hosts", value: "api.example.com" },
+      click("Save outbound hosts"),
+    ],
+    rules: [
+      {
+        method: "PATCH",
+        suffix: "/agents/agt_00000000-0000-4000-8000-000000000001",
+        status: 403,
+        code: "FORBIDDEN",
+      },
+    ],
+    description: "A refused save retains the edited hosts without claiming they were saved.",
+  },
+  gatewayOutboundUnknown: {
+    group: "Pages/Agent detail",
+    name: "Gateway outbound hosts, outcome unknown",
+    path: `${draft}&tab=gateway-outbound`,
+    actions: [
+      { selector: "#gateway-outbound-hosts", value: "api.example.com" },
+      click("Save outbound hosts"),
+    ],
+    rules: [
+      {
+        method: "PATCH",
+        suffix: "/agents/agt_00000000-0000-4000-8000-000000000001",
+        status: 503,
+        code: "UNAVAILABLE",
+      },
+    ],
+    description: "An uncertain write locks repeat saves and offers readback of the same Agent.",
+  },
   gatewaySafety: {
     group: "Pages/Agent detail",
     name: "Collaboration and safety settings",

@@ -314,6 +314,8 @@ export async function composeProduction(
     }
     if (protectedDriver !== undefined) {
       controller.installDriver(protectedDriver, ["sandbox", "credential_proxy"]);
+    } else if (config.drivers.gatewayProxyDriver !== undefined) {
+      controller.installDriver(config.drivers.gatewayProxyDriver, []);
     } else if (sandboxDriver !== undefined) {
       controller.registerDriver(sandboxDriver);
       controller.selectDriver("sandbox", sandboxDriver.id);
@@ -408,6 +410,9 @@ export async function composeProduction(
     app.addHook("onClose", async () => {
       await exchange?.close();
       await config.drivers.protectedDriver?.close();
+      if (config.drivers.gatewayProxyDriver !== config.drivers.protectedDriver) {
+        await config.drivers.gatewayProxyDriver?.close();
+      }
       await preparedGitHub?.close();
       await state.close();
     });
@@ -415,6 +420,9 @@ export async function composeProduction(
     return app;
   } catch (error) {
     await config.drivers.protectedDriver?.close();
+    if (config.drivers.gatewayProxyDriver !== config.drivers.protectedDriver) {
+      await config.drivers.gatewayProxyDriver?.close();
+    }
     await preparedGitHub?.close();
     await pool.end();
     throw error;

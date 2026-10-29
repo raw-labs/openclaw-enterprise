@@ -81,6 +81,19 @@ const controllerRequire = createRequire(
 const { KubernetesObjectApi } = controllerRequire("@kubernetes/client-node");
 const { ObjectSerializer } = controllerRequire("@kubernetes/client-node/dist/serializer.js");
 
+async function stockGatewayDestinations() {
+  const { STOCK_GATEWAY_PROXY } =
+    await import("../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts");
+  return {
+    policyRulesPath: fileURLToPath(
+      new URL("../../deploy/runtime/gateway-proxy/sandbox-policy.rego", import.meta.url),
+    ),
+    supervisorImage: STOCK_GATEWAY_PROXY.supervisorImage,
+    relayImage: STOCK_GATEWAY_PROXY.relayImage,
+    blockedCidrs: ["10.0.0.0/8"],
+  };
+}
+
 function sandboxInstallation() {
   const configuration = installation();
   configuration.drivers.compute.configuration.servicePrincipalCredentials = { mode: "disabled" };
@@ -6283,7 +6296,8 @@ test(
       ],
     };
     const registryPath = join(tls.directory, "registry.json");
-    await writeFile(registryPath, JSON.stringify(registry));
+    // The production registry loader rejects group-writable files, including under a permissive host umask.
+    await writeFile(registryPath, JSON.stringify(registry), { mode: 0o600 });
     configuration.backend.push({
       id: "github-primary",
       type: "github",
@@ -6414,7 +6428,10 @@ test(
     // generic exchange service, issuer call or second Git lifecycle is needed to load it.
     const gitId = configuration.drivers.sandbox.id;
     configuration.backend[0].drivers.credential_proxy = gitId;
-    configuration.drivers.credential_proxy = { id: gitId, configuration: {} };
+    configuration.drivers.credential_proxy = {
+      id: gitId,
+      configuration: { gatewayDestinations: await stockGatewayDestinations() },
+    };
     // A native broker peer left in Compute after a switch to protected Git would make every
     // stop, retire and delete list repository material Secrets the chart no longer lets the
     // worker list (finding 2212). Startup, and so the chart's upgrade check, refuses it.
@@ -6576,16 +6593,23 @@ test(
         const rev = {
           ...revision,
           id: revisionId,
+          configuration: {},
+          gatewayManagedMode: true,
+          compute: {
+            id: protectedGit.computeDriver.id,
+            implementation: protectedGit.computeDriver.implementation,
+          },
           harnessAuth: auth,
           egressPlan: plan,
           executionAdmission: { version: 5, mode: "protected" },
         };
         const ctx = { ...context, plan, revision: rev };
         protectedGit.computeDriver.validateExecutionAdmission(rev, owner);
-        assert.equal(
-          protectedGit.computeDriver.admitRevision(rev),
-          "protected-codex-no-connection-retry:v1",
-        );
+        const admission = protectedGit.computeDriver.admitRevision(rev);
+        const facts = JSON.parse(admission.slice("kubernetes:v1:".length));
+        assert.equal(facts.execution, "protected-codex-no-connection-retry:v1");
+        assert.deepEqual(facts.gatewayDestinations.destinations, []);
+        assert.deepEqual(facts.driver, owner.ref);
         protectedGit.computeDriver.validateRepositoryCredentials(rev.harness, sandbox.id);
         // Compute's preparation refuses the profile too, so a revision admitted before this check
         // fails with the code instead of waiting at enrollment (finding 2199). The Sandbox's own
@@ -7000,7 +7024,7 @@ test(
           revokedRegistry.repositories[0].namespaces[0].namespaceId =
             "ns_00000000-0000-4000-8000-000000000999";
           const revokedPath = join(tls.directory, "registry-revoked.json");
-          await writeFile(revokedPath, JSON.stringify(revokedRegistry));
+          await writeFile(revokedPath, JSON.stringify(revokedRegistry), { mode: 0o600 });
           const revoked = structuredClone(configuration);
           revoked.backend.find(({ id }) => id === "github-primary").configuration.registryPath =
             revokedPath;
@@ -7066,9 +7090,7 @@ test(
   },
 );
 
-test("destination-only OpenShell startup exposes paired Gateway capabilities without credential authority", async (t) => {
-  const { STOCK_GATEWAY_PROXY } =
-    await import("../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts");
+test("OpenShell startup composes independent Gateway destination and protected Harness capabilities", async (t) => {
   const configuration = sandboxInstallation();
   configuration.backend[0].configuration = {
     endpoint: "https://openshell-gateway.openclaw-system.svc:50051",
@@ -7078,14 +7100,13 @@ test("destination-only OpenShell startup exposes paired Gateway capabilities wit
   configuration.drivers.credential_proxy = {
     id: "openshell-sandbox",
     configuration: {
-      gatewayDestinations: {
-        policyRulesPath: fileURLToPath(
-          new URL("../../deploy/runtime/gateway-proxy/sandbox-policy.rego", import.meta.url),
-        ),
-        supervisorImage: STOCK_GATEWAY_PROXY.supervisorImage,
-        relayImage: STOCK_GATEWAY_PROXY.relayImage,
-        blockedCidrs: ["10.0.0.0/8"],
-      },
+      middlewareName: "oce-authority",
+      authorityScope: "execution",
+      authority: (
+        await import("../helpers/installation-driver-configuration.mjs")
+      ).createCredentialProxyInstallationConfiguration().drivers.credential_proxy.configuration
+        .authority,
+      gatewayDestinations: await stockGatewayDestinations(),
     },
   };
   // Startup must compose the real capability views without invoking the management peer.
@@ -7099,17 +7120,111 @@ test("destination-only OpenShell startup exposes paired Gateway capabilities wit
   assert.equal(typeof loaded.sandboxDriver.gatewayProxy.prepare, "function");
   assert.equal(typeof loaded.sandboxDriver.gatewayProxy.remove, "function");
   assert.equal(typeof loaded.proxyDriver.gatewayDestinations.admit, "function");
-  assert.deepEqual(loaded.proxyDriver.sourceControl.providers, []);
-  assert.equal(loaded.proxyDriver.bindExchange, undefined);
-  const credentialRefusal = {
-    message: "Destination-only OpenShell does not provide protected credential execution.",
-  };
-  await assert.rejects(
-    loaded.proxyDriver.sourceControl.assertAvailable(t.signal),
-    credentialRefusal,
+  assert.ok(
+    loaded.proxyDriver.sourceControl.providers.some(({ ref }) => ref.id === "openai-static-https"),
   );
-  await assert.rejects(
-    loaded.proxyDriver.configureRevision({ signal: t.signal }),
-    credentialRefusal,
+  assert.equal(typeof loaded.proxyDriver.configureRevision, "function");
+  assert.equal(typeof loaded.sandboxDriver.provisionHarness, "function");
+  assert.equal(typeof loaded.sandboxDriver.enrollHarness, "function");
+  const driver = loaded.computeDriver;
+  const revision = {
+    id: "destination-revision",
+    namespaceId: "namespace",
+    agentId: "agent",
+    compute: { id: driver.id, implementation: driver.implementation },
+    sandboxDriverId: loaded.sandboxDriver.id,
+    harness: { id: "codex", mode: "dedicated" },
+    harnessAuth: { method: "runtime" },
+    executionAdmission: { version: 2, mode: "unprotected" },
+    configuration: {},
+    gatewayOutbound: { destinations: [{ host: "example.com", port: 443 }] },
+  };
+  const facts = JSON.parse(driver.admitRevision(revision).slice("kubernetes:v1:".length));
+  assert.deepEqual(facts.gatewayDestinations.destinations, [{ host: "example.com", port: 443 }]);
+  assert.equal(facts.gatewayDestinations.driverId, loaded.proxyDriver.id);
+  assert.equal(facts.gatewayDestinations.sandboxDriverId, loaded.sandboxDriver.id);
+  assert.equal(facts.execution, undefined);
+  driver.validateExecutionAdmission(revision);
+  // Protected launch admission uses the same selected owner, but keeps its credential plan independent.
+  const execution = {
+    installationId: "installation",
+    namespaceId: revision.namespaceId,
+    agentId: revision.agentId,
+    servicePrincipalId: "principal",
+    revisionId: revision.id,
+    executionId: "execution",
+  };
+  const source = {
+    installationId: execution.installationId,
+    namespaceId: execution.namespaceId,
+    source: { id: "source", generation: 1 },
+    backend: { id: "backend", generation: 1 },
+    provider: { id: "openai-static-https", generation: 2 },
+  };
+  const plan = {
+    id: "protected-plan",
+    generation: 1,
+    execution,
+    sandboxDriverId: loaded.sandboxDriver.id,
+    egressDriverId: loaded.proxyDriver.id,
+    driver: loaded.protectedDriver.ref,
+    routes: [
+      {
+        route: { id: "route", generation: 1 },
+        origin: "https://api.openai.com",
+        path: "/v1/responses",
+        method: "POST",
+        deadlineMs: 5000,
+        operationPolicy: { id: "openai-bounded-inference", generation: 1 },
+        responsePolicy: { id: "openai-bounded-response", generation: 1 },
+        binding: {
+          binding: { id: "binding", generation: 1 },
+          execution,
+          source,
+          isolationId: revision.agentId,
+          grantHash: "a".repeat(64),
+          grant: { kind: "inference", models: ["model"], providerTools: "none" },
+        },
+      },
+    ],
+  };
+  const protectedRevision = {
+    ...revision,
+    executionAdmission: { version: 3, mode: "protected" },
+    harnessAuth: {
+      method: "credential_source",
+      sourceId: "source",
+      credentialGatewayId: "openshell-credentials",
+      sourceType: "openai",
+      loginMode: "api_key",
+    },
+    egressPlan: plan,
+  };
+  const protectedFacts = JSON.parse(
+    driver.admitRevision(protectedRevision).slice("kubernetes:v1:".length),
+  );
+  assert.equal(protectedFacts.execution, "protected-codex-no-connection-retry:v1");
+  assert.deepEqual(protectedFacts.gatewayDestinations, facts.gatewayDestinations);
+  assert.equal(protectedRevision.egressPlan, plan);
+  const admitted = {
+    ...protectedRevision,
+    compute: {
+      ...protectedRevision.compute,
+      admission: "kubernetes:v1:" + JSON.stringify(protectedFacts),
+    },
+  };
+  assert.equal(driver.hasProtectedCodexAdmission(admitted), true);
+  assert.throws(
+    () =>
+      driver.gatewayDestinationPlan({
+        ...admitted,
+        compute: {
+          ...admitted.compute,
+          admission:
+            "kubernetes:v1:" +
+            JSON.stringify({ gatewayDestinations: protectedFacts.gatewayDestinations }),
+        },
+      }),
+    /exact selected capability/,
   );
 });

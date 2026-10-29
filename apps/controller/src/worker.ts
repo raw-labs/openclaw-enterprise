@@ -1147,6 +1147,7 @@ export class ControllerWorker {
   private readonly credentialGateway: CredentialGatewayDriver | undefined;
   private readonly proxyDriver: CredentialProxyDriver | undefined;
   private readonly protectedDriver: InstalledDriver | undefined;
+  private readonly gatewayProxyDriver: InstalledDriver | undefined;
   private readonly preparedTokens:
     import("@openclaw-enterprise/contracts").PreparedTokenService | undefined;
   private readonly backends: readonly BackendDefinition[];
@@ -1288,6 +1289,7 @@ export class ControllerWorker {
       throw new Error("The selected Configuration Driver exposes invalid lifecycle hooks.");
     }
     this.protectedDriver = drivers?.protectedDriver;
+    this.gatewayProxyDriver = drivers?.gatewayProxyDriver;
     this.preparedTokens = drivers?.tokenService;
     this.sandbox =
       this.protectedDriver?.require("sandbox") ?? drivers?.sandboxDriver ?? options.sandboxDriver;
@@ -1399,6 +1401,8 @@ export class ControllerWorker {
     const protectedDriver = this.protectedDriver;
     if (protectedDriver !== undefined) {
       provisioning.installDriver(protectedDriver, ["sandbox", "credential_proxy"]);
+    } else if (this.gatewayProxyDriver !== undefined) {
+      provisioning.installDriver(this.gatewayProxyDriver, []);
     }
     for (const driver of [
       this.configuration,
@@ -1447,6 +1451,9 @@ export class ControllerWorker {
     this.abort.abort();
     await this.loop;
     await this.protectedDriver?.close();
+    if (this.gatewayProxyDriver !== this.protectedDriver) {
+      await this.gatewayProxyDriver?.close();
+    }
     await this.state.close();
     this.emit({ event: "worker.stopped" });
   }

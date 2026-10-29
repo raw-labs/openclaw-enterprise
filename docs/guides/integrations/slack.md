@@ -34,74 +34,44 @@ go to the Agent's gateway; model credentials are configured separately.
 
 ## Configure both Slack proxies
 
-For Slack-enabled k3d and EKS installations, configure both paths before
-creating a Slack-enabled dedicated Codex Agent. A working Socket Mode connection
-does not establish that Console user or channel search works.
+For dedicated single-cluster Kubernetes Agents, keep these routes separate.
+A working Socket Mode connection does not establish that Console directory lookup works.
 
-| Path                                     | Required setting                                                       | Consumer          |
-| ---------------------------------------- | ---------------------------------------------------------------------- | ----------------- |
-| Slack messaging and Socket Mode          | Installation `drivers.compute.configuration.runtime.channels.proxyUrl` | Dedicated gateway |
-| Console lookup and credential validation | Helm `slackProxy.enabled` or `api.channelDirectoryProxyUrl`            | OCC API           |
+| Path                                     | Route                                                       | Consumer          |
+| ---------------------------------------- | ----------------------------------------------------------- | ----------------- |
+| Slack messaging and Socket Mode          | Revision-owned OpenShell destination proxy                  | Dedicated Gateway |
+| Console lookup and credential validation | Helm `slackProxy.enabled` or `api.channelDirectoryProxyUrl` | OCC API           |
 
-Provision a reviewed HTTP CONNECT proxy that each consumer can reach. For production,
-use Helm `slackProxy.enabled: true`. The chart then creates a private proxy
-Service, points the API directory proxy at its Service DNS name, admits API and
-managed gateway callers, and lets the proxy reach public IPv4 destinations on
-TCP 443, excluding private and reserved ranges. For an external proxy instead,
-use a literal IPv4 address and explicit port with no URL credentials or path.
-Setting one proxy path does not configure the other. The managed proxy serves
-only API directory lookup and dedicated gateway traffic; it does not make
-embedded OpenClaw Slack-capable.
+The selected Credential Proxy and Sandbox must support Gateway destination
+control. Slack contributes its required API and rotating Socket Mode hosts
+automatically during deployment. Do not copy them into the Agent’s extra-host
+list. Compute removes the Gateway’s old Slack-proxy grant and uses its revision
+proxy as the external HTTPS route. This experimental path is not yet qualified
+for production; follow the [verification status](../../../specs/plans/0024-gateway-outbound-proxy-reuse.md#verification-evidence).
 
-The proxy checks the Slack hostname on every CONNECT request, so its network
-policy can allow public HTTPS without tracking Slack's rotating IP addresses.
-Do not store signed WSS URLs or credentials in configuration or documentation.
-
-The directory path needs `CONNECT slack.com:443`. The gateway path also needs
-the Slack Socket Mode endpoints returned for the app; review the required
-`slack.com`, `slack-edge.com`, and `slack-msgs.com` domains and their subdomains.
-Retain TLS certificate verification. See the [directory proxy contract](../../reference/drivers/slack-channel.md#enable-lookup-in-production)
-and [gateway network boundary](../../reference/drivers/kubernetes-compute/networking-and-isolation.md#networking).
-
-Merge these fragments into the protected Installation and Helm inputs. Replace
-documentation-only addresses with reviewed endpoints; preserve other settings.
+The bundled Slack proxy remains an installation resource for token validation
+and user/channel directory lookup, including before an Agent is deployed. It is
+not a Gateway fallback. In Helm inputs, merge:
 
 ```yaml
-# installation.yaml
-drivers:
-  compute:
-    configuration:
-      runtime:
-        channels:
-          proxyUrl: http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128
-          managedProxy:
-            hostname: openclaw-enterprise-slack-proxy.openclaw-system.svc
-            namespace: openclaw-system
-            podLabels:
-              app.kubernetes.io/name: openclaw-enterprise
-              app.kubernetes.io/instance: oce
-              app.kubernetes.io/component: slack-proxy
-            port: 3128
-```
-
-```yaml
-# Helm values
 slackProxy:
   enabled: true
 ```
 
-Apply both inputs through the installation procedure and roll out the affected
-control-plane processes so they load the new configuration. With the managed
-proxy, Helm grants API egress to the proxy Pods. Kubernetes Compute grants
-gateway egress to the channel proxy named in the Installation runtime setting.
-Keep Slack tokens in Namespace Secrets; do not place them in these inputs or the
-proxy configuration.
+For an external API proxy, set `api.channelDirectoryProxyUrl` to a reviewed
+literal IPv4 endpoint and explicit port, without URL credentials or a path.
+The API route needs `CONNECT slack.com:443`. Keep native TLS certificate
+verification enabled and keep Slack tokens in Namespace Secrets. Do not store
+signed WSS URLs or credentials in proxy settings. See the
+[directory proxy contract](../../reference/drivers/slack-channel.md#enable-lookup-in-production)
+and [Gateway network boundary](../../reference/drivers/kubernetes-compute/networking-and-isolation.md#networking).
 
-For an existing installation, once OCC reloads the gateway proxy setting, deploy
-a new version for every affected running Slack Agent. Its gateway environment
-and channel NetworkPolicy are rendered during version preparation; restarting
-OCC alone does not update existing gateways. Preserve stopped Agents' state.
-Changing only the API directory proxy does not require an Agent redeployment.
+Apply installation and Helm changes through the installation procedure. A new
+Agent deployment saves its Channel requirements and destination policy; later
+Channel or extra-host edits require another deployment. Changing only the API
+directory proxy does not require an Agent redeployment. Separate execution
+clusters retain their existing Gateway Channel route. Embedded OpenClaw remains
+unsupported for Slack.
 
 Before handing off the Slack setup, verify both paths:
 

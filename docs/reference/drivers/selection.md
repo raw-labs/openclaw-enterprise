@@ -57,7 +57,7 @@ Sandbox packages in trusted YAML in either mode.
 | `secret`             | [SecretDriver](secret.md)                                                   | Required in trusted Installation YAML, including SSH; bundled Kubernetes only.                                                                           |
 | `sandbox`            | [SandboxDriver](sandbox.md)                                                 | Optional; bundled OpenShell or installed package, and currently requires bundled Kubernetes Compute.                                                     |
 | `credential_proxy`   | [CredentialProxyDriver](credential-proxy.md)                                | Optional; the selected Sandbox and Credential Proxy must come from one Driver registration, supplied by bundled OpenShell or a selected Sandbox package. |
-| `credential_gateway` | [CredentialGatewayDriver](credential-gateway.md)                            | Required with the bundled OpenShell Sandbox, otherwise omitted; bundled OpenShell Backend member only.                                                   |
+| `credential_gateway` | [CredentialGatewayDriver](credential-gateway.md)                            | Required for bundled OpenShell execution, not Gateway-only registration; bundled Backend member only.                                                    |
 | `credential_refresh` | [CredentialRefreshDriver](credential-refresh.md)                            | Optional; bundled OpenShell only, on the selected Credential Gateway's Backend.                                                                          |
 | `service_account`    | [ServiceAccountDriver](service-account.md)                                  | Optional bundled ChatGPT Backend member; no installed-package selector.                                                                                  |
 | `plugin`             | [PluginDriver](plugin.md)                                                   | Optional bundled `occ-plugin` or `codex-plugin`; no installed-package selector.                                                                          |
@@ -143,13 +143,14 @@ The worker's `Recreate` rollout cannot establish that custody is settled.
 An Installation-scoped [Backend](../backends.md) groups an authenticated
 client with exact related Driver selections. `backend[].drivers` owns
 membership, and composition injects the Backend into the concrete member.
-The generic Driver contract has no Backend identity field. All declared members
-are required and must match the selected registry `(capability, id)`. The bundled ChatGPT Backend requires its selected
-ServiceAccount Driver; the bundled GitHub Backend requires its selected Repo
-Driver; the bundled OpenShell Backend requires both its Sandbox and Credential
-Gateway Drivers, and its Credential Refresh Driver when it declares one. A
-selected Credential Gateway or Credential Refresh Driver must belong to a
-configured Backend. There is no per-Agent Driver selection.
+The generic Driver contract has no Backend identity field. Declared execution
+members must match the selected registry `(capability, id)`: ChatGPT requires
+ServiceAccount, GitHub requires Repo, and OpenShell requires Sandbox and Credential
+Gateway. Gateway-only OpenShell instead requires its registered Sandbox/Proxy
+pair; `drivers.credential_proxy.usage: gateway` does not select those views for
+Harness or repository execution. See the [experimental flow](../../flows/gateway-outbound-destinations.md).
+Credential Refresh requires its selected Credential Gateway on the same Backend.
+There is no per-Agent Driver selection.
 
 Runtime Backend injection is limited to those bundled Drivers; installed
 packages keep the factory arguments below, and Backend loading or injection into

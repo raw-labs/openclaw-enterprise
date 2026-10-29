@@ -61,7 +61,8 @@ explicit supported Harness runtime." A selected SandboxDriver currently requires
 `dedicated` Codex execution; it does not support embedded OpenClaw.
 
 An Agent update may include `executionMode`, `harnessAuth`, and `backendId`
-alongside its required `configurationId`. Omission preserves the current value;
+alongside `configurationId`. An update must include `configurationId`,
+`gatewayManagedMode`, or `gatewayOutbound`. Omission preserves the current value;
 `harnessAuth: null` clears authentication and `backendId: null` clears the
 Backend. Existing versions retain their immutable placement, auth binding, and
 Backend association. For the current `harnessAuth` source, an update checks only
@@ -78,6 +79,9 @@ Updating that Configuration, or naming another one, resolves it. See the
 [Harness execution topology flow](../../flows/harness-execution-topology.md) for
 runtime selection, identity boundaries, and activation.
 
+See [additional Gateway destinations](../agents.md#additional-gateway-destinations)
+for the separate Agent-owned host list and its permissions.
+
 <a id="revisions-and-deployment" class="anchor-alias"></a>
 
 ## Versions and deployment
@@ -89,7 +93,8 @@ ordered version history and at most one selected version, identified by
 readiness. See [Agent revisions](../../guides/topics/agent-revisions.md).
 
 The Agent revision records the source `configurationId`, `configurationKind`, and
-`configurationGeneration`, [`gatewayManagedMode`](../agent-native-admin.md#gateway-managed-mode), its complete saved native `configuration`
+`configurationGeneration`, [`gatewayManagedMode`](../agent-native-admin.md#gateway-managed-mode),
+`gatewayOutbound` additional destinations, its complete saved native `configuration`
 document, the approved Harness identity/version/mode, selected Compute identity,
 nullable `backendId`, and `harnessAuth` with its resolved internal source snapshot.
 The auth snapshot contains no credential bytes; public Agent revisions omit private

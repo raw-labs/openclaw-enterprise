@@ -1,7 +1,12 @@
 import type { CredentialPolicyWithdrawalOptions } from "@openclaw-enterprise/contracts";
 import { networkPolicySpecToJson } from "../../kubernetes/network-policy.ts";
 import {
+  GATEWAY_PROXY_NONPUBLIC_CIDRS,
+  gatewayProxyExclusionsCover,
+} from "../../kubernetes/gateway-proxy-network.ts";
+import {
   assertExecutionAdmission,
+  normalizeGatewayOutbound,
   codexProxiesRepositoryBroker,
   codexRepositoryBrokerNetworkProxy,
   type PreparedTokenService,
@@ -497,6 +502,8 @@ export interface KubernetesComputeDriverOptions {
     readonly dns: KubernetesWorkloadPeer;
     readonly gatewayPort: number;
     readonly gatewayTrustedProxyCidrs: readonly string[];
+    /** Complete Pod, Service, node and infrastructure ranges excluded from Gateway proxy egress. */
+    readonly infrastructureCidrs?: readonly string[];
     readonly gatewayClients?: readonly KubernetesWorkloadPeer[];
     readonly pluginStatusProxySourceCidrs?: readonly string[];
     readonly repositoryCredentials?: KubernetesWorkloadPeer & { readonly port: number };
@@ -524,8 +531,6 @@ export interface KubernetesComputeDriverOptions {
     readonly codexSeccompProfile?: string;
     /** HTTPS OpenAI-compatible Responses endpoint for dedicated Codex API-key auth. */
     readonly codexModelBaseUrl?: string;
-    /** Experimental destination-only Gateway routing. Embedded execution is unchanged. */
-    readonly gatewayOutbound?: { readonly destinations: readonly GatewayDestination[] };
     readonly channels?: {
       readonly proxyUrl: string;
       readonly managedProxy?: KubernetesWorkloadPeer & {
@@ -582,7 +587,7 @@ interface GatewayConfigurationSnapshot {
 }
 
 const PROTECTED_CODEX_NO_CONNECTION_RETRY = "protected-codex-no-connection-retry:v1";
-const GATEWAY_DESTINATIONS_ADMISSION = "gateway-destinations:v1:";
+const GATEWAY_DESTINATIONS_ADMISSION = "kubernetes:v1:";
 
 interface PluginRuntimeSnapshot {
   readonly name: string;
@@ -3439,6 +3444,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
           dns: WORKLOAD_PEER_SCHEMA,
           gatewayPort: { type: "integer" },
           gatewayTrustedProxyCidrs: { type: "array", items: { type: "string" } },
+          infrastructureCidrs: { type: "array", minItems: 1, items: { type: "string" } },
           gatewayClients: { type: "array", items: WORKLOAD_PEER_SCHEMA },
           pluginStatusProxySourceCidrs: { type: "array", items: { type: "string" } },
           repositoryCredentials: {
@@ -3493,26 +3499,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
           gatewayNodeSelector: { type: "object", additionalProperties: { type: "string" } },
           codexSeccompProfile: { type: "string", minLength: 1 },
           codexModelBaseUrl: { type: "string", minLength: 1 },
-          gatewayOutbound: {
-            type: "object",
-            required: ["destinations"],
-            additionalProperties: false,
-            properties: {
-              destinations: {
-                type: "array",
-                maxItems: 128,
-                items: {
-                  type: "object",
-                  required: ["host", "port"],
-                  additionalProperties: false,
-                  properties: {
-                    host: { type: "string", minLength: 1, maxLength: 253 },
-                    port: { const: 443 },
-                  },
-                },
-              },
-            },
-          },
           channels: {
             type: "object",
             required: ["proxyUrl"],
@@ -3577,6 +3563,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   private readonly preparedTokens: PreparedTokenReadinessService | undefined;
   private readonly credentialGatewayDriver: CredentialGatewayDriver | undefined;
   private readonly protectedExecution: ProtectedExecutionDriver | undefined;
+  private readonly gatewayProxyDriver: InstalledDriver | undefined;
 
   private get proxyDriver() {
     return this.protectedExecution?.proxy;
@@ -3916,30 +3903,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
         if (options.runtime.codexSeccompProfile !== undefined) {
           validateCodexSeccompProfile(options.runtime.codexSeccompProfile);
         }
-        if (options.runtime.gatewayOutbound !== undefined) {
-          const destinations = options.runtime.gatewayOutbound.destinations;
-          if (
-            !Array.isArray(destinations) ||
-            destinations.length > 128 ||
-            destinations.some(
-              ({ host, port }) =>
-                typeof host !== "string" ||
-                host.length > 253 ||
-                host !== host.toLowerCase() ||
-                !host.includes(".") ||
-                isIP(host) !== 0 ||
-                !host
-                  .split(".")
-                  .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
-                port !== 443,
-            )
-          ) {
-            throw configurationConstraintFailure(
-              "Gateway destinations require exact canonical public DNS hosts on TCP/443; wildcards are not administrator destinations.",
-              "/runtime/gatewayOutbound/destinations",
-            );
-          }
-        }
         if (channels !== undefined) {
           if (asRecord(channels) === undefined) {
             throw configurationConstraintFailure(
@@ -4141,6 +4104,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
       readonly preprovisionedNamespace?: PreprovisionedKubernetesNamespace | undefined;
       readonly credentialGatewayDriver?: CredentialGatewayDriver;
       readonly protectedDriver?: InstalledDriver;
+      /** Paired Gateway attachment owner; does not select the Harness Sandbox or credential sender. */
+      readonly gatewayProxyDriver?: InstalledDriver;
       readonly nodeEnrollment?: GatewayNodeEnrollment;
       readonly readNodeCa?: () => Promise<string | undefined>;
     } = {},
@@ -4159,6 +4124,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     this.protectedExecution =
       selection.protectedDriver && new ProtectedExecutionDriver(selection.protectedDriver);
+    this.gatewayProxyDriver = selection.gatewayProxyDriver ?? selection.protectedDriver;
     if (
       this.protectedExecution &&
       selection.sandboxDriver &&
@@ -4740,7 +4706,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         channelRuntime:
           agentSave ||
           this.options.runtime?.channels !== undefined ||
-          this.options.runtime?.gatewayOutbound !== undefined,
+          (this.options.runtime !== undefined && this.options.executionCluster === undefined),
       },
       callerSettingError,
     );
@@ -6111,13 +6077,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
   ): void {
     assertExecutionAdmission(revision);
     const plan = revision.egressPlan;
-    // Destination-only preflight is unprotected execution, not a credential release.
-    // Only the later exact frozen Compute admission can select destination routing.
+    // An unprotected Harness has no credential authority to release. Gateway routing is admitted separately.
     if (
       plan === undefined &&
-      (this.proxyDriver === undefined ||
-        (this.options.runtime?.gatewayOutbound !== undefined &&
-          revision.executionAdmission.mode === "unprotected"))
+      (this.proxyDriver === undefined || revision.executionAdmission.mode === "unprotected")
     ) {
       return;
     }
@@ -6136,6 +6099,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     revision: AgentRevision,
     context?: ComputeRevisionContext,
   ): void {
+    this.sandboxDriverForRevision(revision);
     this.gatewayDestinationPlan(revision);
     this.validateExecutionAdmission(revision, "stored");
     const plan = revision.egressPlan;
@@ -7693,19 +7657,19 @@ export class KubernetesComputeDriver implements ComputeDriver {
     );
     const channels = this.enabledChannels(admittedRevision);
     const { name: namespace } = await this.resolveNamespace(revision.namespaceId);
-    if (!(await this.prepareGatewayProxy(revision, namespace))) {
-      throw new DependencyUnavailableError(
-        "The exact revision Gateway proxy is not ready for activation.",
-      );
-    }
     await this.revokeUnavailablePublicGithubRead(revision, namespace);
-    await this.deliverWorkspaceSetup(revision, workspaceSetup, namespace);
     const sourceNamespace =
       this.options.executionCluster === undefined
         ? namespace
         : await this.controlNamespace(revision.namespaceId);
     const secretEnvironment = this.secretEnvironmentForRevision(revision, context, sourceNamespace);
     const harnessAuth = this.harnessAuthForRevision(admittedRevision, context, sourceNamespace);
+    if (!(await this.prepareGatewayProxy(revision, namespace))) {
+      throw new DependencyUnavailableError(
+        "The exact revision Gateway proxy is not ready for activation.",
+      );
+    }
+    await this.deliverWorkspaceSetup(revision, workspaceSetup, namespace);
     const gatewayNamespace = await this.requireGatewayNamespace(revision, namespace);
     const nativeRuntime = nativeRuntimeSnapshot(admittedRevision);
     const agentName = `agent-${sha256Hex(revision.agentId, 12)}`;
@@ -14081,7 +14045,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
   }
 
   private hasProtectedCodexAdmission(revision: AgentRevision): boolean {
-    if (revision.compute.admission !== PROTECTED_CODEX_NO_CONNECTION_RETRY) {
+    if (this.executionComputeAdmission(revision) !== PROTECTED_CODEX_NO_CONNECTION_RETRY) {
       return false;
     }
     if (!this.protectedCodexInference(revision)) {
@@ -14090,16 +14054,13 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     return true;
   }
 
-  private gatewayDestinationRequirements(
-    revision: Readonly<AgentRevision>,
-  ): readonly GatewayDestination[] {
-    const destinations = [...(this.options.runtime?.gatewayOutbound?.destinations ?? [])];
+  private gatewayChannelContributions(revision: Readonly<AgentRevision>) {
     const providers = enabledChannelProviders(
       revision.configuration,
       CHANNEL_PROVIDERS,
       callerSettingError,
     );
-    for (const provider of providers) {
+    return [...providers].sort().map((provider) => {
       const contributors = this.channelDrivers.filter((driver) =>
         driver.gatewayProviders?.includes(provider),
       );
@@ -14109,8 +14070,22 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           "Every enabled channel requires one selected destination contributor.",
         );
       }
-      destinations.push(...contributor.gatewayDestinations(revision.configuration));
-    }
+      return {
+        provider,
+        driverId: contributor.id,
+        implementation: contributor.implementation,
+        destinations: structuredClone(contributor.gatewayDestinations(revision.configuration)),
+      };
+    });
+  }
+
+  private gatewayDestinationRequirements(
+    revision: Readonly<AgentRevision>,
+  ): readonly GatewayDestination[] {
+    const destinations = [
+      ...normalizeGatewayOutbound(revision.gatewayOutbound ?? { destinations: [] }).destinations,
+      ...this.gatewayChannelContributions(revision).flatMap(({ destinations }) => destinations),
+    ];
     const unique = new Map(
       destinations.map(({ host, port }) => [host + ":" + port, { host, port }]),
     );
@@ -14123,26 +14098,48 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     revision: Readonly<AgentRevision>,
     destinations: readonly GatewayDestination[],
   ): GatewayDestinationPlan {
-    const proxy = this.proxyDriver;
-    const sandbox = this.sandboxDriver;
+    const owner = this.gatewayProxyDriver;
+    const proxy = owner?.require("credential_proxy");
+    const sandbox = owner?.require("sandbox");
     if (
-      this.options.runtime?.gatewayOutbound === undefined ||
+      this.options.runtime === undefined ||
       this.options.executionCluster !== undefined ||
       revision.harness.mode !== "dedicated" ||
-      revision.egressPlan !== undefined ||
-      revision.executionAdmission.mode !== "unprotected" ||
-      this.publicGithubReadCandidate(revision) !== undefined ||
       revision.compute.id !== this.id ||
       revision.compute.implementation !== this.implementation ||
       !proxy?.gatewayDestinations ||
-      !sandbox?.gatewayProxy ||
-      revision.sandboxDriverId !== sandbox.id
+      !sandbox?.gatewayProxy
     ) {
       throw new ConfigurationFailure(
-        "Gateway destination control requires dedicated single-cluster execution and its exact selected destination proxy and Sandbox, without combined execution admission.",
+        "Gateway destination control requires dedicated single-cluster execution and its exact selected destination proxy and Sandbox.",
+      );
+    }
+    const infrastructure = this.options.network.infrastructureCidrs;
+    if (!infrastructure?.length || !gatewayProxyExclusionsCover(infrastructure, infrastructure)) {
+      throw new ConfigurationFailure(
+        "Gateway proxy admission requires explicit IPv4 infrastructureCidrs.",
       );
     }
     const plan = proxy.gatewayDestinations.admit(revision, destinations);
+    const endpointRanges = [
+      this.options.network.publicGithubRead?.address,
+      this.options.network.providerHarness?.address,
+    ]
+      .filter((address): address is string => address !== undefined && isIP(address) === 4)
+      .map((address) => address + "/32");
+    if (
+      plan.egress?.addressFamily !== "ipv4" ||
+      !Array.isArray(plan.egress.excludedCidrs) ||
+      !gatewayProxyExclusionsCover(plan.egress.excludedCidrs, [
+        ...GATEWAY_PROXY_NONPUBLIC_CIDRS,
+        ...infrastructure,
+        ...endpointRanges,
+      ])
+    ) {
+      throw new ConfigurationFailure(
+        "The selected Gateway proxy does not enforce the required address exclusions.",
+      );
+    }
     if (
       plan.version !== 1 ||
       plan.driverId !== proxy.id ||
@@ -14167,37 +14164,75 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     return structuredClone(plan);
   }
 
-  /** Never infer new permissions for revisions without a stored destination admission. */
-  private gatewayDestinationPlan(
-    revision: Readonly<AgentRevision>,
-  ): GatewayDestinationPlan | undefined {
+  private requiresGatewayDestinations(revision: Readonly<AgentRevision>): boolean {
+    return (
+      this.options.runtime !== undefined &&
+      this.options.executionCluster === undefined &&
+      revision.harness.mode === "dedicated"
+    );
+  }
+
+  private computeAdmissionFacts(revision: Readonly<AgentRevision>):
+    | {
+        readonly gatewayDestinations: GatewayDestinationPlan;
+        readonly execution?: string;
+      }
+    | undefined {
     const admission = revision.compute.admission;
-    if (
-      admission?.startsWith("gateway-destinations:") &&
-      !admission.startsWith(GATEWAY_DESTINATIONS_ADMISSION)
-    ) {
-      throw new ConfigurationFailure("Unsupported Gateway destination admission version.");
-    }
     if (!admission?.startsWith(GATEWAY_DESTINATIONS_ADMISSION)) {
+      if (this.requiresGatewayDestinations(revision)) {
+        throw new ConfigurationFailure(
+          "Gateway destination admission is required for dedicated single-cluster execution.",
+        );
+      }
       return undefined;
     }
-    let stored: GatewayDestinationPlan;
     try {
-      stored = JSON.parse(
-        admission.slice(GATEWAY_DESTINATIONS_ADMISSION.length),
-      ) as GatewayDestinationPlan;
+      const facts = asRecord(JSON.parse(admission.slice(GATEWAY_DESTINATIONS_ADMISSION.length)));
       if (
-        !Array.isArray(stored.destinations) ||
-        !isDeepStrictEqual(stored, this.admitGatewayDestinations(revision, stored.destinations))
+        !facts ||
+        Object.keys(facts).some(
+          (key) =>
+            !["gatewayDestinations", "execution", "driver", "channelContributions"].includes(key),
+        ) ||
+        !isDeepStrictEqual(facts.driver, this.gatewayProxyDriver?.ref) ||
+        !isDeepStrictEqual(
+          facts.channelContributions,
+          this.gatewayChannelContributions(revision),
+        ) ||
+        (facts.execution !== undefined && typeof facts.execution !== "string") ||
+        (this.protectedCodexInference(revision)
+          ? facts.execution !== PROTECTED_CODEX_NO_CONNECTION_RETRY
+          : facts.execution !== undefined &&
+            !/^public-github-read:v1:[a-f0-9]{64}$/.test(String(facts.execution))) ||
+        !isDeepStrictEqual(
+          facts.gatewayDestinations,
+          this.admitGatewayDestinations(revision, this.gatewayDestinationRequirements(revision)),
+        )
       ) {
         throw new Error("Changed Gateway destination admission.");
       }
+      return facts as unknown as {
+        readonly gatewayDestinations: GatewayDestinationPlan;
+        readonly execution?: string;
+      };
     } catch {
       throw new ConfigurationFailure(
         "Gateway destination admission or its exact selected capability is unavailable; deploy a new revision.",
       );
     }
-    return stored;
+  }
+
+  /** Execution launch and network facts coexist with the revision's independent Gateway policy. */
+  private executionComputeAdmission(revision: Readonly<AgentRevision>): string | undefined {
+    const facts = this.computeAdmissionFacts(revision);
+    return facts === undefined ? revision.compute.admission : facts.execution;
+  }
+
+  private gatewayDestinationPlan(
+    revision: Readonly<AgentRevision>,
+  ): GatewayDestinationPlan | undefined {
+    return this.computeAdmissionFacts(revision)?.gatewayDestinations;
   }
 
   private gatewayNetworkProfile(revision: Readonly<AgentRevision>): NetworkProfile {
@@ -14244,13 +14279,13 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         undefined
     ) {
       throw new ConfigurationFailure(
-        "Gateway destination control cannot compose with a pre-profile runtime egress grant; replace that ordinary runtime before opting in.",
+        "Gateway destination control cannot compose with a pre-profile runtime egress grant; replace that ordinary runtime before deployment.",
       );
     }
     // Channel grants are additive: erase the old route before a destination-profile Gateway can start.
     await this.reconcileChannelNetworkPolicy(revision, [], gatewayNamespace);
     if (
-      !(await this.sandboxDriver!.gatewayProxy!.prepare(
+      !(await this.gatewayProxyDriver!.require("sandbox").gatewayProxy!.prepare(
         await this.gatewayProxyContext(revision, namespace),
         plan,
       ))
@@ -14348,7 +14383,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       return;
     }
     if (
-      !(await this.sandboxDriver!.gatewayProxy!.remove(
+      !(await this.gatewayProxyDriver!.require("sandbox").gatewayProxy!.remove(
         await this.gatewayProxyContext(revision, namespace),
         plan,
       ))
@@ -14380,44 +14415,47 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
 
   admitRevision(revision: Readonly<AgentRevision>): string | undefined {
     this.validateGatewayManagedMode(revision);
-    if (
-      this.options.runtime?.gatewayOutbound !== undefined &&
-      revision.harness.mode !== "embedded"
-    ) {
+    let execution: string | undefined;
+    if (this.protectedCodexInference(revision)) {
+      execution = PROTECTED_CODEX_NO_CONNECTION_RETRY;
+    } else if (this.publicGithubReadCandidate(revision) !== undefined) {
+      execution = this.publicGithubReadAdmission();
+    }
+    if (this.requiresGatewayDestinations(revision)) {
       return (
         GATEWAY_DESTINATIONS_ADMISSION +
-        JSON.stringify(
-          this.admitGatewayDestinations(revision, this.gatewayDestinationRequirements(revision)),
-        )
+        JSON.stringify({
+          driver: this.gatewayProxyDriver?.ref,
+          channelContributions: this.gatewayChannelContributions(revision),
+          gatewayDestinations: this.admitGatewayDestinations(
+            revision,
+            this.gatewayDestinationRequirements(revision),
+          ),
+          ...(execution === undefined ? {} : { execution }),
+        })
       );
     }
-    // A launch fact, not an authorization grant. Never infer it for stored revisions:
-    // older workers must refuse the new command and older Sandboxes keep their exact command.
-    if (this.protectedCodexInference(revision)) {
-      return PROTECTED_CODEX_NO_CONNECTION_RETRY;
-    }
-    return this.publicGithubReadCandidate(revision) === undefined
-      ? undefined
-      : this.publicGithubReadAdmission();
+    return execution;
   }
 
   private publicGithubReadForRevision(revision: AgentRevision) {
     if (
-      revision.compute.admission !== undefined &&
-      this.gatewayDestinationPlan(revision) === undefined &&
+      this.executionComputeAdmission(revision) !== undefined &&
       !this.hasProtectedCodexAdmission(revision) &&
       !this.hasPublicGithubReadAdmission(revision)
     ) {
       throw new ConfigurationFailure("AgentRevision Compute admission is invalid.");
     }
     const admission = this.publicGithubReadAdmission();
-    return admission !== undefined && revision.compute.admission === admission
+    return admission !== undefined && this.executionComputeAdmission(revision) === admission
       ? this.publicGithubReadCandidate(revision)
       : undefined;
   }
 
   private hasPublicGithubReadAdmission(revision: AgentRevision): boolean {
-    return /^public-github-read:v1:[a-f0-9]{64}$/.test(revision.compute.admission ?? "");
+    return /^public-github-read:v1:[a-f0-9]{64}$/.test(
+      this.executionComputeAdmission(revision) ?? "",
+    );
   }
 
   private async revokeUnavailablePublicGithubRead(
@@ -14940,7 +14978,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         embedded: revision.harness.mode === "embedded",
         channelRuntime:
           this.options.runtime?.channels !== undefined ||
-          this.options.runtime?.gatewayOutbound !== undefined,
+          (this.options.runtime !== undefined && this.options.executionCluster === undefined),
       },
       preparationSettingError,
     );
@@ -16138,7 +16176,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       role === "gateway" &&
       configuration?.gatewayDestinations !== undefined &&
       secretEnvironment.some(({ name }) =>
-        ["http_proxy", "https_proxy", "all_proxy", "no_proxy"].includes(name.toLowerCase()),
+        ["http_proxy", "https_proxy", "all_proxy", "no_proxy", "node_use_env_proxy"].includes(
+          name.toLowerCase(),
+        ),
       )
     ) {
       throw new ConfigurationFailure(
@@ -16569,6 +16609,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         );
         if (configuration?.gatewayDestinations !== undefined) {
           const plan = configuration.gatewayDestinations;
+          // Node built-in HTTP(S) and fetch must opt into the explicit proxy as well as native SDK clients.
+          variables.push({ name: "NODE_USE_ENV_PROXY", value: "1" });
           const endpoint =
             "http://" +
             plan.endpoint.serviceName +

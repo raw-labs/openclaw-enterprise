@@ -54,7 +54,8 @@
     "tests/integration/postgres-standing-session-worker.test.ts",
     "tests/integration/postgres-standing-expiry-authority.test.ts",
     "tests/integration/credential-proxy-withdrawal.test.ts",
-    "tests/integration/postgres-egress-policy-transaction.test.ts"
+    "tests/integration/postgres-egress-policy-transaction.test.ts",
+    "tests/integration/postgres-agent-gateway-outbound.test.ts"
   ],
   "files": [
     {
@@ -530,6 +531,12 @@
         "final placement binds the original Credential Proxy method",
         "authorization throw before mint fences a retained callback",
         "authorization throw after mint fences a retained callback"
+      ]
+    },
+    {
+      "path": "tests/integration/postgres-agent-gateway-outbound.test.ts",
+      "expectedTests": [
+        "PostgreSQL Agent outbound API writes survive reload and immutable revisions retain their approved hosts"
       ]
     }
   ]

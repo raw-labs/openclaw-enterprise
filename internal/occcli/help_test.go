@@ -110,7 +110,9 @@ func TestAgentUpdateHelpNamesGatewayManagedModeAndItsGrant(t *testing.T) {
 	}
 	flat := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
-		"Each update names configurationId or gatewayManagedMode (or both)",
+		"Each update names configurationId, gatewayManagedMode or gatewayOutbound",
+		"Changing gatewayOutbound requires update and administer on that exact Agent.",
+		`Use {"gatewayOutbound": {"destinations": []}} to clear additional hosts.`,
 		"Changing gatewayManagedMode needs Installation administer.",
 	} {
 		if !strings.Contains(flat, want) {

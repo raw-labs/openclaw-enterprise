@@ -513,6 +513,14 @@
       "tag": "0064_gateway_managed_mode",
       "breakpoints": true,
       "sha256": "e73a21fc94abd66ec93540293708d76e5f0c1f8946c9d9994fcf81a6b9058329"
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1787000000065,
+      "tag": "0065_gateway_outbound",
+      "breakpoints": true,
+      "sha256": "ff564fb04f4929ddf1a29c4f524644f0c19f157e9ad733f481d0d7c4055d27b7"
     }
   ],
   "initialSchemaStates": {

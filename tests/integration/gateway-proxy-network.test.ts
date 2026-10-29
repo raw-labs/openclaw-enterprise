@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
+import { openShellGatewayDestinations } from "../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts";
 
 const run = promisify(execFile);
 const docker = async (...args: string[]) =>
@@ -25,8 +26,9 @@ test(
     const prefix = "oce-gateway-proxy-" + randomUUID().slice(0, 8);
     const supervisor = prefix + "-supervisor";
     const relay = prefix + "-relay";
+    const nativeContainers: string[] = [];
     t.after(async () => {
-      for (const name of [relay, supervisor]) {
+      for (const name of [...nativeContainers, relay, supervisor]) {
         await docker("rm", "-f", name).catch(() => undefined);
       }
       await rm(directory, { recursive: true, force: true });
@@ -42,21 +44,86 @@ test(
     for (const image of [assets.supervisorImage, assets.relayImage]) {
       await docker("image", "inspect", image).catch(() => docker("pull", image));
     }
-    const policyPath = join(directory, "policy.json");
-    await writeFile(
-      policyPath,
-      JSON.stringify({
-        version: 1,
-        network_policies: {
-          exact: {
-            name: "exact",
-            endpoints: [{ host: "example.com", ports: [443], tls: "skip" }],
-            binaries: [],
-          },
-        },
-      }),
-      { mode: 0o644 },
+    const nativeClients = process.env.OCC_TEST_GATEWAY_PROXY_NATIVE_CLIENTS === "1";
+    const nativeImage =
+      process.env.OCC_TEST_KUBERNETES_GATEWAY_IMAGE ?? process.env.OCC_TEST_RUNTIME_IMAGE;
+    if (nativeClients) {
+      assert.ok(nativeImage, "Native-client proof requires the selected Gateway runtime image.");
+    }
+    const selected = openShellGatewayDestinations(
+      {
+        policyRulesPath: rulesPath,
+        supervisorImage: assets.supervisorImage,
+        relayImage: assets.relayImage,
+        blockedCidrs: ["10.0.0.0/8"],
+      },
+      "selected-openshell",
+      "selected-openshell",
     );
+    const plan = selected.admit(
+      {
+        id: "rev_00000000-0000-4000-8000-000000000001",
+        namespaceId: "ns_00000000-0000-4000-8000-000000000001",
+        agentId: "agent_00000000-0000-4000-8000-000000000001",
+        revision: 1,
+        backendId: "openshell",
+        configurationId: "cfg_00000000-0000-4000-8000-000000000001",
+        configurationKind: "agent",
+        configurationGeneration: 1,
+        configuration: {},
+        gatewayManagedMode: true,
+        harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
+        harnessAuth: { method: "runtime" },
+        executionAdmission: { version: 2, mode: "unprotected" },
+        compute: { id: "kubernetes", implementation: "kubernetes-local" },
+        sandboxDriverId: "selected-openshell",
+        servicePrincipalId: "principal_00000000-0000-4000-8000-000000000001",
+        createdAt: "2026-10-29T00:00:00.000Z",
+      },
+      (nativeClients ? ["example.com", "slack.com", "ws.postman-echo.com"] : ["example.com"]).map(
+        (host) => ({ host, port: 443 as const }),
+      ),
+    );
+    const policyPath = join(directory, "policy.json");
+    await writeFile(policyPath, plan.policy, { mode: 0o644 });
+    async function nativeProbe(mode: string, namespaceOwner = supervisor) {
+      const source = JSON.parse(await readFile("deploy/runtime/openclaw-source.json", "utf8"));
+      const containerName = prefix + "-native-" + mode;
+      nativeContainers.push(containerName);
+      const { stdout } = await run(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "--name",
+          containerName,
+          "--network",
+          "container:" + namespaceOwner,
+          "--entrypoint",
+          "node",
+          "--env",
+          "HTTP_PROXY=http://127.0.0.1:3129",
+          "--env",
+          "HTTPS_PROXY=http://127.0.0.1:3129",
+          "--env",
+          "NO_PROXY=",
+          "--env",
+          "NODE_USE_ENV_PROXY=1",
+          "--env",
+          "PROOF_MODE=" + mode,
+          "--env",
+          "EXPECTED_OPENCLAW_COMMIT=" + source.commit,
+          "--mount",
+          "type=bind,src=" +
+            resolve("tests/fixtures/gateway-native-transports.mjs") +
+            ",dst=/tmp/native-transports.mjs,readonly",
+          nativeImage!,
+          "/tmp/native-transports.mjs",
+        ],
+        { timeout: 60000, maxBuffer: 2 ** 20 },
+      );
+      t.diagnostic(stdout.trim());
+    }
     await docker(
       "run",
       "-d",
@@ -136,14 +203,24 @@ test(
     assert.match(await connect("example.org", 443), /^HTTP\/1\.1 403 /);
     assert.match(await connect("example.com", 80), /^HTTP\/1\.1 403 /);
     assert.match(await connect("93.184.216.34", 443), /^HTTP\/1\.1 403 /);
+    if (nativeClients) {
+      await nativeProbe("allowed");
+      await nativeProbe("denied");
+    }
     // Stock network-proxy intentionally does not hot-reload local files: a frozen revision needs replacement.
     await writeFile(policyPath, JSON.stringify({ version: 1, network_policies: {} }));
     assert.match(await connect("example.com", 443), /^HTTP\/1\.1 200 /);
     await docker("kill", relay);
+    if (nativeClients) {
+      await nativeProbe("relay-outage");
+    }
     assert.doesNotMatch(await connect("example.com", 443), /^HTTP\/1\.1 200 /);
     await docker("start", relay);
     await docker("kill", supervisor);
     assert.equal(await docker("inspect", "--format", "{{.State.Running}}", relay), "true");
+    if (nativeClients) {
+      await nativeProbe("proxy-outage", relay);
+    }
     assert.doesNotMatch(await connect("example.com", 443, relay), /^HTTP\/1\.1 200 /);
     // Docker proves policy/relay operation only, not Kubernetes admission, NetworkPolicy or bypass resistance.
   },

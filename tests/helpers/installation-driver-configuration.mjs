@@ -29,6 +29,7 @@ export function createInstallationDriverConfiguration() {
           network: {
             dns: { namespace: "kube-system", podLabels: { "k8s-app": "kube-dns" } },
             gatewayPort: 8080,
+            infrastructureCidrs: ["10.0.0.0/8"],
             gatewayTrustedProxyCidrs: ["127.0.0.1/32"],
             gatewayClients: [{ namespace: "occ-system", podLabels: { app: "controller" } }],
           },

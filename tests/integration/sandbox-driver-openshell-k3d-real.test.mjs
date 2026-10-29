@@ -2322,9 +2322,9 @@ async function prepareProductionInstallation(
     // The API and worker consume the selected operator configuration unchanged.
     configuration.drivers.credential_proxy = structuredClone(gatewayDestinations.credentialProxy);
     configuration.backend[0].drivers.credential_proxy = gatewayDestinations.credentialProxy.id;
-    configuration.drivers.compute.configuration.runtime.gatewayOutbound = {
-      destinations: [{ host: gatewayDestinations.allowedHost, port: 443 }],
-    };
+    configuration.drivers.compute.configuration.network.infrastructureCidrs = structuredClone(
+      gatewayDestinations.infrastructureCidrs,
+    );
   }
   // The Codex scenario runs a second Agent beside the first. Each Agent holds about 7 GiB of
   // limits: its 4 GiB Gateway, its Harness and the 1 GiB OpenShell supervisor. A rolling
@@ -2742,6 +2742,13 @@ async function prepareProductionInstallation(
     ],
   });
   assert.equal(agent.status, 201, JSON.stringify(agent.error));
+  if (gatewayDestinations !== undefined) {
+    const saved = await request("PATCH", `/namespaces/${namespaceId}/agents/${agent.data.id}`, {
+      gatewayOutbound: { destinations: [{ host: gatewayDestinations.allowedHost, port: 443 }] },
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.error));
+    agent.data = saved.data;
+  }
 
   // Generate the durable transport Secret through the supported Agent API so
   // current Compute ownership metadata and control-plane placement are exercised.
@@ -3920,7 +3927,12 @@ async function diagnoseAdditionalAgent(topology, agentId, revisionId, deployment
  * the first Agent's configuration, the given model source and the given tool sources. Its
  * principal receives `operate` on exactly those sources, as the first Agent's does.
  */
-async function deployAdditionalCredentialAgent(topology, modelSourceId, toolSources) {
+async function deployAdditionalCredentialAgent(
+  topology,
+  modelSourceId,
+  toolSources,
+  gatewayOutbound,
+) {
   const { request, namespaceId } = topology;
   assert.equal(typeof topology.agent.configurationId, "string");
   const agent = await request("POST", `/namespaces/${namespaceId}/agents`, {
@@ -3935,6 +3947,11 @@ async function deployAdditionalCredentialAgent(topology, modelSourceId, toolSour
   });
   assert.equal(agent.status, 201, JSON.stringify(agent.error));
   const agentPath = `/namespaces/${namespaceId}/agents/${agent.data.id}`;
+  if (gatewayOutbound !== undefined) {
+    const saved = await request("PATCH", agentPath, { gatewayOutbound });
+    assert.equal(saved.status, 200, JSON.stringify(saved.error));
+    agent.data = saved.data;
+  }
   const runtimeCredentials = await request("POST", `${agentPath}/runtime-credentials`, {});
   assert.equal(runtimeCredentials.status, 200, JSON.stringify(runtimeCredentials.error));
   for (const sourceId of [modelSourceId, ...toolSources.map(({ id }) => id)]) {
@@ -5231,6 +5248,12 @@ async function readGatewayDestinationInputs() {
     input.credentialProxy?.id && input.credentialProxy?.configuration?.gatewayDestinations,
     "supply the selected credential_proxy registration with gatewayDestinations configuration",
   );
+  assert.ok(
+    Array.isArray(input.infrastructureCidrs) &&
+      input.infrastructureCidrs.length > 0 &&
+      input.infrastructureCidrs.every((cidr) => typeof cidr === "string"),
+    "supply Compute infrastructureCidrs independently of the selected proxy exclusions",
+  );
   for (const key of ["allowedUrl", "forbiddenUrl"]) {
     const url = new URL(input[key]);
     assert.equal(url.protocol, "https:");
@@ -5257,6 +5280,11 @@ async function readGatewayDestinationInputs() {
     /^[a-zA-Z0-9_-]{8,120}$/,
     "the allowed public HTTPS upstream must return an independent responseMarker",
   );
+  assert.match(
+    input.peerResponseMarker,
+    /^[a-zA-Z0-9_-]{8,120}$/,
+    "the second Agent's public HTTPS upstream must return an independent peerResponseMarker",
+  );
   return input;
 }
 
@@ -5273,10 +5301,22 @@ async function assertGatewayDestinationLifecycle(context, topology, input) {
       "--",
       ...args,
     );
-  const planFor = (revision) => {
-    assert.match(revision.compute.admission ?? "", /^gateway-destinations:v1:/);
-    const plan = JSON.parse(revision.compute.admission.slice("gateway-destinations:v1:".length));
-    assert.deepEqual(plan.destinations, [{ host: input.allowedHost, port: 443 }]);
+  const planFor = async (revision, expectedHost = input.allowedHost) => {
+    // Compute admission is private state, deliberately absent from public revision
+    // responses. Inspect the real persisted record rather than widening the API.
+    const saved = await topology.observerPool.query(
+      "SELECT admitted_spec->'compute'->>'admission' AS admission FROM occ.agent_revisions WHERE id=$1 AND agent_id=$2 AND namespace_id=$3",
+      [revision.id, revision.agentId, topology.namespaceId],
+    );
+    assert.equal(saved.rows.length, 1);
+    const admission = saved.rows[0].admission;
+    assert.match(admission ?? "", /^kubernetes:v1:/);
+    const facts = JSON.parse(admission.slice("kubernetes:v1:".length));
+    const plan = facts.gatewayDestinations;
+    assert.deepEqual(revision.gatewayOutbound, {
+      destinations: [{ host: expectedHost, port: 443 }],
+    });
+    assert.deepEqual(plan.destinations, [{ host: expectedHost, port: 443 }]);
     assert.equal(plan.agentId, revision.agentId);
     assert.equal(plan.revisionId, revision.id);
     assert.equal(plan.namespaceId, topology.namespaceId);
@@ -5320,7 +5360,7 @@ async function assertGatewayDestinationLifecycle(context, topology, input) {
     `http://${plan.endpoint.serviceName}.${topology.gatewayPlacement}.svc:3129`;
   // This runs inside the existing Gateway. TLS and an independent upstream marker
   // prove actual forwarding, not merely that the frontend accepts a TCP connection.
-  const proxyProbe = async (url, proxy, pod = topology.gatewayPod) =>
+  const proxyProbe = async (url, proxy, pod = topology.gatewayPod, marker = input.responseMarker) =>
     JSON.parse(
       await execGateway(
         [
@@ -5358,13 +5398,18 @@ connect.end();
 `,
           url,
           proxy,
-          input.responseMarker,
+          marker,
         ],
         pod,
       ),
     );
-  const expectAllowed = async (plan) => {
-    const result = await proxyProbe(input.allowedUrl, endpoint(plan));
+  const expectAllowed = async (
+    plan,
+    url = input.allowedUrl,
+    marker = input.responseMarker,
+    pod = topology.gatewayPod,
+  ) => {
+    const result = await proxyProbe(url, endpoint(plan), pod, marker);
     assert.equal(result.connect, 200, JSON.stringify(result));
     assert.ok(result.upstream >= 200 && result.upstream < 300, JSON.stringify(result));
     assert.equal(result.marker, true, "the prepared real HTTPS upstream must return its marker");
@@ -5373,6 +5418,66 @@ connect.end();
     const result = await proxyProbe(input.allowedUrl, proxy, pod);
     assert.equal(result.connect, undefined, "a foreign or down frontend must not admit CONNECT");
     assert.ok(result.transport, JSON.stringify(result));
+  };
+  // No handcrafted CONNECT or injected dispatcher: these are the Gateway image
+  // runtime's built-in clients, using only the environment projected by Compute.
+  // This does not substitute for the separate native Slack Socket Mode proof.
+  const nativeHttpProbe = async (url, marker, pod = topology.gatewayPod) =>
+    JSON.parse(
+      await execGateway(
+        [
+          "node",
+          "--input-type=module",
+          "-e",
+          String.raw`
+import https from "node:https";
+if (process.env.NODE_USE_ENV_PROXY !== "1") throw new Error("Gateway proxy activation is missing");
+const url = process.argv[1];
+const marker = process.argv[2];
+const observe = async (request) => {
+  try { return await request(); } catch (error) { return { error: error.name }; }
+};
+const fetchResult = await observe(async () => {
+  const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
+  const body = await response.text();
+  return { status: response.status, marker: body.includes(marker) };
+});
+const requestResult = await observe(() => new Promise((resolve, reject) => {
+  const request = https.get(url, { signal: AbortSignal.timeout(12000) }, (response) => {
+    let body = "";
+    response.on("data", (chunk) => { if (body.length < 65536) body += chunk; });
+    response.on("end", () => resolve({ status: response.statusCode, marker: body.includes(marker) }));
+    response.on("error", reject);
+  });
+  request.setTimeout(12000, () => request.destroy(new Error("HTTPS request timed out")));
+  request.on("error", reject);
+}));
+console.log(JSON.stringify({ fetch: fetchResult, https: requestResult }));
+`,
+          url,
+          marker,
+        ],
+        pod,
+      ),
+    );
+  const expectNativeHttpAllowed = async (url, marker, pod = topology.gatewayPod) => {
+    const result = await nativeHttpProbe(url, marker, pod);
+    for (const client of [result.fetch, result.https]) {
+      assert.ok(client.status >= 200 && client.status < 300, JSON.stringify(result));
+      assert.equal(
+        client.marker,
+        true,
+        "the Gateway image client must receive the upstream marker",
+      );
+    }
+  };
+
+  const expectNativeHttpDenied = async (url, pod = topology.gatewayPod) => {
+    const result = await nativeHttpProbe(url, input.responseMarker, pod);
+    for (const client of [result.fetch, result.https]) {
+      assert.equal(client.status, undefined, "a denied client must not reach the upstream");
+      assert.equal(typeof client.error, "string", JSON.stringify(result));
+    }
   };
 
   const assertPlacement = async (plan) => {
@@ -5423,14 +5528,10 @@ connect.end();
     );
     return proxy;
   };
-  const plan = planFor(topology.revision);
+  const plan = await planFor(topology.revision);
   await assertPlacement(plan);
-  const snapshot = await topology.observerPool.query(
-    "SELECT admitted_spec->'compute'->>'admission' AS admission FROM occ.agent_revisions WHERE id=$1",
-    [topology.revision.id],
-  );
-  assert.equal(snapshot.rows[0].admission, topology.revision.compute.admission);
   await expectAllowed(plan);
+  await expectNativeHttpAllowed(input.allowedUrl, input.responseMarker);
   for (const url of [input.forbiddenUrl, `https://${input.allowedHost}:${input.forbiddenPort}/`]) {
     const denied = await proxyProbe(url, endpoint(plan));
     assert.equal(
@@ -5439,6 +5540,8 @@ connect.end();
       "the policy engine must refuse forbidden host or port before forwarding",
     );
   }
+  // Positive native requests above distinguish policy refusal from an unavailable client.
+  await expectNativeHttpDenied(input.forbiddenUrl);
   // Prove the same resolved public address accepts TCP/443 from the proxy Pod
   // before checking denial in the Gateway. DNS or an upstream outage is not CNI proof.
   const proxy = await readyProxy(plan);
@@ -5493,17 +5596,29 @@ socket.once("error", (error) => finish({ connected: false, reason: error.code })
   assert.ok(direct.reason);
   await expectAllowed(plan);
 
+  // Different public API grants must produce different effective permissions,
+  // not just separate proxy endpoints with the same website list.
   const second = await deployAdditionalCredentialAgent(
     topology,
     topology.agent.harnessAuth.sourceId,
     [],
+    { destinations: [{ host: input.forbiddenHost, port: 443 }] },
   );
-  const secondPlan = planFor(second.revision);
+  const secondPlan = await planFor(second.revision, input.forbiddenHost);
   await readyProxy(secondPlan);
   const secondGateway = await resource(
     "pod",
     await currentGatewayPod(topology, second.agent.id),
     topology.gatewayPlacement,
+  );
+  await expectAllowed(secondPlan, input.forbiddenUrl, input.peerResponseMarker, secondGateway);
+  await expectNativeHttpAllowed(input.forbiddenUrl, input.peerResponseMarker, secondGateway);
+  await expectNativeHttpDenied(input.allowedUrl, secondGateway);
+  const secondDenied = await proxyProbe(input.allowedUrl, endpoint(secondPlan), secondGateway);
+  assert.equal(
+    secondDenied.connect,
+    403,
+    "the second Agent must not inherit the first Agent's website grant",
   );
   await expectNetworkDenied(endpoint(plan), secondGateway);
   await expectNetworkDenied(endpoint(secondPlan));
@@ -5520,11 +5635,25 @@ socket.once("error", (error) => finish({ connected: false, reason: error.code })
       )) === undefined || undefined,
   );
 
+  // Desired settings change now; the running revision keeps its saved policy
+  // until the regular replacement workflow deploys the new list.
+  const edited = await topology.request("PATCH", agentPath, {
+    gatewayOutbound: { destinations: [{ host: input.forbiddenHost, port: 443 }] },
+  });
+  assert.equal(edited.status, 200, JSON.stringify(edited.error));
+  const unchangedRevision = await topology.request(
+    "GET",
+    `${agentPath}/revisions/${topology.revision.id}`,
+  );
+  assert.equal(unchangedRevision.status, 200, JSON.stringify(unchangedRevision.error));
+  assert.deepEqual(await planFor(unchangedRevision.data), plan);
+  await expectAllowed(plan);
+
   const oldGatewayUid = topology.gatewayPod.metadata.uid;
   const oldHarnessUid = topology.harnessPod.metadata.uid;
   const redeployed = await topology.request("POST", `${agentPath}/deploy`);
   assert.equal(redeployed.status, 202, JSON.stringify(redeployed.error));
-  const replacementPlan = planFor(redeployed.data);
+  const replacementPlan = await planFor(redeployed.data, input.forbiddenHost);
   assert.notEqual(replacementPlan.endpoint.serviceName, plan.endpoint.serviceName);
   // Dedicated Compute stops every predecessor before preparing its replacement.
   // Do not fabricate simultaneous same-Agent revisions to claim CNI proof. The
@@ -5550,7 +5679,11 @@ socket.once("error", (error) => finish({ connected: false, reason: error.code })
   await assertGone(plan);
   await expectNetworkDenied(endpoint(plan));
   await assertPlacement(replacementPlan);
-  await expectAllowed(replacementPlan);
+  await expectAllowed(replacementPlan, input.forbiddenUrl, input.peerResponseMarker);
+  await expectNativeHttpAllowed(input.forbiddenUrl, input.peerResponseMarker);
+  const replacedDenied = await proxyProbe(input.allowedUrl, endpoint(replacementPlan));
+  assert.equal(replacedDenied.connect, 403, "replacement must remove the previous website grant");
+  await expectNativeHttpDenied(input.allowedUrl);
   const workspace = await topology.request("GET", `${agentPath}/workspace/files/AGENTS.md`);
   assert.equal(workspace.status, 200, JSON.stringify(workspace.error));
   assert.equal(workspace.data.content, "# Initialized OpenShell workspace\n");
@@ -5572,6 +5705,7 @@ socket.once("error", (error) => finish({ connected: false, reason: error.code })
       async () => (await proxyPods(replacementPlan)).length === 0 || undefined,
     );
     await expectNetworkDenied(endpoint(replacementPlan));
+    await expectNativeHttpDenied(input.forbiddenUrl);
     const fallback = await directProbe();
     assert.equal(fallback.connected, false, "proxy outage must not open a direct public fallback");
   } finally {
@@ -5588,7 +5722,7 @@ socket.once("error", (error) => finish({ connected: false, reason: error.code })
     }
   }
   await readyProxy(replacementPlan);
-  await expectAllowed(replacementPlan);
+  await expectAllowed(replacementPlan, input.forbiddenUrl, input.peerResponseMarker);
   const stopped = await topology.request("POST", `${agentPath}/stop`);
   assert.equal(stopped.status, 202, JSON.stringify(stopped.error));
   await assertGone(replacementPlan);

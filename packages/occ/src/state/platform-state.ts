@@ -1,3 +1,4 @@
+import { normalizeGatewayOutbound, type GatewayOutbound } from "@openclaw-enterprise/contracts";
 import type { PreparedTokenCurrentProof } from "@openclaw-enterprise/contracts";
 import { assertExecutionAdmission } from "@openclaw-enterprise/contracts";
 import { memoryEgressSendReceipts } from "./egress-send-receipts.ts";
@@ -207,7 +208,10 @@ export interface AgentReadRepository {
 
 export interface AgentRepository extends AgentReadRepository {
   createAgent(
-    agent: Omit<Agent, "gatewayManagedMode"> & { readonly gatewayManagedMode?: boolean },
+    agent: Omit<Agent, "gatewayManagedMode" | "gatewayOutbound"> & {
+      readonly gatewayManagedMode?: boolean;
+      readonly gatewayOutbound?: GatewayOutbound;
+    },
   ): Promise<Readonly<Agent>>;
   setSandboxPolicyEditing(
     namespaceId: string,
@@ -228,6 +232,7 @@ export interface AgentRepository extends AgentReadRepository {
     repositoryAccess?: RepositoryAccess | null,
     credentialSources?: readonly AgentCredentialSourceBinding[],
     gatewayManagedMode?: boolean,
+    gatewayOutbound?: GatewayOutbound,
   ): Promise<Readonly<Agent> | undefined>;
   compareAndSetActiveRevision(
     namespaceId: string,
@@ -2839,9 +2844,16 @@ function repositories(
         repositoryAccess: _providedRepositoryAccess,
         ...withoutPlugins
       } = agent;
+      if (
+        agent.executionMode !== "dedicated" &&
+        normalizeGatewayOutbound(agent.gatewayOutbound).destinations.length > 0
+      ) {
+        throw new ScopeViolationError("Gateway outbound destinations require dedicated execution.");
+      }
       const saved = immutableCopy({
         ...withoutPlugins,
         gatewayManagedMode: agent.gatewayManagedMode ?? true,
+        gatewayOutbound: normalizeGatewayOutbound(agent.gatewayOutbound),
         ...(plugins === undefined ? {} : { plugins }),
         ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
         ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -2924,6 +2936,7 @@ function repositories(
       nextRepositoryAccess,
       nextCredentialSources,
       gatewayManagedMode,
+      gatewayOutbound,
     ) => {
       const current = await agents.findAgent(namespaceId, agentId);
       if (!current) {
@@ -2988,12 +3001,19 @@ function repositories(
         credentialSources: _currentCredentialSources,
         ...withoutPlugins
       } = current;
+      if (
+        (executionMode ?? current.executionMode) !== "dedicated" &&
+        normalizeGatewayOutbound(gatewayOutbound ?? current.gatewayOutbound).destinations.length > 0
+      ) {
+        throw new ScopeViolationError("Gateway outbound destinations require dedicated execution.");
+      }
       const updated = immutableCopy({
         ...withoutPlugins,
         configurationId,
         backendId: nextBackendId,
         executionMode: executionMode ?? current.executionMode,
         gatewayManagedMode: gatewayManagedMode ?? current.gatewayManagedMode,
+        gatewayOutbound: normalizeGatewayOutbound(gatewayOutbound ?? current.gatewayOutbound),
         harnessAuth: association,
         ...(agentCredentialSources === undefined || agentCredentialSources.length === 0
           ? {}
@@ -3142,6 +3162,8 @@ function repositories(
         owner.servicePrincipalId !== revision.servicePrincipalId ||
         owner.backendId !== revision.backendId ||
         revision.gatewayManagedMode !== owner.gatewayManagedMode ||
+        JSON.stringify(normalizeGatewayOutbound(revision.gatewayOutbound)) !==
+          JSON.stringify(normalizeGatewayOutbound(owner.gatewayOutbound)) ||
         !harnessAuthMatches(owner.harnessAuth, revision.harnessAuth) ||
         !credentialSourcesMatch(owner.credentialSources, revision.credentialSources)
       ) {

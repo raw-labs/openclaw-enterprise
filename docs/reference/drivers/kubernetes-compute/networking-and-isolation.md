@@ -3,9 +3,10 @@
 Configure tenant network boundaries, private Agent routes, and existing
 namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
 
-The draft `runtime.gatewayOutbound.destinations` setting is **experimental and
-UNVERIFIED**, not supported for production. See the
-[source flow](../../../flows/gateway-outbound-destinations.md).
+Gateway destination control is **experimental, not production-qualified**.
+Embedded and separate-cluster networking stays unchanged. See the
+[configuration and exclusion flow](../../../flows/gateway-outbound-destinations.md) and
+[verification status](../../../../specs/plans/0024-gateway-outbound-proxy-reuse.md#verification-evidence).
 
 ## Networking
 

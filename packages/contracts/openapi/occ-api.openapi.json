@@ -12981,6 +12981,32 @@
                                 "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                                 "type": "boolean"
                               },
+                              "gatewayOutbound": {
+                                "additionalProperties": false,
+                                "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                                "properties": {
+                                  "destinations": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "host": {
+                                          "maxLength": 253,
+                                          "minLength": 3,
+                                          "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                          "type": "string"
+                                        },
+                                        "port": { "const": 443, "type": "number" }
+                                      },
+                                      "required": ["host", "port"],
+                                      "type": "object"
+                                    },
+                                    "type": "array",
+                                    "uniqueItems": true
+                                  }
+                                },
+                                "required": ["destinations"],
+                                "type": "object"
+                              },
                               "harnessAuth": {
                                 "anyOf": [
                                   {
@@ -13186,6 +13212,7 @@
                               "harnessAuth",
                               "executionMode",
                               "gatewayManagedMode",
+                              "gatewayOutbound",
                               "desiredRuntimeState",
                               "status",
                               "createdAt"
@@ -13223,6 +13250,7 @@
                                   },
                                   "field": {
                                     "anyOf": [
+                                      { "const": "gatewayOutbound", "type": "string" },
                                       { "const": "plugins", "type": "string" },
                                       { "const": "pluginApprovers", "type": "string" },
                                       { "const": "repositoryBindings", "type": "string" },
@@ -13258,6 +13286,32 @@
                               "gatewayManagedMode": {
                                 "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                                 "type": "boolean"
+                              },
+                              "gatewayOutbound": {
+                                "additionalProperties": false,
+                                "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                                "properties": {
+                                  "destinations": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "host": {
+                                          "maxLength": 253,
+                                          "minLength": 3,
+                                          "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                          "type": "string"
+                                        },
+                                        "port": { "const": 443, "type": "number" }
+                                      },
+                                      "required": ["host", "port"],
+                                      "type": "object"
+                                    },
+                                    "type": "array",
+                                    "uniqueItems": true
+                                  }
+                                },
+                                "required": ["destinations"],
+                                "type": "object"
                               },
                               "id": {
                                 "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -13295,6 +13349,7 @@
                               "backendId",
                               "executionMode",
                               "gatewayManagedMode",
+                              "gatewayOutbound",
                               "desiredRuntimeState",
                               "status",
                               "createdAt",
@@ -13431,6 +13486,32 @@
                   "gatewayManagedMode": {
                     "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                     "type": "boolean"
+                  },
+                  "gatewayOutbound": {
+                    "additionalProperties": false,
+                    "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                    "properties": {
+                      "destinations": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": {
+                              "maxLength": 253,
+                              "minLength": 3,
+                              "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                              "type": "string"
+                            },
+                            "port": { "const": 443, "type": "number" }
+                          },
+                          "required": ["host", "port"],
+                          "type": "object"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": ["destinations"],
+                    "type": "object"
                   },
                   "harnessAuth": {
                     "anyOf": [
@@ -13700,6 +13781,32 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "additionalProperties": false,
+                          "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                          "properties": {
+                            "destinations": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "host": {
+                                    "maxLength": 253,
+                                    "minLength": 3,
+                                    "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                    "type": "string"
+                                  },
+                                  "port": { "const": 443, "type": "number" }
+                                },
+                                "required": ["host", "port"],
+                                "type": "object"
+                              },
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": ["destinations"],
+                          "type": "object"
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -13902,6 +14009,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"
@@ -15267,6 +15375,32 @@
                     "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                     "type": "boolean"
                   },
+                  "gatewayOutbound": {
+                    "additionalProperties": false,
+                    "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                    "properties": {
+                      "destinations": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": {
+                              "maxLength": 253,
+                              "minLength": 3,
+                              "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                              "type": "string"
+                            },
+                            "port": { "const": 443, "type": "number" }
+                          },
+                          "required": ["host", "port"],
+                          "type": "object"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": ["destinations"],
+                    "type": "object"
+                  },
                   "harnessAuth": {
                     "anyOf": [
                       {
@@ -16370,6 +16504,32 @@
                     "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                     "type": "boolean"
                   },
+                  "gatewayOutbound": {
+                    "additionalProperties": false,
+                    "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                    "properties": {
+                      "destinations": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": {
+                              "maxLength": 253,
+                              "minLength": 3,
+                              "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                              "type": "string"
+                            },
+                            "port": { "const": 443, "type": "number" }
+                          },
+                          "required": ["host", "port"],
+                          "type": "object"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": ["destinations"],
+                    "type": "object"
+                  },
                   "harnessAuth": {
                     "anyOf": [
                       {
@@ -16685,6 +16845,32 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "additionalProperties": false,
+                          "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                          "properties": {
+                            "destinations": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "host": {
+                                    "maxLength": 253,
+                                    "minLength": 3,
+                                    "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                    "type": "string"
+                                  },
+                                  "port": { "const": 443, "type": "number" }
+                                },
+                                "required": ["host", "port"],
+                                "type": "object"
+                              },
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": ["destinations"],
+                          "type": "object"
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -16887,6 +17073,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"
@@ -17052,6 +17239,32 @@
                             "gatewayManagedMode": {
                               "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                               "type": "boolean"
+                            },
+                            "gatewayOutbound": {
+                              "additionalProperties": false,
+                              "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                              "properties": {
+                                "destinations": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "host": {
+                                        "maxLength": 253,
+                                        "minLength": 3,
+                                        "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                        "type": "string"
+                                      },
+                                      "port": { "const": 443, "type": "number" }
+                                    },
+                                    "required": ["host", "port"],
+                                    "type": "object"
+                                  },
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              },
+                              "required": ["destinations"],
+                              "type": "object"
                             },
                             "harnessAuth": {
                               "anyOf": [
@@ -17258,6 +17471,7 @@
                             "harnessAuth",
                             "executionMode",
                             "gatewayManagedMode",
+                            "gatewayOutbound",
                             "desiredRuntimeState",
                             "status",
                             "createdAt"
@@ -17295,6 +17509,7 @@
                                 },
                                 "field": {
                                   "anyOf": [
+                                    { "const": "gatewayOutbound", "type": "string" },
                                     { "const": "plugins", "type": "string" },
                                     { "const": "pluginApprovers", "type": "string" },
                                     { "const": "repositoryBindings", "type": "string" },
@@ -17330,6 +17545,32 @@
                             "gatewayManagedMode": {
                               "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                               "type": "boolean"
+                            },
+                            "gatewayOutbound": {
+                              "additionalProperties": false,
+                              "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                              "properties": {
+                                "destinations": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "host": {
+                                        "maxLength": 253,
+                                        "minLength": 3,
+                                        "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                        "type": "string"
+                                      },
+                                      "port": { "const": 443, "type": "number" }
+                                    },
+                                    "required": ["host", "port"],
+                                    "type": "object"
+                                  },
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              },
+                              "required": ["destinations"],
+                              "type": "object"
                             },
                             "id": {
                               "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -17367,6 +17608,7 @@
                             "backendId",
                             "executionMode",
                             "gatewayManagedMode",
+                            "gatewayOutbound",
                             "desiredRuntimeState",
                             "status",
                             "createdAt",
@@ -17469,7 +17711,8 @@
                 "additionalProperties": false,
                 "anyOf": [
                   { "required": ["configurationId"] },
-                  { "required": ["gatewayManagedMode"] }
+                  { "required": ["gatewayManagedMode"] },
+                  { "required": ["gatewayOutbound"] }
                 ],
                 "properties": {
                   "backendId": {
@@ -17513,6 +17756,32 @@
                   "gatewayManagedMode": {
                     "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                     "type": "boolean"
+                  },
+                  "gatewayOutbound": {
+                    "additionalProperties": false,
+                    "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                    "properties": {
+                      "destinations": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": {
+                              "maxLength": 253,
+                              "minLength": 3,
+                              "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                              "type": "string"
+                            },
+                            "port": { "const": 443, "type": "number" }
+                          },
+                          "required": ["host", "port"],
+                          "type": "object"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": ["destinations"],
+                    "type": "object"
                   },
                   "harnessAuth": {
                     "anyOf": [
@@ -17807,6 +18076,32 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "additionalProperties": false,
+                          "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                          "properties": {
+                            "destinations": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "host": {
+                                    "maxLength": 253,
+                                    "minLength": 3,
+                                    "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                    "type": "string"
+                                  },
+                                  "port": { "const": 443, "type": "number" }
+                                },
+                                "required": ["host", "port"],
+                                "type": "object"
+                              },
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": ["destinations"],
+                          "type": "object"
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -18009,6 +18304,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"
@@ -18549,6 +18845,32 @@
                           "description": "Gateway managed mode requested for this Agent version. It does not report Gateway runtime state.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "additionalProperties": false,
+                          "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                          "properties": {
+                            "destinations": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "host": {
+                                    "maxLength": 253,
+                                    "minLength": 3,
+                                    "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                    "type": "string"
+                                  },
+                                  "port": { "const": 443, "type": "number" }
+                                },
+                                "required": ["host", "port"],
+                                "type": "object"
+                              },
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": ["destinations"],
+                          "type": "object"
+                        },
                         "harness": {
                           "additionalProperties": false,
                           "properties": {
@@ -18775,6 +19097,7 @@
                         "configurationGeneration",
                         "configuration",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "harness",
                         "compute",
                         "harnessAuth",
@@ -23355,6 +23678,32 @@
                               "description": "Gateway managed mode requested for this Agent version. It does not report Gateway runtime state.",
                               "type": "boolean"
                             },
+                            "gatewayOutbound": {
+                              "additionalProperties": false,
+                              "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                              "properties": {
+                                "destinations": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "host": {
+                                        "maxLength": 253,
+                                        "minLength": 3,
+                                        "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                        "type": "string"
+                                      },
+                                      "port": { "const": 443, "type": "number" }
+                                    },
+                                    "required": ["host", "port"],
+                                    "type": "object"
+                                  },
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              },
+                              "required": ["destinations"],
+                              "type": "object"
+                            },
                             "harness": {
                               "additionalProperties": false,
                               "properties": {
@@ -23586,6 +23935,7 @@
                             "configurationGeneration",
                             "configuration",
                             "gatewayManagedMode",
+                            "gatewayOutbound",
                             "harness",
                             "compute",
                             "harnessAuth",
@@ -23620,6 +23970,7 @@
                                 },
                                 "field": {
                                   "anyOf": [
+                                    { "const": "gatewayOutbound", "type": "string" },
                                     { "const": "plugins", "type": "string" },
                                     { "const": "pluginApprovers", "type": "string" },
                                     { "const": "repositoryBindings", "type": "string" },
@@ -25502,6 +25853,32 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "additionalProperties": false,
+                          "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                          "properties": {
+                            "destinations": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "host": {
+                                    "maxLength": 253,
+                                    "minLength": 3,
+                                    "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                    "type": "string"
+                                  },
+                                  "port": { "const": 443, "type": "number" }
+                                },
+                                "required": ["host", "port"],
+                                "type": "object"
+                              },
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": ["destinations"],
+                          "type": "object"
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -25704,6 +26081,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"
@@ -26082,6 +26460,32 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "additionalProperties": false,
+                          "description": "Additional exact canonical DNS hosts on TCP/443 for dedicated Agents. Defaults empty. Setting destinations requires update and administer on the exact Agent; deployment snapshots the list.",
+                          "properties": {
+                            "destinations": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "host": {
+                                    "maxLength": 253,
+                                    "minLength": 3,
+                                    "pattern": "^(?![0-9.]+$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[.][a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+                                    "type": "string"
+                                  },
+                                  "port": { "const": 443, "type": "number" }
+                                },
+                                "required": ["host", "port"],
+                                "type": "object"
+                              },
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": ["destinations"],
+                          "type": "object"
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -26284,6 +26688,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"

@@ -5,107 +5,202 @@ rfc: ../rfcs/0024-gateway-outbound-proxy-reuse.md
 # Implementation plan: Gateway outbound destination control via a standalone OpenShell proxy
 
 - **ID:** RFC-0024
-- **Delivery status:** Partially implemented; real-cluster acceptance pending
-- **Owner:** RFC author and assigned implementation contributors
+- **Delivery status:** In progress
 - **Authority:** [Submitted RFC-0024](../rfcs/0024-gateway-outbound-proxy-reuse.md)
-- **Upstream comparison base:** `33c47d4099ec27d7c73abe50137a95cdf6abdecd`
-- **Implementation source:** `85018ba5b7e5b93d4054184f1331923c9328dada`
+- **PR:** [24](https://github.com/raw-labs/openclaw-enterprise/pull/24), retained as a draft until required verification is complete
+- **RFC clarification:** `72fa7ce820fe53ad3cd5aee248a8aaea9d4da72b`; SHA-256 `f803e741835ae7b1af4ade63678e04f1d36646171ba4f2d6200fafb6d00300ac`. The author authorized the ownership clarification on 2026-10-29; requirements and acceptance criteria are unchanged.
 
 ## Outcome and scope
 
-Deliver a standalone experimental draft in
-[PR 24](https://github.com/raw-labs/openclaw-enterprise/pull/24), without merging.
-Make external requests from Gateway-hosted plugins, Channels and integrations
-work through the existing OpenShell proxy and configurable destination policy.
-The Gateway connects to a Service for a separate proxy Pod, which contains a TCP
-relay and OpenShell's loopback-only network proxy. Kubernetes must block direct
-Internet connections from the Gateway. Gateway and Harness placement stays unchanged.
-See the [RFC request example and architecture](../rfcs/0024-gateway-outbound-proxy-reuse.md#one-request-before-and-after).
-This plan does not record RFC acceptance or production support.
+Implement the RFC through the regular Agent authoring, deployment, activation,
+replacement and stop workflow. Preserve the RFC requirements and the authorized
+ownership clarification. Each dedicated Gateway in
+a single-cluster Kubernetes deployment uses its revision's OpenShell proxy for
+external HTTPS, including Slack. Embedded networking and separate execution
+clusters keep their existing behavior.
 
-### Dedicated path and embedded compatibility
+Agent settings hold additional destinations. Enabled Channels contribute their
+own requirements. OCC saves these inputs and the effective policy in each Agent
+revision. Installation configuration supplies the selected implementation and
+network restrictions. Gateway and Harness placement and protected Harness
+operations remain intact.
 
-Implement destination control for opt-in dedicated, single-cluster execution.
-Create a separate proxy Pod and policy for each Agent revision through the regular
-Agent deployment workflow. Include the hosts required by enabled Channels, keep
-policies separate between Agents, and block direct bypass. Integration credentials
-and external TLS verification remain in the Gateway; model credentials remain in
-the separate Harness.
+## Implementation sequence
 
-The connectivity goal permits an initially permissive compatibility policy.
-The implemented configuration instead accepts exact administrator DNS hosts on
-TCP/443 and trusted Channel suffix wildcards; it has no allow-all setting.
-Do not treat that implementation limit or proxy environment variables as proof
-that required native clients work.
+### 1. Agent settings, authorization and persistence
 
-Keep embedded execution unchanged. Compatibility with its existing placement and
-networking does not establish destination control for embedded Gateways.
+- [x] Add `gatewayOutbound.destinations` to Agent create, provision,
+      preflight and update contracts, using an empty default list and exact DNS
+      hosts on TCP/443.
+- [x] Authorize destination writes with `update` and `administer` on the
+      exact Agent. Preserve attributable mutations and denials.
+- [x] Persist the desired list through the Agent repository and PostgreSQL.
+      Snapshot it into the immutable revision at deployment.
+- [x] Permit an outbound-only update. Keep native OpenClaw Configuration and
+      plugin installation separate from the additional-host setting.
 
-The [source flow](../../docs/flows/gateway-outbound-destinations.md) describes the
-current draft callers. The [QA procedure](../../docs/testing/gateway-outbound-destinations.md)
-owns required inputs, commands, cleanup, and the detailed deferred acceptance list.
-Stock proxy/relay Docker proof is available; no live Kubernetes enforcement proof is available. Required integration outcomes keep
-delivery incomplete even when helpers or selection checks pass.
+Owners: [Agent contracts](../../packages/contracts/src/index.ts),
+[API schemas](../../packages/contracts/src/api/common.ts),
+[OCC](../../packages/occ/src/index.ts),
+[PostgreSQL state](../../packages/occ/src/state/postgres-state.ts) and
+[Agent routes](../../apps/controller/src/http/agents.ts).
 
-## Contract and source touchpoints
+### 2. Console and CLI authoring
 
-- [Shared destination contracts](../../packages/contracts/src/gateway-destinations.ts):
-  destination-policy validation and proxy-resource lifecycle, separate from
-  credential exchange and Harness provisioning.
-- [Channel contribution](../../apps/controller/src/drivers/channel/slack.ts):
-  trusted provider requirements. Administrator inputs remain exact DNS TCP/443;
-  trusted Channel suffix wildcards are not administrator wildcard support.
-- [Credential Proxy registration](../../apps/controller/src/drivers/egress-proxy/openshell-registration.ts)
-  and [destination admission](../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts):
-  selected capability identity, stock image/policy pins, and immutable plan.
-- [Sandbox attachment](../../apps/controller/src/drivers/sandbox/gateway-proxy-attachment.ts):
-  proxy-only Pod with stock loopback OpenShell network proxy and stock socat relay;
-  no Gateway, Harness, workspace, credential material, or workload enrollment.
-- [Kubernetes Compute](../../apps/controller/src/drivers/compute/kubernetes/index.ts):
-  regular revision admission, preparation, routing, activation, stop, and retirement.
-  NetworkPolicy/CNI enforcement and trusted label writers remain prerequisites.
-- [Real integration scenario](../../tests/integration/sandbox-driver-openshell-k3d-real.test.mjs),
-  [QA selection](../../tests/helpers/qa-selection.mjs), and
-  [QA manifest](../../scripts/ci/test-suites/qa-matrix.json): explicit
-  `gateway-destinations` scenario, not default advisory coverage.
+- [x] Expose the dedicated Agent's additional destinations in existing authoring
+      workflows, including empty, saving, error and permission-denied states.
+- [x] Support the same setting through CLI create/update input and document the
+      required Agent permissions.
+- [ ] Update Storybook stories and browser coverage. Capture final screenshots
+      and an interaction video outside the checkout and upload reviewer-accessible
+      evidence to the PR.
 
-## Implementation
+Owners: [Console](../../apps/controller/src/console/agents),
+[CLI](../../internal/occcli) and
+[Storybook](../../scripts/console-storybook).
 
-1. Implement the destination-only capability contracts and retain draft-only scope. Refuse
-   combined protected execution or repository authority for this destination-only
-   selection. Preserve the regular Harness credential path and embedded behavior.
-2. Register OpenShell's policy validation together with the Sandbox Driver operation
-   that creates the proxy Pod, Service, policy files and network rules. Save the complete
-   plan in Compute revision admission, compare it
-   on retries, and refuse changed identity, policy, images, or attachment settings.
-3. Prepare and observe the exact proxy-only Pod before Gateway release. Verify
-   immutable files, actual stock policy-engine readiness, observed image identity,
-   and fail-closed behavior on tampering or missing dependencies.
-4. Keep Gateway/Harness placement and transports unchanged. Prove reciprocal
-   revision selectors and mandatory CNI routing; prevent ordinary channel/model
-   policies or alternate proxies from adding a bypass. Fence the Gateway before
-   terminating the old proxy and its established connections.
-5. Run the explicit QA journey using authorized disposable infrastructure and real
-   credentials. Extend proof to every deferred RFC condition. Do not replace
-   missing prerequisites with a fake proxy, fake cluster, or invented receipt.
-6. Keep architecture status, current contract caveats, flow, QA procedure, and
-   navigation accurate. Retain the experiment as **UNVERIFIED** until evidence
-   supports a narrower claim. No merge is authorized by this plan.
+### 3. Policy admission and protected-operation coexistence
 
-These steps describe remaining delivery and validation work; source files already
-present do not mark a step complete. Real runtime dependencies and credentials
-block acceptance, not further source review or documentation work.
+- [ ] Replace the shared administrator-host input with the destination list saved
+      in the Agent revision. Add only that Agent's enabled Channel requirements.
+- [ ] Save the effective destinations, policy, implementation identities and
+      attachment settings in immutable revision admission. Reconcile from the
+      saved policy rather than current desired settings.
+- [ ] Compose Gateway destination control with existing protected Harness and
+      repository operations in the selected paired Drivers. Use separate proxy
+      instances and permissions for the Gateway and Harness paths.
+- [ ] Preserve other required Compute admission facts when destination admission
+      is present. Refuse unsupported or changed capability identities.
 
-## Verification
+Owners: [destination contracts](../../packages/contracts/src/gateway-destinations.ts),
+[OpenShell registration](../../apps/controller/src/drivers/egress-proxy/openshell-registration.ts),
+[destination admission](../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts),
+[Slack Channel](../../apps/controller/src/drivers/channel/slack.ts) and
+[Kubernetes Compute](../../apps/controller/src/drivers/compute/kubernetes/index.ts).
 
-| Required outcome                            | Real check and prerequisites                                                                                    | Result or remaining proof                                                                      |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Policy and proxy resources for the revision | Ordinary API admission, PostgreSQL revision, worker preparation; exact selected pair and stock assets           | Scenario assertions exist; not run.                                                            |
-| Allowed and refused traffic                 | Real Gateway CONNECT with TLS and independent marker; host/port denials; real Channel/WebSocket traffic         | Basic HTTPS assertions exist; not run. Channel/WebSocket proof deferred.                       |
-| No bypass or access to another Agent proxy  | Enforcing CNI, positive controls, all matching policies, proxy variables removed, cross-Agent/revision attempts | TCP/443/isolation assertions exist; not run. Other protocols/address cases deferred.           |
-| Failure and cleanup                         | Tamper, proxy/relay outage, replacement, stop, measured established-connection closure                          | Outage/resource-removal assertions exist; not run. Tamper and connection-close proof deferred. |
-| Existing execution remains intact           | Actual Harness/model/workspace access and unchanged placement before/after replacement                          | Assertions exist; not run.                                                                     |
-| Document consistency                        | Flow validator, local/source links, navigation and length checks; no runtime tests for prose                    | Record actual results in the task handoff; no enforcement claim.                               |
+### 4. Mandatory routing and connection lifecycle
+
+- [ ] Require the selected capability for every dedicated single-cluster Gateway.
+      Remove its old Slack-proxy route and prevent alternate external grants.
+- [ ] Prepare the revision's proxy before starting the Gateway. Verify ownership,
+      immutable policy, pinned images and actual OpenShell readiness.
+- [ ] Enforce reciprocal revision-specific Gateway/proxy peers, DNS access and
+      proxy TCP/443 egress with private and infrastructure address exclusions.
+- [ ] Preserve native TLS verification and support the Gateway's HTTP and
+      WebSocket clients through the explicit proxy.
+- [ ] Stop the old Gateway, remove its proxy and wait for its Pods and established
+      connections to disappear before reporting cleanup. Preserve other Agents
+      and the successor revision.
+- [ ] Retain the control-plane Slack proxy for token validation and directory
+      lookups, including before any Agent is deployed.
+
+Owner: [Sandbox proxy attachment](../../apps/controller/src/drivers/sandbox/gateway-proxy-attachment.ts)
+and the existing Compute and installation composition paths.
+
+### 5. Verification and publication
+
+- [x] Extend the regular API/PostgreSQL Agent workflow for destination writes,
+      permission denials, audit evidence, persistence and immutable revisions.
+- [ ] Extend the existing real OpenShell Kubernetes journey for different
+      destinations on two Agents, Channel requirements, allowed/denied traffic,
+      bypass prevention, outages, tampering, replacement and connection closure.
+- [ ] Prove protected Harness operations alongside Gateway destination control
+      and unchanged control-plane Slack operations.
+- [ ] Run focused tests, typecheck, lint, formatting, workspace, OpenAPI and
+      documentation checks with the installed toolchain. Record missing
+      prerequisites and skipped checks explicitly.
+- [ ] Update current references, the source-backed flow and QA instructions from
+      the final implementation. Complete independent review and final-head CI.
+- [ ] Publish only task-owned changes to the existing PR branch. Verify that the
+      RFC's bytes are unchanged. Keep the PR unmerged unless separately authorized.
+
+## Verification evidence
+
+Required proof follows the [RFC acceptance criteria](../rfcs/0024-gateway-outbound-proxy-reuse.md#acceptance-criteria).
+A source change, unit test, fixture or skipped integration is not live enforcement
+proof. Keep each result tied to the tested revision and environment.
+
+| Requirement                                                  | Supported verification path                                                                     | Current result                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent permissions and immutable revisions                    | Production API, native IAM and real PostgreSQL through the Agent workflow                       | API: 1 passed; PostgreSQL: 1 passed, no skips, on the working implementation based on `fae0c334f`                                                                                                                                                     |
+| Console and CLI authoring                                    | Browser interaction, rebuilt Storybook, CLI requests and uploaded screenshots/video             | Browser: 3 passed, no skips; complete Go CLI package passed. Rebuilt preview captures reviewed and [uploaded](https://gist.github.com/miguelbranco80/dcd6de78c1d0d226d7961a71009cb97a). Full Storybook manager build blocked by missing dependencies. |
+| Distinct Agent policies and Channel grants                   | Real Agent admission and worker deployment with two destination lists                           | Pending                                                                                                                                                                                                                                               |
+| Gateway and protected Harness coexistence                    | Selected paired OpenShell Drivers and actual protected requests                                 | Pending                                                                                                                                                                                                                                               |
+| HTTPS, Slack API and Socket Mode                             | Actual Gateway clients and authorized upstream credentials                                      | Docker native-client transport passed; authenticated Slack events and Kubernetes routing remain unrun                                                                                                                                                 |
+| Network bypass, address exclusions and cross-Agent isolation | Disposable Kubernetes cluster with enforcing NetworkPolicies and positive connectivity controls | Pending                                                                                                                                                                                                                                               |
+| Outages, tamper, replacement and connection closure          | Regular stop/replacement workflow and measured established tunnels                              | Pending                                                                                                                                                                                                                                               |
+| Control-plane networking                                     | Slack validation/directory before and alongside Agent deployment                                | Pending                                                                                                                                                                                                                                               |
+| Static and documentation checks                              | Typecheck, lint, formatting, workspace, OpenAPI, local links and flow validation                | Pending                                                                                                                                                                                                                                               |
+
+The [source flow](../../docs/flows/gateway-outbound-destinations.md) owns the runtime
+trace. The [QA procedure](../../docs/testing/gateway-outbound-destinations.md) owns
+infrastructure, credentials, commands and cleanup. Record results here as each
+required proof completes; missing infrastructure or credentials keeps that item
+incomplete.
+
+### Local checks on the working implementation
+
+2026-10-29, source based on `72fa7ce82` plus the task-owned working tree:
+
+- Kubernetes Compute, configuration startup, Sandbox startup and Agent API batch:
+  **570 passed, no failures, 1 skipped** across 571 tests. The skip required the
+  native runtime image. Repeating Sandbox startup with the verified cached image
+  produced **126 passed, no skips**, including that initializer case. The batch
+  includes all 396 Kubernetes Compute cases. Kubernetes observations are simulated;
+  these results do not establish live CNI enforcement.
+- Full installation-profile suite with Helm: **84 passed, no skips**. This includes
+  dependency-free checkout rendering, explicit Gateway pair inputs, native repository
+  selection, control-plane Slack and refusal of a dedicated shared-proxy input.
+- Native-client Docker integration: **1 passed, no skips** with pinned stock proxy
+  images and local runtime image `ab8155103b74` (OpenClaw source `762a2fe60`). Built-in
+  fetch/HTTPS, unauthenticated Slack `api.test` and Socket Mode WebSocket transport
+  against a public echo endpoint passed; denied hosts and relay/proxy outages
+  refused those clients. This is not authenticated Slack or live Kubernetes proof.
+- Agent API authoring integration: **1 passed**, included in the batch. It exercises
+  exact-Agent update/administer checks, audit and saved settings with in-memory state.
+- Earlier fresh PostgreSQL authoring integration: **1 passed, no skips**, after an
+  administrator created the database and a migrator applied the schema. The limited
+  application role ran the test. This does not establish real Agent deployment.
+- Earlier Console browser workflow: **3 passed, no skips** with in-memory state.
+  Rebuilt simulated preview fingerprint `5ad391ab1cefce3d` remains unchanged.
+  Screenshots and a 21-second interaction video are uploaded in the PR. The full
+  Storybook manager build is blocked by absent Storybook dependencies.
+- Go CLI package: passed with cached Go 1.27.3 and dependency downloads disabled.
+  The cases establish JSON transport and output, not live-controller persistence.
+- Final lint, formatting, application/test typecheck, workspace isolation, OpenAPI
+  generation check, CI selection audit, flow validation and diff checks passed.
+- Independent P0–P2 autoreview remains **unavailable**. The frozen-candidate attempt
+  returned HTTP 401 with no validated report; the current reviewer CLI reports no
+  login. No review approval is claimed.
+- Canonical documentation build/length checks remain blocked by the missing
+  `@sindresorhus/slugify` dependency. No dependencies were installed. The profile
+  guide and networking reference remain coherent single-topic pages; redundant
+  experiment detail links to the flow instead of expanding those references.
+
+## Installation inputs and live-proof blockers
+
+`drivers.credential_proxy.usage: gateway` selects the existing paired capabilities
+for Gateway networking without selecting Harness or repository credential delivery.
+Execution selection remains the default and keeps its existing custody checks.
+Gateway-only selection refuses credential authority, provider custody, Credential
+Gateway/Refresh selection and protected repository transport configuration.
+
+The dedicated profile requires an explicit `gatewayProxy` input with Backend,
+Sandbox and Credential Proxy configurations and infrastructure CIDRs. It does not
+invent endpoints, RuntimeClasses or workspace settings. The Backend can own the
+Gateway pair without a Credential Gateway. API and worker register that owner
+without selecting its execution capabilities. The renderer keeps native Git
+delivery and control-plane Slack unchanged.
+
+These source paths still require complete final regression and deployment proof.
+Existing OpenShell Harness production qualification retains its documented
+listener and identity limits; Gateway-only proxy management does not call the
+OpenShell management service or qualify that separate Harness path.
+
+The live acceptance run additionally needs a fresh enforcing Kubernetes lane,
+approved image provenance, authorized model and Slack credentials, independently
+controlled public probes and complete infrastructure address exclusions. The
+existing unrelated local cluster is not a prepared or qualified substitute.
 
 ## Delivery record
 
@@ -131,6 +226,13 @@ request, the actual Pods and processes, and dedicated versus embedded behavior.
 Aligned the PR description and flow overview. Source implementation and recorded
 runtime results are unchanged; actual-Gateway client compatibility and enforced
 Kubernetes networking remain unproved.
+
+2026-10-28: Made the proposed Credential Proxy extension explicit and separated
+it from the bundled OpenShell topology. Replaced the Slack success example with
+a non-Slack request that the existing proxy refuses. Recorded which Gateway route
+changes and which API/ordinary Slack consumers remain. Marked combined credential
+and general HTTPS proxying as unresolved and unimplemented, not merely unverified.
+No runtime behavior changed.
 
 ## Manual Notes
 

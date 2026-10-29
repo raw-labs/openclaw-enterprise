@@ -224,6 +224,7 @@ export interface InstallationRuntimeDrivers {
   readonly credentialGatewayDriver?: CredentialGatewayDriver;
   readonly credentialRefreshDriver?: CredentialRefreshDriver;
   readonly protectedDriver?: InstalledDriver;
+  readonly gatewayProxyDriver?: InstalledDriver;
   readonly proxyDriver?: CredentialProxyDriver;
   /** Present only when this registration owns protected repository delivery. */
   readonly repositoryGitDriver?: InstalledDriver;
@@ -740,12 +741,33 @@ export async function loadInstallationConfiguration(options: {
   let packageProxyId: string | undefined;
   let egressAuthority: EgressAuthorityConfiguration | undefined;
   let credentialProxyCapacity: CredentialProxyCapacity | undefined;
+  const gatewayProxyOnly = asRecord(drivers.credential_proxy)?.usage === "gateway";
   let preparedGitHubKeyPath: string | undefined;
   let preparedGitHubOrigin: string | undefined;
   let preparedGitHubCa: Buffer | undefined;
   if (drivers.credential_proxy !== undefined) {
     const selection = object(drivers.credential_proxy, "drivers.credential_proxy");
-    closed(selection, ["id", "configuration", "requestCapacity"], "drivers.credential_proxy");
+    closed(
+      selection,
+      ["id", "configuration", "requestCapacity", "usage"],
+      "drivers.credential_proxy",
+    );
+    if (
+      selection.usage !== undefined &&
+      !["gateway", "execution"].includes(String(selection.usage))
+    ) {
+      throw new Error("drivers.credential_proxy.usage must be gateway or execution.");
+    }
+    if (
+      gatewayProxyOnly &&
+      (drivers.credential_gateway !== undefined ||
+        drivers.credential_refresh !== undefined ||
+        repositoryTransportConfiguration !== undefined)
+    ) {
+      throw new Error(
+        "Gateway-only proxy selection cannot select Harness credential or protected repository delivery.",
+      );
+    }
     // OCC's request registry, not the Driver, owns these bounds: they apply to any Driver.
     credentialProxyCapacity = credentialProxyCapacityConfiguration(
       selection.requestCapacity === undefined ? {} : selection.requestCapacity,
@@ -764,7 +786,11 @@ export async function loadInstallationConfiguration(options: {
         egress,
         options.mode,
         repositoryTransportConfiguration,
+        gatewayProxyOnly,
       );
+      if (gatewayProxyOnly && configuredProxy.policy.gatewayDestinations === undefined) {
+        throw new Error("Gateway-only proxy selection requires gatewayDestinations configuration.");
+      }
       if (
         configuredProxy.repository &&
         (!sandboxSelection || selection.id !== sandboxSelection.id)
@@ -876,10 +902,11 @@ export async function loadInstallationConfiguration(options: {
   const sshCompute = computePackage === undefined && computeSelection.id === "compute-ssh";
   const kubernetesCompute = computePackage === undefined && !sshCompute;
   const repositoryDeliveryMode = selectGitHubRepositoryDelivery(repositoryConfiguration, {
-    externalProxy: packageProxyId !== undefined,
-    bundledProxy: proxySelection !== undefined,
-    sandbox: sandboxSelection !== undefined,
-    bundledSandbox: sandboxSelection !== undefined && sandboxSelection.package === undefined,
+    externalProxy: !gatewayProxyOnly && packageProxyId !== undefined,
+    bundledProxy: !gatewayProxyOnly && proxySelection !== undefined,
+    sandbox: !gatewayProxyOnly && sandboxSelection !== undefined,
+    bundledSandbox:
+      !gatewayProxyOnly && sandboxSelection !== undefined && sandboxSelection.package === undefined,
     openShellBackend: openShellBackend !== undefined,
     kubernetes: kubernetesCompute,
   });
@@ -1051,7 +1078,7 @@ export async function loadInstallationConfiguration(options: {
     // ServicePrincipal credentials. A Sandbox Driver may instead use its own infrastructure
     // identity (plan 0044), so only Sandbox-backed installs may disable it (finding 1753).
     if (
-      sandbox === undefined &&
+      (sandbox === undefined || gatewayProxyOnly) &&
       kubernetes.servicePrincipalCredentials.mode !== "projectedServiceAccountToken"
     ) {
       throw new InstallationFieldError([
@@ -1177,6 +1204,7 @@ export async function loadInstallationConfiguration(options: {
           tokenService,
         );
   let protectedDriver: InstalledDriver | undefined;
+  let gatewayProxyDriver: InstalledDriver | undefined;
   let sandboxDriver: SandboxDriver | undefined;
   if (sandbox !== undefined && proxySelection !== undefined) {
     if (sandboxPackage !== undefined) {
@@ -1228,7 +1256,18 @@ export async function loadInstallationConfiguration(options: {
         { sandbox: sandbox.id, credential_proxy: proxySelection.id },
       );
     }
-    sandboxDriver = protectedDriver.require("sandbox");
+    gatewayProxyDriver = protectedDriver;
+    if (gatewayProxyOnly) {
+      if (
+        !gatewayProxyDriver.require("sandbox").gatewayProxy ||
+        !gatewayProxyDriver.require("credential_proxy").gatewayDestinations
+      ) {
+        throw new Error("Gateway-only selection requires both paired Gateway proxy capabilities.");
+      }
+      protectedDriver = undefined;
+    } else {
+      sandboxDriver = protectedDriver.require("sandbox");
+    }
   } else {
     sandboxDriver =
       sandbox === undefined
@@ -1289,6 +1328,7 @@ export async function loadInstallationConfiguration(options: {
         ...(sandboxDriver === undefined ? {} : { sandboxDriver }),
         ...(credentialGatewayDriver === undefined ? {} : { credentialGatewayDriver }),
         ...(protectedDriver === undefined ? {} : { protectedDriver }),
+        ...(gatewayProxyDriver === undefined ? {} : { gatewayProxyDriver }),
         preparedTokens: tokenService,
         ...(preparedRepositoryGit === undefined || repositoryTransport || repositoryGitDriver
           ? {}
@@ -1332,6 +1372,7 @@ export async function loadInstallationConfiguration(options: {
     ...(protectedDriver === undefined
       ? {}
       : { protectedDriver, proxyDriver: protectedDriver.require("credential_proxy") }),
+    ...(gatewayProxyDriver === undefined ? {} : { gatewayProxyDriver }),
     ...(repositoryGitDriver && { repositoryGitDriver }),
     tokenService,
     ...(preparedGitHub === undefined ? {} : { preparedGitHub }),

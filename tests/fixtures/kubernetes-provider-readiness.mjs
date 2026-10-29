@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
+import { gatewayProxyApiFixture } from "./gateway-proxy-api.mjs";
 import { admitLoggingConfiguration } from "../../packages/contracts/src/index.ts";
-import {
-  KubernetesComputeDriver,
-  kubernetesNamespaceName,
-} from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
+import { kubernetesNamespaceName } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
 import {
   tenant,
   digest,
   preparedAuth,
   routedOptions,
   routedRevision,
+  createRoutedKubernetesComputeDriver,
   labelSelectorLabels,
 } from "../helpers/kubernetes-routed-scenarios.mjs";
 
@@ -35,7 +34,7 @@ export function providerReadinessFixture({
   nodeEnrollment,
   workspaceNodePeerLabels = async ({ revision }) => supervisorPeerLabels(revision.id),
 } = {}) {
-  const driver = new KubernetesComputeDriver(
+  const driver = createRoutedKubernetesComputeDriver(
     routedOptions({
       runtime: {
         transportSecretPrefix: "transport",
@@ -193,7 +192,24 @@ export function providerReadinessFixture({
   };
   // Only the Kubernetes transport returns fixture data. Candidate selection, validation,
   // request cancellation, and revision activation all execute the production driver.
-  driver.apiClients = Promise.resolve({ core });
+  const policies = new Map();
+  driver.apiClients = Promise.resolve({
+    core,
+    objects: gatewayProxyApiFixture(),
+    networking: {
+      async readNamespacedNetworkPolicy({ name, namespace }) {
+        const policy = policies.get(namespace + "/" + name);
+        if (!policy) {
+          throw Object.assign(new Error("not found"), { statusCode: 404 });
+        }
+        return structuredClone(policy);
+      },
+      async patchNamespacedNetworkPolicy({ body }) {
+        policies.set(body.metadata.namespace + "/" + body.metadata.name, structuredClone(body));
+        return body;
+      },
+    },
+  });
   return {
     driver,
     revision,

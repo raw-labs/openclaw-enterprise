@@ -44,7 +44,9 @@ const agentCreateExample = `  cat > agent.json <<'JSON'
 JSON
   occ agent create --file agent.json
 
-  Add harnessAuth to select model authentication. See
+  Add harnessAuth to select model authentication. Dedicated Agents start with no
+  additional Gateway outbound hosts. After creation, use occ agent update to
+  approve hosts with update and administer on the exact Agent. See
   https://docs-enterprise.openclaw.org/reference/agents/`
 
 const credentialSourceCreateExample = `  cat > credential-source.json <<'JSON'
@@ -89,10 +91,21 @@ const agentUpdateExample = `  cat > agent.json <<'JSON'
 JSON
   occ agent update <agent-id> --file agent.json
 
-  Each update names configurationId or gatewayManagedMode (or both); send
+  Each update names configurationId, gatewayManagedMode or gatewayOutbound; send
   configurationId also when you change only harnessAuth: copy it from
   occ agent get <agent-id>. Changing gatewayManagedMode needs Installation
-  administer. Omitted harnessAuth, executionMode, backendId, plugins and
-  gatewayManagedMode keep their saved values; "harnessAuth": null clears the
-  binding. The update changes the draft only; deploy to use it. See
+  administer. Omitted harnessAuth, executionMode, backendId, plugins,
+  gatewayManagedMode and gatewayOutbound keep their saved values.
+  "harnessAuth": null clears the binding. For a dedicated Agent, approve additional Gateway HTTPS hosts separately
+  from native Configuration:
+
+  cat > outbound.json <<'JSON'
+  {"gatewayOutbound": {"destinations": [{"host": "api.example.com", "port": 443}]}}
+JSON
+  occ agent update <agent-id> --file outbound.json
+
+  Changing gatewayOutbound requires update and administer on that exact Agent.
+  Use {"gatewayOutbound": {"destinations": []}} to clear additional hosts.
+  Enabled Channels add their required hosts automatically. Omitted settings keep
+  their saved values. The update changes the draft only; deploy to use it. See
   https://docs-enterprise.openclaw.org/reference/agents/`

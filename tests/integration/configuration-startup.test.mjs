@@ -2812,3 +2812,112 @@ test("closed Installation observes only its operator-bound Namespace, including 
   });
   assert.deepEqual(writes, []);
 });
+
+test("Gateway-only paired selection preserves native repository delivery and Compute-owned Harness admission", async (t) => {
+  // Load both configurations through production startup. The added pair may own
+  // Gateway networking, but must not become an OCC credential or Harness owner.
+  const { configuration } = await repositoryInstallation(t);
+  const { gatewayRouting } = await import("../helpers/kubernetes-routed-scenarios.mjs");
+  configuration.drivers.compute.configuration.gatewayRouting = gatewayRouting;
+  delete configuration.drivers.compute.configuration.network.gatewayClients;
+  const native = await loadInstallationConfiguration({
+    mode: "production",
+    environment: { OCC_CONFIG_PATH: await fixture(t, configuration) },
+  });
+  const { createCredentialProxyInstallationConfiguration } =
+    await import("../helpers/installation-driver-configuration.mjs");
+  const pair = createCredentialProxyInstallationConfiguration();
+  const { STOCK_GATEWAY_PROXY } =
+    await import("../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts");
+  const { fileURLToPath } = await import("node:url");
+  delete pair.backend[0].drivers.credential_gateway;
+  configuration.backend.push(pair.backend[0]);
+  configuration.drivers.sandbox = pair.drivers.sandbox;
+  configuration.drivers.credential_proxy = {
+    id: pair.drivers.credential_proxy.id,
+    usage: "gateway",
+    configuration: {
+      middlewareName: "oce-gateway",
+      authorityScope: "execution",
+      gatewayDestinations: {
+        policyRulesPath: fileURLToPath(
+          new URL("../../deploy/runtime/gateway-proxy/sandbox-policy.rego", import.meta.url),
+        ),
+        supervisorImage: STOCK_GATEWAY_PROXY.supervisorImage,
+        relayImage: STOCK_GATEWAY_PROXY.relayImage,
+        blockedCidrs: ["10.0.0.0/8"],
+      },
+    },
+  };
+  const loaded = await loadInstallationConfiguration({
+    mode: "production",
+    environment: { OCC_CONFIG_PATH: await fixture(t, configuration) },
+  });
+  t.after(async () => {
+    await loaded.gatewayProxyDriver?.close();
+  });
+  assert.equal(loaded.sandboxDriver, undefined);
+  assert.equal(loaded.protectedDriver, undefined);
+  assert.equal(loaded.proxyDriver, undefined);
+  assert.equal(loaded.repositoryGitDriver, undefined);
+  assert.deepEqual(loaded.installation.repository, native.installation.repository);
+  const selection = { namespaceId: "ns_repository", bindings: [{ repositoryRef: "application" }] };
+  assert.deepEqual(
+    loaded.repositoryPolicy.resolve(selection),
+    native.repositoryPolicy.resolve(selection),
+  );
+  loaded.computeDriver.validateRepositoryCredentialSupport();
+  const { routedRevision } = await import("../helpers/kubernetes-routed-scenarios.mjs");
+  const revision = routedRevision(loaded.computeDriver);
+  const admission = loaded.computeDriver.admitRevision(revision);
+  const facts = JSON.parse(admission.slice("kubernetes:v1:".length));
+  assert.equal(revision.sandboxDriverId, undefined);
+  assert.equal(loaded.computeDriver.sandboxDriverForRevision(revision), undefined);
+  assert.equal(
+    facts.gatewayDestinations.driverId,
+    loaded.gatewayProxyDriver.require("credential_proxy").id,
+  );
+  assert.equal(facts.execution, undefined);
+  loaded.computeDriver.validateExecutionAdmission(revision);
+
+  const { createConsoleAppFixture } = await import("../helpers/console-app.mjs");
+  const { installationDriverConfigurations } =
+    await import("../../apps/controller/src/composition/installation-config.ts");
+  let state;
+  const f = await createConsoleAppFixture(t, {
+    wrapState(value) {
+      state = value;
+      return value;
+    },
+
+    computeDriver: loaded.computeDriver,
+    backends: loaded.installation.backend,
+    driverConfigurations: installationDriverConfigurations(loaded.installation),
+  });
+  await f.bootstrap();
+  f.controller.installDriver(loaded.gatewayProxyDriver, []);
+  f.controller.registerDriver(loaded.repositoryPolicy);
+  f.controller.selectDriver("repo", loaded.repositoryPolicy.id);
+  await f.controller.validateBackendConfiguration();
+  const namespace = await f.createNamespace("Independent Gateway owner");
+  // This API/admission proof starts with an already-provisioned tenant. It does
+  // not simulate Kubernetes provisioning or claim live workload execution.
+  await state.transact((unit) =>
+    unit.namespaces.transitionNamespaceStatus(namespace.id, namespace.status, "ready"),
+  );
+  const agent = await f.createAgent(
+    namespace.id,
+    "Independent Gateway owner",
+    createHarnessConfiguration("codex", "gpt-4.1"),
+    { executionMode: "dedicated" },
+  );
+  const path = "/namespaces/" + namespace.id + "/agents/" + agent.id;
+  const saved = await f.request("PATCH", path, {
+    body: { gatewayOutbound: { destinations: [{ host: "example.com", port: 443 }] } },
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.data.executionMode, "dedicated");
+  assert.deepEqual(saved.data.gatewayOutbound.destinations, [{ host: "example.com", port: 443 }]);
+  // Actual deployment also provisions Kubernetes runtime credentials. That proof
+  // belongs to the real cluster journey, not this in-memory authoring fixture.
+});

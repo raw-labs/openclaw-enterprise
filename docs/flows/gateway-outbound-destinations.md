@@ -1,6 +1,6 @@
 ---
 created: "2026-10-28"
-updated: "2026-10-28"
+updated: "2026-10-29"
 last_updated_session: "agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3"
 ---
 
@@ -15,8 +15,8 @@ must not be merged. The [implementation plan](../../specs/plans/0024-gateway-out
 tracks required acceptance evidence.
 
 Gateway-hosted integrations need external connections; a separate Harness's
-network access does not carry those requests. This experiment gives each dedicated
-Gateway an HTTP proxy endpoint without moving either workload. Requests pass from
+network access does not carry those requests. This experiment extends the selected Credential Proxy
+capability with destination policy, without moving either workload. Requests pass from
 the Gateway through a Kubernetes Service to a separate Pod containing a socat TCP
 relay and OpenShell's network proxy. OpenShell checks the destination; Kubernetes
 must block direct Internet access from the Gateway. Integration credentials and
@@ -28,7 +28,16 @@ revision stops. The [RFC](../../specs/rfcs/0024-gateway-outbound-proxy-reuse.md)
 explains the request path and why the existing platform interfaces own this work.
 Here, “proxy attachment” means the proxy Pod, Service, policy files and network rules;
 “paired” means the policy and resource-management implementations selected together.
-Neither term means that the Gateway runs inside an OpenShell sandbox.
+Neither term means that the Gateway runs inside an OpenShell sandbox. The selected OpenShell Credential Proxy retains its protected Harness operations
+and also admits Gateway destination policies. The Sandbox creates separate proxy
+instances for these paths; Gateway permission grants no protected credential authority.
+
+Every dedicated single-cluster Gateway uses the new route instead of the bundled
+Slack proxy. Compute clears the old Channel grant and projects the revision proxy
+address. The bundled Slack proxy remains available for control-plane credential
+validation and directory lookup; separate execution clusters retain their existing route. Enabled Channels
+remain refused in embedded mode. See the
+[Slack consumer paths](../guides/integrations/slack.md#configure-both-slack-proxies).
 
 The stock OpenShell/relay Docker test passes. Actual Gateway client compatibility,
 Channel/WebSocket traffic, Kubernetes enforcement and the complete Agent workflow
@@ -36,14 +45,15 @@ remain unverified. Source inspection and fixture results do not establish them.
 
 ## Entry Points
 
-- Trigger: authorized Agent deployment through the ordinary revision and worker
-  lifecycle, with trusted Compute `runtime.gatewayOutbound` configuration.
+- Trigger: an authorized Agent destination update followed by ordinary deployment
+  and worker reconciliation. Destination writes require exact-Agent `update` and
+  `administer`; deployment uses existing deployment permissions.
 - Admission: `apps/controller/src/drivers/compute/kubernetes/index.ts:admitRevision`.
 - Registration: `apps/controller/src/drivers/egress-proxy/openshell-registration.ts:createOpenShellCapabilities`.
 - Attachment: `apps/controller/src/drivers/sandbox/gateway-proxy-attachment.ts:openShellGatewayProxyAttachment`.
 - Scope: dedicated, single-cluster execution with the exact selected Sandbox and
-  destination-only Credential Proxy; no combined protected execution, egress plan,
-  or anonymous GitHub-read admission. Embedded execution is unchanged.
+  Credential Proxy. Protected Harness and repository admission facts coexist with
+  the Gateway policy. Embedded execution and separate execution clusters are unchanged.
 
 ## Flow
 
@@ -51,7 +61,11 @@ The arrows describe draft source calls. They do not show live enforcement proof.
 
 ```mermaid
 graph TD
-  A["Agent deployment"] --> B["Compute collects exact admin hosts<br/>and trusted Channel requirements"]
+  W["Agent destination PATCH"] --> P{"Exact Agent update<br/>and administer?"}
+  P -->|No| R["Refuse and audit denial"]
+  P -->|Yes| S["Persist desired destinations"]
+  S --> A["Agent deployment"]
+  A --> B["Compute collects saved Agent hosts<br/>and trusted Channel requirements"]
   B --> C{"Selected pair and<br/>revision supported?"}
   C -->|No| X["Refuse admission"]
   C -->|Yes| D["Proxy admits policy<br/>Compute freezes revision plan"]
@@ -72,10 +86,24 @@ Startup constructs these capabilities before Agent deployment. Registration does
 not admit a revision or perform its network operations.
 
 `apps/controller/src/drivers/egress-proxy/openshell-registration.ts:createOpenShellCapabilities`
-creates the paired views. Destination-only selection refuses repository or
-credential authority, passes attachment options to the Sandbox, and constructs
-`createOpenShellDestinationProxy`. Its credential-execution methods refuse calls;
-it does not manufacture a CredentialSource, protected execution, or receipt.
+creates the paired views, passes attachment options to the Sandbox, and constructs
+`OpenShellCredentialProxyDriver`. Its `gatewayDestinations` capability admits
+nonsecret Gateway policy while existing credential and repository methods retain
+their own authority checks and proxy instances.
+
+`apps/controller/src/composition/installation-config.ts:loadInstallationConfiguration`
+interprets `drivers.credential_proxy.usage: gateway` as attachment-only selection.
+API and worker register the pair without selecting its Sandbox or Credential Proxy
+for execution. Compute receives `gatewayProxyDriver` separately from its protected
+execution owner. The revision's Harness `sandboxDriverId` is not a Gateway proxy
+ownership field. Default execution usage retains its existing selection and
+credential authority checks. Both processes close the pair at shutdown.
+
+`scripts/render-installation-profile.mjs:renderGatewayProxy` requires explicit
+operator pair configurations and infrastructure ranges. It uses the portable
+Driver-owned `apps/controller/src/drivers/egress-proxy/gateway-destinations-configuration.ts:gatewayDestinationsOptions`
+validator, so rendering does not load the runtime dependency graph. API and worker
+startup validate the remaining Driver configuration and asset files.
 
 `packages/contracts/src/gateway-destinations.ts:GatewayDestinationControl`
 separates pure admission from `GatewayProxyAttachment.prepare/remove`. The Sandbox
@@ -84,8 +112,17 @@ The adapter checks stock asset hashes and digest-pinned supervisor/relay images.
 
 ### 2. Freeze destination permission in the revision
 
+`apps/controller/src/http/agents.ts:updateAgent` calls
+`packages/occ/src/index.ts:updateAgent`. OCC requires both `update` and
+`administer` on the exact Agent for an explicit destination write, including an
+empty list. Create, provision and preflight reject nonempty lists because no
+Agent exists yet to authorize. The API records successful mutations and
+authorization denials. `packages/occ/src/state/postgres-state.ts:updateConfiguration`
+saves the desired list in `occ.agents.gateway_outbound`; deployment saves a
+separate immutable copy in the revision.
+
 `apps/controller/src/drivers/compute/kubernetes/index.ts:gatewayDestinationRequirements`
-combines the administrator's exact DNS hosts on TCP/443 with requirements from
+combines the revision's saved `gatewayOutbound.destinations` on TCP/443 with requirements from
 one selected Channel contributor per enabled provider. Administrator wildcards
 are rejected. `apps/controller/src/drivers/channel/slack.ts:gatewayDestinations`
 contributes the apex and single-label wildcard forms of `slack.com`,
@@ -93,17 +130,25 @@ contributes the apex and single-label wildcard forms of `slack.com`,
 implementation contributions, not user-supplied wildcard grants or Slack channel IDs.
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:admitGatewayDestinations`
-checks the selected pair and revision scope.
+checks the selected pair and revision scope. It requires explicit Compute
+`network.infrastructureCidrs` and checks that the plan's IPv4 exclusions cover
+those ranges, built-in nonpublic ranges and configured literal infrastructure
+endpoints. `apps/controller/src/drivers/kubernetes/gateway-proxy-network.ts:gatewayProxyExclusionsCover`
+rejects missing coverage and partial overlap.
 `apps/controller/src/drivers/egress-proxy/gateway-destinations.ts:openShellGatewayDestinations`
 builds the policy and revision endpoint. Compute returns the serialized result
-under `gateway-destinations:v1:`;
-`packages/occ/src/index.ts:10495` saves it in the immutable Agent revision. The result
+under `kubernetes:v1:` as `gatewayDestinations`, beside optional `execution`
+admission facts, the paired Driver reference and each Channel's provider, Driver
+identity and required destinations. `packages/occ/src/index.ts:deployAgent` saves
+it in the immutable
+Agent revision with the additional destinations and Channel configuration. The result
 binds Namespace, Agent, revision, Driver identities, policy hash, attachment digest,
 and endpoint. The implementation admits at most 128 contributed entries.
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:gatewayDestinationPlan`
-re-admits the saved destinations and compares the complete result before use.
-It does not derive fresh permissions for a revision without that admission.
+checks the saved plan against the destinations and Channel configuration in that
+same revision. Missing admission refuses a dedicated single-cluster deployment;
+it does not restore an older Slack route.
 A changed selected capability or asset requires a new revision rather than a
 broader retry. Destination permission grants no credential, provider action,
 plugin identity, or tenant authorization.
@@ -127,8 +172,9 @@ listening relay alone is insufficient. The adapter also compares the observed
 container image identities with the pinned digests. A false readiness result
 keeps preparation pending. Unexpected ownership or configuration throws.
 
-The attachment authors DNS and public IPv4 TCP/443 egress, excluding built-in
-nonpublic ranges and configured infrastructure CIDRs. These rules require an
+The attachment authors DNS and public IPv4 TCP/443 egress using exactly the
+exclusions saved in `plan.egress.excludedCidrs`. It rechecks that plan against
+the selected assets and configuration before applying or deleting resources. These rules require an
 enforcing CNI and accurate cluster ranges. Stock OpenShell remains responsible
 for CONNECT/DNS decisions. No TLS interception or credential injection is added;
 the Gateway retains upstream certificate verification.
@@ -140,7 +186,8 @@ adds DNS, inbound Gateway access, configured private status ingress, and exact
 proxy-peer grants.
 The workload projection in `apps/controller/src/drivers/compute/kubernetes/index.ts`
 sets uppercase/lowercase proxy variables to the revision Service and sets
-`NO_PROXY` for loopback and required Harness names. Gateway Pods use
+`NO_PROXY` for loopback and required Harness names. It also sets
+`NODE_USE_ENV_PROXY=1` for the image's Node HTTP(S) and fetch clients. Gateway Pods use
 `gateway-destinations-v1`; ordinary channel/model grants select a different
 profile. Existing direct Harness and workspace-node transports retain their
 own grants. Secret environment bindings cannot override proxy variables. Neither
@@ -194,4 +241,6 @@ syntax-only checks cannot qualify the stock binary or CNI boundary.
 
 ## Changelog
 
+- 2026-10-29 16:36: Trace independent Gateway selection, exclusions and portable profile validation in the accompanying implementation. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - 72fa7ce820fe53ad3cd5aee248a8aaea9d4da72b)
+- 2026-10-29 12:35: Trace Agent-owned settings, composed admission and mandatory routing in the accompanying implementation. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - fae0c334f7736612e6d85a87ff419b9794384caa)
 - 2026-10-28 19:04: Trace experimental draft source and mark runtime acceptance unverified. (authoring-run/e4a4150b-1969-47ea-a5ab-88dc8b4a2061 - 45224b0b8ea6927e16d95c2e525ca182c28f365f)

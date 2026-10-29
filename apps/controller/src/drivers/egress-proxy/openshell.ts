@@ -65,6 +65,7 @@ function registeredWithoutExecution(extensions: unknown, registration: string): 
 }
 
 export interface OpenShellProxyOptions {
+  readonly gatewayDestinations?: OpenShellGatewayDestinationsOptions;
   readonly middlewareName: string;
   readonly repositoryMiddlewareName?: string;
   /** Installation operator promises a dedicated, operator-controlled stock 0.1.5 gateway. */
@@ -265,6 +266,7 @@ export class OpenShellCredentialProxyDriver implements CredentialProxyDriver {
   readonly implementation = "openshell";
   readonly id: string;
   readonly sourceControl: CredentialSourceControl;
+  readonly gatewayDestinations?: NonNullable<CredentialProxyDriver["gatewayDestinations"]>;
   readonly bindExchange?: NonNullable<CredentialProxyDriver["bindExchange"]>;
   readonly bindRepositoryGit?: NonNullable<CredentialProxyDriver["bindRepositoryGit"]>;
   private readonly previewEnforcement?: OpenShellGitRuntime["previewEnforcement"];
@@ -282,33 +284,14 @@ export class OpenShellCredentialProxyDriver implements CredentialProxyDriver {
       observedHookPreviewWorkspace: { type: "string" },
       authorityScope: { type: "string" },
     },
-    anyOf: [
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["gatewayDestinations"],
-        properties: { gatewayDestinations: { type: "object" } },
-      },
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["middlewareName", "authorityScope"],
-        properties: {
-          middlewareName: { type: "string", minLength: 1 },
-          repositoryMiddlewareName: { type: "string", minLength: 1 },
-          observedHookPreviewWorkspace: { type: "string", maxLength: 19, minLength: 1 },
-          authorityScope: { type: "string", const: "execution" },
-        },
-      },
-    ],
+    required: ["middlewareName", "authorityScope"],
   };
 
   static validateConfiguration(configuration: unknown): readonly ErrorDetail[] {
     const value = asRecord(configuration);
-    if (value?.gatewayDestinations !== undefined && Object.keys(value).length === 1) {
+    if (value?.gatewayDestinations !== undefined) {
       try {
         gatewayDestinationsOptions(value.gatewayDestinations);
-        return [];
       } catch {
         return [
           {
@@ -324,6 +307,7 @@ export class OpenShellCredentialProxyDriver implements CredentialProxyDriver {
       Object.keys(value).some(
         (key) =>
           ![
+            "gatewayDestinations",
             "middlewareName",
             "authorityScope",
             "repositoryMiddlewareName",
@@ -376,6 +360,16 @@ export class OpenShellCredentialProxyDriver implements CredentialProxyDriver {
       this.previewEnforcement = selection.previewEnforcement;
     }
     this.id = selection.id;
+    if (options.gatewayDestinations) {
+      if (!selection.sandbox.gatewayProxy) {
+        throw new Error("The selected Sandbox must own the Gateway proxy attachment.");
+      }
+      this.gatewayDestinations = openShellGatewayDestinations(
+        options.gatewayDestinations,
+        selection.id,
+        selection.sandbox.id,
+      );
+    }
     this.backend = selection.backend;
     this.sandbox = selection.sandbox;
     this.options = immutableCopy(options);
@@ -699,38 +693,4 @@ export class OpenShellCredentialProxyDriver implements CredentialProxyDriver {
       throw new Error("Protected Sandbox ownership differs from admission.");
     }
   }
-}
-
-/** Destination-only view of the selected OpenShell Driver; no credential authority is installed. */
-export function createOpenShellDestinationProxy(
-  options: OpenShellGatewayDestinationsOptions,
-  selection: {
-    readonly id: string;
-    readonly backend: Backend<OpenShellGateway>;
-    readonly sandbox: SandboxDriver;
-  },
-): CredentialProxyDriver {
-  if (!selection.sandbox.gatewayProxy) {
-    throw new Error("The selected Sandbox must own the Gateway proxy attachment.");
-  }
-  const refuse = async (): Promise<never> => {
-    throw new Error("Destination-only OpenShell does not provide protected credential execution.");
-  };
-  return Object.freeze({
-    id: selection.id,
-    capability: "credential_proxy" as const,
-    implementation: "openshell",
-    gatewayDestinations: openShellGatewayDestinations(options, selection.id, selection.sandbox.id),
-    sourceControl: Object.freeze({
-      backend: { id: selection.backend.id, generation: 1 },
-      sender: { id: selection.backend.id + "/supervisor", generation: 1 },
-      resolver: { id: selection.id + "/resolver", generation: 1 },
-      providers: [],
-      assertAvailable: refuse,
-    }),
-    configureRevision: refuse,
-    wiringStatus: refuse,
-    verifyInstallation: refuse,
-    removeRevision: refuse,
-  });
 }

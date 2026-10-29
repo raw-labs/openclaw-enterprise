@@ -35,8 +35,8 @@ func TestCreateCommandsShowAJSONExample(t *testing.T) {
 		{"secret", "create"},
 		{"agent", "create"},
 		{"credential-source", "create"},
-		// Update bodies have rules the API reference owns: agent update needs
-		// configurationId, and configuration update keeps omitted secretBindings
+		// Update bodies have rules the API reference owns: Agent settings are
+		// distinct from native Configuration, whose updates keep omitted secretBindings
 		// (finding D766).
 		{"configuration", "update"},
 		{"agent", "update"},

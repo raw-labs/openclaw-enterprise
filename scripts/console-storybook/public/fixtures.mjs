@@ -410,6 +410,7 @@ export function installFixture(scenario, evidence) {
     configurationId: config.id,
     executionMode: "dedicated",
     gatewayManagedMode: true,
+    gatewayOutbound: structuredClone(scenario.gatewayOutbound ?? { destinations: [] }),
     harnessAuth: selectedAuth,
     credentialSources: structuredClone(
       scenario.credentialSources ??

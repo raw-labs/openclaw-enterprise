@@ -59,6 +59,7 @@ export function createTestKubernetesComputeDriver(
         dns: { namespace: "kube-system", podLabels: { app: "dns" } },
         gatewayPort: 8080,
         gatewayTrustedProxyCidrs,
+        infrastructureCidrs: ["10.0.0.0/8"],
         ...(placed
           ? {}
           : { gatewayClients: [{ namespace: "controller", podLabels: { app: "controller" } }] }),
@@ -131,6 +132,7 @@ export function conformanceKubernetesOptions({ gatewayTrustedProxyCidrs, runtime
       dns: { namespace: "kube-system", podLabels: { "k8s-app": "kube-dns" } },
       gatewayPort: 8080,
       gatewayTrustedProxyCidrs,
+      infrastructureCidrs: ["10.0.0.0/8"],
       gatewayClients: [
         { namespace: "openclaw-controller", podLabels: { "app.kubernetes.io/name": "controller" } },
       ],

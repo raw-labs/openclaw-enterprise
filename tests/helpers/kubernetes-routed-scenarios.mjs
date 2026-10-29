@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { kubernetesNamespaceName } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
+import { fileURLToPath } from "node:url";
+import { SlackChannelDriver } from "../../apps/controller/src/drivers/channel/slack.ts";
+import { createOpenShellBackend } from "../../apps/controller/src/backends/openshell.ts";
+import { OpenShellSandboxDriver } from "../../apps/controller/src/drivers/sandbox/openshell.ts";
+import { OpenShellCredentialProxyDriver } from "../../apps/controller/src/drivers/egress-proxy/openshell.ts";
+import { STOCK_GATEWAY_PROXY } from "../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts";
+import { InstalledDriver } from "../../packages/occ/src/index.ts";
+import {
+  KubernetesComputeDriver,
+  kubernetesNamespaceName,
+} from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
 import { conformanceKubernetesOptions } from "./kubernetes-compute.mjs";
 
 export const tenant = {
@@ -89,7 +99,7 @@ export function routedOptions(overrides = {}) {
 }
 
 export function routedRevision(driver, overrides = {}) {
-  return {
+  const revision = {
     id: "revision-routed-1",
     executionAdmission: { version: 2, mode: "unprotected" },
     namespaceId: tenant.id,
@@ -127,6 +137,37 @@ export function routedRevision(driver, overrides = {}) {
     createdAt: tenant.createdAt,
     ...overrides,
   };
+  // The fixture freezes admission after its inputs are chosen. It never repairs
+  // a mutated stored revision inside prepare/activate or another production call.
+  return driver.gatewayProxyDriver !== undefined &&
+    driver.options?.runtime !== undefined &&
+    driver.options.executionCluster === undefined &&
+    revision.harness.mode === "dedicated" &&
+    !Object.hasOwn(overrides.compute ?? {}, "admission")
+    ? admitRoutedRevision(driver, revision)
+    : revision;
+}
+
+/** Real Gateway dependencies, independent of the scenario's selected Harness. */
+export function createRoutedKubernetesComputeDriver(options, selection = {}) {
+  const protectedOwner = selection.protectedDriver;
+  const shared =
+    protectedOwner?.capabilities?.includes("credential_proxy") &&
+    protectedOwner.require("credential_proxy").gatewayDestinations &&
+    protectedOwner.require("sandbox").gatewayProxy
+      ? protectedOwner
+      : undefined;
+  const gatewayProxyDriver =
+    selection.gatewayProxyDriver ??
+    shared ??
+    (options?.runtime !== undefined && options.executionCluster === undefined
+      ? selectedOpenShellGatewayDriver().owner
+      : undefined);
+  return new KubernetesComputeDriver(options, {
+    channelDrivers: [new SlackChannelDriver()],
+    ...selection,
+    ...(gatewayProxyDriver === undefined ? {} : { gatewayProxyDriver }),
+  });
 }
 
 /** The labels an equality-only Kubernetes `labelSelector` string ("key=value,key=value") names. */
@@ -154,4 +195,69 @@ export function selectorMatches(selector, labels) {
     assert.fail(`unsupported selector operator ${operator}`);
   });
   return labelsMatch && expressionsMatch;
+}
+
+/** Real selected capability pair; no management RPC or runtime enforcement is simulated. */
+export function selectedOpenShellGatewayDriver(blockedCidrs = ["10.0.0.0/8"]) {
+  const id = "openshell-gateway-fixture";
+  const gatewayDestinations = {
+    policyRulesPath: fileURLToPath(
+      new URL("../../deploy/runtime/gateway-proxy/sandbox-policy.rego", import.meta.url),
+    ),
+    supervisorImage: STOCK_GATEWAY_PROXY.supervisorImage,
+    relayImage: STOCK_GATEWAY_PROXY.relayImage,
+    blockedCidrs,
+  };
+  const backend = createOpenShellBackend({
+    id: "openshell-fixture-backend",
+    type: "openshell",
+    configuration: { serviceName: "openshell-gateway" },
+    drivers: { sandbox: id, credential_proxy: id },
+  });
+  const sandboxOptions = {
+    gateway: { workspaceMode: "operator" },
+    kubernetes: {
+      runtimeClassName: "openshell-sandbox",
+      serviceAccount: { mode: "gatewayConfigured" },
+      sandboxDataMount: { subPath: "workspace", mountPath: "/sandbox/enterprise", readOnly: false },
+    },
+    policy: {
+      process: { runAsUser: "1000", runAsGroup: "1000" },
+      networkPolicies: [
+        {
+          name: "inference",
+          endpoints: [{ host: "api.openai.com", ports: [443] }],
+          binaries: [{ path: "/usr/bin/model-client" }],
+        },
+      ],
+    },
+  };
+  const sandbox = new OpenShellSandboxDriver(sandboxOptions, {
+    id,
+    backend,
+    gatewayDestinations: { driverId: id, options: gatewayDestinations },
+  });
+  const proxyOptions = {
+    middlewareName: "oce-authority",
+    authorityScope: "execution",
+    gatewayDestinations,
+  };
+  const proxy = new OpenShellCredentialProxyDriver(proxyOptions, { id, backend, sandbox });
+  const owner = new InstalledDriver(
+    {
+      id,
+      implementation: "openshell",
+      configuration: { sandbox: sandboxOptions, credential_proxy: proxyOptions },
+    },
+    { capabilities: { sandbox, credential_proxy: proxy } },
+  );
+  return { owner, sandbox, proxy };
+}
+
+/** Snapshot actual Compute admission after the scenario has chosen all revision inputs. */
+export function admitRoutedRevision(driver, revision) {
+  return {
+    ...revision,
+    compute: { ...revision.compute, admission: driver.admitRevision(revision) },
+  };
 }

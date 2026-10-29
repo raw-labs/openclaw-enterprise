@@ -17,8 +17,9 @@ Preserve the default kubeconfig, unrelated clusters, and shared databases.
 
 Provide an existing authorized Codex credential and model through protected
 files, not command arguments or logs. The scenario uses the regular Agent
-Credential Gateway for Harness authentication; destination-only Credential Proxy
-selection must not receive or mint that credential. Use an enforcing container
+Credential Gateway for Harness authentication. The selected Credential Proxy also
+admits Gateway policy; its separate Gateway proxy Pod must not receive Harness
+credentials. Use an enforcing container
 network interface (CNI), trusted label/policy writers, and a prepared cluster whose
 Service, Pod, node, control-plane, and metadata ranges are known.
 
@@ -27,14 +28,16 @@ Create a private JSON file outside the checkout. Set
 
 | Field                                                               | Required value                                                                                                                                               |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `credentialProxy`                                                   | Selected registration object: `id` and `configuration.gatewayDestinations`; the bundled parser selects OpenShell.                                            |
+| `credentialProxy`                                                   | Selected OpenShell registration object: `id`, its protected-operation configuration, and `configuration.gatewayDestinations`.                                |
 | `credentialProxy.configuration.gatewayDestinations.policyRulesPath` | Absolute controller-readable path to unchanged pinned `deploy/runtime/gateway-proxy/sandbox-policy.rego`. It must exist in both API and worker environments. |
 | `credentialProxy.configuration.gatewayDestinations.supervisorImage` | Exact pinned stock supervisor reference in `STOCK_GATEWAY_PROXY`.                                                                                            |
 | `credentialProxy.configuration.gatewayDestinations.relayImage`      | Exact pinned stock socat reference in `STOCK_GATEWAY_PROXY`.                                                                                                 |
 | `credentialProxy.configuration.gatewayDestinations.blockedCidrs`    | Nonempty IPv4 CIDR list covering actual infrastructure networks, including public-addressed infrastructure where applicable.                                 |
+| `infrastructureCidrs`                                               | Independent Compute IPv4 infrastructure ranges; must include actual Pod, Service, node, control-plane, metadata and public-addressed infrastructure.         |
 | `allowedUrl`                                                        | Public HTTPS URL on TCP/443 with an exact DNS hostname and an independently controlled response body.                                                        |
-| `forbiddenUrl`                                                      | Different public HTTPS DNS hostname on TCP/443 that must be refused.                                                                                         |
+| `forbiddenUrl`                                                      | Second Agent's public HTTPS DNS hostname on TCP/443; the first Agent must refuse it until replacement.                                                       |
 | `forbiddenPort`                                                     | Integer from 1 to 65535, other than 443, that must be refused for the allowed host.                                                                          |
+| `peerResponseMarker`                                                | Second upstream's independent response marker, 8–120 ASCII letters, digits, underscores, or hyphens.                                                         |
 | `responseMarker`                                                    | Expected independent upstream marker, 8–120 ASCII letters, digits, underscores, or hyphens.                                                                  |
 
 Read the exact image values from
@@ -42,8 +45,8 @@ Read the exact image values from
 not a moving tag. The stock source pin is
 `bdb956f2cd65a635f1294fccf1d138d263bf650f`. Probe URLs must have no credentials,
 fragment, IP literal, or wildcard. Use endpoints authorized for these requests.
-The test adds only `allowedUrl`'s host to trusted Compute administrator destinations;
-its current fixture has no enabled Channel contribution.
+The test creates both Agents with empty lists, then uses each Agent's API update
+to approve its own host. Its current fixture has no enabled Channel contribution.
 
 Prepare the OpenShell lane's private Sandbox file environment and supply:
 
@@ -88,10 +91,15 @@ The fixture contains assertions for:
   and proxy Pods without moving workloads or copying model credentials;
 - CONNECT from the Gateway to the allowed HTTPS upstream, certificate-verified
   forwarding, and the independent response marker; forbidden host/port refusal;
+- the Gateway image's default Node fetch and HTTPS clients through Compute-projected
+  proxy settings, without a handcrafted CONNECT or injected dispatcher; this does
+  not prove the separate native Slack Socket Mode client;
 - a reachable public TCP/443 positive control from the proxy Pod followed by
   direct raw-IP TCP/443 denial from the Gateway with proxy variables removed;
-- cross-Agent frontend denial and stale-revision endpoint withdrawal, replacement, workspace
-  access, a real model turn, proxy outage with no direct fallback, and stop cleanup.
+- different API-authored hosts on two Agents, mutual host and frontend denial,
+  saved policy after a desired-setting edit, and changed grants on replacement;
+- stale-revision endpoint withdrawal, workspace access, a real model turn,
+  proxy outage with no direct fallback, and stop cleanup.
 
 These describe assertions in source, not successful outcomes. A failed positive
 control, pending attachment, or skipped case cannot establish denial enforcement.
@@ -103,8 +111,13 @@ acceptance conditions open until evidence exists for the final implementation:
 
 - Stock image startup, loopback listener restriction, policy asset hash, relay
   compatibility, and exact observed image identity under the selected runtime.
-- Real Channel traffic, including Slack Socket Mode WebSocket rotation and
-  single-label wildcard behavior, with exact administrator hosts still enforced.
+- Approved non-Slack HTTPS that the bundled Slack proxy refuses. For every dedicated single-cluster
+  Gateway, prove that its old Slack-proxy route is replaced, not chained, and the
+  old Channel egress grant cannot bypass the new policy.
+- Preserved Slack messaging and Socket Mode WebSocket rotation through the new
+  Gateway route, including single-label wildcard behavior. Independently prove
+  API token validation/directory lookup still work before and alongside Agent
+  deployment through the existing Slack proxy. This PR does not remove that Deployment.
 - Wrong-policy, tampered attachment, missing capability, and changed-registration
   refusal through regular admission, worker retry, and activation.
 - Bad upstream certificate rejection; public names resolving to private,
@@ -116,11 +129,14 @@ acceptance conditions open until evidence exists for the final implementation:
 - Required Harness/model/workspace transport before and after replacement,
   exact reciprocal selectors, and every additive network grant in the real cluster.
 
-The stock supervisor/relay Docker test passes, and Compute conformance, typecheck,
-lint, and scoped formatting run with the local dependency graph. These checks
-do not qualify CNI enforcement, credential placement, or Agent cleanup.
-Real Agent execution is **not run**: no prepared cluster, kubectl, k3d, authorized
-model credentials, or public probe endpoints are available. The normal dedicated
+The stock supervisor/relay Docker test passes. Agent API and real PostgreSQL
+authoring tests also pass. Full Compute conformance has dedicated-path failures
+under repair; the [plan](../../specs/plans/0024-gateway-outbound-proxy-reuse.md#verification-evidence)
+records current results. Local checks do not qualify CNI enforcement, credential
+placement, or Agent cleanup.
+Real Agent execution is **not run**. Local cluster tools are available, but the
+required enforcing lane, approved image provenance, authorized model and Slack
+credentials, and independent public probe endpoints are not prepared. The normal dedicated
 lifecycle stops predecessors before preparing replacements; the scenario proves
 stale-endpoint withdrawal, not simultaneous cross-revision CNI isolation.
 
