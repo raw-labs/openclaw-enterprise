@@ -135,6 +135,12 @@ OCC keeps its existing installation-level routes for sign-in, provider services 
 
 The Driver extensions are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts). Compute passes the revision and its destinations to those interfaces. Sandbox and Credential Proxy use the existing [paired Driver registration](../../docs/reference/drivers/selection.md#select-a-protected-sender). The selected Driver must support both Gateway destination control and protected Harness operations, with separate permissions and proxy instances.
 
+Selecting the paired Driver capabilities for the Gateway proxy does not select
+that Driver to provision the Harness or change repository credential delivery.
+The revision identifies the Gateway proxy pair separately from its Harness
+Sandbox selection. Gateway destination permission grants no authority to release
+Harness or repository credentials.
+
 ## Network enforcement and failure
 
 OpenShell authorizes destinations; Kubernetes prevents bypass. Gateway egress reaches only its revision's proxy and required internal services. Proxy ingress selects only that revision's Gateway. The Gateway's external HTTPS route is exclusively through OpenShell, including Slack. Compute refuses deployment when the selected capability or policy is unavailable. Proxy failure blocks external traffic.
