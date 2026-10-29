@@ -3,12 +3,15 @@ import type {
   OpenClawConfigurationDocument,
 } from "@openclaw-enterprise/contracts";
 import {
+  enabledChannelEntries,
   invalidHeaderNameRequirement,
   isAdmittedHeaderName,
   isCredentialHeaderName,
   keyedSettingPath,
   PROVIDER_MODELS_LIST,
   quotedSettingKey,
+  secretInputShorthandName,
+  wholeEnvironmentReferenceName,
 } from "@openclaw-enterprise/occ";
 import { asRecord, splitModelRef } from "@openclaw-enterprise/utils";
 import type { HarnessAuthMethodRule } from "../harness-auth-method.ts";
@@ -134,11 +137,17 @@ export function requireTeamsConfiguration(
     }
   }
   const password = asRecord(teams.appPassword);
+  const stringReference =
+    typeof teams.appPassword === "string"
+      ? wholeEnvironmentReferenceName(teams.appPassword) ??
+        secretInputShorthandName(teams.appPassword)
+      : undefined;
   if (
-    password?.source !== "env" ||
-    (password.provider !== undefined && password.provider !== "default") ||
-    typeof password.id !== "string" ||
-    !/^[A-Za-z_][A-Za-z0-9_]{0,252}$/.test(password.id)
+    stringReference === undefined &&
+    (password?.source !== "env" ||
+      (password.provider !== undefined && password.provider !== "default") ||
+      typeof password.id !== "string" ||
+      !/^[A-Za-z_][A-Za-z0-9_]{0,252}$/.test(password.id))
   ) {
     throw createError(
       "channels.msteams.appPassword",
@@ -192,29 +201,23 @@ export function requireTeamsConfiguration(
   }
 }
 
-const IGNORED_CHANNEL_KEYS: readonly string[] = ["defaults", "modelByChannel"];
-
 /**
- * The enabled `channels.<provider>` entries, in Configuration order. Every provider must be
- * one Kubernetes Compute runs (`supported`); a disabled entry is ignored.
+ * The enabled `channels.<provider>` entries, in Configuration order (enabledChannelEntries).
+ * Every provider must be one Kubernetes Compute runs (`supported`).
  */
 export function enabledChannelProviders(
   configuration: Readonly<OpenClawConfigurationDocument>,
   supported: readonly string[],
   createError: SettingError,
 ): string[] {
-  const enabled: string[] = [];
-  for (const [provider, channel] of Object.entries(asRecord(configuration.channels) ?? {})) {
-    if (IGNORED_CHANNEL_KEYS.includes(provider) || asRecord(channel)?.enabled === false) {
-      continue;
-    }
+  const enabled = enabledChannelEntries(configuration);
+  for (const provider of enabled) {
     if (!supported.includes(provider)) {
       throw createError(
         keyedSettingPath("channels", provider),
         `is not a supported channel: use ${supported.join(" or ")}, or set its enabled to false`,
       );
     }
-    enabled.push(provider);
   }
   return enabled;
 }
@@ -270,8 +273,6 @@ const AGENT_MODEL_SETTINGS: readonly (readonly string[])[] = [
   ["subagents", "model"],
   ["heartbeat", "model"],
   ["compaction", "model"],
-  ["compaction", "memoryFlush", "model"],
-  ["embeddedAgent", "cyberFailover", "model"],
   ["tools", "exec", "reviewer", "model"],
   ["tts", "summaryModel"],
 ];

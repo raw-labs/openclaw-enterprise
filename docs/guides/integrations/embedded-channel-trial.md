@@ -104,5 +104,5 @@ remove its retained state, and revoke or rotate provider credentials. Do not tre
 stop as a provider-token revocation or a wipe of plugin-maintained caches.
 
 The removal condition is a supported dedicated native path supplying the required
-models and integrations. The [proposed RFC](../../../specs/rfcs/0023-temporary-embedded-channel-trial.md)
+models and integrations. The [proposed RFC](../../../specs/rfcs/0024-temporary-embedded-channel-trial.md)
 records the risk and owner decision; it does not claim maintainer acceptance.

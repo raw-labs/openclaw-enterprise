@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
-updated: 2026-10-14
-last_updated_session: authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c
+updated: 2026-10-28
+last_updated_session: authoring-run/096f88e1-170b-4633-9cba-7b607caade55
 ---
 
 # Agent channel runtime
@@ -45,11 +45,16 @@ graph TD
 ### 1. Admit the caller's configuration
 
 `packages/occ/src/index.ts:deployAgentWithAuthorization` authorizes the exact Agent
-and validates same-Namespace resource references. Kubernetes
-`validateHarnessAuth` applies provider settings and `requireChannelTopology` before
-a revision can stop predecessors. `requireTeamsConfiguration` requires explicit
-Public-cloud IDs, an environment Secret reference, the native `/api/messages` path
-and the packaged plugin. Teams also requires an Installation public callback
+and validates same-Namespace resource references. Configuration save and Preset
+save keep drafts independent of deployment prerequisites. Configuration save
+checks channel Secret bindings through the shared `requireChannelSecretBindings`
+rule, including string references and fallback expressions.
+
+Kubernetes `validateHarnessAuth` repeats the binding check at deployment, then
+applies `requireTeamsConfiguration` before a revision can stop predecessors.
+Preparation and activation repeat these runtime checks. Teams requires explicit
+Public-cloud IDs, an environment Secret reference (an object, `${NAME}` or `$NAME`),
+the native `/api/messages` path and the packaged plugin. Teams also requires an Installation public callback
 hostname. Native JSON cannot provision a listener or change trusted Compute options.
 The temporary `runtime.channels.experimentalEmbeddedChannels` option permits
 embedded OpenClaw only when the Installation administrator explicitly enables it.
@@ -120,6 +125,8 @@ it does not establish native plugin support or execution containment.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-28 21:12: Keep Configuration drafts separate from Teams deployment prerequisites and preserve shared Secret validation. (authoring-run/096f88e1-170b-4633-9cba-7b607caade55 - 94346f8101230627f206ed9731f2c32beba27bad)
 
 - 2026-10-14 11:41: Trace trusted opt-in, shared credential execution and exact callback Service fencing. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
 

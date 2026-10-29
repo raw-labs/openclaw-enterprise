@@ -6,7 +6,9 @@ and its dedicated migrated database. The channel case in
 authenticated API, PostgreSQL worker, Kubernetes Configuration/Secret Drivers and
 Compute lifecycle. It verifies default rejection, trusted embedded opt-in, exact
 Secret projections, revision replacement, callback disable/reenable and stop/delete.
-Another Agent without Secret grants cannot deploy.
+A bound Teams draft can be saved without application IDs, but provisioning refuses
+it before creating a workload. Complete drafts use string and object Secret
+references across revisions. Another Agent without Secret grants cannot deploy.
 
 Install Gateway API and Envoy SecurityPolicy CRDs in the selected disposable
 cluster before running this file. CI's `k3d-fixture-state` preparation installs

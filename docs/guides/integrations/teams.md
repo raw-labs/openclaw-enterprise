@@ -45,6 +45,10 @@ that Installation document. See [gateway isolation](../../reference/drivers/kube
 
 ## Configure and deploy an Agent
 
+You can save a Configuration draft before you supply the application IDs and
+callback listener. Bind each credential reference to a Secret when saving.
+Deployment requires all settings below; saving a draft does not verify them.
+
 Create a Microsoft application and Azure Bot with the Teams channel enabled.
 Store its app password as an OCE Secret in the Agent's exact Namespace. Use native
 Configuration JSON, preserving the existing model and Harness authentication:
