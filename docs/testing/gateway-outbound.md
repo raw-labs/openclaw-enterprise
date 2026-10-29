@@ -12,7 +12,14 @@ node --test tests/conformance/platform-state-memory.test.mjs
 
 The actual Fastify/OCC/IAM tests exercise exact-Agent update plus administer,
 ordinary edits after ceiling tightening, deployment admission and immutable
-snapshots. The fixture replaces workload provisioning; these cases do not prove
+snapshots. The same Configuration with proxy environment settings deploys without
+managed outbound, but fails admission when the Agent requests managed transport.
+The denial case covers both Gateway managed modes. The channel case uses the
+bundled Configuration validation rules and both supported Slack Secret reference
+forms. It refuses deployment after the
+Agent loses access to a bound Secret, even when outbound access is approved.
+Provider credential validation is excluded from that case.
+The fixture replaces workload provisioning; these cases do not prove
 Kubernetes enforcement.
 
 Follow [PostgreSQL setup](postgresql.md), migrate a new disposable database as

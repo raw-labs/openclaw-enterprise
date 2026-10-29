@@ -11,7 +11,9 @@ URLs skip cases, so check the test results for skips.
 ## Version-worker tests
 
 The application lane prepares isolated databases and removes its resources on
-exit. Each run needs its own state file. With Docker Compose available, run:
+exit. Its PostgreSQL server is disposable, so preparation turns off `fsync`,
+`synchronous_commit` and `full_page_writes` there; keep no data in it. Each run
+needs its own state file. With Docker Compose available, run:
 
 ```sh
 (
@@ -147,8 +149,15 @@ OCC_MIGRATION_HISTORY_DATABASE_PREFIX=openclaw_migration_test_local \
 
 All three selectors are required. The prefix must start with `openclaw_`, use
 only lowercase letters, digits, and underscores, and contain at most 50
-characters. The test uses `docker exec` and drops only databases it created.
+characters. The test reads the container's administrator password with `docker inspect`,
+connects through the selected port, and drops only databases it created.
 See [migration recovery](../reference/settings/operations.md#migration-history).
+
+The populated 62-entry history case retains existing runtime-role assignments,
+sessions, and embedded Slack/Teams outbound snapshots. After migration, the
+application role reads the revision through PostgreSQL State and checks exact
+Agent use through native IAM. The case also checks that the assigning-session
+hold commits and that embedded snapshots reject additional outbound hosts.
 
 ## Azure workload-identity connections
 

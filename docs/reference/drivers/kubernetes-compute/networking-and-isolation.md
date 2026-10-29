@@ -57,7 +57,8 @@ the native gateway port in this mode.
 
 ### Gateway authentication
 
-All Kubernetes routing modes require trusted-proxy authentication. Compute renders `gateway.trustedProxies` from `network.gatewayTrustedProxyCidrs`,
+Kubernetes Compute supports only trusted-proxy authentication, in every
+routing mode. It renders `gateway.trustedProxies` from `network.gatewayTrustedProxyCidrs`,
 `gateway.auth.mode: trusted-proxy`, `userHeader: x-occ-identity`, the allowed
 identity `occ-workspace-files` with `operator.admin`, and
 `gateway.allowRealIpFallback: true`. Configuration and Console starters
@@ -67,7 +68,8 @@ provisioning check the same fields and answer `409 RESOURCE_CONFLICT` naming the
 provisioning returns fixed `409` text with the reason in the API log; deployment
 is admitted, then fails with `DEPENDENCY_UNAVAILABLE` and the reason in the
 worker's `worker.compute-prepare-failed` line. `trustedProxy.allowLoopback` must be omitted or false:
-loopback access uses the separate password, not proxy identity headers. Required headers and device approval have separate purposes.
+loopback access uses the separate password, not proxy identity headers. Native
+required-header and device auto-approval settings serve separate purposes.
 
 Compute renders `gateway.bind: lan` when it is omitted or `auto`, as native
 container detection misses containerd on cgroup v2. Deployment/provisioning
@@ -75,7 +77,8 @@ refuse any other bind, `custom` unless `customBindHost` is `0.0.0.0`, and any
 `gateway.tailscale.mode` but `off`. Accepted `lan` and `custom` binds listen on
 IPv4 `0.0.0.0`, so Gateways need an IPv4 Pod address.
 
-[Loopback passwords](storage-and-credentials.md#runtime-credentials) support verification.
+An optional [loopback password](storage-and-credentials.md#runtime-credentials)
+supports operator verification.
 Kubernetes private status-port `GET /readyz` returns empty `200`/`503`, retaining
 readiness gates; Gateway probes HTTP. `gateway.tls.enabled: true` is refused
 before an Agent revision is created. Envoy terminates TLS. Docker/SSH
@@ -141,10 +144,13 @@ endpoint, Pod and Service CIDRs, and metadata endpoint fall inside them. A
 dedicated Agent has one authentication-only egress policy, pinned to its latest
 prepared Agent revision ID. Stop leaves it and the Agent's runtime and plugin-status
 policies, selecting no Pod, until the next preparation or Agent deletion.
-Channels and approved Gateway HTTPS use revision proxies; direct public access is denied. [Gateway outbound](../../gateway-outbound.md) defines policy.
+Supported channels and approved Gateway HTTPS use a per-revision proxy. Direct
+public access remains denied. Default-off `runtime.channels.experimentalEmbeddedChannels`
+permits the [embedded trial](../../../guides/integrations/embedded-channel-trial.md)
+with enabled managed outbound and channel-derived destinations only.
+See [Gateway outbound](../../gateway-outbound.md).
 
 Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
-`runtime.channels.experimentalEmbeddedChannels` defaults off; it permits the [unsupported embedded trial](../../../guides/integrations/embedded-channel-trial.md).
 
 ## Explicit network profiles
 
@@ -263,17 +269,15 @@ route-specific SecurityPolicy for native device authentication. The
 [routing reference](../../gateway-routing.md#native-node-endpoint) owns its
 credential boundary and the remaining Harness lifecycle requirements.
 
-The Service and route stay stable across version changes and are repaired only
-during deployment reconciliation; see
+The Service and route stay stable across versions; see
 [endpoint and route](../../gateway-routing.md#endpoint-and-route). Missing CRDs
 or denied worker permissions fail reconciliation rather than disabling routing
 silently.
 
 Envoy authenticates the OCC service key and the service route rewrites identity headers
 ([service key and native identity](../../gateway-routing.md#service-key-and-native-identity)).
-It removes forwarding and scope headers. Native `allowRealIpFallback` accepts Envoy’s direct downstream address when OCC
-and Envoy share a Pod CIDR. That address must be nonloopback; a loopback
-port-forward alone is not a working native attribution path.
+Native `allowRealIpFallback` accepts Envoy's direct downstream address when OCC
+and Envoy share a Pod CIDR.
 
 ## Namespaces and isolation
 
@@ -355,4 +359,10 @@ receive controller credentials.
 
 ## Teams callbacks
 
-[Teams setup](../../../guides/integrations/teams.md) covers callbacks.
+Deployment admission refuses enabled Teams without `gatewayRouting.channels`,
+custom webhook paths, legacy listeners, and clouds other than `Public`. The API
+returns HTTP 400 with the reason before creating an Agent revision. Configuration
+and Agent saves do not require the Installation's callback listener.
+
+See [Teams setup](../../../guides/integrations/teams.md) for public callbacks,
+credentials, routing, cleanup, and verification.

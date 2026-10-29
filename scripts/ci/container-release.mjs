@@ -28,8 +28,11 @@ export const runtimeImageSmokeTests = Object.freeze([
   "tests/integration/runtime-image-native-listener.test.mjs",
   "tests/integration/runtime-image-startup-probe.test.mjs",
   "tests/integration/runtime-image-startup-termination.test.mjs",
+  "tests/integration/runtime-image-gateway-unclean-restart.test.mjs",
+  "tests/integration/runtime-image-gateway-retained-state.test.mjs",
   "tests/integration/runtime-image-gateway-peer.test.mjs",
   "tests/integration/runtime-image-native-worker.test.mjs",
+  "tests/integration/runtime-image-node-state-permissions.test.ts",
   "tests/integration/sandbox-driver-startup.test.mjs",
   "tests/integration/workspace-files-native.test.mjs",
 ]);
@@ -476,8 +479,8 @@ async function smoke(directory, env) {
   }
   assert.equal(manifest.mediaType, "application/vnd.oci.image.manifest.v1+json");
   const tag = `localhost/enterprise-${env.IMAGE}:prepared-${arch}`;
-  // Let Docker's CLI negotiate its daemon API; distro Skopeo may still use an
-  // older fixed API. The loaded config identity remains bound to the OCI export.
+  // Docker's CLI negotiates the daemon API; distro Skopeo can use an older fixed API.
+  // Keep the loaded config identity bound to the immutable OCI export below.
   const importDirectory = await mkdtemp(join(tmpdir(), "oce-native-import-"));
   try {
     const archive = join(importDirectory, "image.tar");

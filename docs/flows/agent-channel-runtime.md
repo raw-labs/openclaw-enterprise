@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
-updated: 2026-10-15
-last_updated_session: 01a12f94-4e1e-7df1-8b9d-1c7f305c2584
+updated: 2026-10-28
+last_updated_session: authoring-run/f9565ffe-e506-4945-a47d-eb61a05fb2cd
 ---
 
 # Agent channel runtime
@@ -11,7 +11,7 @@ last_updated_session: 01a12f94-4e1e-7df1-8b9d-1c7f305c2584
 An authorized Agent deployment freezes native channel settings and Secret bindings
 into its revision. Kubernetes Compute prepares credentials and channel egress,
 then publishes the native Teams callback for the serving revision. This flow
-describes the combined integration source, not production or live-provider qualification.
+describes evaluation-branch source, not production or live-provider qualification.
 
 ## Entry Points
 
@@ -45,14 +45,17 @@ graph TD
 ### 1. Admit the caller's configuration
 
 `packages/occ/src/index.ts:deployAgentWithAuthorization` authorizes the exact Agent
-and validates same-Namespace resource references. Kubernetes
-`validateHarnessAuth` applies provider settings and `requireChannelTopology` before
-a revision can stop predecessors. `enabledChannels` restricts Teams to Public cloud,
-the native `/api/messages` path and an Installation public callback hostname.
-`validateChannelSecretBindings` requires a matching binding for every referenced
-credential name. Native registration and plugin inputs follow [Teams setup](../guides/integrations/teams.md);
-the native SDK owns Microsoft JWT authentication. Native JSON cannot provision a
-listener or change trusted Compute options.
+and validates same-Namespace resource references. Configuration save and Preset
+save keep drafts independent of deployment prerequisites. Configuration save
+checks channel Secret bindings through the shared `requireChannelSecretBindings`
+rule, including string references and fallback expressions.
+
+Kubernetes `validateHarnessAuth` repeats the binding check at deployment, then
+applies `requireTeamsConfiguration` before a revision can stop predecessors.
+Preparation and activation repeat these runtime checks. Teams requires explicit
+Public-cloud IDs, an environment Secret reference (an object, `${NAME}` or `$NAME`),
+the native `/api/messages` path and the packaged plugin. Teams also requires an Installation public callback
+hostname. Native JSON cannot provision a listener or change trusted Compute options.
 The temporary `runtime.channels.experimentalEmbeddedChannels` option permits
 embedded OpenClaw only when the Installation administrator explicitly enables it.
 The same option advertises embedded provisioning to the regular API; its default
@@ -67,20 +70,16 @@ into the owning Gateway. Dedicated Harnesses receive model authentication separa
 OpenClaw instead receives both channel and model credentials in its combined
 Gateway/execution Pod. This preserves exact resource ownership but weakens
 credential separation within that Agent.
-The selected `BundledChannelDriver.gatewayNetworkRequirements` aggregates Slack and
-Teams destinations. Worker composition injects only the pure declaration through
-`createBundledChannelNetworkRequirements`; it receives no provider validation or
-directory methods. The API owns credential validation before enqueue; worker
-handoff freezes the same declarations without provider I/O inside its transaction. `admitGatewayOutbound` permits embedded `channelsOnly` snapshots
-only with the trusted option and managed outbound enabled; additional modes remain
-dedicated-only. See [Gateway outbound lifecycle](gateway-outbound.md) for immutable
-proxy policy, readiness, current-ceiling checks and withdrawal.
-
-`gatewayOutboundTransport` adds internal and selected model endpoint hosts to
-`NO_PROXY`, preserving the embedded model route while `HTTPS_PROXY` and
-`NODE_USE_ENV_PROXY` send channel traffic through the revision proxy. The embedded
-process retains its public model egress and can bypass environment settings.
-This is routing, not credential containment.
+`admitGatewayOutbound` freezes channel-derived destinations and infrastructure
+exclusions. `reconcileGatewayOutbound` creates a credential-free proxy, Service,
+immutable policy ConfigMap and exact revision NetworkPolicies before the Gateway
+starts. Embedded admission requires both the trusted opt-in and enabled managed
+outbound, and refuses additional restricted or public destinations.
+`deployment` supplies proxy variables and the guarded-fetch trust marker only to
+the Gateway. `gatewayOutboundTransport` exempts exact embedded model endpoints
+from the channel proxy so they retain their separate model egress grant. Dedicated
+Harnesses receive neither channel credentials nor this trust marker. Caller proxy
+and trust-marker overrides fail Configuration admission.
 
 The runtime image selects upstream `msteams` in
 `deploy/runtime/Dockerfile` and `scripts/build-runtime-assets.mjs`. No independent
@@ -88,9 +87,11 @@ Teams message engine or channel credential broker is introduced.
 
 ### 3. Publish the serving callback
 
-`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsRoute`
+`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback`
 reads the owned Gateway Deployment. A candidate whose revision does not match
-that Deployment cannot claim or delete its predecessor's callback.
+that Deployment cannot claim or delete its predecessor's callback. The serving
+Deployment must also carry `openclaw.dev/msteams-webhook: "true"`; matching the
+revision does not authorize a callback for a workload without that listener.
 `activateRevisionWorkloads` rejects stale activation before publishing the new route.
 
 The `channels` HTTPS listener accepts an exact Agent path and POST method, rewrites
@@ -102,14 +103,16 @@ Envoy Gateway peer to the native Gateway port; other tenants gain no ingress gra
 
 ### 4. Disable, stop or delete
 
-`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsRoute` removes obsolete callback resources when the activated
+`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback` removes obsolete callback resources when the activated
 revision disables Teams. `stopRevision` removes the serving route first.
 `deleteGatewayUnauthenticatedRoutes` deletes HTTPRoute before its revision-selecting Service and SecurityPolicy,
 then its NetworkPolicy, using the exact revision, observed UID and resourceVersion.
 Retiring an older revision cannot delete a newer callback. Existing Agent deletion
 uses the same owned Gateway cleanup and removes retained credential artifacts.
 Stop/delete do not consult the opt-in topology gate: disabling the trusted option
-must not prevent credential withdrawal from an existing trial workload.
+must not prevent credential withdrawal from an existing trial workload. Revision
+retirement and stop remove the revision proxy and its policy resources. Disabling
+the trial also withdraws the managed route through revision access maintenance.
 
 ## Debugging and Verification
 
@@ -131,11 +134,11 @@ it does not establish native plugin support or execution containment.
 
 ## Changelog
 
-- 2026-10-15 11:02: Adopt the source PR's pure worker requirement declaration and remove duplicate integration wiring. (authoring-run/01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - b0c299f7e8a9cdb992500fa39d32dddea9271ed0)
+- 2026-10-28 22:48: Restore serving Deployment authority for Teams callback publication. (authoring-run/f9565ffe-e506-4945-a47d-eb61a05fb2cd - 9f6bf0987dd2b4aae823eda7894086e0bf988eb5)
 
-- 2026-10-15 09:30: Correct Teams admission source pointers for the combined implementation. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - ef947b01ff8b14fc522a7c1974731228d4900b57)
+- 2026-10-28 22:44: Compose embedded opt-in with revision-owned managed outbound; runtime qualification remains pending. (authoring-run/1e6506f2-51c0-4fe1-ad6e-0012e3c730f6 - 9f6bf0987dd2b4aae823eda7894086e0bf988eb5)
 
-- 2026-10-15 08:54: Adapt embedded evaluation to immutable Slack/Teams outbound requirements and preserve model transport. (01a12f94-4e1e-7df1-8b9d-1c7f305c2584 - f0473090e63c6738d800cfea244675f970736e3d)
+- 2026-10-28 21:12: Keep Configuration drafts separate from Teams deployment prerequisites and preserve shared Secret validation. (authoring-run/096f88e1-170b-4633-9cba-7b607caade55 - 94346f8101230627f206ed9731f2c32beba27bad)
 
 - 2026-10-14 11:41: Trace trusted opt-in, shared credential execution and exact callback Service fencing. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
 

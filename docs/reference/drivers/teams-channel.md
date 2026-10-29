@@ -44,6 +44,16 @@ An opaque cursor binds continuation to the app, tenant, Team, kind and query.
 Only a checked Graph skip token and local page offset can continue lookup;
 provider-supplied URLs are never followed. Redirects are rejected.
 
+## Network requirements
+
+`gatewayNetworkRequirements` declares the exact Microsoft Public cloud token,
+Bot Framework, reply and Graph hosts when Teams is enabled. The selected bundled
+Driver combines these with Slack requirements in each Agent revision.
+`controlPlaneNetworkRequirements` declares only `login.microsoftonline.com` and
+`graph.microsoft.com` for the separate API proxy. Both use the
+[managed outbound contract](../gateway-outbound.md); additional storage hosts
+belong to the Dedicated Agent's policy.
+
 ## Lifecycle
 
 Lookup does not change Configuration or Microsoft permissions. Search text and

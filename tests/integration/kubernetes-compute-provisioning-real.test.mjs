@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isIP } from "node:net";
 import { join } from "node:path";
-import test, { after } from "node:test";
+import test from "node:test";
 import { kubernetesConfigurationName } from "../../apps/controller/src/drivers/configuration/kubernetes/index.ts";
 import { createGatewayNodeEnrollment } from "../../apps/controller/src/gateway/node-enrollment-client.ts";
 import {
@@ -30,12 +30,10 @@ import {
   assertHarnessWorkspaceClaim,
   createDriver,
   createScopedController,
-  createNamespaceReaper,
   workloadPod,
+  deleteNamespaces,
 } from "../helpers/kubernetes-compute-real.mjs";
-
-const { deleteNamespaces, waitForDeletedVolumes } = createNamespaceReaper();
-after(waitForDeletedVolumes);
+import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 
 test(
   "real Kubernetes Drivers safely use and preserve an externally managed tenant namespace",
@@ -411,6 +409,16 @@ test(
     }
     const originalOperatorConfigMap = await resource("configmap", "operator-sentinel", cleanupName);
     const originalOperatorSecret = await resource("secret", "operator-sentinel", cleanupName);
+    // A Configuration whose OCC transaction failed after its ConfigMap create applied (finding
+    // 1400): the Driver's own ownership metadata, no record, and teardown removes it.
+    const orphanedConfiguration = {
+      ...configuration,
+      id: `cfg_${randomUUID()}`,
+      namespaceId: cleanupOwner.id,
+    };
+    await configurationDriver.create(orphanedConfiguration);
+    const orphanedConfigMap = kubernetesConfigurationName(orphanedConfiguration.id);
+    await resource("configmap", orphanedConfigMap, cleanupName);
 
     // Valid deletion removes fixed OCC infrastructure without touching the operator's namespace.
     const deletingOwner = { ...cleanupOwner, status: "deleting" };
@@ -425,6 +433,7 @@ test(
     for (const kind of ["networkpolicies", "resourcequotas", "limitranges"]) {
       assert.deepEqual(await resources(kind, cleanupName), []);
     }
+    assert.equal(await missing("configmap", orphanedConfigMap, cleanupName), true);
     const preservedNamespace = await resource("namespace", cleanupName);
     assert.equal(preservedNamespace.metadata.uid, originalCleanupNamespace.metadata.uid);
     assert.deepEqual(preservedNamespace.metadata.labels, originalCleanupNamespace.metadata.labels);
@@ -933,8 +942,7 @@ test(
     assert.equal(credentials.status, 200, JSON.stringify(credentials.body));
     const workspaceName = harnessWorkspaceClaimName(legacy.data.id);
     const gatewayStateName = `gateway-state-${hash(legacy.data.id)}`;
-    const claimDirectory = await mkdtemp(join(tmpdir(), "openclaw-legacy-rwx-"));
-    context.after(() => rm(claimDirectory, { recursive: true, force: true }));
+    const claimDirectory = await temporaryDirectory(context, "openclaw-legacy-rwx-");
     for (const [name, namespace, accessMode, storage] of [
       [workspaceName, placement, "ReadWriteMany", "40Gi"],
       [gatewayStateName, gatewayPlacement, "ReadWriteOnce", "10Gi"],
@@ -1216,12 +1224,13 @@ test(
     const values = {
       agents: { defaults: { model, models: { [model]: { agentRuntime: { id: "openclaw" } } } } },
       // The existing fixture CLI supplies probe protocol responses. A supported,
-      // closed provider endpoint prevents synthetic keys reaching a live provider.
+      // reserved provider endpoint prevents synthetic keys reaching a live provider.
+      // A non-loopback host also detects a lost model-specific proxy bypass.
       models: {
         providers: {
           openai: {
             api: "openai-responses",
-            baseUrl: "https://127.0.0.1:9/v1",
+            baseUrl: "https://embedded-model.invalid:9/v1",
             models: [{ id: "gpt-6-astra", name: "Fixture model" }],
           },
         },
@@ -1277,21 +1286,15 @@ test(
         channels: { experimentalEmbeddedChannels: true },
       },
     });
-    const prepareDiagnostics = [];
-    const optedIn = await createProvisioningApiFixture(context, driver, controller.authentication, {
-      emit: (event) => {
-        if (event.event === "worker.compute-prepare-failed") {
-          prepareDiagnostics.push(event);
-        }
-      },
-    });
+    const optedIn = await createProvisioningApiFixture(context, driver, controller.authentication);
     const missingBinding = await optedIn.request("POST", path, {
       ...plan,
       requestId: `req_${randomUUID()}`,
       configuration: { kind: "agent", values },
     });
     assert.equal(missingBinding.status, 400, JSON.stringify(missingBinding.body));
-    assert.equal(missingBinding.error.code, "CHANNEL_CREDENTIAL_BINDING_REQUIRED");
+    assert.equal(missingBinding.error.code, "INVALID_REQUEST");
+    assert.match(missingBinding.error.message, /channels.slack.appToken.*SLACK_APP_TOKEN/);
     const foreign = await optedIn.request("POST", path, {
       ...plan,
       requestId: `req_${randomUUID()}`,
@@ -1307,7 +1310,43 @@ test(
       },
     });
     assert.equal(foreign.status, 400, JSON.stringify(foreign.body));
-    const admitted = await optedIn.request("POST", path, plan);
+    // A bound draft can be saved before its provider IDs are known. Provisioning must
+    // refuse that draft before creating a workload, even in an opted-in Installation.
+    const draftValues = structuredClone(values);
+    delete draftValues.channels.msteams.appId;
+    draftValues.channels.msteams.appPassword = "$MSTEAMS_APP_PASSWORD";
+    const draft = await optedIn.request("POST", `/namespaces/${namespaceId}/configurations`, {
+      kind: "agent",
+      values: draftValues,
+      secretBindings,
+    });
+    assert.equal(draft.status, 201, JSON.stringify(draft.body));
+    const incomplete = await optedIn.request("POST", path, {
+      ...plan,
+      requestId: `req_${randomUUID()}`,
+      configuration: { kind: "agent", values: draftValues, secretBindings },
+    });
+    assert.equal(incomplete.status, 400, JSON.stringify(incomplete.body));
+    assert.equal(incomplete.error.code, "INVALID_REQUEST");
+    assert.match(incomplete.error.message, /channels.msteams.appId.*UUID/);
+    const beforeProvision = await resources("deployments", placement);
+    assert.equal(beforeProvision.length, 0, "an incomplete Teams draft starts no workload");
+
+    // Exercise a bound string through real provisioning; later revisions below use
+    // the object reference and must preserve the same exact Secret projection.
+    const admitted = await optedIn.request("POST", path, {
+      ...plan,
+      configuration: {
+        ...plan.configuration,
+        values: {
+          ...values,
+          channels: {
+            ...values.channels,
+            msteams: { ...values.channels.msteams, appPassword: "${MSTEAMS_APP_PASSWORD}" },
+          },
+        },
+      },
+    });
     assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
     await optedIn.startWorker();
     const provisioned = await waitFor("embedded channel provisioning to succeed", async () => {
@@ -1316,7 +1355,7 @@ test(
       assert.notEqual(
         observed.data.status,
         "failed",
-        JSON.stringify({ response: observed.body, prepareDiagnostics }),
+        JSON.stringify(observed.body),
       );
       return observed.data.status === "succeeded" ? observed.data : undefined;
     });
@@ -1331,7 +1370,7 @@ test(
         assert.notEqual(
           work?.state,
           "failed_permanent",
-          JSON.stringify({ work, prepareDiagnostics }),
+          work?.state,
         );
         return work?.state === "succeeded";
       });
@@ -1350,6 +1389,7 @@ test(
       );
       const deployment = await resource("deployment", gateway, placement);
       assert.equal(deployment.metadata.annotations["openclaw.dev/agent-revision-id"], revisionId);
+      assert.equal(deployment.metadata.annotations["openclaw.dev/msteams-webhook"], "true");
       const environment = deployment.spec.template.spec.containers[0].env;
       const expectedEnvironment = {};
       const canonicalSecrets = await resources("secrets", placement);
@@ -1399,16 +1439,26 @@ test(
       );
       assert.equal(
         environment.find(({ name }) => name === "HTTPS_PROXY").value,
-        `http://${driver.gatewayOutboundName(await optedIn.readRevision(namespaceId, provisioned.agentId, revisionId))}.${placement}.svc:3128`,
+        `http://${driver.gatewayOutboundName(admittedRevision)}.${placement}.svc:3128`,
       );
       assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
+      assert.equal(environment.find(({ name }) => name === "OPENCLAW_PROXY_ACTIVE").value, "1");
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
+      const bypassHosts = environment.find(({ name }) => name === "NO_PROXY").value.split(",");
+      assert.ok(bypassHosts.includes("127.0.0.1"));
       assert.ok(
-        environment
-          .find(({ name }) => name === "NO_PROXY")
-          .value.split(",")
-          .includes("127.0.0.1"),
+        bypassHosts.includes("embedded-model.invalid"),
+        "the admitted embedded model endpoint must retain its separate model egress path",
       );
+      assert.equal(bypassHosts.includes("api.openai.com"), false);
+      assert.equal(bypassHosts.includes("*"), false);
+      // Slack and Teams still traverse the revision proxy; model bypass must not
+      // exempt the channel destinations from its exact destination policy.
+      for (const { destinations } of admittedRevision.gatewayOutbound.requirements) {
+        for (const { host } of destinations) {
+          assert.equal(bypassHosts.includes(host), false, host);
+        }
+      }
       const proxy = await resource(
         "deployment",
         driver.gatewayOutboundName(admittedRevision),
@@ -1456,8 +1506,57 @@ test(
         callback.spec.rules[0].filters[1].requestHeaderModifier.remove.includes("authorization"),
         false,
       );
+      // Native callback JWTs confer no OCE person or configured-role authority.
+      for (const name of ["x-occ-identity", "x-occ-role", "x-occ-role-policy", "x-openclaw-scopes"]) {
+        assert.ok(callback.spec.rules[0].filters[1].requestHeaderModifier.remove.includes(name));
+      }
     };
+    // The normal Agent update route cannot grant extra destinations to embedded execution.
+    for (const gatewayOutbound of [
+      { mode: "restricted", hosts: ["example.com"] },
+      { mode: "publicHttps" },
+    ]) {
+      const additional = await optedIn.request("PATCH", agentPath, {
+        configurationId: provisioned.configurationId,
+        gatewayOutbound,
+      });
+      assert.equal(additional.status, 409, JSON.stringify(additional.body));
+      assert.match(additional.error.message, /dedicated/);
+    }
     await assertServing(provisioned.revisionId);
+    // A Teams draft may be edited while Slack and Teams serve. Refuse an unsupported
+    // callback at admission, before the worker can stop their shared Gateway or proxy.
+    const configurationPath = `/namespaces/${namespaceId}/configurations/${provisioned.configurationId}`;
+    const revisionsBeforeRefusal = await optedIn.request("GET", `${agentPath}/revisions`);
+    assert.equal(revisionsBeforeRefusal.status, 200, JSON.stringify(revisionsBeforeRefusal.body));
+    const servingCallback = await resource("httproute", callbackName, placement);
+    const invalidCallback = await optedIn.request("PATCH", configurationPath, {
+      values: {
+        ...values,
+        channels: {
+          ...values.channels,
+          msteams: { ...values.channels.msteams, webhook: { path: "/unsupported" } },
+        },
+      },
+      secretBindings,
+    });
+    assert.equal(invalidCallback.status, 200, JSON.stringify(invalidCallback.body));
+    const refusedCallback = await optedIn.request("POST", `${agentPath}/deploy`);
+    assert.equal(refusedCallback.status, 400, JSON.stringify(refusedCallback.body));
+    assert.match(refusedCallback.error.message, /channels.msteams.webhook.path.*api\/messages/);
+    const revisionsAfterRefusal = await optedIn.request("GET", `${agentPath}/revisions`);
+    assert.equal(revisionsAfterRefusal.status, 200, JSON.stringify(revisionsAfterRefusal.body));
+    assert.deepEqual(
+      revisionsAfterRefusal.data.map(({ id }) => id),
+      revisionsBeforeRefusal.data.map(({ id }) => id),
+    );
+    assert.equal(
+      (await resource("httproute", callbackName, placement)).metadata.uid,
+      servingCallback.metadata.uid,
+    );
+    await assertServing(provisioned.revisionId);
+    const restored = await optedIn.request("PATCH", configurationPath, { values, secretBindings });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
     const candidate = await optedIn.request("POST", `${agentPath}/deploy`);
     assert.equal(candidate.status, 202, JSON.stringify(candidate.body));
     await waitFor(
@@ -1478,7 +1577,6 @@ test(
     await assertServing(candidate.data.id);
     // Disabling Teams is a normal Configuration/redeployment operation. The other
     // channel stays active while only this callback and its credentials disappear.
-    const configurationPath = `/namespaces/${namespaceId}/configurations/${provisioned.configurationId}`;
     const disabled = await optedIn.request("PATCH", configurationPath, {
       values: { ...values, channels: { ...values.channels, msteams: { enabled: false } } },
       secretBindings: {
@@ -1508,6 +1606,7 @@ test(
       ).every(Boolean),
     );
     const disabledGateway = await resource("deployment", gateway, placement);
+    assert.equal(disabledGateway.metadata.annotations["openclaw.dev/msteams-webhook"], "false");
     assert.equal(
       disabledGateway.spec.template.spec.containers[0].env.some(
         ({ name }) => name === "MSTEAMS_APP_PASSWORD",
@@ -1551,6 +1650,7 @@ test(
       ["msteams"],
     );
     const teamsGateway = await resource("deployment", gateway, placement);
+    assert.equal(teamsGateway.metadata.annotations["openclaw.dev/msteams-webhook"], "true");
     assert.equal(
       teamsGateway.spec.template.spec.containers[0].env.some(
         ({ name }) => name === "SLACK_BOT_TOKEN" || name === "SLACK_APP_TOKEN",
@@ -1611,6 +1711,31 @@ test(
         ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] !== provisioned.agentId,
       ),
     );
+    // Stopped proxy Pods are insufficient: retained Services or policy objects could
+    // expose an obsolete revision again. Verify cleanup after both provider cutovers.
+    for (const revisionId of [
+      provisioned.revisionId,
+      candidate.data.id,
+      disabledRevision.data.id,
+      teamsOnly.id,
+      resumed.data.id,
+    ]) {
+      const stoppedRevision = await optedIn.readRevision(
+        namespaceId,
+        provisioned.agentId,
+        revisionId,
+      );
+      const proxyName = driver.gatewayOutboundName(stoppedRevision);
+      await waitFor(`revision ${revisionId} proxy resources to be withdrawn`, async () => {
+        const absent = await Promise.all([
+          ...["service", "serviceaccount", "configmap", "networkpolicy"].map((kind) =>
+            missing(kind, proxyName, placement),
+          ),
+          missing("networkpolicy", `${proxyName}-gateway`, placement),
+        ]);
+        return absent.every(Boolean);
+      });
+    }
     for (const kind of ["service", "securitypolicy", "networkpolicy"]) {
       assert.equal(await missing(kind, callbackName, placement), true);
     }

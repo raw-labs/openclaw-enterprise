@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
-updated: 2026-10-20
-last_updated_session: Codex/01a12f94-4e1e-7df1-8b9d-1c7f305c2584
+updated: "2026-10-28"
+last_updated_session: "authoring-run/29552e5d-baf0-4837-99f3-371a7cca1bbc"
 ---
 
 # Agent Channel Directory Lookup Flow
@@ -22,7 +22,7 @@ actionable error.
   authorized caller posts to the Namespace channel directory route.
 - Assumptions: the caller can create an Agent or update the exact Agent or
   Configuration, and can operate the selected same-Namespace Secret.
-- Source: `apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`,
+- Source: `apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`,
   `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`,
   and `apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`.
 
@@ -41,13 +41,13 @@ graph TD
   M -->|managed| H["API-only proxy checks Driver destination and resolved IP"]
   M -->|external| I["Tunnel through approved external proxy IP"]
   M -->|no proxy| R["Use process HTTP transport"]
-  H --> E["Slack Driver reads workspace and bounded directory pages"]
-  I --> E
-  R --> E
-  H -->|Teams| T["Teams Driver exchanges password for Graph token"]
-  T --> V["Resolve native Team ID; read selected Team channels or members"]
-  V -->|provider error| X
-  V --> F
+  H --> S{"Selected provider?"}
+  I --> S
+  R --> S
+  S -->|Slack| E["Slack Driver reads workspace and bounded directory pages"]
+  S -->|Teams| T["Exchange password; read selected Team channels or members"]
+  T -->|provider error| X
+  T --> F
   E -->|provider error| X
   E --> F["Console shows names and exact IDs"]
   F --> G["Configuration saves selected IDs"]
@@ -71,7 +71,8 @@ platform state. A missing or foreign target is rejected before provider I/O.
 `apps/controller/src/composition/channel.ts:createBundledChannelCapabilities`
 selects the bundled Slack and Teams ChannelDriver for production API calls. With
 `OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL`, the Driver tunnels management requests
-to the selected provider’s declared management destinations through that endpoint. Without it, the Driver uses the process
+to `slack.com:443`, `login.microsoftonline.com:443`, and
+`graph.microsoft.com:443` through that endpoint. Without it, the Driver uses the process
 HTTP transport; default-deny production egress provides no Slack route and calls
 return unavailable. A missing selected ChannelDriver instead returns `501`
 before the Secret value is read.
@@ -112,14 +113,21 @@ not participate in bot deployment credential admission.
 cancels an unused response body on a non-success HTTP status before returning
 the safe rate-limit or unavailable error. This releases occupied transport
 capacity even when the error body has not finished. The same request owner
-serves credential validation; no automatic retry is added. Successful responses
+serves credential validation; no automatic retry is added. Production
+composition sets `expectProxy`: with no proxy URL, a credential check whose
+fetch fails to connect, resolve, or answer within the time budget raises
+`SlackRouteNotConfiguredError` (`409`) instead of the unavailable error (finding
+2521). Its message names the Helm proxy settings and says to try again when the
+API has another approved route, since an open route can also time out (finding
+2531). Any other fetch rejection, such as a refused redirect, a TLS failure, or
+an invalid header value, stays unavailable (finding 2532). Successful responses
 have an 8,000,000-byte streaming cap before decoded JSON is checked against the
 existing limit of 2,000,000 UTF-16 code units. Overflow cancels the body read and returns `invalid_response`.
 
 ### 3. Display names and save IDs
 
-`apps/controller/src/console/channels/slack.mjs:appendFields`,
-`apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`
+`apps/controller/src/console/channels/slack.mts:appendFields`,
+`apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`
 
 The Console presents bot-token selection before channel access and explains that
 name lookup needs that token. It debounces typing and shows each candidate's name,
@@ -220,9 +228,14 @@ Manual IDs remain available after missing-consent or provider errors.
 
 ## Changelog
 
+- 2026-10-28 23:20: Compose Teams with revision-owned outbound and callback cleanup in the accompanying uncommitted change. (authoring-run/29552e5d-baf0-4837-99f3-371a7cca1bbc - c773fc031e7dfef4f164cec0b8652f94356c298a)
+
+- 2026-10-28 22:25: Carry Teams into the typed console owners and preserve Slack transport diagnostics and shared Secret validation. (authoring-run/d2bd1414-d73d-4eca-b675-32310d3d3c26 - 93c1dc4f24b9)
+
 - 2026-10-15 15:46: Select provider operations and network requirements through shared composition. (authoring-run/6de03ad9-293f-4b20-b21c-a5e0a23cb208 - b0c299f7e8a9cdb992500fa39d32dddea9271ed0)
 
 - 2026-10-14 16:02: Trace the accompanying generic API-only proxy and trusted Driver requirements. (authoring-run/7bd4f79c-2e3a-40b6-b2e9-5e51b495a8f0 - bd8fe1f7b0b798dca84d6f90b7377ddda79d88a6)
+- 2026-10-25: Name the Slack proxy settings, and keep a retry for another approved route, when production credential validation cannot connect to Slack. (findings 2521, 2531, 2532)
 
 - 2026-10-16 18:08: Expose the optional native Teams upload destination and preserve its save/clear semantics. (01a1345f-9591-7c21-9306-c235c3bd6ee3 - d279f3bcb15a)
 

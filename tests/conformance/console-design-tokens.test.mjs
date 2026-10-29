@@ -42,7 +42,7 @@ test("older console custom properties are aliases of design tokens, not separate
 
 test("every custom property console.css and channels.css read is defined", () => {
   const defined = new Set(declarations(consoleCss).keys());
-  // Set at runtime on the log pane (agents/logs-view.mjs).
+  // Set at runtime on the log pane (agents/logs-view.mts).
   defined.add("--log-time-width").add("--log-time-ems");
   // Set on the document element by trackVisualViewport (dom.mjs).
   defined.add("--visual-viewport-top").add("--visual-viewport-bottom");
@@ -90,8 +90,6 @@ test("spacing and radius use the design-language scale (UX plan B3, spec P12)", 
   // Kept on purpose: each is geometry tied to a border or a fixed-size mark, not spacing. Only
   // the exact value is allowed, so other spacing on these rules still has to use the scale.
   const allowed = new Map([
-    // Forced colours draw the 3px bar as a border; subtract it so the label stays put.
-    ['.nav a[aria-current="page"] padding-left', "calc(var(--space-3) - 3px)"],
     // Centres the 20px mark on the first text line.
     [".checklist-mark margin-top", "1px"],
     // The check glyph inside the 20px mark.
@@ -132,5 +130,53 @@ test("the console breakpoints are the documented 520, 760 and 1100 px (design-la
   assert.deepEqual(
     [...new Set(widths)].filter((px) => ![520, 760, 1100, 1101].includes(px)),
     [],
+  );
+});
+
+test("type uses the design-language scale (UX plan B3, spec P12)", () => {
+  // 16px on phone inputs is the size below which mobile browsers zoom on focus, not a type step.
+  const phoneInputMinimum = "16px";
+  const allowed = new Map([
+    ["input, select, textarea font-size", phoneInputMinimum],
+    [".log-picker select, .log-search input font-size", phoneInputMinimum],
+    [".channel-field input, .channel-field select font-size", phoneInputMinimum],
+    // The nav glyphs are fixed at 16px to match their 16px box (spec 6.1), not a type step.
+    [".nav-icon font-size", "16px"],
+    // UNKNOWN fits the 78px level column the log grid reserves (6.5em); on the scale it is 83px.
+    [".log-level font-size", "10px"],
+    [".log-level letter-spacing", "0.03em"],
+    // Fits the timestamp to its cell: 4px is the cell's slack, not a size.
+    [".log-time-text font-size", "min(var(--text-xs), (100cqi - 4px) / var(--log-time-ems, 19.4))"],
+  ]);
+  const offScale = [];
+  const used = new Set();
+  for (const { selector, prop, value } of rules(consoleCss + channelsCss)) {
+    const key = `${selector} ${prop}`;
+    const checks = {
+      "font-size": () => literalsOf(value).length > 0 || /%|calc\(|smaller|larger/.test(value),
+      font: () => literalsOf(value).length > 0 || /%|calc\(/.test(value),
+      "font-weight": () => /\d|\b(bold|bolder|lighter)\b/.test(value),
+      "font-family": () => !/^(var\(--font-(sans|mono)\)|inherit)$/.test(value),
+      "letter-spacing": () => !/^(var\(--tracking-(tight|caps)\)|normal)$/.test(value),
+    };
+    const bad = checks[prop]?.() ?? false;
+    if (!bad) {
+      continue;
+    }
+    if (allowed.get(key) === value) {
+      used.add(key);
+      continue;
+    }
+    offScale.push(`${selector} { ${prop}: ${value} }`);
+  }
+  assert.deepEqual(
+    offScale,
+    [],
+    "use --text-*, --weight-*, --font-* and --tracking-* (design-language 2.2)",
+  );
+  assert.deepEqual(
+    [...allowed.keys()].filter((key) => !used.has(key)),
+    [],
+    "drop allowances that no longer match a literal",
   );
 });

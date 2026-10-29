@@ -435,6 +435,41 @@
       "when": 1787000000062,
       "tag": "0062_administrator_sandbox_policy_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787000000063,
+      "tag": "0063_credential_proxy_admission",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787000000064,
+      "tag": "0064_repository_credential_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1787000000065,
+      "tag": "0065_credential_delivery_custody",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1787000000066,
+      "tag": "0066_prepared_attempt_settlement",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787000000067,
+      "tag": "0067_gateway_managed_mode",
+      "breakpoints": true
     }
   ]
 }

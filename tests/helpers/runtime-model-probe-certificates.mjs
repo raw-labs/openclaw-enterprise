@@ -1,71 +1,16 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { sharedRsaPrivateKeyPem } from "../fixtures/repository-credentials/shared-keys.mjs";
+import { caAndLeaf } from "./certificates.mjs";
 
 // Callers own subprocess policy and cleanup: image tests remove the CA key,
-// while the first-Agent smoke retains it.
-export async function createModelProbeCertificates({
-  directory,
-  caName,
-  run,
-  dnsNames = ["api.openai.com"],
-}) {
-  const file = (name) => join(directory, name);
-  await run("openssl", [
-    "req",
-    "-x509",
-    "-newkey",
-    "rsa:2048",
-    "-nodes",
-    "-days",
-    "2",
-    "-subj",
-    `/CN=${caName}`,
-    "-addext",
-    "basicConstraints=critical,CA:TRUE",
-    "-addext",
-    "keyUsage=critical,keyCertSign",
-    "-keyout",
-    file("ca-key.pem"),
-    "-out",
-    file("ca.pem"),
-  ]);
-  await run("openssl", [
-    "req",
-    "-newkey",
-    "rsa:2048",
-    "-nodes",
-    "-subj",
-    `/CN=${dnsNames[0]}`,
-    "-keyout",
-    file("key.pem"),
-    "-out",
-    file("leaf.csr"),
-  ]);
-  await writeFile(
-    file("leaf.ext"),
-    [
-      `subjectAltName=${dnsNames.map((name) => `DNS:${name}`).join(",")}`,
-      "basicConstraints=critical,CA:FALSE",
-      "extendedKeyUsage=serverAuth",
-      "keyUsage=critical,digitalSignature,keyEncipherment",
-      "",
-    ].join("\n"),
-  );
-  await run("openssl", [
-    "x509",
-    "-req",
-    "-in",
-    file("leaf.csr"),
-    "-CA",
-    file("ca.pem"),
-    "-CAkey",
-    file("ca-key.pem"),
-    "-CAcreateserial",
-    "-days",
-    "2",
-    "-extfile",
-    file("leaf.ext"),
-    "-out",
-    file("cert.pem"),
-  ]);
+// while the first-Agent smoke retains it. The CA and leaf keys are the process's
+// shared fixture keys (shared-keys.mjs); both certificates are minted per call.
+export async function createModelProbeCertificates({ directory, caName, run, dnsNames = ["api.openai.com"] }) {
+  await caAndLeaf(directory, {
+    caName,
+    commonName: dnsNames[0],
+    subjectAltName: dnsNames.map((name) => `DNS:${name}`).join(","),
+    caKeyPem: sharedRsaPrivateKeyPem("model-probe-ca"),
+    leafKeyPem: sharedRsaPrivateKeyPem("model-probe-leaf"),
+    run,
+  });
 }

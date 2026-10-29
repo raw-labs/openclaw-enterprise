@@ -23,10 +23,10 @@ state for `occ dev down`. See [hosted execution](README.md#run-the-hosted-local-
 
 ## Kubernetes HTTP fixture
 
-Install Docker, k3d, `kubectl`, Kubernetes 1.35+. CI prepares an owned cluster
-with enforcing NetworkPolicies, fixture/controller images and limited-role
-PostgreSQL databases, preserving default kubeconfig and unrelated resources.
-Fixture lanes: `k3d-fixture-configuration`,
+Install Docker, k3d and `kubectl`. Use Kubernetes 1.35 or later. The CI preparer
+creates an owned cluster with enforcing NetworkPolicies, fixture/controller images
+and migrated limited-role PostgreSQL databases. It preserves the default kubeconfig and unrelated resources.
+Run these fixture lanes: `k3d-fixture-configuration`,
 `k3d-fixture-state` and `k3d-fixture-plugins`.
 
 ```sh
@@ -44,18 +44,15 @@ Fixture lanes: `k3d-fixture-configuration`,
 ```
 
 Selected cases must pass without skips. Lanes check API/worker lifecycle,
-RBAC, storage, revision replacement and enforced network isolation. Enabled Slack
+RBAC, storage, revision replacement and enforced network isolation. Enabled channel
 provisioning uses the actual controller proxy with simulated provider/runtime
-responses; it proves policy and Secret delivery, not native Slack connectivity.
-See [CI image preparation](ci.md#setting-overrides).
-See [channel cases](channel-runtime.md) for embedded trial proof.
+responses; it proves policy and Secret delivery, not native provider connectivity.
+See [channel cases](channel-runtime.md) and [CI image preparation](ci.md#setting-overrides).
 
-External OAuth credentials use OpenShell rather than Kubernetes bootstrap Jobs or a
-native OAuth store. The [OpenShell OAuth proof](openshell-oauth.md) exercises real
-Gateway refresh and operator-mTLS access-token reads with a controlled issuer.
-The credentialed [OpenShell runtime lane](openshell.md) covers provider delivery,
-Codex exposure, model execution, and withdrawal. Neither lane runs in ordinary
-credential-free CI; a green fixture result does not prove live OAuth refresh.
+External OAuth credentials use OpenShell, not Kubernetes bootstrap Jobs or a
+native OAuth store. A green fixture result does not prove live OAuth refresh: the
+[OpenShell OAuth proof](openshell-oauth.md) and the credentialed
+[OpenShell runtime lane](openshell.md) cover it, outside ordinary CI.
 
 An imported immutable `OCC_TEST_KUBERNETES_RUNTIME_IMAGE` extends the API/worker
 case through runtime Secret and private-state deletion without a model turn.
@@ -137,20 +134,13 @@ OCC_TEST_HARNESS_K3D_REAL=1 OCC_TEST_SLACK_LIVE=0 \
   node --env-file="$TEST_ENV_FILE" --test tests/integration/harness-topology-k3d-real.test.mjs
 ```
 
-All five non-Slack cases must pass: dedicated Codex, embedded OpenClaw, Secret
-lifecycle, and startup-failure evidence with plugins disabled and enabled. A
+All six non-Slack cases must pass: dedicated Codex, dedicated Skill source
+uploads, embedded OpenClaw, Secret lifecycle, and startup-failure evidence with
+plugins disabled and enabled. The Skill source case needs local `zip`. A
 selected suite fails on missing prerequisites; an unselected suite skips. The
 suite does not install OCC with Helm. Credentials belong only in the selected
 runtime Pods, not controllers, logs, or shell history. For private workspace
 routing, run the separate [gateway routing suite](#private-gateway-routing).
-
-For a candidate image with paired-node Skill upload support and local `zip`:
-
-```sh
-OCC_TEST_SKILL_SOURCE_LIFECYCLE=1 node --env-file="$TEST_ENV_FILE" --test \
-  --test-name-pattern='candidate dedicated Skill source' \
-  tests/integration/harness-topology-k3d-real.test.mjs
-```
 
 For custom provider and image settings see the test's
 [source](../../tests/integration/harness-topology-k3d-real.test.mjs) and
@@ -396,7 +386,7 @@ DNS settings across restarts. This is fixture setup, not production DNS setup.
 
 ### Configure the network and credentials
 
-Cross-cluster traffic requires verified HTTPS, reachable DNS names,
+All cross-cluster traffic uses verified HTTPS. Set reachable DNS names,
 certificates, observed CIDRs, and cluster API access. Do not use cluster-local
 `.svc` addresses across clusters. CP API and worker use separate scoped DP
 kubeconfigs; Gateway uses the exact-Agent transport token to reach the Harness,
@@ -406,7 +396,8 @@ Create a DP TLS Secret and install `deploy/helm/openclaw-execution` with
 `routing.hostname`, `gatewayClassName`, `tlsSecretName`, and
 `controlPlaneCidrs`. Provision distinct DP API and worker kubeconfigs, then
 store them in separate CP Secrets with a `kubeconfig` key. Administrators own
-credential issuance, rotation, and tenant grants. The worker must lack RoleBinding-write and impersonation permission.
+credential issuance, rotation, and tenant grants. The worker must not have
+RoleBinding-write or impersonation permission.
 
 Add this to the Installation Compute configuration:
 

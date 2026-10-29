@@ -1,4 +1,6 @@
 import { nativeAdminOriginResolver } from "../gateway/native-admin-origin.ts";
+import { installEgressAuthority } from "./egress-authority.ts";
+import { installationControllerOptions } from "./installation-config.ts";
 import type { AuditEventFactory } from "@openclaw-enterprise/audit";
 import type {
   AuditEvent,
@@ -29,6 +31,7 @@ import { createDockerDevelopmentComputeDriverFromEnv } from "../drivers/compute/
 import { createFilesystemDevelopmentConfigurationDriverFromEnv } from "../drivers/configuration/filesystem/index.ts";
 import { createFastifyApp } from "../index.ts";
 import { createBundledChannelCapabilities } from "./channel.ts";
+import type { ConsoleTheme } from "../console-theme.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -44,6 +47,7 @@ import {
   type OccLogger,
 } from "../logging.ts";
 import { resolveApprovedHarness } from "./production-harness.ts";
+import type { CompositionDependencies } from "./production.ts";
 import type { ControllerWorkspaceFilesAccess } from "../gateway/contracts.ts";
 import type { NativeAdminAccessConfig } from "../gateway/native-admin.ts";
 import {
@@ -53,6 +57,7 @@ import {
 } from "./workspace-files.ts";
 
 export interface PostgresDevelopmentConfig {
+  readonly consoleTheme?: ConsoleTheme;
   readonly metrics?: import("../metrics/index.ts").OccMetrics;
   readonly mode: "development";
   readonly host: "127.0.0.1" | "::1" | "0.0.0.0";
@@ -95,6 +100,7 @@ export async function composePostgresDevelopment(
   config: PostgresDevelopmentConfig,
   options: PostgresDevelopmentRuntimeOptions = {},
   serviceAccountDriverFactory?: ServiceAccountDriverFactory,
+  dependencies: CompositionDependencies = {},
 ) {
   const drivers = "installation" in options ? options : undefined;
   const auditEventFactory = "auditEventFactory" in options ? options.auditEventFactory : undefined;
@@ -121,7 +127,9 @@ export async function composePostgresDevelopment(
   });
 
   try {
-    const state = new PostgresPlatformState(pool);
+    const state = new PostgresPlatformState(pool, {
+      preparedTokenProof: drivers?.tokenService?.postgresCurrentProof,
+    });
     const persistedInstallation = await state.loadInstallation();
     if (persistedInstallation === undefined) {
       throw new Error("The platform Installation must be bootstrapped before development startup.");
@@ -143,6 +151,7 @@ export async function composePostgresDevelopment(
     }
     const sandboxDriver = drivers?.sandboxDriver;
     const credentialGatewayDriver = drivers?.credentialGatewayDriver;
+    const protectedDriver = drivers?.protectedDriver;
     const credentialRefreshDriver = drivers?.credentialRefreshDriver;
     const configurationDriver =
       options.configurationDriver ??
@@ -184,6 +193,9 @@ export async function composePostgresDevelopment(
       ...(config.nativeAdmin?.enabled === true
         ? { sharedCookieDomain: config.nativeAdmin.sharedCookieDomain }
         : {}),
+      ...(dependencies.passwordHasher === undefined
+        ? {}
+        : { passwordHasher: dependencies.passwordHasher }),
     });
 
     const bootstrapPrincipal = iamState.identities.find(
@@ -236,8 +248,9 @@ export async function composePostgresDevelopment(
     const { driver: channelDriver, channelNetworkRequirements } =
       createBundledChannelCapabilities();
     const controller = new OpenClawController(persistedInstallation, {
-      sandboxNetworkPolicyCeiling: drivers?.installation.sandboxNetworkPolicyCeiling ?? [],
+      ...installationControllerOptions(drivers?.installation),
       state,
+      ...(drivers?.tokenService && { preparedTokens: drivers.tokenService }),
       recordOperations: true,
       ...(config.nativeAdmin?.enabled === true
         ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! }
@@ -248,9 +261,6 @@ export async function composePostgresDevelopment(
       channelNetworkRequirements,
       ...(loggingLevel === undefined ? {} : { loggingLevel }),
       ...(drivers === undefined ? {} : { backends: drivers.installation.backend }),
-      ...(drivers?.installation.runtime === undefined
-        ? {}
-        : { nativeWorkerSupport: drivers.installation.runtime.nativeWorkerSupport }),
     });
     controller.registerDriver(iamDriver);
     controller.selectDriver("iam", driverId);
@@ -258,7 +268,9 @@ export async function composePostgresDevelopment(
     controller.selectDriver("compute", computeDriver.id);
     controller.registerDriver(channelDriver);
     controller.selectDriver("channel", channelDriver.id);
-    if (sandboxDriver !== undefined) {
+    if (protectedDriver !== undefined) {
+      controller.installDriver(protectedDriver, ["sandbox", "credential_proxy"]);
+    } else if (sandboxDriver !== undefined) {
       controller.registerDriver(sandboxDriver);
       controller.selectDriver("sandbox", sandboxDriver.id);
     }
@@ -282,8 +294,8 @@ export async function composePostgresDevelopment(
       controller.registerDriver(drivers.pluginDriver);
       controller.selectDriver("plugin", drivers.pluginDriver.id);
     }
-    if (drivers?.repoDriver !== undefined) {
-      const driver = drivers.repoDriver;
+    if (drivers?.repositoryPolicy !== undefined) {
+      const driver = drivers.repositoryPolicy;
       controller.registerDriver(driver);
       controller.selectDriver("repo", driver.id);
     }
@@ -316,6 +328,7 @@ export async function composePostgresDevelopment(
 
     const observabilityUrl = config.observabilityUrl ?? drivers?.installation.observability?.url;
     const app = createFastifyApp({
+      ...(config.consoleTheme === undefined ? {} : { consoleTheme: config.consoleTheme }),
       ...(config.metrics === undefined ? {} : { metrics: config.metrics }),
       controller,
       iamDriver,
@@ -358,16 +371,23 @@ export async function composePostgresDevelopment(
       },
       ...(workspaceFilesAccess === undefined ? {} : { workspaceFilesAccess }),
     });
+    await drivers?.preparedGitHub?.connect(pool);
+    const exchange = protectedDriver && (await installEgressAuthority(controller, protectedDriver));
     app.get("/healthz", async () => ({ status: "ok" }));
     app.get("/readyz", async () => {
       await pool.query("SELECT 1");
       return { status: "ready" };
     });
     app.addHook("onClose", async () => {
+      await exchange?.close();
+      await drivers?.protectedDriver?.close();
+      await drivers?.preparedGitHub?.close();
       await state.close();
     });
     return app;
   } catch (error) {
+    await drivers?.protectedDriver?.close();
+    await drivers?.preparedGitHub?.close();
     await pool.end();
     throw error;
   }

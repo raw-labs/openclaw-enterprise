@@ -50,12 +50,12 @@ export function channelRequest(
     (!managedService && (address === undefined || isIP(address) !== 4))
   ) {
     throw new Error(
-      "Channel directory proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
+      "Control-plane outbound proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
     );
   }
   if (address === "0.0.0.0") {
     throw new Error(
-      "Channel directory proxy must not use host 0.0.0.0, which names no proxy address.",
+      "Control-plane outbound proxy must not use host 0.0.0.0, which names no proxy address.",
     );
   }
   const proxy = new ProxyAgent(proxyUrl);

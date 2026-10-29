@@ -11,7 +11,9 @@ An empty value must not block text-only Teams configuration.
 
 Also inspect **Teams**, **Teams Missing Secret**, **Teams Unsupported**, and
 **Teams Read Only**, **Teams Secrets Loading**, **Teams Save Denied**, and
-**Teams Save Pending**. Missing credentials prevent deployment; advanced native
+**Teams Save Pending**, and **Teams Credentials Save Denied**. In the Credentials
+case, choose another Secret, save, and check the refusal and retained selection.
+Reload to confirm the saved binding remains. Missing credentials prevent deployment; advanced native
 settings remain inspectable and cannot be flattened by the editor. In **Teams
 Unsupported**, open native Configuration JSON and confirm the sender allowlist
 remains without a Team map; **Edit Microsoft Teams** stays disabled. Deployed

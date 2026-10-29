@@ -20,7 +20,9 @@ access, bind a Namespace Secret, grant Agent access, and retain the native
 plugin selection. The same case saves the optional SharePoint upload site ID,
 checks it after reopening and an unrelated access edit, then clears it and
 verifies removal from native Configuration. This proves configuration handling,
-not Microsoft upload permissions or file delivery. Its directory case uses the real API, OCC, IAM, Secret Driver,
+not Microsoft upload permissions or file delivery. The Credentials step also
+checks that an IAM refusal leaves the saved Teams binding unchanged and grants
+no access to the replacement Secret. Its directory case uses the real API, OCC, IAM, Secret Driver,
 and bundled Channel Driver with a local HTTP Microsoft protocol fixture. It
 selects names, saves native IDs, and preserves manual entry after consent denial.
 `tests/integration/teams-directory.test.mjs` additionally checks Team-scoped
@@ -33,14 +35,25 @@ UI evidence, not deployment proof.
 
 Run `node --test tests/integration/production-kubernetes-packaging.test.mjs`
 with Helm and yq installed to verify the opt-in TLS listener, explicit ingress
-peers, proxy flag, and rejected conflicting settings. This checks real rendered
+peers and rejected conflicting settings. This checks real rendered
 chart output, not live Envoy policy enforcement.
+
+The existing deployment-admission case in
+`tests/conformance/kubernetes-compute.test.mjs` refuses missing callback routing,
+custom or invalid webhook settings, legacy listeners, and unsupported clouds
+before predecessor shutdown. It also accepts the default callback path and
+keeps Installation prerequisites out of Configuration and Agent saves.
+The existing settings-admission case in
+`tests/integration/configuration-controller.test.mjs` checks these refusals
+through Configuration save and Agent deployment HTTP requests. It verifies the
+HTTP 400 reason and absence of a new Agent revision, using real Kubernetes
+admission rules without cluster I/O.
 
 The existing retirement case in `tests/conformance/kubernetes-compute.test.mjs`
 also exercises serving/candidate callback ownership, exact method/path/header
 rules, cutover, and disable cleanup through the production Driver with a
 substituted Kubernetes transport. Its manifest assertions do not prove public
-requests traverse Envoy. `tests/conformance/slack-proxy-tunnel.test.mjs` runs the
+requests traverse Envoy. `tests/integration/gateway-outbound-proxy.test.mjs` runs the
 actual proxy process; test-only DNS redirects provider names to disposable local
 sockets and cannot establish Microsoft connectivity.
 
@@ -60,8 +73,11 @@ saved bytes, removal of the bearer token before storage access, and refusal of
 an unapproved redirect. It proves native guarded-fetch/media-storage integration
 with the proxy, not the private Teams downloader caller, an actual Teams activity,
 Microsoft network access, file permission or model turn.
-The conformance proxy cases separately cover private/mixed/unsupported DNS
-answers, exact storage-host admission and late DNS completion after the deadline.
+The managed channel transport case in the proxy integration suite checks
+private, mixed, reserved and unsupported DNS answers, lookup failures, the
+connection deadline, and late resolution after client disconnect. DNS responses
+are controlled; the production proxy and local sockets remain real. The native
+media case checks exact storage-host admission.
 
 The Teams directory browser case in `tests/browser/console-agent-channels.test.mjs`
 runs in Chromium and WebKit. It checks mouse selection, selected chips and exact

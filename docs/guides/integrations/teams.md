@@ -37,25 +37,16 @@ gatewayRouting:
         podSelector:
           matchLabels:
             app: public-ingress
-outboundProxy:
-  enabled: true
-  denyCidrs:
-    - 203.0.113.0/24 # Replace with reviewed Installation infrastructure CIDRs.
 ```
 
 Keep the existing private gateway settings. In the Installation's selected
 Compute Driver configuration, set `gatewayRouting.channels.hostname` to the
-same hostname and enable `runtime.gatewayOutbound` with reviewed infrastructure
-exclusions. For profile-based installations, use the `gatewayOutbound` input
-shown in [outbound setup](slack.md#configure-outbound-access).
-
-Enabling Teams automatically declares its exact Microsoft Public cloud hosts:
-`login.microsoftonline.com`, `login.botframework.com`, `api.botframework.com`,
-`smba.trafficmanager.net`, and `graph.microsoft.com`. Deployment freezes these
-requirements in the revision and prepares its isolated Gateway proxy. Slack can
-be enabled alongside Teams; both providers' requirements are retained. The Agent
-needs no additional manually approved hosts for these channel destinations.
-The API-only management proxy uses a separate restricted policy.
+same hostname and enable `runtime.gatewayOutbound`. Configure its image and
+infrastructure exclusions as described in [managed Gateway outbound](../../reference/gateway-outbound.md).
+The bundled Channel Driver declares the exact Microsoft Public cloud messaging
+destinations for each Agent revision. Slack and Teams can run together.
+The [embedded trial](embedded-channel-trial.md) requires a separate, default-off
+opt-in and permits only channel-derived destinations.
 
 ## Configure and deploy the Agent
 
@@ -84,12 +75,13 @@ token. The route removes OCE identity, scope, API-key, and cookie headers. It
 does not require an OCE session or admit gateway administrative paths.
 Callback ownership follows the serving revision. A failed candidate cannot
 remove its predecessor's callback; stopping or deleting the serving revision
-removes the route and its authentication-policy override.
+removes its HTTPRoute, Service, SecurityPolicy and NetworkPolicy.
 
 Advanced native configurations remain inspectable and can be disabled in the
 console. Unsupported editor shapes require the Configuration API; the editor
-does not flatten multiple teams or wildcard access rules. Custom webhook paths
-and legacy webhook listeners fail deployment preparation.
+does not flatten multiple teams or wildcard access rules. Deployment refuses
+custom webhook paths and legacy webhook listeners before stopping the serving
+Agent. Correct the setting named in the refusal, then deploy again.
 
 ## Configure outgoing channel files
 
@@ -113,7 +105,7 @@ For channel files, the native plugin creates organization-scoped view links:
 people signed into the organization who obtain the link can access the file,
 including people outside the Team. Group chats use links for the resolved chat
 members; existing site/library permissions still apply. These are native
-[upload and sharing semantics](https://github.com/openclaw/openclaw/blob/f8386bc7df0a6c9eda7a28ae81943c5c06a414ff/extensions/msteams/src/graph-upload.ts),
+[upload and sharing semantics](https://github.com/openclaw/openclaw/blob/90d30a1178a79dddd92e6190b66b95d89dfb3ca8/extensions/msteams/src/graph-upload.ts),
 not additional restrictions enforced by the editor.
 
 Leave the destination empty when channel/group document sending is unnecessary.
@@ -124,33 +116,20 @@ network requirements. Live outgoing file delivery remains unqualified.
 
 ## Prepare attachment downloads
 
-Attachments remain unqualified for live Teams use. For a controlled trial,
-review the actual attachment URL and each redirect hostname without logging
-signed URLs. On a dedicated Agent, an administrator can approve the required
-exact storage hosts through the [Gateway Network setting](../../reference/gateway-outbound.md):
+Attachments remain unqualified for live Teams use. For a controlled trial on a
+Dedicated Agent, review the attachment URL and every redirect hostname without
+copying signed URLs into logs. Add only the required exact storage hosts through
+that Agent's [managed outbound policy](../../reference/gateway-outbound.md).
+Each redirect must pass that policy independently. Additional hosts are
+Dedicated-only; the embedded trial accepts only channel-derived destinations.
 
-```json
-{
-  "gatewayOutbound": {
-    "mode": "restricted",
-    "hosts": ["tenant.sharepoint.com", "files.blob.core.windows.net"]
-  }
-}
-```
-
-Enabled Teams contributes its messaging destinations automatically. Additional
-storage hosts belong to this Agent's admitted revision, rather than an
-Installation-wide shared proxy. Add each required redirect hostname separately
-and redeploy. Embedded evaluation permits only channel-derived destinations;
-it cannot approve additional storage hosts with this setting.
-
-The managed proxy validates DNS answers and pins the selected public IPv4
-address. Private/reserved addresses, mixed public/private answers, unsupported
-IPv6 routes and timeouts fail closed. Compute projects `OPENCLAW_PROXY_ACTIVE=1`
-only when the Gateway has admitted managed transport, allowing native guarded
-fetch to use that proxy. Native URL, redirect and credential checks remain active.
-The marker applies throughout the Gateway but adds no destinations. Agent
-Configuration cannot override the transport or its trust markers.
+The revision-owned proxy checks destination names and resolved addresses, denies
+private, reserved and Installation infrastructure addresses, and connects to the
+validated numeric address. Compute supplies the proxy environment and
+`OPENCLAW_PROXY_ACTIVE=1` only to the Gateway using that admitted transport.
+Native URL, redirect, token and TLS checks remain active. The Dedicated Harness
+receives neither channel credentials nor this trust marker. Agent configuration
+cannot override proxy environment or the trust marker.
 
 Native `channels.msteams.mediaAllowHosts` may also need an exact destination
 that its defaults do not admit. This is separate from proxy admission and
@@ -189,12 +168,11 @@ Team link again when reopening to browse names. See the
 [directory reference](../../reference/drivers/teams-channel.md) for bounds and
 visibility limits.
 
-The production API needs its control-plane proxy to permit
-`login.microsoftonline.com:443` and `graph.microsoft.com:443`. Helm
-`outboundProxy.enabled` derives these management destinations from the bundled
-Channel Driver. An approved external endpoint can instead be selected with
-`api.controlPlaneOutboundProxyUrl`. Agent network selections do not broaden
-this API-only route. Missing directory consent or egress
+The production API needs an approved route to
+`login.microsoftonline.com:443` and `graph.microsoft.com:443`. Enable the API-only
+`outboundProxy` and configure its infrastructure exclusions; the bundled Driver
+supplies both Teams management destinations. This proxy is separate from each
+Agent revision's runtime proxy. Missing directory consent or egress
 leaves exact-ID entry available and does not make Graph access a deployment
 prerequisite.
 
@@ -215,8 +193,3 @@ prerequisite.
 
 See [credential ownership](../../reference/drivers/kubernetes-compute/storage-and-credentials.md)
 and the [callback flow](../../flows/agent-channel-ingress.md).
-
-Embedded OpenClaw uses the same Teams destination declarations, public callback
-listener and revision ownership checks when the trusted
-[embedded evaluation option](embedded-channel-trial.md) is enabled. Its channel
-and model credentials share the execution workload.

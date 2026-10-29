@@ -14,8 +14,8 @@ runtime prerequisites, and limits.
 4. Choose **Share Agent** and read each reported step. Roles must exist in the Agent’s saved `gateway.roles` Configuration; an unavailable catalog disables new assignments. You can share before deployment or while stopped.
 
 While the share runs, the page stays open until it finishes, usually within
-seconds; each request has a 15-second timeout. Tabs still switch. Signing out or an expired
-session still leaves.
+seconds; each request has a 15-second timeout; tabs still switch. Reloading or closing the tab
+asks first. Signing out or an expired session still leaves.
 
 The person gains Namespace discovery, Agent read and OpenClaw entry with the
 selected role. Their native profile is personal when configured roles are
@@ -35,9 +35,9 @@ To withdraw one explicit Agent grant, find it under **Direct Agent grants** and
 select **Remove binding**. Namespace discovery remains, and other grants, groups
 or Installation administration may still provide OCE management access. OpenClaw entry requires an explicit person/Agent assignment. The console does not
 delete the person, Agent or Roles. People without Installation administration
-do not see the **Access** tab, and it is also hidden if a sharing policy read is
-denied; their other Agent controls remain governed by their
-own permissions.
+do not see the **Access** tab. If a sharing policy read is denied, the tab is
+hidden and the page opens **Configuration** with a note that says why. Their
+other Agent controls remain governed by their own permissions.
 
 ## Related
 

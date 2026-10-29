@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 // CONNECT handling, TLS and the native SDK remain real in the selected image.
 export async function startControlledOutboundProxy(
   t,
-  { upstreamPort, upstreamHosts, approvedHosts },
+  { upstreamPort, upstreamHosts, approvedHosts, dnsAnswers = {} },
 ) {
   const directory = await mkdtemp(join(tmpdir(), "oce-outbound-transport-"));
   const preload = join(directory, "routing.mjs");
@@ -29,9 +29,19 @@ export async function startControlledOutboundProxy(
 import net from "node:net";
 import { syncBuiltinESMExports } from "node:module";
 const hosts = new Set(${JSON.stringify(upstreamHosts)});
+const answers = ${JSON.stringify(dnsAnswers)};
 dns.lookup = async (host, options) => {
   if (!hosts.has(host) || options?.all !== true) throw new Error("Unexpected fixture DNS lookup");
-  return [{ address: "93.184.216.34", family: 4 }];
+  const answer = answers[host];
+  if (answer === "failure") throw new Error("Fixture DNS lookup failed");
+  if (answer === "pending") return new Promise(() => {});
+  if (answer?.delayMs !== undefined) {
+    process.stderr.write(JSON.stringify({ event: "fixture.dns_started", host }) + "\\n");
+    await new Promise((resolve) => setTimeout(resolve, answer.delayMs));
+    process.stderr.write(JSON.stringify({ event: "fixture.dns_resolved", host }) + "\\n");
+    return answer.addresses;
+  }
+  return answer ?? [{ address: "93.184.216.34", family: 4 }];
 };
 const connect = net.connect;
 net.connect = (options, ...args) => {
@@ -63,7 +73,11 @@ syncBuiltinESMExports();
     },
   );
   const closed = once(child, "close");
+  const sockets = new Set();
   t.after(async () => {
+    for (const socket of sockets) {
+      socket.destroy();
+    }
     if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
     }
@@ -86,5 +100,14 @@ syncBuiltinESMExports();
     });
   }).finally(() => clearTimeout(timer));
   assert.ok(port > 0);
-  return { port };
+  return {
+    child,
+    port,
+    stderr: () => stderr,
+    track(socket) {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+      return socket;
+    },
+  };
 }

@@ -3,12 +3,15 @@ import type {
   OpenClawConfigurationDocument,
 } from "@openclaw-enterprise/contracts";
 import {
+  enabledChannelEntries,
   invalidHeaderNameRequirement,
   isAdmittedHeaderName,
   isCredentialHeaderName,
   keyedSettingPath,
   PROVIDER_MODELS_LIST,
   quotedSettingKey,
+  secretInputShorthandName,
+  wholeEnvironmentReferenceName,
 } from "@openclaw-enterprise/occ";
 import { asRecord, splitModelRef } from "@openclaw-enterprise/utils";
 import type { HarnessAuthMethodRule } from "../harness-auth-method.ts";
@@ -118,8 +121,8 @@ export function requireWorkspaceNodePlugins(
 }
 
 /**
- * Enabled channels need a dedicated workload unless trusted evaluation is enabled,
- * and enabled managed `runtime.gatewayOutbound`. `providers` lists the
+ * Enabled channels need a dedicated workload unless the trusted embedded trial is
+ * enabled, and managed transport through `runtime.gatewayOutbound`. `providers` lists the
  * enabled channel providers, in Configuration order.
  */
 export function requireChannelTopology(
@@ -176,11 +179,17 @@ export function requireTeamsConfiguration(
     }
   }
   const password = asRecord(teams.appPassword);
+  const stringReference =
+    typeof teams.appPassword === "string"
+      ? wholeEnvironmentReferenceName(teams.appPassword) ??
+        secretInputShorthandName(teams.appPassword)
+      : undefined;
   if (
-    password?.source !== "env" ||
-    (password.provider !== undefined && password.provider !== "default") ||
-    typeof password.id !== "string" ||
-    !/^[A-Za-z_][A-Za-z0-9_]{0,252}$/.test(password.id)
+    stringReference === undefined &&
+    (password?.source !== "env" ||
+      (password.provider !== undefined && password.provider !== "default") ||
+      typeof password.id !== "string" ||
+      !/^[A-Za-z_][A-Za-z0-9_]{0,252}$/.test(password.id))
   ) {
     throw createError(
       "channels.msteams.appPassword",
@@ -234,29 +243,23 @@ export function requireTeamsConfiguration(
   }
 }
 
-const IGNORED_CHANNEL_KEYS: readonly string[] = ["defaults", "modelByChannel"];
-
 /**
- * The enabled `channels.<provider>` entries, in Configuration order. Every provider must be
- * one Kubernetes Compute runs (`supported`); a disabled entry is ignored.
+ * The enabled `channels.<provider>` entries, in Configuration order (enabledChannelEntries).
+ * Every provider must be one Kubernetes Compute runs (`supported`).
  */
 export function enabledChannelProviders(
   configuration: Readonly<OpenClawConfigurationDocument>,
   supported: readonly string[],
   createError: SettingError,
 ): string[] {
-  const enabled: string[] = [];
-  for (const [provider, channel] of Object.entries(asRecord(configuration.channels) ?? {})) {
-    if (IGNORED_CHANNEL_KEYS.includes(provider) || asRecord(channel)?.enabled === false) {
-      continue;
-    }
+  const enabled = enabledChannelEntries(configuration);
+  for (const provider of enabled) {
     if (!supported.includes(provider)) {
       throw createError(
         keyedSettingPath("channels", provider),
         `is not a supported channel: use ${supported.join(" or ")}, or set its enabled to false`,
       );
     }
-    enabled.push(provider);
   }
   return enabled;
 }
@@ -267,28 +270,6 @@ const PROVIDER_ENVIRONMENT =
   "the Agent's Harness authentication binding owns model provider environment";
 const MODEL_CREDENTIAL_ENVIRONMENT =
   /^(?:OPENAI_|ANTHROPIC_|CODEX_(?:ACCESS_TOKEN|CHATGPT_WORKSPACE_ID|LOGIN_MODE)$)/i;
-const CHANNEL_PROXY_ENVIRONMENT =
-  /^(?:https?_proxy|all_proxy|no_proxy|node_use_env_proxy|openclaw_proxy_(?:active|ca_file))$/i;
-
-/** Only trusted Compute configuration can select the proxy and delegate guarded-fetch checks. */
-export function requireChannelProxyEnvironment(
-  configuration: Readonly<OpenClawConfigurationDocument>,
-  createError: SettingError,
-): void {
-  const env = asRecord(configuration.env);
-  for (const [parent, values] of [
-    ["env", env],
-    ["env.vars", asRecord(env?.vars)],
-  ] as const) {
-    const name = Object.keys(values ?? {}).find((key) => CHANNEL_PROXY_ENVIRONMENT.test(key));
-    if (name !== undefined) {
-      throw createError(
-        keyedSettingPath(parent, name),
-        "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
-      );
-    }
-  }
-}
 // The refusal names the header, so it explains itself whatever word the rule matched; never its
 // value. A header name is not a secret. A long one is cut so the message fits its cap.
 const credentialHeaderRequirement = (name: string): string =>
@@ -334,8 +315,6 @@ const AGENT_MODEL_SETTINGS: readonly (readonly string[])[] = [
   ["subagents", "model"],
   ["heartbeat", "model"],
   ["compaction", "model"],
-  ["compaction", "memoryFlush", "model"],
-  ["embeddedAgent", "cyberFailover", "model"],
   ["tools", "exec", "reviewer", "model"],
   ["tts", "summaryModel"],
 ];
@@ -749,4 +728,27 @@ export function kubernetesHarnessAuthMethods(
     // Codex runs only dedicated, so its execution mode is not a fix.
     fix: topology === "Dedicated Codex" ? "harnessAuth" : "harnessAuth or executionMode",
   };
+}
+
+const CHANNEL_PROXY_ENVIRONMENT =
+  /^(?:https?_proxy|all_proxy|no_proxy|node_use_env_proxy|openclaw_proxy_(?:active|ca_file))$/i;
+
+/** Only trusted Compute configuration can select the proxy and delegate guarded-fetch checks. */
+export function requireChannelProxyEnvironment(
+  configuration: Readonly<OpenClawConfigurationDocument>,
+  createError: SettingError,
+): void {
+  const env = asRecord(configuration.env);
+  for (const [parent, values] of [
+    ["env", env],
+    ["env.vars", asRecord(env?.vars)],
+  ] as const) {
+    const name = Object.keys(values ?? {}).find((key) => CHANNEL_PROXY_ENVIRONMENT.test(key));
+    if (name !== undefined) {
+      throw createError(
+        keyedSettingPath(parent, name),
+        "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
+      );
+    }
+  }
 }

@@ -3,6 +3,9 @@
 A Harness calls models and runs Agent tools. Select a compatible execution mode,
 model and Harness in Agent Configuration.
 
+For an overview of the Gateway/Harness boundary and file flows, see
+[Remote Harness execution and split storage](../guides/topics/remote-harness.md).
+
 ## Supported topology
 
 | Harness  | Agent execution mode | Workloads and support                                                                                                                                                    |
@@ -20,14 +23,13 @@ a dedicated gateway and Harness run as separate Pods in the Agent's
 ServiceAccount and storage. Embedded OpenClaw and its built-in Harness remain
 one untrusted workload.
 
-Each dedicated AgentRevision owns one Harness that all its sessions share: the
-Codex app server or the native OpenClaw node host. OpenShell contains the whole
-AgentRevision, not each session; see
-[Agent runtime isolation](security/runtime-isolation.md#agent-runtime-isolation)
-for the trust boundary. The node host admits a configurable number of
-session-owned worker processes with separate managed workspaces; Kubernetes
-defaults to eight retained workers. Additional sessions are refused until a
-hosted session stops, and active workers are not displaced.
+Each dedicated AgentRevision owns one shared Harness: Codex app server or native
+OpenClaw node host.
+[OpenShell isolates the AgentRevision](security/runtime-isolation.md#agent-runtime-isolation),
+not sessions. The node host retains session-owned worker processes with separate
+managed workspaces (configurable limit, Kubernetes default eight). At capacity,
+it refuses new sessions until a hosted session stops, without displacing active
+workers.
 
 Dedicated Codex has no separate OCE session-count limit. Active top-level turns
 use OpenClaw's `agents.defaults.maxConcurrent`, which defaults, absent an
@@ -60,10 +62,11 @@ Codex plugin is explicitly enabled with `websocket` app-server transport.
 Its Gateway renders the main workspace as `/home/node/workspace`; Codex executes
 in the separate Harness workspace.
 
-Kubernetes Compute preserves policy, refusing Agent save, provisioning and deployment
-when required `codex` or OpenClaw `openai`/`anthropic` plugins are disabled, denied,
+OCE Kubernetes admission refuses Agent save, provisioning and deployment
+if required `codex` or OpenClaw `openai`/`anthropic` plugins are disabled, denied,
 excluded from nonempty allowlists, or duplicated after normalization.
-Missing/empty allowlists are unrestricted.
+Missing/empty allowlists are unrestricted. OCE requires explicit permission,
+unlike Gateway runtime-only provider auto-enable.
 
 Selectable model catalogs and fallbacks under Agent defaults or entries
 must retain the selected provider. Additional catalog models need an
@@ -136,8 +139,9 @@ Kubernetes deployment rejects `runtime` with `409`.
 Codex requires a successful native model probe before serving.
 API-key/PAT/external-token state stays ephemeral; `chatgptAuthTokens` delegates
 refresh externally with no refresh token or native fallback. Dedicated Gateways
-receive no model credentials. Configuration `secretBindings` and the initial
-runtime credential API serve separate Gateway transport/channel authentication.
+do not receive the selected Harness inference credential. Configuration
+`secretBindings` supply channel and Gateway feature credentials, including Memory
+embeddings; the initial runtime credential API supplies transport authentication.
 
 For initial and replacement deployments, Kubernetes OpenClaw runs one native
 model probe (20 seconds plus 45 CPU-seconds at its CPU limit, 256 output tokens)
@@ -158,14 +162,14 @@ reaches its model over Responses WebSocket by default (embedded OpenClaw uses
 HTTP streaming), so an egress proxy or firewall before that model host must
 allow the WebSocket upgrade. Compatible endpoints use HTTPS Responses streaming, including the probe.
 Secret-backed Codex uses [Compute configuration](drivers/kubernetes-compute.md#configuration);
-OpenShell sources supply their own endpoint. Dedicated Codex retries a confirmed
-subprocess timeout once after one second. Each attempt has a 30-second cap within
-one 61-second budget, including the delay. A transient failure (provider 5xx or
-overload, dropped stream or connection, external kill) shares that one retry;
-other failures do not retry. Under `tini`, termination during a probe, delay or
-held failure exits at once. Exhausted or nonretryable failure
-holds the process unready until restart or Pod stop; readiness polling never
-starts another model call.
+OpenShell sources supply their own endpoint. Dedicated Codex retries once, after
+1-1.5 seconds, a timeout, transient failure (provider 5xx or overload, dropped
+connection, kill) or `network`/`http_5xx` exit naming no credential, TLS error
+or limit; nothing else retries, except TLS or DNS failures Codex prints only as
+a failed connection. Attempts cap at 30 seconds within one 61-second budget,
+delay included. Under `tini`, termination always exits at once. Exhausted
+or nonretryable failure holds the process unready until restart or Pod stop;
+readiness polling never starts another model call.
 
 Codex logs each attempt as a structured `codex.model_probe` record with its
 number, elapsed milliseconds, exit code, recognized termination signal, and
@@ -270,13 +274,14 @@ activation audit when durable completion succeeds; recovery repeats safe effects
 under the current claim. The [worker flow](../flows/controller-worker.md)
 explains exact ordering and failure handling.
 
-The pinned OpenClaw Codex plugin permits fresh remote work when OCC owns the
-native process configuration, but it lacks a supported managed-remote resume path
-for an existing ordinary session after gateway restart. Retained gateway session
-state and persistent volume data prove storage continuity, not continued native
-execution. Dedicated restart acceptance remains incomplete; the ownership and
-persistence requirements still apply. See the upstream restriction in
-[openclaw/openclaw@759e127](https://github.com/openclaw/openclaw/commit/759e127777b54426c922e8ab4c228523ddac04e9).
+Ordinary thread resume permits an OpenClaw-owned remote connection after
+ownership and non-running-thread checks. Manual adoption requires local stdio
+and an OpenClaw-owned Codex home
+([runtime checks](https://github.com/openclaw/openclaw/blob/9cc4450e9d79a993a51dc6fa362468f46c6f1819/extensions/codex/src/app-server/thread-lifecycle-adoption.ts#L187-L300)).
+
+Retained Gateway state and Harness rollouts do not guarantee session recovery
+or continuation of interrupted turns. OCE's end-to-end dedicated restart
+acceptance remains incomplete.
 
 ## Optional sandbox provisioning
 
@@ -316,11 +321,7 @@ workflow used by dedicated Codex; no startup override is required.
 A custom image can declare
 [`runtime.nativeWorkerSupport`](configuration.md#installation-startup-configuration). Without native-worker support, deploy and provisioning answer
 `400 INVALID_REQUEST`, the Console withholds Dedicated OpenClaw, and retry
-rechecks support. Deployment requires the qualifying SandboxDriver,
-admitted authentication, and supported projections above. Compute places model
-metadata and the credential reference only in the native node's configuration;
-the Gateway receives no model credential. A missing model or disconnected node
-fails the turn without Gateway inference fallback.
+rechecks support.
 
 ## Related
 

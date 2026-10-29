@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { OCCPluginDriver } from "../../apps/controller/src/drivers/plugin/index.ts";
+import { CodexPluginDriver } from "../../apps/controller/src/drivers/plugin/index.ts";
+import { apiErrorResponse, proxyErrorResponse } from "../helpers/api-error.mjs";
 import { createConsoleAppFixture as createBaseConsoleAppFixture } from "../helpers/console-app.mjs";
 import {
   apiRequests,
+  asksBeforeUnload,
   detailUrl,
   holdRequests,
   login,
@@ -14,7 +16,11 @@ import {
   pathRequests,
   repositoryCheckbox,
   selectSecret,
+  settlePageRequests,
+  settledView,
+  waitForCondition,
   waitForInputValue,
+  writeRequests,
 } from "./console-agents-browser-helpers.mjs";
 import {
   configurationPostRequests,
@@ -22,8 +28,20 @@ import {
   createRepositoryLaunchFixture,
   enterManualModel,
   routeInstallationProvisioning,
+  raceAgentName,
   routeInstallationWithoutProvisioning,
+  submitCreateAgent,
+  createAgentThroughForm,
+  routeProvisioningJob,
+  provisioningJob,
 } from "./console-agents-test-support.mjs";
+import {
+  AGENT_NAME_CONFLICT,
+  CHANNEL_SECRETS_CONFIGURATION_CHANGED,
+  REPOSITORY_EDITS_PENDING,
+  RESOURCE_NOT_FOUND,
+} from "../helpers/refusal-text.mjs";
+import { liftRestriction, restrict } from "../helpers/iam-grants.mjs";
 
 // Unsaved drafts survive a refused Create and a failed Namespace read, and a pending save holds
 // every way off the page (findings 1934, 1935, 1937). The rules that keep untouched forms and
@@ -38,18 +56,15 @@ const standardCodexPreset = JSON.parse(
 const createConsoleAppFixture = (t) =>
   createBaseConsoleAppFixture(t, { defaultPresets: [defaultCodexPreset] });
 
-// Whether a reload or tab close would ask first: the console cancels beforeunload.
-const asksBeforeUnload = (page) =>
-  page.evaluate(() => {
-    const event = new Event("beforeunload", { cancelable: true });
-    globalThis.dispatchEvent(event);
-    return event.defaultPrevented;
-  });
 const sidebarLink = (page, name) =>
   page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("link", { name, exact: true });
 const heading = (page, name) => page.getByRole("heading", { name, exact: true });
+// A page load renders the whole shell more than once (the held or pending page, then the page),
+// and each render replaces the sidebar. A click whose press and release straddle a render is
+// lost, so a step that clicks after a navigation waits for that load to settle (finding 2504).
+const settled = (page) => page.locator(settledView).waitFor();
 // Refocusing the window rechecks the session and Namespace access.
 const refocus = (page) => page.evaluate(() => globalThis.dispatchEvent(new Event("focus")));
 
@@ -67,22 +82,6 @@ async function failNextNamespacesRead(page) {
     failed.resolve();
   });
   return failed.promise;
-}
-
-function revokeNamespace(fixture, namespace, id) {
-  fixture.policy.restrictions.push({
-    id,
-    namespaceId: namespace.id,
-    resourceKind: "namespace",
-    action: "read",
-    effect: "deny",
-  });
-}
-
-function restoreNamespace(fixture, id) {
-  const index = fixture.policy.restrictions.findIndex((restriction) => restriction.id === id);
-  assert.notEqual(index, -1);
-  fixture.policy.restrictions.splice(index, 1);
 }
 
 async function startDefaultPreset(page) {
@@ -122,7 +121,6 @@ test("a refused Create stays a draft for a reload and a return, and the retry re
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Refused create", { ready: true });
-  await fixture.createAgent(namespace.id, "Existing Agent");
   const preset = await fixture.request("POST", `/namespaces/${namespace.id}/presets`, {
     body: standardCodexPreset,
   });
@@ -140,16 +138,11 @@ test("a refused Create stays a draft for a reload and a return, and the retry re
   await name.waitFor();
   assert.equal(await asksBeforeUnload(page), true);
 
-  const conflict = page.waitForResponse(
-    (response) =>
-      response.url().endsWith(`/namespaces/${namespace.id}/agents`) &&
-      response.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  assert.equal((await conflict).status(), 409);
-  await page
-    .getByText("An Agent with this name already exists in this Namespace. Choose a different name.")
-    .waitFor();
+  // Another create takes the name after the preflight, so the Secret and Configuration are saved
+  // before the API refuses the Agent.
+  await raceAgentName(page, fixture, namespace.id, "Existing Agent");
+  await submitCreateAgent(page, fixture, namespace.id, { status: 409 });
+  await page.getByText(AGENT_NAME_CONFLICT).waitFor();
   // The form is still the reader's to fix, so a reload asks first (finding 1934).
   assert.equal(await asksBeforeUnload(page), true);
 
@@ -169,15 +162,7 @@ test("a refused Create stays a draft for a reload and a return, and the retry re
   // The retry uses the Secret the refused attempt saved; the restored form cannot pick another.
   assert.equal(await page.getByLabel("API key Secret", { exact: true }).isDisabled(), true);
   await name.fill("Kept Agent");
-  const createdResponse = page.waitForResponse(
-    (response) =>
-      response.url().endsWith(`/namespaces/${namespace.id}/agents`) &&
-      response.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  const created = await createdResponse;
-  assert.equal(created.status(), 201);
-  const { data } = await created.json();
+  const data = await createAgentThroughForm(page, fixture, namespace.id);
   await page.waitForURL((url) => url.pathname === `/console/agents/${data.id}`);
   assert.equal(data.name, "Kept Agent");
   assert.equal(data.configurationId, configurationId);
@@ -199,7 +184,8 @@ test("a draft kept after a refusal between the Secret and the Configuration keep
   const { page } = await newPage(t, fixture);
   await routeInstallationWithoutProvisioning(page, fixture);
   const requests = apiRequests(page, fixture.origin);
-  // The first Configuration write is refused as too many requests; nothing was saved by it.
+  // A rate limit in front of the API refuses the first Configuration write (the route itself
+  // sends no 429); nothing was saved by it.
   let refuse = true;
   await page.route(`**/namespaces/${namespace.id}/configurations`, async (route, request) => {
     if (!refuse || request.method() !== "POST") {
@@ -207,11 +193,7 @@ test("a draft kept after a refusal between the Secret and the Configuration keep
       return;
     }
     refuse = false;
-    await route.fulfill({
-      status: 429,
-      contentType: "application/json",
-      body: JSON.stringify({ error: { code: "RATE_LIMITED", message: "Slow down." } }),
-    });
+    await route.fulfill(proxyErrorResponse(429));
   });
   await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
   await page.getByLabel("Preset template").selectOption(preset.data.id);
@@ -236,15 +218,7 @@ test("a draft kept after a refusal between the Secret and the Configuration keep
   await waitForInputValue(picker, "Refused configuration Agent");
   assert.equal(await picker.isDisabled(), true);
 
-  const createdResponse = page.waitForResponse(
-    (response) =>
-      response.url().endsWith(`/namespaces/${namespace.id}/agents`) &&
-      response.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  const created = await createdResponse;
-  assert.equal(created.status(), 201);
-  const { data } = await created.json();
+  const data = await createAgentThroughForm(page, fixture, namespace.id);
   await page.waitForURL((url) => url.pathname === `/console/agents/${data.id}`);
   assert.equal(data.harnessAuth.source.id, secretId);
   assert.equal(pathRequests(requests, "POST", `/namespaces/${namespace.id}/secrets`).length, 1);
@@ -274,25 +248,32 @@ test("a failed Namespace read keeps drafts; a read that no longer lists their Na
   assert.equal(await asksBeforeUnload(page), true);
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await heading(page, "Namespaces").waitFor();
+  await settled(page);
   await sidebarLink(page, "Agents").click();
+  await settled(page);
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
   await waitForInputValue(page.getByLabel("Agent name", { exact: true }), "Kept draft");
 
   // Another Namespace's pages keep the draft; a read that no longer lists its Namespace drops it.
+  // Until the switch settles, the held Create Agent form still shows its own Create Agent button.
   await page.getByLabel("Namespace", { exact: true }).selectOption(other.id);
+  await settled(page);
   await page.getByRole("button", { name: "Create Agent", exact: true }).waitFor();
   assert.equal(await asksBeforeUnload(page), true);
-  revokeNamespace(fixture, namespace, "drafts-kept-revoke");
+  const revoked = restrict(fixture.policy, "read", "namespace", { namespaceId: namespace.id });
   await sidebarLink(page, "Namespaces").click();
   await heading(page, "Namespaces").waitFor();
+  await settled(page);
   await page.getByText("Other drafts", { exact: true }).waitFor();
   assert.equal(await page.getByText("Kept drafts", { exact: true }).count(), 0);
   assert.equal(await asksBeforeUnload(page), false);
 
-  restoreNamespace(fixture, "drafts-kept-revoke");
+  liftRestriction(fixture.policy, revoked);
   await sidebarLink(page, "Agents").click();
+  await settled(page);
   await page.getByRole("button", { name: "Create Agent", exact: true }).waitFor();
   await page.getByLabel("Namespace", { exact: true }).selectOption(namespace.id);
+  await settled(page);
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
   await page.getByRole("button", { name: "Start with default Preset", exact: true }).waitFor();
   assert.equal(await page.getByLabel("Agent name", { exact: true }).count(), 0);
@@ -375,15 +356,15 @@ test("a pending save holds the sidebar links and Back on the Agent page", async 
     await sidebarLink(page, "Namespaces").click();
     assert.equal(page.url(), pageUrl);
     // So does Back to another page (the Agents list, before the Agent and its three tab
-    // changes): the page stays and its URL is restored before the history event ends.
+    // changes). The browser returns to this entry without discarding the intervening tabs.
     await page.evaluate(
       () =>
         new Promise((resolve) => {
-          globalThis.addEventListener("popstate", () => setTimeout(resolve, 0), { once: true });
+          globalThis.addEventListener("popstate", resolve, { once: true });
           globalThis.history.go(-4);
         }),
     );
-    assert.equal(page.url(), pageUrl);
+    await page.waitForURL(pageUrl);
     assert.equal(await deploy.isDisabled(), true);
     await note.waitFor();
     // On a phone the refusal closes the navigation drawer, which would hide the reason.
@@ -399,13 +380,14 @@ test("a pending save holds the sidebar links and Back on the Agent page", async 
     held.release();
   }
   await page.getByText(/Configuration .*generation 2/).waitFor();
-  // The refused Back kept the Agents list in history, so Back now reaches it.
-  await page.goBack();
+  // The refused traversal kept all four entries, so the same traversal now reaches the list.
+  await page.evaluate(() => globalThis.history.go(-4));
   await heading(page, "Agents").waitFor();
 });
 
 // Each write that holds the page names itself beside its control when the sidebar, Back or
-// ← Agents is refused; they refused in silence before (findings 1962, 1965).
+// ← Agents is refused; they refused in silence before (findings 1962, 1965). A reload or tab
+// close asks first while it runs (finding 2125).
 for (const pending of [
   {
     kind: "a deploy",
@@ -453,7 +435,7 @@ for (const pending of [
       await page.locator("summary", { hasText: "Plugin selections JSON" }).first().click();
       await page
         .getByLabel("Plugin selections JSON")
-        .fill(JSON.stringify({ "occ-plugin:diffs": { enabled: true } }));
+        .fill(JSON.stringify({ "codex-plugin:linear@openai-curated-remote": { enabled: true } }));
       await page.getByRole("button", { name: "Save plugin selections" }).click();
     },
   },
@@ -462,7 +444,7 @@ for (const pending of [
     const fixture = await createConsoleAppFixture(t);
     await fixture.bootstrap();
     if (pending.tab === "plugins") {
-      const driver = new OCCPluginDriver();
+      const driver = new CodexPluginDriver();
       fixture.controller.registerDriver(driver);
       fixture.controller.selectDriver("plugin", driver.id);
     }
@@ -488,19 +470,17 @@ for (const pending of [
       await reason.evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
       await leave();
       await reason.waitFor();
-      assert.equal(page.url(), pageUrl);
+      await page.waitForURL(pageUrl);
     };
     try {
+      assert.equal(await asksBeforeUnload(page), true);
       await refusedWithReason(() => sidebarLink(page, "Agents").click());
-      // Back to the Agents list (past the tab change, where one was made): the URL returns
-      // before the history event ends.
+      // Back to the Agents list, past the tab change where one was made.
       await refusedWithReason(() =>
         page.evaluate(
           (steps) =>
             new Promise((resolve) => {
-              globalThis.addEventListener("popstate", () => setTimeout(resolve, 0), {
-                once: true,
-              });
+              globalThis.addEventListener("popstate", resolve, { once: true });
               globalThis.history.go(steps);
             }),
           pending.tab === "configuration" ? -1 : -2,
@@ -558,8 +538,155 @@ for (const pending of [
     }
     // The note goes with the hold.
     await reason.waitFor({ state: "detached" });
+    // The save's reread may still be settling the form; then a reload asks no more.
+    await waitForCondition(
+      async () => !(await asksBeforeUnload(page)),
+      "a reload still asks after the write",
+    );
   });
 }
+
+// A plugin save keeps its editor locked until the tab rebuilds. After Delete there is no tab to
+// rebuild, so the settled save held ← Agents, the sidebar and a reload for good (finding 2125).
+test("a plugin save that settles after Delete lets the page go", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
+  const driver = new CodexPluginDriver();
+  fixture.controller.registerDriver(driver);
+  fixture.controller.selectDriver("plugin", driver.id);
+  const namespace = await fixture.createNamespace("Plugin save delete", { ready: true });
+  const { agent } = await createSlackAgent(fixture, namespace, "Plugin Delete Agent");
+  const { page } = await newPage(t, fixture);
+  await login(page, fixture, detailUrl(fixture, namespace.id, agent.id, "draft", "plugins"));
+  await page.locator("button:not([disabled])", { hasText: "Deploy new version" }).waitFor();
+  // The controller applies the save; its answer waits until after Delete.
+  const held = await holdRequests(t, page, `**/namespaces/${namespace.id}/agents/${agent.id}`, {
+    method: "PATCH",
+    once: true,
+    afterServer: true,
+  });
+  await page.locator("summary", { hasText: "Plugin selections JSON" }).first().click();
+  await page
+    .getByLabel("Plugin selections JSON")
+    .fill(JSON.stringify({ "codex-plugin:linear@openai-curated-remote": { enabled: true } }));
+  await page.getByRole("button", { name: "Save plugin selections" }).click();
+  await held.requested;
+
+  await page.getByRole("button", { name: "Delete Agent" }).click();
+  await page
+    .getByRole("dialog", { name: "Delete Plugin Delete Agent?" })
+    .getByRole("button", { name: "Permanently delete Agent" })
+    .click();
+  await page.getByRole("status").getByText("Deletion was requested").waitFor();
+  const reason = page.getByText(
+    "Wait for plugin selections to finish saving before leaving this tab.",
+    { exact: true },
+  );
+  await page.getByRole("link", { name: "← Agents" }).click();
+  await reason.waitFor();
+  assert.equal(await asksBeforeUnload(page), true);
+
+  held.release();
+  await reason.waitFor({ state: "detached" });
+  assert.equal(await asksBeforeUnload(page), false);
+  await page.getByRole("link", { name: "← Agents" }).click();
+  await heading(page, "Agents").waitFor();
+});
+
+test("Back during a Configuration save preserves the previous Agent tab", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Save and Back", { ready: true });
+  const agent = await fixture.createAgent(namespace.id, "Draft history", nativeValues("before"));
+  const { page } = await newPage(t, fixture);
+  await login(page, fixture, detailUrl(fixture, namespace.id, agent.id, "draft", "plugins"));
+  await page.getByRole("tab", { name: "Channels" }).click();
+  await page.getByRole("tab", { name: "Channels", selected: true }).waitFor();
+  const channelsUrl = page.url();
+  await page.getByRole("tab", { name: "Configuration" }).click();
+  await page.getByRole("button", { name: "Edit Configuration" }).click();
+  const configurationUrl = page.url();
+
+  const editor = page.getByLabel("Configuration JSON", { exact: true });
+  const values = nativeValues("after");
+  await editor.fill(JSON.stringify(values, null, 2));
+  const path = `/namespaces/${namespace.id}/configurations/${agent.configurationId}`;
+  const requests = apiRequests(page, fixture.origin);
+  // The controller applies the edit once. Back arrives while this editor still awaits its answer.
+  const held = await holdRequests(t, page, `**${path}`, { method: "PATCH", afterServer: true });
+  await page.getByRole("button", { name: "Save Configuration" }).click();
+  await held.requested;
+  try {
+    await page.goBack();
+    await page
+      .getByText("Wait for Configuration save to finish before leaving the editor.", {
+        exact: true,
+      })
+      .waitFor();
+    await page.waitForURL(configurationUrl);
+    assert.equal(await editor.evaluate((node) => node.readOnly), true);
+  } finally {
+    held.release();
+  }
+  await page.getByText("Configuration saved.", { exact: true }).waitFor();
+  const saved = await fixture.request("GET", path);
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.data.values, values);
+  await page.goBack();
+  assert.equal(page.url(), channelsUrl, "one Back after the save should reach Channels");
+  await page.getByRole("tab", { name: "Channels", selected: true }).waitFor();
+  await page.goForward();
+  await page.getByRole("tab", { name: "Configuration", selected: true }).waitFor();
+  assert.equal(page.url(), configurationUrl);
+  await settlePageRequests(page);
+  assert.equal(pathRequests(requests, "PATCH", path).length, 1);
+});
+
+test("Back refused by unsaved repository changes preserves the previous Agent tab", async (t) => {
+  const repository = "example/application";
+  const { fixture, namespace } = await createRepositoryLaunchFixture(t, (namespaceId) => [
+    {
+      repositoryRef: "application",
+      repositoryId: "1965",
+      repository,
+      namespaces: [{ namespaceId, profiles: ["git-read"] }],
+    },
+  ]);
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Repository history",
+    nativeValues("draft"),
+  );
+  const { page } = await newPage(t, fixture);
+  await login(page, fixture, detailUrl(fixture, namespace.id, agent.id, "draft", "plugins"));
+  const requests = apiRequests(page, fixture.origin);
+  await page.getByRole("tab", { name: "Channels" }).click();
+  await page.getByRole("tab", { name: "Channels", selected: true }).waitFor();
+  const channelsUrl = page.url();
+  await page.getByRole("tab", { name: "Repositories" }).click();
+  const choice = repositoryCheckbox(page, repository);
+  await choice.check();
+  await page.locator("#repository-default-git-read").check();
+  const repositoriesUrl = page.url();
+
+  await page.goBack();
+  await page.getByText(REPOSITORY_EDITS_PENDING).waitFor();
+  await page.waitForURL(repositoriesUrl);
+  assert.equal(await choice.isChecked(), true, "Back kept the unsaved selection");
+
+  // Cancel rereads the saved access in place. Wait for its unselected repository before Back.
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await choice.and(page.locator("input:not(:checked):enabled")).waitFor();
+  assert.equal(await choice.isChecked(), false);
+  await page.goBack();
+  assert.equal(page.url(), channelsUrl, "one Back after Cancel should reach Channels");
+  await page.getByRole("tab", { name: "Channels", selected: true }).waitFor();
+  await page.goForward();
+  await page.getByRole("tab", { name: "Repositories", selected: true }).waitFor();
+  assert.equal(page.url(), repositoriesUrl);
+  await settlePageRequests(page);
+  assert.deepEqual(writeRequests(requests), [], "no repository write");
+});
 
 test("an uncertain Configuration save holds ← Agents, but the sidebar may leave the kept draft", async (t) => {
   const fixture = await createConsoleAppFixture(t);
@@ -690,9 +817,7 @@ test("Secret choices carried through Reload draft do not ask before a reload", a
   });
   assert.equal(changed.status, 200, JSON.stringify(changed.body));
   await page.getByRole("button", { name: "Save channel Secrets" }).click();
-  await page
-    .getByText("Configuration changed. Reload this draft before saving channel Secrets.")
-    .waitFor();
+  await page.getByText(CHANNEL_SECRETS_CONFIGURATION_CHANGED).waitFor();
 
   const reread = await holdRequests(t, page, `**/namespaces/${namespace.id}/agents/${agent.id}`, {
     once: true,
@@ -715,15 +840,6 @@ test("Secret choices carried through Reload draft do not ask before a reload", a
 // A refusal keeps the Create form as a draft only when a retry cannot repeat a write: an
 // uncertain outcome, an admitted provisioning job, a pending credential registration, a job that
 // created its Agent and a repository policy refusal keep none (finding 1965).
-const apiError = (status, code, message) => ({
-  status,
-  contentType: "application/json",
-  body: JSON.stringify({
-    error: { code, message },
-    meta: { requestId: "req_00000000-0000-4000-8000-000000001965" },
-  }),
-});
-
 // The sidebar leaves the refused form and Create Agent returns to the chooser: no kept draft
 // reopens it or asks before a reload.
 async function expectNoKeptDraft(page) {
@@ -746,31 +862,6 @@ async function fillProvisionedAgent(page, fixture, namespace, name) {
   await page.getByLabel("Model", { exact: true }).selectOption("gpt-6-sol");
 }
 
-// Admits one provisioning job and answers its status reads with `read`.
-async function routeProvisioningJob(page, namespace, read) {
-  const url = `/namespaces/${namespace.id}/agents/provision/work_1`;
-  await page.route(`**/namespaces/${namespace.id}/agents/provision`, (route) =>
-    route.fulfill({
-      status: 202,
-      contentType: "application/json",
-      body: JSON.stringify({
-        data: {
-          provisioning: {
-            workId: "work_1",
-            status: "queued",
-            phase: "accepted",
-            attemptCount: 0,
-            updatedAt: new Date().toISOString(),
-            url,
-          },
-        },
-        meta: { requestId: "req_00000000-0000-4000-8000-000000000202" },
-      }),
-    }),
-  );
-  await page.route(`**${url}`, (route) => route.fulfill(read(url)));
-}
-
 test("an uncertain Create outcome keeps no draft", async (t) => {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
@@ -784,7 +875,7 @@ test("an uncertain Create outcome keeps no draft", async (t) => {
     }
     // The Agent is created, but the answer does not say so: a retry could create another.
     await route.fetch();
-    await route.fulfill(apiError(503, "DEPENDENCY_UNAVAILABLE", "masked"));
+    await route.fulfill(apiErrorResponse(503, "DEPENDENCY_UNAVAILABLE", "masked"));
   });
   await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
   await startDefaultPreset(page);
@@ -802,8 +893,10 @@ test("a refused read of an admitted provisioning job keeps no draft", async (t) 
   const { page } = await newPage(t, fixture);
   await routeInstallationProvisioning(page, fixture);
   // The job is admitted, then its status read is refused: the request ID stays the job's.
-  await routeProvisioningJob(page, namespace, () =>
-    apiError(404, "NOT_FOUND", "The requested platform resource was not found."),
+  const work = provisioningJob(namespace.id, "work_1");
+  await routeProvisioningJob(page, work, null);
+  await page.route(`**${work.url}`, (route) =>
+    route.fulfill(apiErrorResponse(404, "NOT_FOUND", RESOURCE_NOT_FOUND)),
   );
   await fillProvisionedAgent(page, fixture, namespace, "Admitted Agent");
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
@@ -819,27 +912,18 @@ test("a failed provisioning job that names its Agent keeps no draft", async (t) 
   await routeInstallationProvisioning(page, fixture);
   // The job created its Agent and first version, then the deployment failed: no Retry, and a
   // kept draft would create the Agent again.
-  await routeProvisioningJob(page, namespace, (url) => ({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({
-      data: {
-        workId: "work_1",
-        status: "failed",
-        phase: "handoff",
-        attemptCount: 1,
-        updatedAt: new Date().toISOString(),
-        agentId: "agt_00000000-0000-4000-8000-000000001965",
-        revisionId: "rev_00000000-0000-4000-8000-000000001965",
-        url,
-        error: {
-          code: "PROVISIONING_DEPLOYMENT_FAILED",
-          message: "The initial deployment failed.",
-        },
+  const work = provisioningJob(namespace.id, "work_1");
+  await routeProvisioningJob(page, work, [
+    work.job("failed", {
+      phase: "handoff",
+      agentId: "agt_00000000-0000-4000-8000-000000001965",
+      revisionId: "rev_00000000-0000-4000-8000-000000001965",
+      error: {
+        code: "PROVISIONING_DEPLOYMENT_FAILED",
+        message: "The initial deployment failed.",
       },
-      meta: { requestId: "req_00000000-0000-4000-8000-000000000200" },
     }),
-  }));
+  ]);
   await fillProvisionedAgent(page, fixture, namespace, "Failed job Agent");
   await page.getByRole("button", { name: "Create Agent", exact: true }).click();
   await page.getByText(/^The initial deployment failed\. Open this Agent/).waitFor();
@@ -871,7 +955,8 @@ test("a refused credential registration keeps no draft", async (t) => {
       await route.fallback();
       return;
     }
-    await route.fulfill(apiError(429, "RATE_LIMITED", "Slow down."));
+    // A rate limit in front of the API: the route itself sends no 429.
+    await route.fulfill(proxyErrorResponse(429));
   });
   await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
   await page.getByRole("button", { name: "Start without Preset" }).click();
@@ -901,13 +986,7 @@ test("a repository-scoped Agent refusal keeps no draft", async (t) => {
       const response = await route.fetch();
       if (deny) {
         deny = false;
-        fixture.policy.restrictions.push({
-          id: "guard-agent-create",
-          namespaceId: namespace.id,
-          resourceKind: "agent",
-          action: "create",
-          effect: "deny",
-        });
+        restrict(fixture.policy, "create", "agent", { namespaceId: namespace.id });
       }
       await route.fulfill({ response });
     },

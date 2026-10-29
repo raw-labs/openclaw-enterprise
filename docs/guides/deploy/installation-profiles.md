@@ -15,7 +15,8 @@ Use `openclaw` for embedded OpenClaw Agents with the bundled OpenClaw
 PluginDriver. Operators select plugins manually or through the API. Embedded
 OpenClaw refuses external channels by default. The unsupported-production
 [embedded-channel trial](../integrations/embedded-channel-trial.md#enable-the-trusted-option)
-accepts trusted `channels.experimentalEmbeddedChannels: true` with a runtime proxy.
+accepts trusted `channels.experimentalEmbeddedChannels: true` with
+`gatewayOutbound.enabled: true`.
 
 Use `codex` for dedicated Codex Agents with the bundled Codex PluginDriver. Its
 stock hosted catalog needs a PAT supplied later through a same-Namespace Secret
@@ -31,28 +32,37 @@ Both profiles enable:
   private metrics, digest-pinned images, DNS policy, trusted proxy CIDRs, and
   plugin-status proxy CIDRs.
 
-Gateway Pods, Harness Pods, and tenant defaults request `100m` CPU and allow
-four cores (`"4"`). Concurrent runtimes can each consume four cores; quotas
-count the whole limit.
+Both profiles give Gateway Pods (embedded or dedicated), Harness Pods, and the
+tenant namespace container default a `100m` CPU request and a four-core (`"4"`)
+CPU limit. The CPU limit only permits bursts: an embedded OpenClaw Gateway's
+startup model probe is a full agent turn of about 16 CPU-seconds on about one
+core (ready in 24 to 30 seconds at one core, 51 to 72 at `500m`). The CPU request sets the scheduling reservation,
+so the higher limit reserves no node capacity. The trade-off is overcommit:
+several busy runtimes on one node can each take up to four cores from their
+neighbors, and a `limits.cpu` namespace quota counts the whole limit.
 
 Memory requests cover the use measured between turns, so the scheduler reserves
 what each Agent actually holds; limits cover measured peaks:
 
-| Pod                             | Request  | Limit | Measured                                                                                                                                                             |
-| ------------------------------- | -------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gateway (embedded or dedicated) | `1792Mi` | `3Gi` | 1.2 to 1.6 GiB between turns, peaks of 1.8 to 2.2 GiB; a dedicated Codex Gateway serving native admin chat was OOM-killed at `2Gi`                                   |
-| Codex Harness                   | `768Mi`  | `6Gi` | 0.45 to 0.57 GiB between turns, 1 GiB running a test suite, 1.9 GiB running `tsc`; lint, `tsc` and tests together were OOM-killed at `2Gi` and reached a `4Gi` limit |
-| Container default               | `128Mi`  | `2Gi` | containers that set no resources                                                                                                                                     |
+| Pod                             | Request  | Limit | Measured                                                                                                                                                                                                                                                                    |
+| ------------------------------- | -------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gateway (embedded or dedicated) | `2560Mi` | `4Gi` | embedded: 1.4 GiB at ready, 2.1 to 2.2 GiB between turns, peaks of 2.2 to 2.4 GiB on the first turn (no swap); dedicated Codex: 1.75 to 1.8 GiB between turns, peaks of 1.95 to 2 GiB on a short first turn, but native admin chat was OOM-killed at `2Gi` on a coding turn |
+| Codex Harness                   | `768Mi`  | `6Gi` | 0.45 to 0.57 GiB between turns, 1 GiB running a test suite, 1.9 GiB running `tsc`; lint, `tsc` and tests together were OOM-killed at `2Gi` and reached a `4Gi` limit                                                                                                        |
+| Container default               | `128Mi`  | `2Gi` | containers that set no resources                                                                                                                                                                                                                                            |
 
-An embedded Agent reserves `1792Mi`; dedicated Codex reserves `2560Mi` across
-its Gateway (`runtime.gatewayNodeSelector`) and Harness (`runtime.nodeSelector`).
-Raise `resources.agent.limits.memory` for builds needing more than `6Gi`.
-Limits reserve no memory: concurrent builds can exhaust a node and trigger
-evictions. Size nodes for expected concurrency.
+Plan node memory per Agent: an embedded OpenClaw Agent reserves `2560Mi`, and a
+dedicated Codex Agent reserves `3328Mi`: `2560Mi` for its Gateway on the
+`runtime.gatewayNodeSelector` pool and `768Mi` for its Harness on the
+`runtime.nodeSelector` pool. A Harness runs
+the Agent's shell commands, so builds and test suites in large repositories can
+need more than `6Gi`; raise `resources.agent.limits.memory` in the Installation
+for such workloads. Limits reserve no node memory, so Harnesses building at the
+same time on one node can together exhaust it, and the kubelet then evicts Pods
+using more than their requests first; size agents nodes for the turns
+you expect to run concurrently.
 
 Denying the 11 bundled plugins an OpenAI-only Agent does not use
-(`plugins.deny`) saved only about 50 MiB. Profile input cannot change these
-values; for others, write the Installation from the production example (see
+(`plugins.deny`) saved only about 50 MiB. Profile input cannot change these values; for others, write the Installation from the production example (see
 [Images and resources](../../reference/drivers/kubernetes-compute.md#images-and-resources)).
 An existing Installation keeps its values on upgrade; adopted values apply to
 each Agent at its next deployment. Before adopting them, check each agents node's
@@ -63,14 +73,9 @@ Seeding both Presets does not change the profile's PluginDriver. An Agent
 created from the other profile's Preset still needs a compatible driver,
 runtime, harness mode, credentials, and channel support.
 
-To seed additional Presets, add `"presets": { "files": ["/app/deploy/presets/swe-preset.json"] }`
-to the input JSON and rerender. This adds **SWE Agent** alongside the bundled
-Presets. Set `presets.includeDefaults` to `false` to seed only the listed files;
-omit `files` as well to seed no Presets. The renderer defaults `includeDefaults`
-to `true`. Both controllers must read the files at startup; the renderer only validates paths. Disabling
-seeding does not delete saved Presets. See
-[Preset initialization](../../reference/presets.md#installation-defaults) for path
-resolution and startup validation.
+To add custom Presets or disable bundled seeding, follow
+[Configure Preset seeding](custom-installation-profiles.md#configure-preset-seeding).
+Disabling seeding preserves saved copies.
 
 Repository support is optional. When enabled, the renderer wires the broker
 container, GitHub Backend, Repo Driver, and Compute peer. The repository registry
@@ -197,8 +202,10 @@ With hosted `codex-plugin`, omitted `codex.modelDiscoveryCidrs` resolves
 `api.modelDiscoveryCidrs`. This grants only release API Pods TCP 443 to those
 IPv4 `/32` hosts.
 
-Supplied lists stay unchanged without DNS queries; `[]` requires an external
-HTTPS policy for both hosts. DNS failure leaves both YAML files absent.
+Only the `codex` family accepts `codex.modelDiscoveryCidrs`. Supplied lists skip
+DNS; `[]` requires external HTTPS policy for both hosts. An `openclaw` profile
+selecting hosted `codex-plugin` always requires DNS; it has no offline CIDR input.
+Curated discovery needs no DNS. DNS failure leaves both YAML files absent.
 
 Verify API Pod DNS/NAT destinations and **Load plugins** with an authorized PAT.
 Rerender and upgrade Helm after address changes; this initial snapshot does not
@@ -298,7 +305,7 @@ refuses.
 
 ## Render files
 
-Run the renderer from the repository root with Node.js 24 or newer. With native
+Run the renderer from the repository root with Node.js 24.22.1 or newer. With native
 admin, run `pnpm install` first: the public suffix check uses the API's list.
 
 ```sh
@@ -308,24 +315,8 @@ node scripts/render-installation-profile.mjs \
   --out-dir .build/profile-renders/codex
 ```
 
-For a trusted custom profile, copy the matching `deploy/profiles/` file and add
-`--profile-file .build/profiles/codex.json`. Paths resolve from the working
-directory. Adjust `installation.drivers.plugin`, for example to
-[select the curated catalog](../../reference/drivers/plugin-bundled.md#selection-and-catalogs).
-Its `name` must match `--profile` (`openclaw` or `codex`). Unreadable, invalid or
-mismatched profiles fail without fallback; unsupported fields fail too.
-
-Only the bundled PluginDriver selection is copied. Required strings
-`description`, `recommendedPreset`, `agentHarness`, and `pluginSelection` are
-metadata; they do not override infrastructure or Console defaults. Omitted
-Driver `configuration` becomes `{}`; supplied configuration must be an object.
-Startup validates Driver options. Rendering proves neither startup nor deployment,
-and cannot load custom modules or change the selected profile family.
-
-For custom-only Presets, set `presets.includeDefaults: false` and `presets.files`
-in **site inputs**. Existing copies remain. The Console
-[chooses a readable starter](../../reference/presets.md#plain-console-default)
-independently of `recommendedPreset`.
+For trusted PluginDriver overrides, follow
+[Customize installation profiles](custom-installation-profiles.md). Invalid profiles fail without fallback.
 
 On success, the output directory contains:
 
@@ -337,13 +328,14 @@ On success, the output directory contains:
 - `preflight.json`: rendered output paths, warnings, prerequisites, and next
   steps.
 
-After validating the CLI arguments, the renderer deletes these three files from
-the output directory before it reads the input. It keeps other files. If
-required input is missing or unsupported input is present, it writes
-`preflight.json` with `ok: false` and only the report path in `outputs`, leaves
-both YAML files absent, and exits nonzero. If the input JSON is unreadable or
-malformed, or the selected profile cannot be loaded, it exits without writing a
-preflight report.
+Use separate files for site inputs and custom profiles. Symbolic or hard links to
+these outputs are also refused without changing existing files. An `input.json`
+or custom profile can remain in the output directory under a different name.
+
+After these checks, the renderer clears the three outputs before reading inputs;
+other files stay. Invalid settings produce only `preflight.json` with `ok: false`
+and its path in `outputs`. Unreadable or malformed JSON, or an invalid selected
+profile, produces no report. Both failures exit nonzero and leave no YAML outputs.
 
 ## Use rendered files
 
@@ -370,9 +362,9 @@ at most 63 characters, matching Helm, bootstrap-volume preparation and Pod
 admission.
 Preflight rejects invalid placement labels before writing deployment files.
 
-If rendering fails or either YAML file is absent, stop and fix the input. Do not
-copy manual examples into the same output directory. Rerender successfully so
-`values.yaml`, `installation.yaml`, and `controlPlane.installationChecksum` stay
+If rendering fails or either YAML file is absent, fix the input and rerender;
+never copy manual examples into the output directory. Only a successful render
+keeps `values.yaml`, `installation.yaml`, and `controlPlane.installationChecksum`
 paired.
 
 `runtime.transportSecretPrefix` must form a DNS-safe Kubernetes Secret name after
@@ -397,7 +389,7 @@ the install as ready:
   `controlPlaneOutbound.managedProxy` with its own exclusions for API directory
   lookup and credential validation, or supply an approved `proxyUrl`. The two
   instances have separate clients and policy. Enabling network support does not
-  enable Slack itself; channel-enabled Agents require dedicated execution unless the embedded trial is enabled.
+  enable Slack itself. Embedded channels require the explicit trial opt-in above.
   See [Gateway outbound](../../reference/gateway-outbound.md) and
   [Slack setup](../integrations/slack.md#configure-both-slack-proxies).
 - For hosted `codex-plugin` discovery under either profile family, a PAT supplied

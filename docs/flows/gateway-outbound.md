@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
-updated: 2026-10-19
-last_updated_session: authoring-run/a17d3f2a-fc44-4f46-af2d-e8749bfb8305
+updated: 2026-10-28
+last_updated_session: authoring-run/c5313baa-4413-41e8-b96e-e13dc1933f2f
 ---
 
 # Gateway Outbound Flow
@@ -61,8 +61,8 @@ graph TD
 
 ### 1. Save additional authority on the Agent
 
-`apps/controller/src/console/navigation.mjs:createNavigation` retains the exact
-Network tab through login. `apps/controller/src/console/agents/detail.mjs:reloadDraftInPlace`
+`apps/controller/src/console/navigation.mts:createNavigation` retains the exact
+Network tab through login. `apps/controller/src/console/agents/detail.mts:reloadDraftInPlace`
 rereads the Agent after a Network save or explicit reload, then rebuilds the editor
 in place with confirmation and focus. Sidebar navigation and Back wait for pending
 Network writes. Unsaved changes still block deployment;
@@ -75,11 +75,14 @@ Ordinary updates retain saved authority even after an Installation tightening;
 deployment rechecks it. State persists the selection beside other Agent settings.
 
 `packages/occ/src/state/postgres-state.ts:updateConfiguration` writes
-`gateway_outbound`; `migrations/0060_gateway_outbound.sql` constrains its shape,
+`gateway_outbound`; `migrations/0056_gateway_outbound.sql` constrains its shape,
 DNS names, and dedicated-only extra authority. The memory adapter mirrors those
 invariants. The normal mutation audit names the actor and exact Agent.
 
-The Agent row also retains upstream's `sandbox_policy_editing` flag. Revision
+The Agent row also retains `gateway_managed_mode` and `sandbox_policy_editing`.
+Gateway administration mode and outbound approval are independent settings.
+Deployment preserves both values; changing either draft value cannot change a
+previously admitted version. Revision
 serialization stores `gateway_outbound` beside `sandbox_policy`; the combined
 database constraint permits both without dropping either snapshot. Sandbox policy
 admission and application remain with their [existing owner](agent-sandbox-policy.md).
@@ -125,6 +128,11 @@ use it; Kubernetes ConfigMap projection symlinks remain supported.
 The proxy Pod uses its separate network profile, has no Secret or API token, and
 receives public IPv4 TCP/443 plus DNS under exclusions. Its ingress admits only
 its owning Gateway revision. The Gateway receives no new direct public grant.
+Configuration saves accept non-credential proxy environment settings.
+`KubernetesComputeDriver.admitRevision` refuses those settings when the version
+has a managed outbound snapshot, before deployment starts. Preparation repeats
+that check. Shared channel Secret-binding validation still applies at save.
+
 Compute checks proxy readiness before preparing the Gateway with HTTP(S) proxy,
 Node proxy opt-in and exact internal bypass hosts. Harness environment and
 networking retain their existing contract. Older Node versions fail managed
@@ -219,6 +227,10 @@ compatibility with every native plugin transport or provider.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-28 21:33: Preserve Gateway managed mode alongside outbound approval and append the outbound migration after the current schema. (authoring-run/c5313baa-4413-41e8-b96e-e13dc1933f2f - a50b14647d4311764cce3359150149bc81f23431)
+
+- 2026-10-28 21:28: Move managed proxy environment checks from Configuration save to revision admission and preparation. (authoring-run/1e3b005b-0fc3-4a4b-8e1a-fb8ad7bf47e8 - a50b14647d4311764cce3359150149bc81f23431)
 
 - 2026-10-19 22:31: Preserve both Sandbox and Gateway snapshots after upstream integration and update the migration link. (authoring-run/a17d3f2a-fc44-4f46-af2d-e8749bfb8305 - 5f494a0fdf8f36f5b4cdf0a2886987ca49a5248c)
 

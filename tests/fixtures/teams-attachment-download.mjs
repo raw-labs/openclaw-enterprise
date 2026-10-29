@@ -88,7 +88,7 @@ test("native guarded attachment downloads use the reviewed channel proxy", async
     { host: "tenant.sharepoint.com", authorization: undefined },
   ]);
 
-  // Even a native-allowed redirect cannot escape the installation's exact list.
+  // Even a native-allowed redirect cannot escape the revision's exact destination policy.
   await assert.rejects(
     fetchWithSsrFGuard({ ...options, url: "https://graph.microsoft.com/unapproved" }),
     { name: "TypeError", message: /fetch failed/ },

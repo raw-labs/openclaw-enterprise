@@ -38,8 +38,9 @@ Saving updates the draft. Deployment freezes the selection, channel requirements
 and admitted Installation exclusions into the immutable revision. An existing
 version keeps its selection when the draft or channel settings change. Deploy
 a new version to apply those changes. Admission rechecks the current Installation
-ceiling. Additional modes require dedicated execution; embedded execution is
-unchanged.
+ceiling. Additional modes require dedicated execution. The default-off
+[embedded trial](../guides/integrations/embedded-channel-trial.md) accepts only
+`channelsOnly` and requires enabled managed outbound.
 
 ## Installation setup
 
@@ -100,6 +101,10 @@ loopback, link-local, metadata, CGNAT, reserved and configured infrastructure
 addresses are refused. IPv6-only targets and IP-literal requests fail closed.
 TLS remains end-to-end; there is no certificate replacement or credential injection.
 
+Kubernetes Configuration admission reserves proxy environment settings and the
+native guarded-fetch trust markers for Compute. Use the Agent Network selection
+for additional destinations; callers cannot supply their own proxy or trust marker.
+
 The stock native Gateway uses the generated `HTTP_PROXY`, `HTTPS_PROXY`,
 `NODE_USE_ENV_PROXY` and exact internal `NO_PROXY` settings. This requires Node
 24.5 or newer; managed-proxy Gateway startup refuses older versions. Native
@@ -155,4 +160,4 @@ an allowed hostname can mean the plugin transport does not honor the proxy.
 
 [Runtime flow](../flows/gateway-outbound.md) explains resource ordering.
 [Testing](../testing/gateway-outbound.md) records selected proof and limits.
-[RFC-0021](../../specs/rfcs/0024-gateway-outbound.md) records the architectural proposal.
+[RFC-0026](../../specs/rfcs/0026-gateway-outbound.md) records the architectural proposal.
