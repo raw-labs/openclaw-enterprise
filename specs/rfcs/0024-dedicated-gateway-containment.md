@@ -20,16 +20,15 @@ Slack destinations and requires clients to honor proxy settings. Other
 integrations need a way to reach approved services without a new proxy for each
 integration.
 
-Run each dedicated Gateway inside the selected Sandbox, using OpenShell first.
-Enforce destination policy on socket connections instead of relying on client
-proxy settings. Reuse OpenShell's existing supervisor to open approved upstream
-connections. This replaces the Gateway's Slack HTTP proxy route and also covers
-other approved channel and plugin destinations. Native OpenClaw keeps the
-integration logic, credentials and TLS verification.
+This proposal is to run each dedicated Gateway inside a Sandbox, with OpenShell
+as the first implementation. OpenShell checks the Gateway's socket connections
+against destination policy and opens approved connections through its existing
+supervisor. The Gateway no longer uses the Slack HTTP proxy. Native OpenClaw
+keeps the integration logic, credentials and TLS verification.
 
-The default still allows only enabled-channel destinations. Broader access
-requires explicit permission. The separate Harness, embedded execution and
-control-plane networking stay unchanged.
+The control-plane API continues using the Slack HTTP proxy for credential
+checks and directory lookups. Its networking, the separate Harness and embedded
+execution stay unchanged.
 
 ## One outbound request, before and after
 
@@ -60,19 +59,22 @@ the Slack destination rule.
 ## Gateway outbound policy
 
 The proposed OCE Agent setting `gatewayOutbound` controls external application
-access, separately from native OpenClaw Configuration. Omitting it selects
-`channelsOnly`.
+access, separately from native OpenClaw Configuration. It has two selections:
 
-| Selection                    | External application access                                                  |
-| ---------------------------- | ---------------------------------------------------------------------------- |
-| `channelsOnly` **(default)** | Only destinations contributed by enabled, supported channels.                |
-| `restricted`                 | Channel destinations plus exact administrator-approved DNS hosts on TCP/443. |
-| `publicHttps`                | Public TCP/443, only when the Installation explicitly permits it.            |
+| Selection                  | External application access                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------- |
+| `restricted` **(default)** | Enabled-channel destinations plus optional administrator-approved DNS hosts on TCP/443. |
+| `publicHttps`              | Public TCP/443, only when the Installation explicitly permits it.                       |
 
-With no enabled channel, the default grants no external application access.
-Enabling Slack adds its API and Socket Mode destinations; unrelated services
-remain denied. Installing a plugin does not authorize its provider or package
-registry. Additional access requires an explicit wider selection.
+Omitting the setting selects `restricted` with an empty additional host list.
+Only enabled, supported channels then contribute destinations; with no enabled
+channel, external application access is denied. Enabling Slack adds its API and
+Socket Mode destinations, while unrelated services remain denied.
+
+Installing a plugin does not authorize its provider or package registry.
+An administrator can allow those destinations by adding exact DNS hosts under
+`restricted`, without changing modes, or by selecting explicitly permitted
+`publicHttps` access.
 
 Exact internal Gateway/Harness transport and necessary DNS are separate runtime
 grants. External rules cannot override the Installation ceiling or forbidden

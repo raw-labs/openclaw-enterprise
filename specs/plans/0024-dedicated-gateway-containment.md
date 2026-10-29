@@ -17,7 +17,8 @@ Sandbox's existing policy enforcement. Run the dedicated Gateway in OpenShell
 as the mechanism. Keep the separate Harness's placement, workspace,
 authentication and model-credential path unchanged. Use the RFC's
 [`gatewayOutbound` policy](../rfcs/0024-dedicated-gateway-containment.md#gateway-outbound-policy):
-`channelsOnly` by default, with broader access explicit.
+`restricted` by default, with an empty additional host list; `publicHttps`
+requires explicit Installation permission.
 
 Only the normal dedicated-Gateway caller is in scope. Do not build a generic
 workload executor, scheduler, Pod-template adoption layer, new public resource,
@@ -297,6 +298,10 @@ dedicated Harness while containing the Gateway independently.
 - 2026-10-29: Set `gatewayOutbound` to `channelsOnly` by default; wider
   selections are explicit. Added default-deny proof cases. Implementation is on
   hold for the RFC owner's review.
+
+- 2026-10-29: Simplified the proposal to `restricted` and `publicHttps`.
+  `restricted` defaults to an empty additional host list, preserving the
+  enabled-channel-only default without a separate mode.
 
 ## Changelog
 

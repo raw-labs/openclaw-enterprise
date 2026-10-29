@@ -40,13 +40,14 @@ login, WebSocket operation or message delivery.
 Use the [RFC's proposed selections](../../specs/rfcs/0024-dedicated-gateway-containment.md#gateway-outbound-policy),
 not a permissive substitute. Exercise the real Gateway and record these outcomes:
 
-| Configuration                                 | Required outcome                                                                       |
-| --------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Omitted `gatewayOutbound`, no enabled channel | `channelsOnly` applies; external application connections fail.                         |
-| Default with Slack enabled                    | Declared Slack HTTPS/WSS destinations work; unrelated destinations remain denied.      |
-| `restricted` with an approved DNS host        | That host on TCP/443 works; an unapproved host remains denied.                         |
-| `publicHttps` without Installation permission | Admission rejects the selection.                                                       |
-| Explicitly permitted `publicHttps`            | Public TCP/443 works; forbidden DNS answers and IP-literal destinations remain denied. |
+| Configuration                                                         | Required outcome                                                                       |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Omitted `gatewayOutbound`, no enabled channel                         | `restricted` with no additional hosts applies; external application connections fail.  |
+| Explicit `restricted`, empty additional host list, no enabled channel | External application connections fail, as with the omitted setting.                    |
+| Default with Slack enabled                                            | Declared Slack HTTPS/WSS destinations work; unrelated destinations remain denied.      |
+| `restricted` with an approved DNS host                                | That host on TCP/443 works; an unapproved host remains denied.                         |
+| `publicHttps` without Installation permission                         | Admission rejects the selection.                                                       |
+| Explicitly permitted `publicHttps`                                    | Public TCP/443 works; forbidden DNS answers and IP-literal destinations remain denied. |
 
 Check that disabling Slack removes its contribution on replacement unless an
 independent explicit grant still allows it. Exact internal transport and DNS
