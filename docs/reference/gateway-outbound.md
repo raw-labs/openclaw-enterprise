@@ -100,6 +100,10 @@ loopback, link-local, metadata, CGNAT, reserved and configured infrastructure
 addresses are refused. IPv6-only targets and IP-literal requests fail closed.
 TLS remains end-to-end; there is no certificate replacement or credential injection.
 
+Configuration saves accept non-credential proxy environment settings. Deployment
+refuses caller proxy environment settings for a version that uses managed outbound;
+remove those settings and use the Agent Network selection.
+
 The stock native Gateway uses the generated `HTTP_PROXY`, `HTTPS_PROXY`,
 `NODE_USE_ENV_PROXY` and exact internal `NO_PROXY` settings. This requires Node
 24.5 or newer; managed-proxy Gateway startup refuses older versions. Native

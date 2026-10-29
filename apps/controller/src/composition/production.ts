@@ -68,6 +68,11 @@ export interface ProductionConfig {
   readonly gatewayApiKeyPath?: string;
   readonly controlPlaneOutboundProxyUrl?: string;
   readonly controlPlaneOutboundProxyManagedHost?: string;
+  /**
+   * OCC_API_HTTPS_EGRESS_OPEN: a sign-in egress rule lets the API reach any address on TCP 443,
+   * so Slack can answer without a proxy. Default: closed.
+   */
+  readonly apiHttpsEgressOpen?: boolean;
   readonly nativeAdmin?: NativeAdminAccessConfig;
   /** Default: enabled. `false` makes both runtime routes answer 501. */
   readonly agentRuntimeLogsEnabled?: boolean;
@@ -274,6 +279,7 @@ export async function composeProduction(
 
     phaseCompleted("computePreflight");
     const { driver: channelDriver, channelNetworkRequirements } = createBundledChannelCapabilities({
+      expectProxy: config.apiHttpsEgressOpen !== true,
       ...(config.controlPlaneOutboundProxyUrl === undefined
         ? {}
         : { proxyUrl: config.controlPlaneOutboundProxyUrl }),

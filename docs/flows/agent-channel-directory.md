@@ -98,7 +98,14 @@ An incomplete page cannot establish that a name is absent or unique.
 cancels an unused response body on a non-success HTTP status before returning
 the safe rate-limit or unavailable error. This releases occupied transport
 capacity even when the error body has not finished. The same request owner
-serves credential validation; no automatic retry is added. Successful responses
+serves credential validation; no automatic retry is added. Production
+composition sets `expectProxy`: with no proxy URL, a credential check whose
+fetch fails to connect, resolve, or answer within the time budget raises
+`SlackRouteNotConfiguredError` (`409`) instead of the unavailable error (finding
+2521). Its message names the Helm proxy settings and says to try again when the
+API has another approved route, since an open route can also time out (finding
+2531). Any other fetch rejection, such as a refused redirect, a TLS failure, or
+an invalid header value, stays unavailable (finding 2532). Successful responses
 have an 8,000,000-byte streaming cap before decoded JSON is checked against the
 existing limit of 2,000,000 UTF-16 code units. Overflow cancels the body read and returns `invalid_response`.
 
@@ -177,6 +184,7 @@ view.
 - 2026-10-15 15:46: Select provider operations and network requirements through shared composition. (authoring-run/6de03ad9-293f-4b20-b21c-a5e0a23cb208 - b0c299f7e8a9cdb992500fa39d32dddea9271ed0)
 
 - 2026-10-14 16:02: Trace the accompanying generic API-only proxy and trusted Driver requirements. (authoring-run/7bd4f79c-2e3a-40b6-b2e9-5e51b495a8f0 - bd8fe1f7b0b798dca84d6f90b7377ddda79d88a6)
+- 2026-10-25: Name the Slack proxy settings, and keep a retry for another approved route, when production credential validation cannot connect to Slack. (findings 2521, 2531, 2532)
 
 - 2026-10-14 12:23: Document streaming and decoded Slack response limits. (authoring-run/a404e7a3-9acf-4b50-9307-31e50b1b3582 - 4727e9b109a2127150e03e39e859d45e0668f82f)
 

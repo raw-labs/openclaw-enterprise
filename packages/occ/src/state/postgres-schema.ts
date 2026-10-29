@@ -271,6 +271,7 @@ export const agents = occSchema.table(
       .$type<GatewayOutboundSelection>()
       .notNull()
       .default({ mode: "channelsOnly" }),
+    gatewayManagedMode: boolean("gateway_managed_mode").notNull().default(true),
     sandboxPolicyEditing: boolean("sandbox_policy_editing").notNull().default(false),
     plugins: jsonb("plugins").$type<PluginDesiredState>(),
     pluginApprovers: jsonb("plugin_approvers").$type<PluginApprovers>(),
@@ -659,6 +660,7 @@ export const agentRevisions = occSchema.table(
     agentId: text("agent_id").notNull(),
     revisionNumber: bigint("revision_number", { mode: "number" }).notNull(),
     backendId: text("backend_id"),
+    gatewayManagedMode: boolean("gateway_managed_mode").notNull().default(true),
     admittedSpec: jsonb("admitted_spec").$type<Record<string, unknown>>().notNull(),
     admittedAt: timestamp("admitted_at", { withTimezone: true }).notNull(),
   },

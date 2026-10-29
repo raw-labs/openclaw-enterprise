@@ -24,7 +24,10 @@ import {
   PROTECTED_CODEX_WITH_NODE_ENTRYPOINT,
   RUNTIME_WRAPPER_COMMAND,
 } from "../../apps/controller/src/drivers/compute/kubernetes/runtime-entrypoints.ts";
-import { nodeProgramArguments } from "../../apps/controller/src/drivers/compute/node-program.ts";
+import {
+  nodeProgramArguments,
+  withoutLineComments,
+} from "../../apps/controller/src/drivers/compute/node-program.ts";
 import test from "node:test";
 import {
   admitLoggingConfiguration,
@@ -552,6 +555,40 @@ for (const scenario of [
     assert.deepEqual(fixture.hooks.slice(-2), ["start", "stop"]);
   });
 }
+
+test("provider Harness reads a supervisor's held failure while its workspace node is pending", async () => {
+  // The Codex Harness supervisor holds a failed state migration or workspace setup before
+  // Codex and the workspace node start, so the node never connects. Compute reads the hold
+  // through the provider and fails the revision with it instead of waiting for the
+  // deadline as WORKSPACE_NODE_PENDING (finding 2686).
+  const fixture = await endpointWithGateway();
+  fixture.observePods([fixture.pod("ready")]);
+  fixture.driver.nodeEnrollment.isConnected = async () => false;
+  const observations = [];
+  let answer = { state: "serving" };
+  fixture.sandbox.harnessStatus = async (context) => {
+    observations.push(context);
+    return answer;
+  };
+  // A Codex that serves while its node pairs keeps the named wait.
+  assert.deepEqual(await fixture.prepare(), {
+    ...expectedRevision(fixture),
+    ready: false,
+    pendingReason: "WORKSPACE_NODE_PENDING",
+  });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].transportToken, "test-transport");
+  for (const check of ["state-migration", "workspace-baseline"]) {
+    const runtimeFailure = { ...withoutCause, check, code: "UNAVAILABLE" };
+    answer = { state: "failed", runtimeFailure };
+    assert.deepEqual(await fixture.prepare(), {
+      ...expectedRevision(fixture),
+      ready: false,
+      runtimeFailure,
+    });
+  }
+  assert.equal(observations.length, 3);
+});
 
 test("provider Harness unready Pod prevents transport status observation", async () => {
   const fixture = await endpointWithGateway();
@@ -1461,7 +1498,9 @@ test("provider Harness protected execution is released only on current signed in
             const codex = node ? program(JSON.parse(child[1]).slice(1)) : outer;
             assert.equal(
               codex,
-              disabled ? PROTECTED_CODEX_RUNTIME_ENTRYPOINT : AGENT_RUNTIME_ENTRYPOINT,
+              withoutLineComments(
+                disabled ? PROTECTED_CODEX_RUNTIME_ENTRYPOINT : AGENT_RUNTIME_ENTRYPOINT,
+              ),
             );
             // Only the two model-calling invocations: the authentication probe and app-server.
             assert.equal(
