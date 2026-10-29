@@ -1508,6 +1508,11 @@ test(
         assert.ok(callback.spec.rules[0].filters[1].requestHeaderModifier.remove.includes(name));
       }
     };
+    await assertServing(provisioned.revisionId);
+    const beforeOutboundRefusal = await optedIn.request("GET", agentPath);
+    assert.equal(beforeOutboundRefusal.status, 200, JSON.stringify(beforeOutboundRefusal.body));
+    assert.deepEqual(beforeOutboundRefusal.data.gatewayOutbound, { mode: "channelsOnly" });
+    assert.equal(beforeOutboundRefusal.data.activeRevisionId, provisioned.revisionId);
     // The normal Agent update route cannot grant extra destinations to embedded execution.
     for (const gatewayOutbound of [
       { mode: "restricted", hosts: ["example.com"] },
@@ -1518,9 +1523,22 @@ test(
         gatewayOutbound,
       });
       assert.equal(additional.status, 409, JSON.stringify(additional.body));
-      assert.match(additional.error.message, /dedicated/);
+      // The HTTP contract sanitizes ResourceConflictError's internal Driver detail.
+      assert.equal(additional.error.code, "RESOURCE_CONFLICT");
+      assert.equal(additional.error.message, "The requested platform resource already exists.");
+      // Refusal must preserve both saved selection and the serving channel-only revision.
+      const afterOutboundRefusal = await optedIn.request("GET", agentPath);
+      assert.equal(afterOutboundRefusal.status, 200, JSON.stringify(afterOutboundRefusal.body));
+      assert.deepEqual(
+        afterOutboundRefusal.data.gatewayOutbound,
+        beforeOutboundRefusal.data.gatewayOutbound,
+      );
+      assert.equal(
+        afterOutboundRefusal.data.activeRevisionId,
+        beforeOutboundRefusal.data.activeRevisionId,
+      );
+      await assertServing(provisioned.revisionId);
     }
-    await assertServing(provisioned.revisionId);
     // A Teams draft may be edited while Slack and Teams serve. Refuse an unsupported
     // callback at admission, before the worker can stop their shared Gateway or proxy.
     const configurationPath = `/namespaces/${namespaceId}/configurations/${provisioned.configurationId}`;
