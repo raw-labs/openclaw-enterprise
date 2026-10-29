@@ -1,3 +1,30 @@
+import type { GatewaySandboxCapability } from "./gateway-sandbox.ts";
+
+export type {
+  GatewaySandboxCapability,
+  GatewaySandboxContext,
+  GatewaySandboxRequirements,
+  GatewaySandboxEndpoint,
+  GatewaySandboxStatus,
+  GatewaySandboxObservation,
+  GatewaySandboxNodeBinding,
+  GatewaySandboxRuntimePeer,
+  GatewaySandboxSecretRef,
+} from "./gateway-sandbox.ts";
+import type { GatewayOutboundPolicy, GatewayOutboundAdmission } from "./gateway-outbound.ts";
+
+export type {
+  GatewayOutboundPolicy,
+  GatewayOutboundPolicyCeiling,
+  GatewayOutboundAdmission,
+} from "./gateway-outbound.ts";
+export {
+  normalizeGatewayOutboundPolicy,
+  normalizeGatewayOutboundPolicyCeiling,
+  assertGatewayOutboundWithinCeiling,
+  normalizeGatewayOutboundAdmission,
+} from "./gateway-outbound.ts";
+
 import type {
   CredentialPolicyWithdrawalOptions,
   ExecutionAdmission,
@@ -317,7 +344,7 @@ export interface OpenShellBackendDefinition {
   readonly configuration: OpenShellBackendConfiguration;
   readonly drivers: {
     readonly sandbox: string;
-    readonly credential_gateway: string;
+    readonly credential_gateway?: string;
     readonly credential_proxy?: string;
     /** Refreshes the gateway's refresh-type sources; absent when none are offered. */
     readonly credential_refresh?: string;
@@ -1055,6 +1082,7 @@ export interface Agent extends Scope {
   readonly executionMode: HarnessExecutionMode;
   /** Desired Gateway administration mode; each deployment snapshots the selected value. */
   readonly gatewayManagedMode: boolean;
+  readonly gatewayOutbound: GatewayOutboundPolicy;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingSelection[];
@@ -1134,6 +1162,8 @@ export interface AgentRevision extends Scope {
   readonly configurationGeneration: number;
   readonly configuration: OpenClawConfigurationDocument;
   readonly gatewayManagedMode: boolean;
+  readonly gatewayOutbound: GatewayOutboundPolicy;
+  readonly gatewayOutboundAdmission?: GatewayOutboundAdmission;
   readonly harness: RevisionHarnessDescriptor;
   readonly compute: {
     readonly id: string;
@@ -1181,6 +1211,10 @@ export function freezeAgentRevision(revision: AgentRevision): Readonly<AgentRevi
   return Object.freeze({
     ...revision,
     executionAdmission: immutableCopy(revision.executionAdmission),
+    gatewayOutbound: immutableCopy(revision.gatewayOutbound),
+    ...(revision.gatewayOutboundAdmission === undefined
+      ? {}
+      : { gatewayOutboundAdmission: immutableCopy(revision.gatewayOutboundAdmission) }),
     ...(revision.egressPlan === undefined
       ? {}
       : { egressPlan: immutableCopy(revision.egressPlan) }),
@@ -1932,6 +1966,7 @@ export interface SandboxRepositoryAccess {
 }
 
 export interface SandboxDriver extends Driver {
+  readonly gateway?: GatewaySandboxCapability;
   readonly repositoryAccess?: SandboxRepositoryAccess;
   /** Explicit support; a networking facet alone never grants editable policy. */
   readonly networkPolicy?: {
@@ -2151,7 +2186,15 @@ export type ChannelCredentialReader = (
   validate: (value: string) => Promise<void>,
 ) => Promise<void>;
 
+export type { ChannelGatewayDestination } from "./channel-gateway.ts";
+
 export interface ChannelDriver extends Driver {
+  /** Contributes only enabled, supported channels; no credentials or provider policy. */
+  gatewayDestinations?(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+    /** Exact enabled provider; throw if this Driver cannot cover its destinations. */
+    provider: string,
+  ): readonly import("./channel-gateway.ts").ChannelGatewayDestination[];
   readonly capability: "channel";
   validateCredentials?(
     values: Readonly<Record<string, unknown>>,
@@ -2383,6 +2426,11 @@ export interface ComputeDriver extends Driver {
   readonly maintenanceIntervalMs?: number;
   /** Side-effect-free, bounded Driver-owned facts frozen into a new revision. */
   admitRevision?(revision: Readonly<AgentRevision>): string | undefined;
+  /** Side-effect-free policy and Installation-ceiling validation at save and deployment. */
+  validateGatewayOutbound?(
+    policy: GatewayOutboundPolicy,
+    executionMode: HarnessExecutionMode,
+  ): void;
   /**
    * Opt into exclusive replacement: the worker stops all earlier revisions before
    * preparation and supersedes their reconciliation once a newer exclusive

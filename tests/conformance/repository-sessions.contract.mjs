@@ -52,6 +52,7 @@ export async function seedSessionRevision(
     harnessAuth,
     executionMode,
     gatewayManagedMode: true,
+    gatewayOutbound: { mode: "restricted", hosts: [] },
     servicePrincipalId: `service-agent-${randomUUID()}`,
     repositoryBindings: credentials.bindings.map(({ repositoryRef, profile }) => ({
       repositoryRef,
@@ -69,6 +70,7 @@ export async function seedSessionRevision(
     configurationKind: "agent",
     configurationGeneration: 1,
     gatewayManagedMode: agent.gatewayManagedMode,
+    gatewayOutbound: agent.gatewayOutbound,
     backendId: null,
     harnessAuth: { ...harnessAuth, secretDriverId: secret.driverId },
     configuration: { agents: { defaults: { model: "openai/gpt-fixture" } } },

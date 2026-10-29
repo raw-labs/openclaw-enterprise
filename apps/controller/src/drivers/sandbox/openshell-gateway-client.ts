@@ -16,6 +16,7 @@ import {
 import { asRecord, isNonEmptyString } from "@openclaw-enterprise/utils";
 import { DependencyUnavailableError, gatewayEndpointRewritesIpv4 } from "@openclaw-enterprise/occ";
 import { randomUUID } from "node:crypto";
+import { GATEWAY_CHALLENGE } from "./openshell-gateway-launch.ts";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -33,6 +34,7 @@ import type {
   ChannelCredentials,
   Client,
   ClientReadableStream,
+  ClientDuplexStream,
   ClientUnaryCall,
   Metadata,
   ServiceClientConstructor,
@@ -463,6 +465,16 @@ export interface OpenShellGatewayClient
    * `confirmSandboxAbsent`.
    */
   deleteSandbox(request: OpenShellSandboxDeleteRequest, signal: AbortSignal): Promise<void>;
+  /** Bounded private native Gateway status; no service exposure and no process output. */
+  readGatewayStatus?(
+    request: OpenShellSandboxDeleteRequest & { readonly path: string },
+    signal: AbortSignal,
+  ): Promise<Readonly<Record<string, unknown>>>;
+  /** Reads only the non-secret launcher nonce; other exec output is always discarded. */
+  readGatewayChallenge?(
+    request: OpenShellSandboxDeleteRequest & { readonly generation: string },
+    signal: AbortSignal,
+  ): Promise<string>;
   /** Discards process output and returns its exit code only after the stream completes. */
   execSandbox(request: OpenShellSandboxExecRequest, signal: AbortSignal): Promise<number>;
   /** One bounded GET to a bearer-passthrough service path, through the gateway listener. */
@@ -640,6 +652,10 @@ type OpenShellUnaryMethod = (
 
 type OpenShellGrpcClient = Client &
   Record<OpenShellMethod, OpenShellUnaryMethod> & {
+    ForwardTcp(
+      metadata: Metadata,
+      options: { deadline: Date },
+    ): ClientDuplexStream<RecordValue, RecordValue>;
     ExecSandbox(
       request: RecordValue,
       metadata: Metadata,
@@ -649,7 +665,7 @@ type OpenShellGrpcClient = Client &
 
 /** A failed gateway request's message: the method, its gRPC status, and only a safe detail. */
 function gatewayRequestFailureMessage(
-  method: OpenShellMethod | "ExecSandbox",
+  method: OpenShellMethod | "ExecSandbox" | "ForwardTcp",
   error: unknown,
 ): string {
   const grpcStatus = rawStatusCode(error);
@@ -669,7 +685,7 @@ function gatewayRequestFailureMessage(
 class OpenShellGatewayRequestFailure extends DependencyUnavailableError {
   readonly grpcStatus: number | undefined;
 
-  constructor(method: OpenShellMethod | "ExecSandbox", error: unknown) {
+  constructor(method: OpenShellMethod | "ExecSandbox" | "ForwardTcp", error: unknown) {
     const grpcStatus = rawStatusCode(error);
     super(
       gatewayRequestFailureMessage(method, error),
@@ -686,7 +702,7 @@ class OpenShellGatewayRequestFailure extends DependencyUnavailableError {
 }
 
 function createSandboxValidationCategory(
-  method: OpenShellMethod | "ExecSandbox",
+  method: OpenShellMethod | "ExecSandbox" | "ForwardTcp",
   grpcStatus: number,
   error: unknown,
 ): NonNullable<DependencyUnavailableError["requestDiagnostic"]>["validationCategory"] {
@@ -736,7 +752,7 @@ function gatewayDidNotAnswer(error: unknown): boolean {
 }
 
 function gatewayRequestFailure(
-  method: OpenShellMethod | "ExecSandbox",
+  method: OpenShellMethod | "ExecSandbox" | "ForwardTcp",
   error: unknown,
   unanswered: boolean = gatewayDidNotAnswer(error),
 ): OpenShellGatewayRequestFailure | OpenShellGatewayUnavailableError {
@@ -1430,7 +1446,46 @@ export class GrpcOpenShellGatewayClient implements OpenShellGatewayClient {
     }
   }
 
-  async execSandbox(request: OpenShellSandboxExecRequest, signal: AbortSignal): Promise<number> {
+  async readGatewayChallenge(
+    request: OpenShellSandboxDeleteRequest & { readonly generation: string },
+    signal: AbortSignal,
+  ): Promise<string> {
+    if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(request.generation)) {
+      throw new OpenShellGatewayFailure("Invalid Gateway generation.");
+    }
+    let nonce = "";
+    const exit = await this.executeSandbox(
+      {
+        workspace: request.workspace,
+        sandbox: request.name,
+        command: ["/usr/local/bin/node", "-e", GATEWAY_CHALLENGE],
+        environment: {},
+        stdin: JSON.stringify({ generation: request.generation }),
+        timeoutSeconds: 10,
+      },
+      signal,
+      (data) => {
+        if (nonce.length + data.length > 36 || !/^[a-f0-9-]*$/u.test(data.toString("utf8"))) {
+          throw new OpenShellGatewayFailure("Invalid Gateway process challenge.");
+        }
+        nonce += data.toString("utf8");
+      },
+    );
+    if (exit !== 0 || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u.test(nonce)) {
+      throw new OpenShellGatewayFailure("Gateway process challenge is unavailable.");
+    }
+    return nonce;
+  }
+
+  execSandbox(request: OpenShellSandboxExecRequest, signal: AbortSignal): Promise<number> {
+    return this.executeSandbox(request, signal);
+  }
+
+  private async executeSandbox(
+    request: OpenShellSandboxExecRequest,
+    signal: AbortSignal,
+    onChallenge?: (data: Buffer) => void,
+  ): Promise<number> {
     const stdin = Buffer.from(request.stdin, "utf8");
     if (
       stdin.length > 400_000 ||
@@ -1500,7 +1555,16 @@ export class GrpcOpenShellGatewayClient implements OpenShellGatewayClient {
           }
           const exit = asRecord(asRecord(event)?.exit);
           if (exit === undefined) {
-            // stdout/stderr can contain private documents; never retain or report them.
+            // Only the fixed nonce-reader may consume bounded safe stdout. Never collect stderr.
+            const data = asRecord(asRecord(event)?.stdout)?.data;
+            if (onChallenge && Buffer.isBuffer(data)) {
+              try {
+                onChallenge(data);
+              } catch {
+                finish(new OpenShellGatewayFailure("Invalid Gateway process challenge."));
+                call?.cancel();
+              }
+            }
             return;
           }
           const value = exit.exit_code ?? 0;
@@ -1532,6 +1596,185 @@ export class GrpcOpenShellGatewayClient implements OpenShellGatewayClient {
           ),
         );
         call?.cancel();
+      }
+    });
+  }
+
+  async readGatewayStatus(
+    request: OpenShellSandboxDeleteRequest & { readonly path: string },
+    signal: AbortSignal,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    if (
+      request.path !== "/readyz" &&
+      !/^\/openclaw\/(?:runtime\/(?:status|image|diagnostics)|plugin-runtime\/status)$/u.test(
+        request.path,
+      )
+    ) {
+      throw new OpenShellGatewayFailure("Unsupported private Gateway status path.");
+    }
+    signal.throwIfAborted();
+    const { grpc, client } = await this.ensureClient();
+    const headers = await openShellGatewayGrpcMetadata(grpc, this.options.auth);
+    signal.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      let call: ClientDuplexStream<RecordValue, RecordValue>;
+      try {
+        call = client.ForwardTcp(headers, {
+          deadline: deadline(Math.min(this.requestTimeoutMs, 10_000)),
+        });
+      } catch (error) {
+        reject(
+          gatewayRequestFailure(
+            "ForwardTcp",
+            { code: rawStatusCode(error) },
+            gatewayDidNotAnswer(error),
+          ),
+        );
+        return;
+      }
+      let data = Buffer.alloc(0);
+      let settled = false;
+      const invalid = () =>
+        new OpenShellGatewayFailure(
+          "Private Gateway status returned invalid or oversized HTTP data.",
+        );
+      const finish = (error?: Error, value?: Readonly<Record<string, unknown>>) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        signal.removeEventListener("abort", abort);
+        if (error) {
+          reject(error);
+        } else {
+          resolve(value!);
+        }
+        call.cancel();
+      };
+      const abort = () =>
+        finish(gatewayRequestFailure("ForwardTcp", { code: grpc.status.CANCELLED }));
+      const parse = (ended: boolean) => {
+        const split = data.indexOf("\r\n\r\n");
+        if (split < 0) {
+          if (ended || data.length > 16384) {
+            finish(invalid());
+          }
+          return;
+        }
+        if (split > 16384) {
+          finish(invalid());
+          return;
+        }
+        const lines = data.subarray(0, split).toString("latin1").split("\r\n");
+        const status = lines.shift() ?? "";
+        if (request.path === "/readyz") {
+          if (/^HTTP\/1\.[01] 200(?: |$)/u.test(status)) {
+            finish(undefined, { ready: true });
+            return;
+          }
+          if (/^HTTP\/1\.[01] 503(?: |$)/u.test(status)) {
+            finish(undefined, { ready: false });
+            return;
+          }
+          finish(invalid());
+          return;
+        }
+        if (
+          !/^HTTP\/1\.[01] 200(?: |$)/u.test(status) ||
+          lines.some((line) => /^transfer-encoding:/iu.test(line))
+        ) {
+          finish(invalid());
+          return;
+        }
+        const lengths = lines.filter((line) => /^content-length:/iu.test(line));
+        if (lengths.length > 1) {
+          finish(invalid());
+          return;
+        }
+        const body = data.subarray(split + 4);
+        if (body.length > 262144) {
+          finish(invalid());
+          return;
+        }
+        if (lengths.length === 1) {
+          const text = lengths[0]!.slice(lengths[0]!.indexOf(":") + 1).trim();
+          if (!/^\d{1,6}$/u.test(text) || Number(text) > 262144 || body.length > Number(text)) {
+            finish(invalid());
+            return;
+          }
+          if (body.length < Number(text)) {
+            if (ended) {
+              finish(invalid());
+            }
+            return;
+          }
+        } else if (!ended) {
+          return;
+        }
+        try {
+          const value = asRecord(JSON.parse(body.toString("utf8")));
+          if (!value) {
+            finish(invalid());
+            return;
+          }
+          finish(undefined, value);
+        } catch {
+          finish(invalid());
+        }
+      };
+      call.on("error", (error: unknown) =>
+        finish(
+          gatewayRequestFailure(
+            "ForwardTcp",
+            { code: rawStatusCode(error) },
+            gatewayDidNotAnswer(error),
+          ),
+        ),
+      );
+      call.on("data", (frame: RecordValue) => {
+        if (settled) {
+          return;
+        }
+        if (!(frame.data instanceof Uint8Array) || data.length + frame.data.length > 280000) {
+          finish(invalid());
+          return;
+        }
+        data = Buffer.concat([data, Buffer.from(frame.data)]);
+        parse(false);
+      });
+      call.on("end", () => {
+        if (!settled) {
+          parse(true);
+        }
+      });
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      try {
+        call.write({
+          init: {
+            sandbox: request.name,
+            workspace: request.workspace,
+            tcp: { host: "127.0.0.1", port: 18791 },
+          },
+        });
+        call.write({
+          data: Buffer.from(
+            "GET " +
+              request.path +
+              " HTTP/1.0\r\nHost: 127.0.0.1:18791\r\nConnection: close\r\n\r\n",
+          ),
+        });
+      } catch (error) {
+        finish(
+          gatewayRequestFailure(
+            "ForwardTcp",
+            { code: rawStatusCode(error) },
+            gatewayDidNotAnswer(error),
+          ),
+        );
       }
     });
   }

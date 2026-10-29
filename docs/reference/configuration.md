@@ -61,6 +61,11 @@ none. API and worker must use the same trusted value. See
 [Sandbox policies](sandbox-policies.md#authority-and-admission) for
 its grant schema and authorization boundaries.
 
+Dedicated Gateway containment uses Installation-owned `gatewaySandbox` and
+`gatewayOutboundPolicyCeiling`, independently of the Harness Sandbox selection.
+See [Gateway containment](gateway-containment.md) for the experimental provider,
+signing-key custody, defaults and supported outbound policies.
+
 The optional `observability` block sets one external console destination:
 
 ```yaml

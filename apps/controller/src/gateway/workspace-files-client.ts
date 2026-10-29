@@ -17,12 +17,18 @@ import {
   type ControllerWorkspaceFileWriteResult,
 } from "./contracts.ts";
 
+import {
+  gatewayIngressClientOptions,
+  type GatewayIngressSigningTarget,
+} from "./contained-ingress.ts";
+
 export const NATIVE_WORKSPACE_FILE_CONTENT_MAX_BYTES = 16 * 1024;
 
 export interface NativeWorkspaceFilesTarget {
   readonly url: string;
   readonly nativeAgentId: string;
   readonly apiKey: string;
+  readonly ingress?: GatewayIngressSigningTarget;
   // Composition can follow an unambiguous native sole roster without listing Agents.
   readonly preferSoleNativeAgent?: true;
 }
@@ -105,7 +111,7 @@ async function requestNativeWorkspaceFile(
       role: "operator",
       deviceIdentity: null,
       scopes: [],
-      edgeAuthHeaders: { "x-api-key": target.apiKey },
+      ...gatewayIngressClientOptions(target.ingress, target.url, target.apiKey),
       onHelloOk: resolveHello,
       onConnectError: rejectHello,
     });

@@ -104,6 +104,15 @@ test("one installed Driver owns both protected capabilities, lifecycle and verif
   await boundTransport!.close();
   assert.equal(exchangeProbe.closed, 1);
   await controller.validateBackendConfiguration();
+  // A Gateway-only Sandbox reference is not the selected Harness half of a proxy pair.
+  const gatewayOnly = new OpenClawController(controller.installation, {
+    gatewaySandboxDriver: sandbox,
+  });
+  gatewayOnly.installDriver(owner, ["credential_proxy"]);
+  await assert.rejects(
+    gatewayOnly.validateBackendConfiguration(),
+    /Sandbox and Credential Proxy from the same registered Driver/,
+  );
   assert.throws(
     () => controller.installDriver(owner, ["sandbox", "credential_proxy"]),
     /already registered/,

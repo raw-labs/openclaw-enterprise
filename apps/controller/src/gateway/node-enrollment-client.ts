@@ -6,7 +6,12 @@ import {
 } from "@openclaw/gateway-client";
 import { setTimeout as delay } from "node:timers/promises";
 import { TransientDependencyError } from "@openclaw-enterprise/occ";
+import type { AgentRevision } from "@openclaw-enterprise/contracts";
 import { asRecord, isNonEmptyString } from "@openclaw-enterprise/utils";
+import {
+  gatewayIngressClientOptions,
+  type GatewayIngressSigningTarget,
+} from "./contained-ingress.ts";
 
 export interface NodeSetup {
   readonly setupId: string;
@@ -15,6 +20,8 @@ export interface NodeSetup {
 }
 
 export interface GatewayNodeEnrollment {
+  /** Bind operator setup RPCs to one admitted revision without changing node credentials. */
+  forRevision?(revision: Readonly<AgentRevision>): GatewayNodeEnrollment;
   createSetup(url: string, nodeUrl: string, signal: AbortSignal): Promise<NodeSetup>;
   /**
    * Reads the setup's completion and whether its node is connected. With
@@ -122,10 +129,15 @@ function transientGatewayFailure(error: unknown): TransientDependencyError | und
 /** Compute uses the existing administrative route; only the node-only setup crosses to the Harness. */
 export function createGatewayNodeEnrollment(
   readApiKey: () => Promise<string>,
+  resolveIngress?: (url: string) => Promise<GatewayIngressSigningTarget | undefined>,
 ): GatewayNodeEnrollment {
+  const readCredentials = async (url: string) => ({
+    apiKey: await readApiKey(),
+    ingress: await resolveIngress?.(url),
+  });
   return {
     createSetup: (url, nodeUrl, signal) =>
-      withGateway(url, readApiKey, signal, async (client, requestSignal) => {
+      withGateway(url, readCredentials, signal, async (client, requestSignal) => {
         const setup = asRecord(
           await client.request(
             "device.pair.setupCode",
@@ -154,7 +166,7 @@ export function createGatewayNodeEnrollment(
       const waitMs = Math.max(0, options.waitMs ?? 0);
       return withGateway(
         url,
-        readApiKey,
+        readCredentials,
         signal,
         (client, requestSignal) =>
           observeNodeSetup(
@@ -168,7 +180,7 @@ export function createGatewayNodeEnrollment(
       );
     },
     isConnected: (url, deviceId, signal) =>
-      withGateway(url, readApiKey, signal, (client, requestSignal) =>
+      withGateway(url, readCredentials, signal, (client, requestSignal) =>
         isConnected(
           (method, params, request) => client.request(method, params, request),
           deviceId,
@@ -262,7 +274,9 @@ async function isConnected(
 
 async function withGateway<T>(
   url: string,
-  readApiKey: () => Promise<string>,
+  readCredentials: (
+    url: string,
+  ) => Promise<{ apiKey: string; ingress: GatewayIngressSigningTarget | undefined }>,
   ownerSignal: AbortSignal,
   operation: (client: GatewayClient, signal: AbortSignal) => Promise<T>,
   waitMs = 0,
@@ -277,7 +291,7 @@ async function withGateway<T>(
   ) {
     throw new Error("Node enrollment requires a private WSS Gateway endpoint.");
   }
-  const apiKey = await readApiKey();
+  const { apiKey, ingress } = await readCredentials(url);
   const budget = AbortSignal.timeout(GATEWAY_CONNECT_BUDGET_MS + waitMs);
   const signal = AbortSignal.any([ownerSignal, budget]);
   signal.throwIfAborted();
@@ -310,7 +324,7 @@ async function withGateway<T>(
     role: "operator",
     deviceIdentity: null,
     scopes: [],
-    edgeAuthHeaders: { "x-api-key": apiKey },
+    ...gatewayIngressClientOptions(ingress, url, apiKey),
     onHelloOk: resolveHello,
     onConnectError: rejectHello,
   });

@@ -1,3 +1,12 @@
+import {
+  normalizeGatewayOutboundPolicy,
+  normalizeGatewayOutboundPolicyCeiling,
+  assertGatewayOutboundWithinCeiling,
+  normalizeGatewayOutboundAdmission,
+  type GatewayOutboundPolicy,
+  type GatewayOutboundPolicyCeiling,
+  type GatewayOutboundAdmission,
+} from "@openclaw-enterprise/contracts";
 import { NativeIAMDriver } from "@openclaw-enterprise/iam";
 import { isReducedCredentialPlan } from "./credential-policy-reduction.ts";
 
@@ -741,6 +750,9 @@ export interface RuntimeLogReadGrant {
 export type RuntimeLogReadAdmission = <T>(read: () => Promise<T>) => Promise<T>;
 
 export interface ControllerOptions {
+  readonly gatewayOutboundPolicyCeiling?: GatewayOutboundPolicyCeiling;
+  /** Installed Gateway containment capability; does not select a Harness Sandbox. */
+  readonly gatewaySandboxDriver?: SandboxDriver;
   readonly preparedTokens?: PreparedTokenService | undefined;
   readonly driverConfigurations?: readonly DriverConfigurationRegistration[];
   readonly sandboxNetworkPolicyCeiling?: readonly SandboxNetworkGrant[];
@@ -848,6 +860,7 @@ export interface CreateAgentInput {
   readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode?: HarnessExecutionMode;
   readonly gatewayManagedMode?: boolean;
+  readonly gatewayOutbound?: GatewayOutboundPolicy;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingRequest[];
@@ -888,6 +901,7 @@ export interface ValidateAgentCreateInput {
   readonly initialWorkspaceFiles?: InitialWorkspaceFiles;
   readonly executionMode?: HarnessExecutionMode;
   readonly gatewayManagedMode?: boolean;
+  readonly gatewayOutbound?: GatewayOutboundPolicy;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   /**
@@ -931,6 +945,7 @@ export interface UpdateAgentInput {
   readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode?: HarnessExecutionMode;
   readonly gatewayManagedMode?: boolean;
+  readonly gatewayOutbound?: GatewayOutboundPolicy;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers | null;
   readonly repositoryBindings?: readonly RepositoryBindingRequest[];
@@ -1901,6 +1916,8 @@ export class OpenClawController {
   private readonly configurations = new DriverConfigurationRegistry();
 
   private readonly sandboxNetworkPolicyCeiling: readonly SandboxNetworkGrant[];
+  private readonly gatewayOutboundPolicyCeiling: GatewayOutboundPolicyCeiling;
+  private readonly gatewaySandboxDriver: SandboxDriver | undefined;
   private readonly authorization?: ControllerOptions["authorize"];
   private readonly clock: () => Date;
   private readonly identifier?: ControllerOptions["createId"];
@@ -1947,6 +1964,10 @@ export class OpenClawController {
       "/sandboxNetworkPolicyCeiling",
     );
     this.sandboxNetworkPolicyCeiling = immutableCopy(options.sandboxNetworkPolicyCeiling ?? []);
+    this.gatewaySandboxDriver = options.gatewaySandboxDriver;
+    this.gatewayOutboundPolicyCeiling = normalizeGatewayOutboundPolicyCeiling(
+      options.gatewayOutboundPolicyCeiling,
+    );
     for (const registration of options.driverConfigurations ?? []) {
       this.configurations.register(registration);
     }
@@ -2118,6 +2139,7 @@ export class OpenClawController {
         ]),
       ),
       this.selections.has("credential_proxy") ? this.selectedProxyOwner() : undefined,
+      this.gatewaySandboxDriver,
     );
   }
 
@@ -2989,6 +3011,13 @@ export class OpenClawController {
       throw new ScopeViolationError("The Agent Harness execution mode is invalid.");
     }
     const gatewayManagedMode = normalizeGatewayManagedMode(input.gatewayManagedMode, true);
+    const gatewayOutbound = this.gatewayOutboundPolicy(input.gatewayOutbound);
+    await this.authorizeGatewayOutboundCreate(principalId, input.namespaceId, gatewayOutbound);
+    this.validateGatewayOutbound(
+      gatewayOutbound,
+      executionMode,
+      input.gatewayOutbound !== undefined,
+    );
     const backendId = this.backendId(input.backendId);
     const plugins = normalizeAgentPlugins(input.plugins);
     const pluginApprovers = normalizeAgentPluginApprovers(input.pluginApprovers);
@@ -3041,6 +3070,7 @@ export class OpenClawController {
       harnessAuth,
       executionMode,
       gatewayManagedMode,
+      gatewayOutbound,
       ...(plugins === undefined ? {} : { plugins }),
       ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
       ...(input.repositoryBindings === undefined
@@ -3053,6 +3083,9 @@ export class OpenClawController {
       .digest("hex");
     // The Configuration rules Configuration save applies, for the plan's values and bindings.
     const validateContent = async () => {
+      if (executionMode === "dedicated") {
+        this.gatewayOutboundAdmission(configurationInput.values);
+      }
       await configurationDriver.validateSize?.(configurationInput.values);
       this.validateConfigurationContent(
         configurationInput.values,
@@ -3208,6 +3241,7 @@ export class OpenClawController {
           harnessAuth,
           executionMode,
           gatewayManagedMode,
+          gatewayOutbound,
           ...(backendId === undefined ? {} : { backendId }),
           ...(plugins === undefined ? {} : { plugins }),
           ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
@@ -9355,6 +9389,7 @@ export class OpenClawController {
       input.gatewayManagedMode,
       this.gatewayManagedModeSupported(),
     );
+    const gatewayOutbound = this.gatewayOutboundPolicy(input.gatewayOutbound);
     const backendId = this.backendId(input.backendId);
     const plugins = normalizeAgentPlugins(input.plugins);
     const pluginApprovers = normalizeAgentPluginApprovers(input.pluginApprovers);
@@ -9367,6 +9402,12 @@ export class OpenClawController {
       };
       await this.authorize(principalId, "create", target);
       await this.authorizeGatewayManagedModeChange(principalId, input.gatewayManagedMode === false);
+      await this.authorizeGatewayOutboundCreate(principalId, input.namespaceId, gatewayOutbound);
+      this.validateGatewayOutbound(
+        gatewayOutbound,
+        executionMode,
+        input.gatewayOutbound !== undefined,
+      );
       this.requireGatewayManagedModeSupport(gatewayManagedMode);
       const namespace = await this.lockNamespace(state, input.namespaceId);
       // Checked after authorization: the conflict names the Namespace state.
@@ -9433,6 +9474,7 @@ export class OpenClawController {
           : { credentialSources }),
         executionMode,
         gatewayManagedMode,
+        gatewayOutbound,
         ...(plugins === undefined ? {} : { plugins }),
         ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
         ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -9505,6 +9547,13 @@ export class OpenClawController {
     );
     this.requireGatewayManagedModeSupport(
       normalizeGatewayManagedMode(input.gatewayManagedMode, this.gatewayManagedModeSupported()),
+    );
+    const gatewayOutbound = this.gatewayOutboundPolicy(input.gatewayOutbound);
+    await this.authorizeGatewayOutboundCreate(principalId, input.namespaceId, gatewayOutbound);
+    this.validateGatewayOutbound(
+      gatewayOutbound,
+      executionMode,
+      input.gatewayOutbound !== undefined,
     );
     await this.read(async (state) => {
       const namespace = await this.exactNamespace(state, input.namespaceId);
@@ -9710,9 +9759,13 @@ export class OpenClawController {
     if (input.configurationId !== undefined && !isNonEmptyString(input.configurationId)) {
       throw new ScopeViolationError("The exact Agent Configuration identity is missing.");
     }
-    if (input.configurationId === undefined && input.gatewayManagedMode === undefined) {
+    if (
+      input.configurationId === undefined &&
+      input.gatewayManagedMode === undefined &&
+      input.gatewayOutbound === undefined
+    ) {
       throw new ScopeViolationError(
-        "An Agent update must name a Configuration or Gateway managed mode.",
+        "An Agent update must name a Configuration, Gateway managed mode or Gateway outbound policy.",
       );
     }
     const requestedAuth =
@@ -9725,6 +9778,10 @@ export class OpenClawController {
       input.gatewayManagedMode === undefined
         ? undefined
         : normalizeGatewayManagedMode(input.gatewayManagedMode);
+    const gatewayOutbound =
+      input.gatewayOutbound === undefined
+        ? undefined
+        : this.gatewayOutboundPolicy(input.gatewayOutbound);
     const plugins = normalizeAgentPlugins(input.plugins);
     const pluginApprovers =
       input.pluginApprovers === null ? null : normalizeAgentPluginApprovers(input.pluginApprovers);
@@ -9745,6 +9802,22 @@ export class OpenClawController {
       if (agent.status !== "active") {
         throw new AgentDeletingError();
       }
+      const effectiveOutbound = gatewayOutbound ?? agent.gatewayOutbound;
+      if (
+        gatewayOutbound !== undefined &&
+        JSON.stringify(gatewayOutbound) !== JSON.stringify(agent.gatewayOutbound)
+      ) {
+        await this.authorize(principalId, "administer", {
+          kind: "agent",
+          id: agent.id,
+          namespaceId: namespace.id,
+        });
+      }
+      this.validateGatewayOutbound(
+        effectiveOutbound,
+        input.executionMode ?? agent.executionMode,
+        input.gatewayOutbound !== undefined,
+      );
       const configurationId = input.configurationId ?? agent.configurationId;
       if (gatewayManagedMode !== undefined) {
         await this.authorizeGatewayManagedModeChange(
@@ -9870,6 +9943,7 @@ export class OpenClawController {
         repositoryAccess,
         requestedSources,
         gatewayManagedMode,
+        gatewayOutbound,
       );
       if (!updated) {
         throw new ResourceStateConflictError("The Agent Configuration changed during its update.");
@@ -10471,6 +10545,10 @@ export class OpenClawController {
         // The name then becomes the served Agent's OpenClaw display name.
         configuration: frozenValues(withAgentIdentityName(admittedConfiguration, lockedAgent.name)),
         gatewayManagedMode: lockedAgent.gatewayManagedMode,
+        gatewayOutbound: lockedAgent.gatewayOutbound,
+        ...(revisionHarness.mode === "dedicated"
+          ? { gatewayOutboundAdmission: this.gatewayOutboundAdmission(admittedConfiguration) }
+          : {}),
         harness: revisionHarness,
         compute: { id: compute.id, implementation: compute.implementation },
         ...(sandbox === undefined ? {} : { sandboxDriverId: sandbox.id }),
@@ -10492,6 +10570,7 @@ export class OpenClawController {
       ) {
         throw new ConfigurationHarnessError(GATEWAY_MANAGED_MODE_UNSUPPORTED);
       }
+      this.validateGatewayOutbound(revisionDraft.gatewayOutbound, revisionDraft.harness.mode);
       const computeAdmission = compute.admitRevision?.(freezeAgentRevision(revisionDraft));
       const revision = await state.revisions.createRevision(
         freezeAgentRevision({
@@ -12017,6 +12096,11 @@ export class OpenClawController {
     // plugin policy below: a status read still reports the stored work after an Installation
     // gateway or routing change makes the Compute Driver refuse the plan.
     if (!statusRead) {
+      await this.authorizeGatewayOutboundCreate(principalId, namespaceId, plan.gatewayOutbound);
+      this.validateGatewayOutbound(plan.gatewayOutbound, plan.executionMode);
+      if (plan.executionMode === "dedicated") {
+        this.gatewayOutboundAdmission(plan.configuration.values);
+      }
       validateComputeAgentProvisioning(compute, plan.executionMode, plan.configuration.values);
     }
     if (record.status === "failed") {
@@ -12912,6 +12996,7 @@ export class OpenClawController {
             : {}),
           executionMode: plan.executionMode,
           gatewayManagedMode: plan.gatewayManagedMode,
+          gatewayOutbound: plan.gatewayOutbound,
           ...(plugins === undefined ? {} : { plugins }),
           ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
           ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -12993,6 +13078,7 @@ export class OpenClawController {
     readonly harnessAuth: HarnessAuthBinding | null;
     readonly executionMode: HarnessExecutionMode;
     readonly gatewayManagedMode: boolean;
+    readonly gatewayOutbound: GatewayOutboundPolicy;
   } {
     const plan = asRecord(record.plan);
     let configuration: AgentProvisioningConfigurationInput;
@@ -13014,15 +13100,88 @@ export class OpenClawController {
       harnessAuth: normalizeProvisioningHarnessAuth(plan?.harnessAuth ?? null),
       executionMode,
       gatewayManagedMode: normalizeGatewayManagedMode(plan?.gatewayManagedMode, true),
+      gatewayOutbound: this.gatewayOutboundPolicy(plan?.gatewayOutbound ?? null),
     };
   }
 
-  /**
-   * A new Agent's managed mode defaults to whether the selected Compute Driver enforces it, so
-   * an Agent on SSH Compute (or a Driver that does not declare support) is saved deployable
-   * instead of failing at its first deploy (finding 2676). The default needs no Installation
-   * administer: there is no enforcement to opt out of. Without a selected Compute it is on.
-   */
+  private gatewayOutboundPolicy(input: unknown): GatewayOutboundPolicy {
+    try {
+      return normalizeGatewayOutboundPolicy(input);
+    } catch (error) {
+      throw new ConfigurationHarnessError(
+        error instanceof Error ? error.message : "Invalid Gateway outbound policy.",
+      );
+    }
+  }
+
+  private gatewayOutboundAdmission(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): GatewayOutboundAdmission {
+    const providers = enabledChannelEntries(configuration);
+    const channel = this.selections.get("channel")?.driver as ChannelDriver | undefined;
+    if (providers.length > 0 && channel?.gatewayDestinations === undefined) {
+      throw new ConfigurationHarnessError(
+        "The selected Channel Driver cannot admit enabled Gateway channel destinations.",
+      );
+    }
+    try {
+      return normalizeGatewayOutboundAdmission({
+        ceiling: this.gatewayOutboundPolicyCeiling,
+        channelDestinations: providers.flatMap((provider) =>
+          channel!.gatewayDestinations!(configuration, provider),
+        ),
+      });
+    } catch {
+      throw new ConfigurationHarnessError(
+        "The selected Channel Driver cannot admit enabled Gateway channel destinations.",
+      );
+    }
+  }
+
+  private validateGatewayOutbound(
+    policy: GatewayOutboundPolicy,
+    mode: HarnessExecutionMode,
+    explicit = false,
+  ): void {
+    if (mode === "embedded") {
+      if (explicit || policy.mode !== "restricted" || policy.hosts.length > 0) {
+        throw new ConfigurationHarnessError(
+          "gatewayOutbound is supported only for dedicated Agents.",
+        );
+      }
+      return;
+    }
+    try {
+      assertGatewayOutboundWithinCeiling(policy, this.gatewayOutboundPolicyCeiling);
+    } catch {
+      throw new ConfigurationHarnessError(
+        "Gateway outbound policy exceeds the Installation ceiling.",
+      );
+    }
+    const compute = this.selections.get("compute")?.driver as ComputeDriver | undefined;
+    if (compute?.validateGatewayOutbound === undefined) {
+      throw new ConfigurationHarnessError(
+        "The selected Compute Driver cannot enforce dedicated Gateway outbound policy.",
+      );
+    }
+    compute.validateGatewayOutbound(policy, mode);
+  }
+
+  private async authorizeGatewayOutboundCreate(
+    principalId: string,
+    namespaceId: string,
+    policy: GatewayOutboundPolicy,
+  ): Promise<void> {
+    if (policy.mode === "publicHttps" || policy.hosts.length > 0) {
+      await this.authorize(principalId, "administer", {
+        kind: "agent",
+        id: namespaceId,
+        namespaceId,
+      });
+    }
+  }
+
+  /** Default managed mode follows the selected Compute enforcement capability. */
   private gatewayManagedModeSupported(): boolean {
     const compute = this.selections.get("compute")?.driver as ComputeDriver | undefined;
     return compute === undefined || compute.supportsGatewayManagedMode === true;
@@ -14290,6 +14449,9 @@ export class OpenClawController {
     const sandbox = this.sandboxDriver();
     requireSandboxExecutionMode(sandbox, agent.executionMode);
     const compute = this.selections.get("compute")?.driver as ComputeDriver | undefined;
+    if (agent.executionMode === "dedicated") {
+      this.gatewayOutboundAdmission((await readConfiguration()).values);
+    }
     if (resolveHarness === undefined || compute === undefined) {
       return;
     }

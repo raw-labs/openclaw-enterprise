@@ -85,6 +85,13 @@ namespace with separate Pods, identities and storage. External access-gateway ad
 token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental.
 
+[Dedicated Gateway containment](reference/gateway-containment.md) is an
+experimental implementation of RFC-0024, not a production-qualified deployment.
+An Installation selects the Gateway Sandbox independently of the Harness.
+Compute owns routing, activation and private-state claims; the Sandbox Driver
+owns the contained Gateway lifecycle and network enforcement. Embedded execution
+and the separate Harness retain their existing credential and placement paths.
+
 <a id="current-limitations"></a>
 <a id="near-term-future-work"></a>
 

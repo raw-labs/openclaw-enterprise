@@ -170,3 +170,91 @@ test("Agent create preflight refuses a caller without Agent create as Agent crea
     );
   }
 });
+
+test("Gateway outbound preflight and create reject unsafe hosts, embedded requests and unsupported Compute", async (t) => {
+  const f = await setup(t);
+  // These go through production Fastify/OCC admission, not an imitation policy validator.
+  for (const gatewayOutbound of [
+    { mode: "restricted", hosts: ["https://api.github.com"] },
+    { mode: "restricted", hosts: ["*.github.com"] },
+    { mode: "restricted", hosts: ["127.0.0.1"] },
+    { mode: "restricted", hosts: ["metadata.google.internal"] },
+    { mode: "restricted", hosts: ["service.namespace.svc.cluster.local"] },
+    { mode: "restricted", hosts: ["localhost"] },
+    { mode: "restricted", hosts: ["foo/bar.com"] },
+  ]) {
+    const fields = { executionMode: "dedicated", gatewayOutbound };
+    const checked = await f.validate({ configuration: { kind: "agent", values: {} }, ...fields });
+    const created = await f.create({}, fields);
+    assert.equal(checked.status, 400, JSON.stringify(checked.body));
+    assert.equal(created.status, 400, JSON.stringify(created.body));
+    assert.deepEqual(created.body.error, checked.body.error);
+  }
+  const unsupported = await f.validate({
+    configuration: { kind: "agent", values: {} },
+    executionMode: "dedicated",
+    gatewayOutbound: { mode: "restricted", hosts: [] },
+  });
+  assert.equal(unsupported.status, 400);
+  assert.match(
+    unsupported.body.error.message,
+    /cannot enforce dedicated Gateway outbound policy|Dedicated execution requires selected Gateway containment/,
+  );
+  const explicitEmbedded = {
+    executionMode: "embedded",
+    gatewayOutbound: { mode: "restricted", hosts: [] },
+  };
+  const rejected = await f.validate({
+    configuration: { kind: "agent", values: {} },
+    ...explicitEmbedded,
+  });
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body.error.message, /dedicated/);
+  // An ordinary embedded Agent still gets the narrow saved default and can save it unchanged.
+  const accepted = await f.create({}, {});
+  assert.equal(accepted.status, 201, JSON.stringify(accepted.body));
+  assert.deepEqual(accepted.data.gatewayOutbound, { mode: "restricted", hosts: [] });
+  const saved = await f.request("PATCH", f.agents + "/" + accepted.data.id, {
+    body: { configurationId: accepted.data.configurationId },
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(saved.data.gatewayOutbound, { mode: "restricted", hosts: [] });
+});
+
+test("Gateway outbound changes need exact Agent administer and record attributable denials", async (t) => {
+  const f = await setup(t);
+  const created = await f.create({}, {});
+  assert.equal(created.status, 201);
+  const agent = created.data;
+  const target = { kind: "agent", id: agent.id, namespaceId: f.namespace.id };
+  const member = await f.createAccountWithPolicy("outbound-writer", (principal) => {
+    grantRole(f.policy, principal.id, {
+      id: "outbound-agent-writer",
+      namespaceId: f.namespace.id,
+      resource: { kind: "agent", id: agent.id },
+      permissions: { agent: ["read", "update"] },
+    });
+  });
+  const session = await f.signIn(member.credentials);
+  const auditStart = f.auditSink.events.length;
+  // Even a caller who can update this Agent cannot widen its outbound authority.
+  const denied = await f.request("PATCH", f.agents + "/" + agent.id, {
+    session,
+    body: { gatewayOutbound: { mode: "publicHttps" } },
+  });
+  assert.equal(denied.status, 403, JSON.stringify(denied.body));
+  assertWriteAuthorizationDenial(
+    f.auditSink.events.slice(auditStart),
+    {
+      principalId: member.principal.id,
+      action: "openclaw.agents.update",
+      grant: "administer",
+      resource: target,
+    },
+    "Gateway outbound change",
+  );
+  assert.deepEqual((await f.request("GET", f.agents + "/" + agent.id)).data.gatewayOutbound, {
+    mode: "restricted",
+    hosts: [],
+  });
+});

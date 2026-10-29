@@ -31,7 +31,12 @@ export function gatewayIdentityRefusal(workspace: string, unconfirmed: string): 
     } catch (error) {
       const record = asRecord(error);
       // grpc-js ServiceError: a numeric status code and a string details field.
-      const code = typeof record?.details === "string" ? record.code : undefined;
+      const code =
+        typeof record?.grpcStatus === "number"
+          ? record.grpcStatus
+          : typeof record?.details === "string"
+            ? record.code
+            : undefined;
       if (code === GRPC_PERMISSION_DENIED || code === GRPC_UNAUTHENTICATED) {
         throw new SandboxGatewayUnauthorizedError(
           `OpenShell refused the controller gateway identity in Workspace ${workspace}, so ${unconfirmed}.`,

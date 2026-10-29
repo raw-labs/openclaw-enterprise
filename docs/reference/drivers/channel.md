@@ -28,6 +28,14 @@ path, validate)` authorizes the exact same-Namespace Secret and supplies its val
 only inside the SecretDriver callback. Provider calls run before the write
 transaction. Validation does not pin Secret versions or revalidate queued work.
 
+For dedicated Gateway containment, optional
+`gatewayDestinations(configuration, provider)` returns non-secret
+`{host, ports, protocol}` requirements for that enabled provider. The Driver
+must reject providers it cannot cover. OCC freezes contributions in the Agent
+revision; Sandbox translates them into enforcement rules. A wildcard does not
+include its apex. These contributions contain no credentials and make no
+provider request. See [Gateway containment](../gateway-containment.md).
+
 ## IAM
 
 OCC admits the caller, checks Agent creation or the exact Agent or Configuration

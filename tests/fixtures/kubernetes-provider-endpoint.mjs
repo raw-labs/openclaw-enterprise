@@ -80,7 +80,7 @@ export function providerEndpointFixture({
       },
     },
   });
-  const { driver, revision, namespace, core } = fixture;
+  const { driver, revision, namespace, core, containedGateway } = fixture;
   const gatewayName = `gateway-${digest(revision.agentId)}`;
   const gatewayNamespace = kubernetesNamespaceName(tenant.id);
   const objects = new Map();
@@ -150,7 +150,10 @@ export function providerEndpointFixture({
       },
       async patch(object) {
         writes.push(structuredClone(object));
-        save(object);
+        save({
+          ...object,
+          metadata: { ...object.metadata, uid: object.metadata.name + "-uid", generation: 1 },
+        });
         return object;
       },
     },
@@ -206,7 +209,19 @@ export function providerEndpointFixture({
         assert.equal(requestedNamespace, body.metadata.namespace);
         writes.push(structuredClone(body));
         const previous = read(kind, body.metadata.name, body.metadata.namespace);
-        save({ ...previous, ...body, metadata: { ...previous?.metadata, ...body.metadata } });
+        save({
+          ...previous,
+          ...body,
+          ...(kind === "Service"
+            ? { spec: { ...body.spec, clusterIP: previous?.spec?.clusterIP ?? "10.43.0.81" } }
+            : {}),
+          metadata: {
+            ...previous?.metadata,
+            ...body.metadata,
+            uid: body.metadata.name + "-uid",
+            generation: 1,
+          },
+        });
       };
     }
   }
@@ -262,11 +277,45 @@ export function providerEndpointFixture({
       return read("Deployment", gatewayName, gatewayNamespace);
     },
     setGatewayServing() {
-      // Only explicit observation advances readiness; API writes never do.
-      const gateway = read("Deployment", gatewayName, gatewayNamespace);
-      gateway.metadata.generation = 1;
-      gateway.status = { observedGeneration: 1, replicas: 1, updatedReplicas: 1, readyReplicas: 1 };
-      save(gateway);
+      // Explicit provider and Gateway API observations. Writes alone do not establish readiness.
+      containedGateway.setReady();
+      for (const object of objects.values()) {
+        if (!["HTTPRoute", "BackendTLSPolicy"].includes(object.kind)) {
+          continue;
+        }
+        const parent = {
+          name: driver.options.gatewayRouting.gatewayName,
+          namespace: driver.options.gatewayRouting.gatewayNamespace,
+        };
+        object.status =
+          object.kind === "HTTPRoute"
+            ? {
+                parents: [
+                  {
+                    parentRef: parent,
+                    conditions: ["Accepted", "ResolvedRefs"].map((type) => ({
+                      type,
+                      status: "True",
+                      observedGeneration: object.metadata.generation,
+                    })),
+                  },
+                ],
+              }
+            : {
+                ancestors: [
+                  {
+                    ancestorRef: parent,
+                    conditions: [
+                      {
+                        type: "Accepted",
+                        status: "True",
+                        observedGeneration: object.metadata.generation,
+                      },
+                    ],
+                  },
+                ],
+              };
+      }
     },
     setSetupAvailable(value) {
       workspaceNodeSetupAvailable = value;

@@ -1,3 +1,7 @@
+import { loadGatewayAdmissionFixture } from "./gateway-admission.mjs";
+
+const gatewayAdmissionCompute = (await loadGatewayAdmissionFixture()).computeDriver;
+
 /**
  * A Compute Driver whose Namespaces and Revisions are always ready at once. `overrides`
  * adds or replaces members (implementation, validateHarnessAuth, runtimeLogging, ...); it is
@@ -10,6 +14,9 @@ export function createReadyComputeDriver(id, overrides = {}) {
     implementation: "deterministic-test",
     // Simulates managed-mode enforcement for controller admission tests.
     supportsGatewayManagedMode: /** @type {true} */ (true),
+    // Real configured admission; deterministic lifecycle below is not runtime enforcement proof.
+    validateGatewayOutbound:
+      gatewayAdmissionCompute.validateGatewayOutbound.bind(gatewayAdmissionCompute),
     async ensureNamespace(namespace) {
       return { namespaceId: namespace.id, namespaceReady: true };
     },

@@ -1,7 +1,7 @@
 ---
 created: 2026-08-21
-updated: 2026-10-26
-last_updated_session: authoring-run/5da38bb7-602c-4a49-a7f2-863af81abcba
+updated: 2026-10-29
+last_updated_session: authoring-run/21421cb1-94a4-4e04-a9ae-e2971e771f6f
 ---
 
 # Harness Execution Topology Flow
@@ -30,10 +30,12 @@ graph TD
   C --> D["Claim and reauthorize version work"]
   D --> E{"Approved topology"}
   E -->|embedded OpenClaw| F["Create gateway or stage replacement"]
-  E -->|dedicated Codex| G["Start separate Gateway and Codex Pods in the tenant namespace"]
-  E -->|dedicated OpenClaw| Q{"Full-containment provisioning Sandbox?"}
+  E -->|dedicated Codex| V{"Selected Gateway containment?"}
+  V -->|no| H
+  V -->|yes| G["Prepare contained Gateway and separate Codex Harness"]
+  E -->|dedicated OpenClaw| Q{"Gateway containment and native Harness Sandbox?"}
   Q -->|no| H
-  Q -->|yes| R["Start Gateway; SandboxDriver provisions native Harness"]
+  Q -->|yes| R["Prepare contained Gateway and native Harness Sandbox"]
   E -->|unsupported or mismatched| H["Reject before workload creation"]
   F --> I["Activate shared gateway; Recreate on replacement"]
   I --> K{"Gateway ready after startup authentication?"}
@@ -137,8 +139,26 @@ independently places the Gateway Pod and private-state initializer on trusted no
 After Harness readiness, preparation starts a candidate Gateway if its predecessor is stopped or unready. Activation waits for workspace node enrollment. Dedicated Codex keeps `agent-<agent digest>-workspace` across versions.
 `KubernetesComputeDriver.gatewayNativeHookRelayConfiguration` binds its callbacks to the Agent route; `AGENT_WITH_NODE_ENTRYPOINT` prepares private capability storage and TLS trust, and OpenClaw authorizes callbacks. See [native hook routing](../reference/gateway-routing.md#native-node-endpoint).
 
-Compute owns the Gateway; SandboxDriver owns the native Harness, with separate
-ServiceAccounts. The Harness retains identity, workspace and model credentials.
+For dedicated execution, `KubernetesComputeDriver.provisionContainedGateway`
+uses the independently selected `SandboxDriver.gateway`, not the Harness
+Sandbox. `containedGatewayContext` saves immutable requirements, launch generation
+and provider identity before provider effects. A changed provider cannot adopt
+that launch. Only declared Gateway state categories persist; the provider
+prepares them for its process UID. The Harness keeps its identity, workspace
+and model credentials. Provider-owned Harness bootstrap still needs an explicit
+bootstrap-to-final Gateway transition and is not qualified by this source.
+
+`OpenShellGatewaySandboxCapability.provision` observes the owned process, reads
+its generation-matched nonce through authenticated exec, then reobserves the
+same process before Secret reads. Material travels only through exec stdin to
+the fixed nonce directory. A restarted launcher rejects stale release and
+node-binding writes; native configuration remains ephemeral. The
+[Gateway contract](../reference/drivers/sandbox.md#gateway-specific-capability)
+owns transport, state and cleanup requirements. Compute obtains the verified
+connection-source peer from provider observation, then grants only that peer
+Harness transport/status ingress. An absent observation grants no rule. The
+contained workload uses the provider-fenced network profile, excluding ordinary
+Gateway egress grants.
 OpenShell delivers version-owned setup and Gateway CA files; startup combines
 trust, writes a private one-use target and reconnects with the saved device token.
 Renewal and cleanup preserve exact ownership.
@@ -201,7 +221,13 @@ Full refs preserve native ID namespaces, including `codex/`. OpenClaw separates
 the explicit provider for thread start, resume and turns; the Harness probe keeps
 the native ID.
 
-Kubelet probes private `/readyz`: Gateway plugin status and native `/startupz`
+For a contained Gateway, `containedGatewayReady` requires private provider
+readback plus current-generation acceptance of its HTTPRoute and BackendTLSPolicy.
+The relay uses the configured control endpoint for TLS identity and the advertised
+service authority for Host routing; it receives no provider control credential.
+These source checks do not establish real deployment qualification.
+
+For ordinary Pods, kubelet probes private `/readyz`: Gateway plugin status and native `/startupz`
 and `/readyz`, Codex plugin state and authenticated app-server WebSocket, or
 dedicated OpenClaw identity gate runtime-backed workload readiness.
 While first-deploy [workspace setup](workspace-files.md) is pending, embedded
@@ -232,9 +258,11 @@ to report its assigned workspace node: a 20-second budget per version and node a
 activation retries, then one status read per retry. That wait and the pairing wait end
 early when other Work is claimable.
 
-On version stop, the Driver gives the Gateway up to 330 seconds to drain. It
-waits for the Gateway Pod to disappear before stopping the Harness, which can
-finish active work. Idle Gateways and wrappers that have yet to start OpenClaw
+On contained Gateway stop, `cleanupContainedGateway` withdraws serving routes,
+stops the owned provider workload and confirms removal before deleting relay
+resources. It retains private storage until Agent deletion. Ordinary Pod-backed
+Gateway shutdown allows up to 330 seconds to drain and waits for Pod removal
+before stopping the Harness, which can finish active work. Idle Gateways and wrappers that have yet to start OpenClaw
 exit promptly. After forced termination, the next Gateway needs proof that the
 previous owner stopped before it can take over retained state.
 [Embedded recovery](../guides/topics/agent-troubleshoot.md#an-embedded-gateway-reports-an-unverifiable-state-owner)
@@ -310,6 +338,8 @@ owns claim sizes, mounts, StorageClass requirements and final teardown.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-29 13:10: Trace experimental independent Gateway containment and process-bound private launch; runtime qualification remains pending. (authoring-run/21421cb1-94a4-4e04-a9ae-e2971e771f6f - f5651130fba3545a5a852d5f62d25674b766327a)
 
 - 2026-10-26 23:35: Trace the model tool policy in both Gateway administration modes and recovery after a forced stop. (authoring-run/5da38bb7-602c-4a49-a7f2-863af81abcba - fac7d121c3c582afb53ca49c7d4579e04b5e5ea5)
 

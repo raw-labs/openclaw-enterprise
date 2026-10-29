@@ -15,11 +15,13 @@ import pg from "pg";
 import {
   loadInstallationConfiguration,
   loadStartupConfigurationSnapshot,
+  installationControllerOptions,
 } from "../../apps/controller/src/composition/installation-config.ts";
 import {
   DEVELOPMENT_BROWSER_ORIGIN_RULE,
   isDevelopmentBrowserOrigin,
 } from "../../apps/controller/src/auth/configuration.ts";
+import { OpenShellGateway } from "../../apps/controller/src/backends/openshell.ts";
 import { PresetFileError } from "../../apps/controller/src/composition/installation-presets.ts";
 import { openShellRepositoryConfiguration } from "../../apps/controller/src/composition/installation-fields.ts";
 import { DEVELOPMENT_HARNESS_DESCRIPTOR } from "../../apps/controller/src/composition/production-harness.ts";
@@ -136,6 +138,75 @@ async function fixture(t, configuration = installation()) {
   await writeFile(path, JSON.stringify(configuration), "utf8");
   return path;
 }
+
+test("Gateway containment startup selects its provider and keeps signing custody in the controller", async (t) => {
+  const directory = await temporaryDirectory(t, "oce-gateway-ingress-");
+  const privateKeyPath = join(directory, "private.pem");
+  const pair = generateKeyPairSync("ed25519");
+  await writeFile(privateKeyPath, pair.privateKey.export({ type: "pkcs8", format: "pem" }), {
+    mode: 0o600,
+  });
+  const configuration = credentialProxyInstallation();
+  delete configuration.drivers.credential_gateway;
+  delete configuration.drivers.credential_proxy;
+  configuration.backend[0].drivers = { sandbox: configuration.drivers.sandbox.id };
+  configuration.drivers.sandbox.useForHarness = false;
+  configuration.gatewaySandbox = {
+    driverId: configuration.drivers.sandbox.id,
+    ingress: { keyId: "current", privateKeyPath },
+  };
+  configuration.gatewayOutboundPolicyCeiling = {
+    allowPublicHttps: false,
+    hosts: ["api.github.com"],
+  };
+  const path = await fixture(t, configuration);
+  const load = () =>
+    loadInstallationConfiguration({ mode: "development", environment: { OCC_CONFIG_PATH: path } });
+  const loaded = await load();
+  assert.equal(loaded.installation.gatewaySandbox.driverId, "openshell-sandbox");
+  assert.equal(loaded.sandboxDriver, undefined);
+  assert.equal(typeof loaded.gatewaySandboxDriver.gateway.provision, "function");
+  assert.equal(loaded.credentialGatewayDriver, undefined);
+  assert.equal(loaded.proxyDriver, undefined);
+  // The real worker constructor must accept the same Gateway-only selection as the API.
+  // It must not reinterpret Backend membership as a Harness Sandbox selection.
+  const pool = new pg.Pool({ connectionString: "postgresql://127.0.0.1/unused" });
+  const worker = createControllerWorker({ pool, drivers: loaded });
+  t.after(() => worker.stop());
+  assert.throws(
+    () => createControllerWorker({ pool, drivers: { ...loaded, gatewaySandboxDriver: undefined } }),
+    /selected Gateway Sandbox Driver does not match/,
+  );
+  assert.throws(
+    () =>
+      createControllerWorker({
+        pool,
+        drivers: { ...loaded, sandboxDriver: loaded.gatewaySandboxDriver },
+      }),
+    /selected Sandbox Driver requires shared startup configuration/,
+  );
+  assert.equal(
+    loaded.gatewayIngressAuthority.publicKeyPem,
+    pair.publicKey.export({ type: "spki", format: "pem" }),
+  );
+  assert.equal(JSON.stringify(loaded.installation).includes("BEGIN PRIVATE KEY"), false);
+  assert.deepEqual(
+    installationControllerOptions(loaded.installation).gatewayOutboundPolicyCeiling,
+    configuration.gatewayOutboundPolicyCeiling,
+  );
+  // Refuse world-readable material; ordinary group-readable projected keys remain usable.
+  await chmod(privateKeyPath, 0o644);
+  await assert.rejects(load(), /gatewaySandbox.ingress.privateKeyPath/);
+  await chmod(privateKeyPath, 0o440);
+  await load();
+  configuration.gatewaySandbox.driverId = "not-installed";
+  await writeFile(path, JSON.stringify(configuration));
+  await assert.rejects(load(), /gatewaySandbox.driverId/);
+  configuration.gatewaySandbox.driverId = "openshell-sandbox";
+  configuration.gatewayOutboundPolicyCeiling.allowPublicHttps = "true";
+  await writeFile(path, JSON.stringify(configuration));
+  await assert.rejects(load(), /allowPublicHttps must be a boolean/);
+});
 
 test("Credential Proxy startup preserves the selection and refuses retired keys", async (t) => {
   const configuration = credentialProxyInstallation();
@@ -1285,6 +1356,7 @@ test("production embedded replacements preserve their active Service across fail
     configurationKind: "agent",
     configurationGeneration: 1,
     gatewayManagedMode: true,
+    gatewayOutbound: { mode: "restricted", hosts: [] },
     executionAdmission: { version: 2, mode: "unprotected" },
     configuration: admitLoggingConfiguration(
       createHarnessConfiguration(harness.id, "gpt-4.1"),
@@ -2644,8 +2716,8 @@ test("closed Installation observes only its operator-bound Namespace, including 
     createOpenShellBackend: (definition) => ({
       id: definition.id,
       drivers: definition.drivers,
-      client: {
-        clientForNamespace: () => ({
+      client: new OpenShellGateway(definition.configuration, {
+        gatewayClient: {
           health: async () => {},
           getWorkspace: async () => ({
             name,
@@ -2655,8 +2727,8 @@ test("closed Installation observes only its operator-bound Namespace, including 
               "openclaw.dev/namespace-id": id,
             },
           }),
-        }),
-      },
+        },
+      }),
     }),
   });
   const { computeDriver: driver, configurationDriver, secretDriver } = drivers;

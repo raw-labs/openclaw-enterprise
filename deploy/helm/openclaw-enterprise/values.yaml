@@ -141,6 +141,10 @@ bootstrap:
   serviceKey:
     fileName: initial-admin-service-key.json
 
+gatewayIngress:
+  # Dedicated Ed25519 key, private.pem, mounted only in API, worker and upgrade preflight.
+  secretName: ""
+
 backend:
   openshell:
     # Mount a dedicated administrator mTLS Secret only in API and worker.

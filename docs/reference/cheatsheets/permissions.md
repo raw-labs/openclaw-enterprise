@@ -38,6 +38,11 @@ principal. Rerunning bootstrap does not add missing permissions to existing Role
 | [`sandbox_policy`](../sandbox-policies.md)      | `read`, `update`                                                                                      | Exact Agent-owned policy. Reads and discovery require Agent read; preview/save/apply require Agent manage_policy and enabled editing.                                                                                                                                                                                                                      |
 | [`agent_revision`](../api.md#agent-revisions)   | `read`                                                                                                | Exact AgentRevision; deployment-status reads use this permission too.                                                                                                                                                                                                                                                                                      |
 
+Changing `gatewayOutbound` requires exact Agent `update` and `administer`.
+Creating an Agent with extra hosts or public HTTPS requires Namespace-scoped
+Agent `create` and `administer`; the Installation ceiling still applies. See
+[Gateway containment](../gateway-containment.md).
+
 Namespace, Preset, Agent, ServiceAccount, AgentRevision, Secret, and credential
 source lists check each returned resource. Listing Agents, ServiceAccounts or Presets also requires `namespace:read`;
 listing AgentRevisions also requires `agent:read` on the parent. The

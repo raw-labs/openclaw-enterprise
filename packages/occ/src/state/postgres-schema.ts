@@ -1,3 +1,4 @@
+import type { GatewayOutboundPolicy } from "@openclaw-enterprise/contracts";
 import type { CredentialPolicyReductionState } from "./platform-state.ts";
 import type {
   InitialWorkspaceFiles,
@@ -267,6 +268,10 @@ export const agents = occSchema.table(
     backendId: text("backend_id"),
     executionMode: text("execution_mode").$type<HarnessExecutionMode>().notNull(),
     gatewayManagedMode: boolean("gateway_managed_mode").notNull().default(true),
+    gatewayOutbound: jsonb("gateway_outbound")
+      .$type<GatewayOutboundPolicy>()
+      .notNull()
+      .default({ mode: "restricted", hosts: [] }),
     sandboxPolicyEditing: boolean("sandbox_policy_editing").notNull().default(false),
     plugins: jsonb("plugins").$type<PluginDesiredState>(),
     pluginApprovers: jsonb("plugin_approvers").$type<PluginApprovers>(),
@@ -302,6 +307,10 @@ export const agents = occSchema.table(
     ),
     check("agents_id_format", sql`${table.id} ~ ${identifierPatterns.agent}`),
     check("agents_name_length", sql`char_length(${table.name}) BETWEEN 1 AND 200`),
+    check(
+      "agents_gateway_outbound_valid",
+      sql`occ.gateway_outbound_is_valid(${table.gatewayOutbound}) AND (${table.executionMode} = 'dedicated' OR ${table.gatewayOutbound} = '{"mode":"restricted","hosts":[]}'::jsonb)`,
+    ),
     check("agents_execution_mode_valid", sql`${table.executionMode} IN ('embedded', 'dedicated')`),
     check(
       "agents_desired_runtime_state_valid",
@@ -679,6 +688,10 @@ export const agentRevisions = occSchema.table(
       "agent_revisions_backend_id_valid",
       sql`${table.backendId} IS NULL OR (char_length(${table.backendId}) BETWEEN 1 AND 200 AND ${table.backendId} = btrim(${table.backendId}) AND ${table.backendId} !~ '[[:cntrl:]]')`,
     ),
+    check(
+      "agent_revisions_gateway_outbound_valid",
+      sql`occ.gateway_outbound_is_valid(${table.admittedSpec}->'gateway_outbound') AND CASE WHEN ${table.admittedSpec} #>> '{harness,mode}' = 'dedicated' THEN occ.gateway_outbound_admission_is_valid(${table.admittedSpec}->'gateway_outbound_admission', ${table.admittedSpec}->'gateway_outbound') ELSE NOT (${table.admittedSpec} ? 'gateway_outbound_admission') AND ${table.admittedSpec}->'gateway_outbound' = '{"mode":"restricted","hosts":[]}'::jsonb END`,
+    ),
     check("agent_revisions_spec_object", sql`jsonb_typeof(${table.admittedSpec}) = 'object'`),
     check(
       "agent_revisions_egress_scope",
@@ -743,7 +756,7 @@ export const agentRevisions = occSchema.table(
           - 'configuration_id' - 'configuration_kind' - 'configuration_generation'
           - 'draft_spec' - 'harness' - 'compute' - 'sandbox_driver_id' - 'sandbox_policy'
           - 'secret_driver_id' - 'secret_bindings' - 'harness_auth' - 'credential_sources' - 'plugins'
-          - 'plugin_approvers' - 'repository_credentials' - 'egress_plan' - 'execution_admission') = '{}'::jsonb
+          - 'plugin_approvers' - 'repository_credentials' - 'egress_plan' - 'execution_admission' - 'gateway_outbound' - 'gateway_outbound_admission') = '{}'::jsonb
         AND jsonb_typeof(${table.admittedSpec}->'configuration_id') = 'string'
         AND (${table.admittedSpec}->>'configuration_id') ~ ${identifierPatterns.configuration}
         AND jsonb_typeof(${table.admittedSpec}->'configuration_kind') = 'string'

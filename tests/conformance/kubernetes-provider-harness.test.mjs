@@ -104,12 +104,11 @@ test("provider Harness endpoint bootstraps Gateway before provisioning and reque
   });
   assert.equal(provisions.length, 0);
   assert.equal(endpoints.length, 0);
-  const bootstrapGateway = read("Deployment", gatewayName, gatewayNamespace);
-  assert.ok(bootstrapGateway);
+  assert.equal(read("Deployment", gatewayName, gatewayNamespace), undefined);
+  const bootstrap = [...fixture.containedGateway.launches.values()][0];
+  assert.ok(bootstrap, "Compute persists and provisions the contained launch before the Harness");
   assert.notEqual(
-    bootstrapGateway.spec.template.spec.containers[0].env.find(
-      ({ name }) => name === "APP_SERVER_URL",
-    ).value,
+    bootstrap.requirements.environment.find(({ name }) => name === "APP_SERVER_URL").value,
     providerUrl,
   );
 

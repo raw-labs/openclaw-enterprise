@@ -6,6 +6,7 @@ import type {
   BackendDefinition,
   DriverCapability,
   OpenShellBackendDefinition,
+  SandboxDriver,
 } from "@openclaw-enterprise/contracts";
 import { BACKEND_ID_MAX_CHARACTERS, isBackendId } from "@openclaw-enterprise/contracts";
 import { asRecord, deepFreeze, isNonEmptyString } from "@openclaw-enterprise/utils";
@@ -407,9 +408,15 @@ function validateOpenShellBackend(
       throw new ScopeViolationError(path(id, `drivers.${key}`) + " is unsupported.");
     }
   }
-  if (!isNonEmptyString(drivers.sandbox) || !isNonEmptyString(drivers.credential_gateway)) {
+  if (!isNonEmptyString(drivers.sandbox)) {
+    throw new ScopeViolationError(path(id, "drivers") + " requires a sandbox member.");
+  }
+  if (drivers.credential_gateway !== undefined && !isNonEmptyString(drivers.credential_gateway)) {
+    throw new ScopeViolationError(path(id, "drivers.credential_gateway") + " must be a Driver ID.");
+  }
+  if (drivers.credential_refresh !== undefined && drivers.credential_gateway === undefined) {
     throw new ScopeViolationError(
-      path(id, "drivers") + " requires sandbox and credential_gateway members.",
+      path(id, "drivers.credential_refresh") + " requires a credential_gateway member.",
     );
   }
   if (drivers.credential_refresh !== undefined && !isNonEmptyString(drivers.credential_refresh)) {
@@ -433,7 +440,9 @@ function validateOpenShellBackend(
     },
     drivers: {
       sandbox: drivers.sandbox,
-      credential_gateway: drivers.credential_gateway,
+      ...(drivers.credential_gateway === undefined
+        ? {}
+        : { credential_gateway: drivers.credential_gateway as string }),
       ...(drivers.credential_proxy === undefined
         ? {}
         : { credential_proxy: backendId(drivers.credential_proxy, "Egress Driver ID") }),
@@ -453,7 +462,9 @@ function backendMembers(backend: BackendDefinition): readonly string[] {
   }
   return [
     `sandbox:${backend.drivers.sandbox}`,
-    `credential_gateway:${backend.drivers.credential_gateway}`,
+    ...(backend.drivers.credential_gateway === undefined
+      ? []
+      : [`credential_gateway:${backend.drivers.credential_gateway}`]),
     ...(backend.drivers.credential_refresh === undefined
       ? []
       : [`credential_refresh:${backend.drivers.credential_refresh}`]),
@@ -518,9 +529,28 @@ export function validateSelectedBackendDrivers(
   backends: readonly BackendDefinition[],
   selected: Readonly<Partial<Record<DriverCapability, Driver>>>,
   proxyOwner?: InstalledDriver,
+  gatewaySandbox?: SandboxDriver,
 ): void {
+  if (
+    gatewaySandbox !== undefined &&
+    (gatewaySandbox.capability !== "sandbox" ||
+      !backends.some(
+        (backend) => backend.type === "openshell" && backend.drivers.sandbox === gatewaySandbox.id,
+      ))
+  ) {
+    throw new DriverSelectionError(
+      "The Gateway Sandbox Driver must belong to a configured Backend.",
+    );
+  }
   const requires = (capability: DriverCapability, id: string, label: string): void => {
     const driver = selected[capability];
+    if (
+      capability === "sandbox" &&
+      gatewaySandbox?.capability === "sandbox" &&
+      gatewaySandbox.id === id
+    ) {
+      return;
+    }
     if (driver?.capability !== capability || driver.id !== id) {
       throw new DriverSelectionError(`The configured Backend requires its ${label}.`);
     }
@@ -532,11 +562,13 @@ export function validateSelectedBackendDrivers(
       requires("service_account", backend.drivers.service_account, "ServiceAccount Driver");
     } else {
       requires("sandbox", backend.drivers.sandbox, "Sandbox Driver");
-      requires(
-        "credential_gateway",
-        backend.drivers.credential_gateway,
-        "Credential Gateway Driver",
-      );
+      if (backend.drivers.credential_gateway !== undefined) {
+        requires(
+          "credential_gateway",
+          backend.drivers.credential_gateway,
+          "Credential Gateway Driver",
+        );
+      }
       if (backend.drivers.credential_refresh !== undefined) {
         requires(
           "credential_refresh",

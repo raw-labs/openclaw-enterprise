@@ -31,6 +31,89 @@ import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 
 const execute = promisify(execFile);
 
+test("Gateway ingress signing key is mounted only in controller and upgrade preflight", async () => {
+  const objects = await resources(
+    (
+      await renderProductionChart(
+        {
+          "gatewayIngress.secretName": "gateway-ingress-signing-key",
+        },
+        { isUpgrade: true },
+      )
+    ).stdout,
+  );
+  const deployments = objects.filter(({ kind }) => kind === "Deployment");
+  for (const component of ["api", "worker"]) {
+    const pod = deployments.find(
+      ({ metadata }) => metadata.name === "openclaw-enterprise-" + component,
+    ).spec.template.spec;
+    const volume = pod.volumes.find(({ name }) => name === "gateway-ingress-signing");
+    assert.equal(volume.secret.secretName, "gateway-ingress-signing-key");
+    assert.equal(volume.secret.defaultMode, 0o440);
+    assert.deepEqual(volume.secret.items, [{ key: "private.pem", path: "private.pem" }]);
+    const mounts = pod.containers
+      .flatMap(({ volumeMounts = [] }) => volumeMounts)
+      .filter(({ name }) => name === volume.name);
+    assert.deepEqual(mounts, [
+      {
+        name: volume.name,
+        mountPath: "/etc/openclaw/gateway-ingress/private-key.pem",
+        subPath: "private.pem",
+        readOnly: true,
+      },
+    ]);
+  }
+  // The upgrade preflight performs the same key validation as API startup.
+  // Migration and bootstrap must never receive signing authority.
+  const jobs = objects.filter(({ kind }) => kind === "Job");
+  const readers = jobs
+    .flatMap(({ spec }) => [
+      ...(spec.template.spec.initContainers ?? []),
+      ...(spec.template.spec.containers ?? []),
+    ])
+    .filter(({ volumeMounts = [] }) =>
+      volumeMounts.some(({ name }) => name === "gateway-ingress-signing"),
+    );
+  assert.deepEqual(
+    readers.map(({ name }) => name),
+    ["installation-check"],
+  );
+  // Only tenant workers can create or mutate the selectorless relay and its TLS policy.
+  // API and observer identities need only immutable launch ConfigMap reads.
+  const roles = objects.filter(({ kind }) => kind === "ClusterRole");
+  const workerRole = roles.find(({ metadata }) =>
+    metadata.name.endsWith("-openclaw-tenant-worker"),
+  );
+  for (const resource of ["endpointslices", "backendtlspolicies"]) {
+    const rule = workerRole.rules.find(({ resources = [] }) => resources.includes(resource));
+    assert.ok(rule, resource);
+    for (const verb of ["get", "create", "patch", "delete"]) {
+      assert.ok(rule.verbs.includes(verb), resource + ":" + verb);
+    }
+    for (const role of roles.filter((role) => role !== workerRole)) {
+      assert.equal(
+        role.rules.some(
+          ({ resources = [], verbs }) =>
+            resources.includes(resource) &&
+            verbs.some((verb) => ["create", "patch", "delete", "*"].includes(verb)),
+        ),
+        false,
+      );
+    }
+  }
+  for (const suffix of ["-openclaw-tenant-api", "-openclaw-gateway-observer"]) {
+    const role = roles.find(({ metadata }) => metadata.name.endsWith(suffix));
+    const rule = role.rules.find(({ resources = [] }) => resources.includes("configmaps"));
+    assert.deepEqual(rule.verbs, ["get"]);
+  }
+  await assert.rejects(
+    renderProductionChart({
+      "gatewayIngress.secretName": values["auth.secretName"],
+    }),
+    /gatewayIngress.secretName/,
+  );
+});
+
 test("console themes mount only on the API and restart it when the checksum changes", async () => {
   const defaults = await resources((await renderProductionChart()).stdout);
   const themed = await resources(

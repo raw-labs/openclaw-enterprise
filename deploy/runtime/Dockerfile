@@ -185,10 +185,16 @@ COPY deploy/runtime/openclaw-terminated-gateway-namespace.patch /tmp/openclaw-te
 RUN echo '570fb99e849442793eeb0e59417b4b4b2b282e7d236392a022258753b353263b  /tmp/openclaw-terminated-gateway-namespace.patch' | sha256sum --check --strict \
     && git apply /tmp/openclaw-terminated-gateway-namespace.patch
 
+# OCE authenticates relayed operators without trusting the confined listener's loopback peer.
+# Remove this bridge when native OpenClaw supports the reviewed contained ingress protocol.
+COPY deploy/runtime/openclaw-contained-ingress.patch /tmp/openclaw-contained-ingress.patch
+RUN echo '97d143335ffd98073370b418e1c09d059fa62a2ba8a04bc8fb64b63721fce95c  /tmp/openclaw-contained-ingress.patch' | sha256sum --check --strict \
+    && git apply /tmp/openclaw-contained-ingress.patch
+
 # Run the bridge tests alongside the build using the same patched source.
 # Packaging mounts this stage so a failed test still blocks the runtime image.
 FROM openclaw-patched-source AS openclaw-bridge-tests
-# One runner invocation for both Node test files: the runner compiles the whole
+# One runner invocation for the native bridge test files: the runner compiles the whole
 # source tree for its workers first (about a minute), and a second invocation on
 # a fresh .artifacts mount would compile it again. The test runner restores its
 # cache by renaming directories; a fresh mount keeps those renames off the
@@ -196,11 +202,12 @@ FROM openclaw-patched-source AS openclaw-bridge-tests
 RUN --network=none --mount=type=tmpfs,target=/source/.artifacts \
     OPENCLAW_VITEST_RUNTIME=node OPENCLAW_VITEST_MAX_WORKERS=1 pnpm_config_verify_deps_before_run=false \
     node --import ./scripts/tsx.mjs scripts/test-projects.mts src/gateway/server.required-placement-scopes.test.ts \
-    src/infra/gateway-lock-recovery.test.ts
-# Type-check the two UI test graphs touched by the bridge. The upstream runner
+    src/infra/gateway-lock-recovery.test.ts \
+    src/gateway/server.contained-ingress.test.ts src/gateway/ingress-attribution.test.ts src/gateway/auth.test.ts
+# Type-check the UI and Gateway auth test graphs touched by the bridges. The upstream runner
 # generates its database types and compiler cache under .artifacts.
 RUN --network=none --mount=type=tmpfs,target=/source/.artifacts \
-    node scripts/run-tsgo-core-test-shards.mjs --ci-graphs-json '["core-test-ui-chat","core-test-ui-app"]'
+    node scripts/run-tsgo-core-test-shards.mjs --ci-graphs-json '["core-test-ui-chat","core-test-ui-app","core-test-gateway-server","core-test-gateway-root"]'
 # Select only the Node projects that own these files: the browser project starts a
 # Vite server on localhost, which Buildah's network-less RUN cannot resolve.
 RUN --network=none cd ui && node ../scripts/run-node-package-bin.mts vitest run --config vitest.config.ts \

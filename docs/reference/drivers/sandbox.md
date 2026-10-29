@@ -8,10 +8,13 @@ human_verified: true
 ## Overview
 
 `SandboxDriver` confines an Agent Harness's network, filesystem, or processes.
+Its optional Gateway-specific capability also supports experimental
+[dedicated Gateway containment](../gateway-containment.md).
 OpenClaw Control Plane (OCC) supports this Driver with the bundled
 [Kubernetes Compute Driver](kubernetes-compute.md).
-The Sandbox can provision a dedicated Harness. Compute owns the gateway,
-workload identity, baseline isolation, routing, and activation.
+The Sandbox can provision a dedicated Harness or the independently selected
+dedicated Gateway. Compute owns workload identity, baseline isolation, routing,
+activation and private-state claims; Sandbox owns its contained process lifecycle.
 
 ## Interface
 
@@ -30,6 +33,32 @@ The [exported interface](../../../packages/contracts/src/index.ts) extends `Driv
 | `repositoryAccess`      | Optional    | Compute verifies the execution receiving repository access, checks whether its Git route is ready, and retires expired access through this interface. |
 | `networkPolicy`         | Optional    | Declare support for [network policy operations](#optional-network-policy-operations).                                                                 |
 | `computeLifecycleHooks` | Optional    | Inherited from `Driver`. Installed packages supply hooks on the registration and must omit them on the capability object.                             |
+
+### Gateway-specific capability
+
+Optional `gateway` implements the types in
+[`gateway-sandbox.ts`](../../../packages/contracts/src/gateway-sandbox.ts).
+Installation `gatewaySandbox` selects this capability independently of an
+Agent's Harness Sandbox. It validates Gateway requirements, prepares its
+namespace, provisions the contained Gateway, supplies a relay endpoint and
+private status readback, updates node bindings, observes process identity, and
+stops or removes its provider resources. A present observation can supply its
+exact network peer (namespace and Pod labels), so Compute grants Harness
+transport and status access to the actual connection source without provider
+special cases. No observed peer means no ingress grant. The contract is not a general workload
+executor. It accepts exact non-model credential references and Gateway-private
+state, not Harness credential attachments or its workspace.
+
+The capability exposes a stable, non-secret `identity`. Compute saves it with
+the launch generation and rejects a changed provider before using stored launch
+state. Optional `home` identifies the nonpersistent native HOME; retained state
+contains only the declared Gateway categories, not startup configuration or
+credentials. A provider must prepare those paths for its actual process UID
+before it accepts startup material.
+
+Compute activates only after policy and native readiness checks. Status stays
+behind authenticated provider transport. Cleanup confirms provider removal and
+retains the Agent's private-state claim until Agent deletion.
 
 ### Methods
 

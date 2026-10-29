@@ -12981,6 +12981,37 @@
                                 "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                                 "type": "boolean"
                               },
+                              "gatewayOutbound": {
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "hosts": {
+                                        "items": {
+                                          "maxLength": 253,
+                                          "minLength": 1,
+                                          "type": "string"
+                                        },
+                                        "maxItems": 64,
+                                        "type": "array",
+                                        "uniqueItems": true
+                                      },
+                                      "mode": { "const": "restricted", "type": "string" }
+                                    },
+                                    "required": ["mode", "hosts"],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "mode": { "const": "publicHttps", "type": "string" }
+                                    },
+                                    "required": ["mode"],
+                                    "type": "object"
+                                  }
+                                ],
+                                "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                              },
                               "harnessAuth": {
                                 "anyOf": [
                                   {
@@ -13186,6 +13217,7 @@
                               "harnessAuth",
                               "executionMode",
                               "gatewayManagedMode",
+                              "gatewayOutbound",
                               "desiredRuntimeState",
                               "status",
                               "createdAt"
@@ -13259,6 +13291,37 @@
                                 "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                                 "type": "boolean"
                               },
+                              "gatewayOutbound": {
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "hosts": {
+                                        "items": {
+                                          "maxLength": 253,
+                                          "minLength": 1,
+                                          "type": "string"
+                                        },
+                                        "maxItems": 64,
+                                        "type": "array",
+                                        "uniqueItems": true
+                                      },
+                                      "mode": { "const": "restricted", "type": "string" }
+                                    },
+                                    "required": ["mode", "hosts"],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "mode": { "const": "publicHttps", "type": "string" }
+                                    },
+                                    "required": ["mode"],
+                                    "type": "object"
+                                  }
+                                ],
+                                "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                              },
                               "id": {
                                 "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                                 "type": "string"
@@ -13295,6 +13358,7 @@
                               "backendId",
                               "executionMode",
                               "gatewayManagedMode",
+                              "gatewayOutbound",
                               "desiredRuntimeState",
                               "status",
                               "createdAt",
@@ -13431,6 +13495,31 @@
                   "gatewayManagedMode": {
                     "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                     "type": "boolean"
+                  },
+                  "gatewayOutbound": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "hosts": {
+                            "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "maxItems": 64,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "mode": { "const": "restricted", "type": "string" }
+                        },
+                        "required": ["mode", "hosts"],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": { "mode": { "const": "publicHttps", "type": "string" } },
+                        "required": ["mode"],
+                        "type": "object"
+                      }
+                    ],
+                    "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
                   },
                   "harnessAuth": {
                     "anyOf": [
@@ -13700,6 +13789,33 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "hosts": {
+                                  "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "mode": { "const": "restricted", "type": "string" }
+                              },
+                              "required": ["mode", "hosts"],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "mode": { "const": "publicHttps", "type": "string" }
+                              },
+                              "required": ["mode"],
+                              "type": "object"
+                            }
+                          ],
+                          "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -13902,6 +14018,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"
@@ -15267,6 +15384,31 @@
                     "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                     "type": "boolean"
                   },
+                  "gatewayOutbound": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "hosts": {
+                            "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "maxItems": 64,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "mode": { "const": "restricted", "type": "string" }
+                        },
+                        "required": ["mode", "hosts"],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": { "mode": { "const": "publicHttps", "type": "string" } },
+                        "required": ["mode"],
+                        "type": "object"
+                      }
+                    ],
+                    "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                  },
                   "harnessAuth": {
                     "anyOf": [
                       {
@@ -16370,6 +16512,31 @@
                     "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                     "type": "boolean"
                   },
+                  "gatewayOutbound": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "hosts": {
+                            "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "maxItems": 64,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "mode": { "const": "restricted", "type": "string" }
+                        },
+                        "required": ["mode", "hosts"],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": { "mode": { "const": "publicHttps", "type": "string" } },
+                        "required": ["mode"],
+                        "type": "object"
+                      }
+                    ],
+                    "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                  },
                   "harnessAuth": {
                     "anyOf": [
                       {
@@ -16685,6 +16852,33 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "hosts": {
+                                  "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "mode": { "const": "restricted", "type": "string" }
+                              },
+                              "required": ["mode", "hosts"],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "mode": { "const": "publicHttps", "type": "string" }
+                              },
+                              "required": ["mode"],
+                              "type": "object"
+                            }
+                          ],
+                          "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -16887,6 +17081,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"
@@ -17052,6 +17247,37 @@
                             "gatewayManagedMode": {
                               "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                               "type": "boolean"
+                            },
+                            "gatewayOutbound": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "hosts": {
+                                      "items": {
+                                        "maxLength": 253,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "maxItems": 64,
+                                      "type": "array",
+                                      "uniqueItems": true
+                                    },
+                                    "mode": { "const": "restricted", "type": "string" }
+                                  },
+                                  "required": ["mode", "hosts"],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "mode": { "const": "publicHttps", "type": "string" }
+                                  },
+                                  "required": ["mode"],
+                                  "type": "object"
+                                }
+                              ],
+                              "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
                             },
                             "harnessAuth": {
                               "anyOf": [
@@ -17258,6 +17484,7 @@
                             "harnessAuth",
                             "executionMode",
                             "gatewayManagedMode",
+                            "gatewayOutbound",
                             "desiredRuntimeState",
                             "status",
                             "createdAt"
@@ -17331,6 +17558,37 @@
                               "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                               "type": "boolean"
                             },
+                            "gatewayOutbound": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "hosts": {
+                                      "items": {
+                                        "maxLength": 253,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "maxItems": 64,
+                                      "type": "array",
+                                      "uniqueItems": true
+                                    },
+                                    "mode": { "const": "restricted", "type": "string" }
+                                  },
+                                  "required": ["mode", "hosts"],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "mode": { "const": "publicHttps", "type": "string" }
+                                  },
+                                  "required": ["mode"],
+                                  "type": "object"
+                                }
+                              ],
+                              "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                            },
                             "id": {
                               "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                               "type": "string"
@@ -17367,6 +17625,7 @@
                             "backendId",
                             "executionMode",
                             "gatewayManagedMode",
+                            "gatewayOutbound",
                             "desiredRuntimeState",
                             "status",
                             "createdAt",
@@ -17469,7 +17728,8 @@
                 "additionalProperties": false,
                 "anyOf": [
                   { "required": ["configurationId"] },
-                  { "required": ["gatewayManagedMode"] }
+                  { "required": ["gatewayManagedMode"] },
+                  { "required": ["gatewayOutbound"] }
                 ],
                 "properties": {
                   "backendId": {
@@ -17513,6 +17773,31 @@
                   "gatewayManagedMode": {
                     "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                     "type": "boolean"
+                  },
+                  "gatewayOutbound": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "hosts": {
+                            "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "maxItems": 64,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "mode": { "const": "restricted", "type": "string" }
+                        },
+                        "required": ["mode", "hosts"],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": { "mode": { "const": "publicHttps", "type": "string" } },
+                        "required": ["mode"],
+                        "type": "object"
+                      }
+                    ],
+                    "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
                   },
                   "harnessAuth": {
                     "anyOf": [
@@ -17807,6 +18092,33 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "hosts": {
+                                  "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "mode": { "const": "restricted", "type": "string" }
+                              },
+                              "required": ["mode", "hosts"],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "mode": { "const": "publicHttps", "type": "string" }
+                              },
+                              "required": ["mode"],
+                              "type": "object"
+                            }
+                          ],
+                          "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -18009,6 +18321,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"
@@ -18549,6 +18862,33 @@
                           "description": "Gateway managed mode requested for this Agent version. It does not report Gateway runtime state.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "hosts": {
+                                  "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "mode": { "const": "restricted", "type": "string" }
+                              },
+                              "required": ["mode", "hosts"],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "mode": { "const": "publicHttps", "type": "string" }
+                              },
+                              "required": ["mode"],
+                              "type": "object"
+                            }
+                          ],
+                          "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                        },
                         "harness": {
                           "additionalProperties": false,
                           "properties": {
@@ -18774,6 +19114,7 @@
                         "configurationKind",
                         "configurationGeneration",
                         "configuration",
+                        "gatewayOutbound",
                         "gatewayManagedMode",
                         "harness",
                         "compute",
@@ -23355,6 +23696,37 @@
                               "description": "Gateway managed mode requested for this Agent version. It does not report Gateway runtime state.",
                               "type": "boolean"
                             },
+                            "gatewayOutbound": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "hosts": {
+                                      "items": {
+                                        "maxLength": 253,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "maxItems": 64,
+                                      "type": "array",
+                                      "uniqueItems": true
+                                    },
+                                    "mode": { "const": "restricted", "type": "string" }
+                                  },
+                                  "required": ["mode", "hosts"],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "mode": { "const": "publicHttps", "type": "string" }
+                                  },
+                                  "required": ["mode"],
+                                  "type": "object"
+                                }
+                              ],
+                              "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                            },
                             "harness": {
                               "additionalProperties": false,
                               "properties": {
@@ -23585,6 +23957,7 @@
                             "configurationKind",
                             "configurationGeneration",
                             "configuration",
+                            "gatewayOutbound",
                             "gatewayManagedMode",
                             "harness",
                             "compute",
@@ -25502,6 +25875,33 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "hosts": {
+                                  "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "mode": { "const": "restricted", "type": "string" }
+                              },
+                              "required": ["mode", "hosts"],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "mode": { "const": "publicHttps", "type": "string" }
+                              },
+                              "required": ["mode"],
+                              "type": "object"
+                            }
+                          ],
+                          "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -25704,6 +26104,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"
@@ -26082,6 +26483,33 @@
                           "description": "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
                           "type": "boolean"
                         },
+                        "gatewayOutbound": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "hosts": {
+                                  "items": { "maxLength": 253, "minLength": 1, "type": "string" },
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "mode": { "const": "restricted", "type": "string" }
+                              },
+                              "required": ["mode", "hosts"],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "mode": { "const": "publicHttps", "type": "string" }
+                              },
+                              "required": ["mode"],
+                              "type": "object"
+                            }
+                          ],
+                          "description": "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission."
+                        },
                         "harnessAuth": {
                           "anyOf": [
                             {
@@ -26284,6 +26712,7 @@
                         "harnessAuth",
                         "executionMode",
                         "gatewayManagedMode",
+                        "gatewayOutbound",
                         "desiredRuntimeState",
                         "status",
                         "createdAt"

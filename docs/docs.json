@@ -1070,6 +1070,7 @@
               "testing/slack",
               "testing/plugins",
               "testing/openshell",
+              "testing/gateway-containment",
               "testing/openshell-oauth",
               "testing/openshell-coverage",
               "flows/agent-repository-credentials",
@@ -1082,6 +1083,7 @@
               "testing/static-egress",
               "testing/protected-repository-custody",
               "reference/sandbox-policies",
+              "reference/gateway-containment",
               "guides/topics/agent-sandbox-policy",
               "flows/agent-sandbox-policy"
             ]

@@ -94,20 +94,24 @@ rules:
     resources: [networkpolicies]
     verbs: [get, list, create, patch, delete]
   - apiGroups: [gateway.networking.k8s.io]
-    resources: [httproutes]
+    resources: [httproutes, backendtlspolicies]
     verbs: [get, create, patch, delete]
   - apiGroups: [gateway.envoyproxy.io]
     resources: [securitypolicies]
     verbs: [get, create, patch, delete]
   - apiGroups: [discovery.k8s.io]
     resources: [endpointslices]
-    verbs: [get, list]
+    verbs: [get, list, create, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-openclaw-tenant-api
 rules:
+  # Read the immutable contained-Gateway launch snapshot for private status.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get]
   - apiGroups: [""]
     resources: [secrets]
     verbs: [get, create, update, patch, delete]
@@ -144,6 +148,9 @@ kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-openclaw-gateway-observer
 rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get]
   - apiGroups: [apps]
     resources: [deployments]
     verbs: [list]

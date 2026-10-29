@@ -1,7 +1,7 @@
 ---
 created: "2026-09-23"
-updated: 2026-10-26
-last_updated_session: create-deployment-superseded
+updated: 2026-10-29
+last_updated_session: authoring-run/9df4d453-cf2f-4737-875e-6e5fda3b309b
 ---
 
 # Agent provisioning flow
@@ -24,7 +24,9 @@ The original provisioning handle follows the first deployment to activation or f
 graph TD
   Console["<b>Console</b><br/>Save entered Secrets"] --> Secrets["<b>Existing Secrets API</b><br/>Return ordinary references"]
   Secrets --> API["<b>Provision API</b><br/>Inline config and references"]
-  API --> Queue["<b>Existing work queue</b><br/>Return job handle"]
+  API --> Policy{"<b>Gateway policy</b><br/>Driver and ceiling admitted?"}
+  Policy -- "yes" --> Queue["<b>Existing work queue</b><br/>Return job handle"]
+  Policy -- "no" --> Refused["<b>Reject request</b><br/>No queued work"]
   Queue --> Claim["<b>Worker</b><br/>Claim and authorize"]
   Claim --> Config["<b>Create Configuration</b><br/>Record completed identity"]
   Config --> Agent["<b>Create Agent</b><br/>Grant exact credential access"]
@@ -43,7 +45,7 @@ graph TD
   classDef condition fill:#F7F1E5,stroke:#B3A078,color:#514532,stroke-width:1px
   class Console,Secrets,API,Queue state
   class Claim,Config,Agent,Transport,Deploy,Observe,UI operation
-  class Failed,Recovery,Terminal,Superseded condition
+  class Failed,Recovery,Terminal,Superseded,Policy,Refused condition
 ```
 
 ## Execution Trace
@@ -81,6 +83,22 @@ A selected Credential Gateway requires a supported, ready model Credential Sourc
 After an Installation selects another Secret Driver, request, status and retry answer `503` for a Secret owned by the previous Driver, after authorization and lookup. The message asks the caller to save replacement Secrets and submit a new request. The worker fails that attempt with `PROVISIONING_REJECTED`; an unavailable Secret Driver still retries.
 
 Before admission, OCC applies Configuration rules, then the ChannelDriver checks credentials through authorized Secret callbacks. Slack reads a token that is one whole `${NAME}` as the env reference to NAME, and checks token roles and bot authentication without pinning Secret versions or adding worker revalidation. The repository Driver validates Namespace selections before queueing and when creating the Agent. Undeliverable repository bindings, including Sandbox repositories, keep Agent create's `409` on admission and retry ([Compute admission](../reference/drivers/compute-admission.md)). Initial workspace files require the selected Sandbox's `validateWorkspaceSetup` capability; Compute delegates validation or refuses unsupported placement before staging files. Deployment checks the exact Harness topology.
+
+`OpenClawController.validateGatewayOutbound` checks the requested dedicated
+Gateway policy against the Installation ceiling and selected Compute capability.
+A nondefault create also requires Namespace-scoped Agent administer. Embedded
+requests may omit policy but cannot explicitly request this dedicated-only
+capability. `OpenClawController.gatewayOutboundAdmission` asks the selected
+Channel Driver for each enabled provider's non-secret destinations; unsupported
+providers fail before work is queued. The worker rechecks current authority. Its internal controller receives the
+same Gateway provider membership, outbound ceiling and selected Channel Driver
+from Installation composition; Gateway-only selection does not become a Harness
+Sandbox selection.
+
+At deployment, OCC freezes the normalized request, current ceiling and channel
+contributions in the Agent revision, not in native Configuration. The
+[Gateway containment reference](../reference/gateway-containment.md) owns the
+policy and runtime boundary.
 
 OCC stores the accepted request and deduplication fingerprint in `agent_provisioning_work`, then queues `controller_work` with `work_kind = 'provisioning'`. Configuration and Agent creation happen later. The same actor, Namespace and request ID return the existing work; changed input conflicts.
 
@@ -169,6 +187,7 @@ No API deletes a provisioning request. Agent deletion removes the Agent's reques
 
 ## Changelog
 
+- 2026-10-29 11:54: Document dedicated Gateway policy, ceiling and channel admission before provisioning. (authoring-run/9df4d453-cf2f-4737-875e-6e5fda3b309b - f5651130fba3545a5a852d5f62d25674b766327a)
 - 2026-10-25: Name Slack's whole `${NAME}` token reading; move older entries to the history page. (finding 2512)
 - 2026-10-25: Check Configuration rules before channel credentials. (finding 2506)
 - 2026-10-25: Refuse a taken Agent name at admission. (finding 2420)

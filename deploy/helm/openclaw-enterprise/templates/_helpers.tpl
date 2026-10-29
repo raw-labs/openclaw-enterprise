@@ -466,6 +466,9 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if .Values.gatewayIngress.secretName -}}
+{{- $reservedCaMounts = append $reservedCaMounts "/etc/openclaw/gateway-ingress/private-key.pem" -}}
+{{- end -}}
 {{- if .Values.backend.openshell.clientSecretName -}}
 {{- $reservedCaMounts = append $reservedCaMounts "/etc/openclaw/openshell" -}}
 {{- end -}}
@@ -722,6 +725,7 @@ an allowlist without its provider is refused: the API treats it as a startup err
 {{- $routing := .Values.gatewayRouting -}}
 {{- $roles := list -}}
 {{- $roles = append $roles (list "backend.openshell.clientSecretName" .Values.backend.openshell.clientSecretName) -}}
+{{- $roles = append $roles (list "gatewayIngress.secretName" .Values.gatewayIngress.secretName) -}}
 {{- if .Values.egressAuthority.enabled -}}
 {{- $roles = concat $roles (list (list "egressAuthority.tlsSecretName" .Values.egressAuthority.tlsSecretName) (list "egressAuthority.issuerSecretName" .Values.egressAuthority.issuerSecretName)) -}}
 {{- end -}}

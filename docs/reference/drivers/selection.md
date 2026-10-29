@@ -57,7 +57,7 @@ Sandbox packages in trusted YAML in either mode.
 | `secret`             | [SecretDriver](secret.md)                                                   | Required in trusted Installation YAML, including SSH; bundled Kubernetes only.                                                                           |
 | `sandbox`            | [SandboxDriver](sandbox.md)                                                 | Optional; bundled OpenShell or installed package, and currently requires bundled Kubernetes Compute.                                                     |
 | `credential_proxy`   | [CredentialProxyDriver](credential-proxy.md)                                | Optional; the selected Sandbox and Credential Proxy must come from one Driver registration, supplied by bundled OpenShell or a selected Sandbox package. |
-| `credential_gateway` | [CredentialGatewayDriver](credential-gateway.md)                            | Required with the bundled OpenShell Sandbox, otherwise omitted; bundled OpenShell Backend member only.                                                   |
+| `credential_gateway` | [CredentialGatewayDriver](credential-gateway.md)                            | Required for Harness credential delivery, not Gateway-only containment; bundled OpenShell Backend member only.                                           |
 | `credential_refresh` | [CredentialRefreshDriver](credential-refresh.md)                            | Optional; bundled OpenShell only, on the selected Credential Gateway's Backend.                                                                          |
 | `service_account`    | [ServiceAccountDriver](service-account.md)                                  | Optional bundled ChatGPT Backend member; no installed-package selector.                                                                                  |
 | `plugin`             | [PluginDriver](plugin.md)                                                   | Optional bundled `occ-plugin` or `codex-plugin`; no installed-package selector.                                                                          |
@@ -75,6 +75,17 @@ operator-managed runtime credentials. Kubernetes-only production image, Codex
 runtime, and projected-credential checks apply only to bundled Kubernetes Compute. `drivers.sandbox` with `compute-ssh` fails startup;
 OCC Secret delivery to SSH hosts is unsupported even though the Installation
 contract still requires the Secret selection.
+
+## Select Gateway-only containment
+
+For the experimental dedicated Gateway path, configure `gatewaySandbox.driverId`
+and ingress verification material in Installation YAML. The ID selects the
+configured Sandbox instance. Set `drivers.sandbox.useForHarness: false` to keep
+the ordinary dedicated Harness; this option requires Gateway selection and no
+Harness credential Gateway, Refresh or Proxy selections. Without the flag,
+`drivers.sandbox` retains its existing Harness meaning. There is no Agent-level
+Gateway provider override. See [Gateway containment](../gateway-containment.md)
+for the complete authority and verification boundary.
 
 ## Select a protected sender
 

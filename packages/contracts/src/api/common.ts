@@ -714,6 +714,26 @@ export const RepositoryBindingSelectionsSchema = Type.Array(RepositoryBindingSel
   maxItems: 16,
 });
 
+export const GatewayOutboundPolicySchema = Type.Union(
+  [
+    Type.Object(
+      {
+        mode: Type.Literal("restricted"),
+        hosts: Type.Array(Type.String({ minLength: 1, maxLength: 253 }), {
+          maxItems: 64,
+          uniqueItems: true,
+        }),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object({ mode: Type.Literal("publicHttps") }, { additionalProperties: false }),
+  ],
+  {
+    description:
+      "Dedicated Gateway external access. Exact restricted DNS hosts allow TCP/443 only. Default: restricted with empty hosts. Changes require Agent update and administer; publicHttps requires Installation permission.",
+  },
+);
+
 export const GatewayManagedModeSchema = Type.Boolean({
   description:
     "Whether OCE restricts Gateway-local administration. Defaults on when the selected Compute Driver supports it, otherwise off. Changing the setting requires Installation administer permission and takes effect on deployment.",
@@ -740,6 +760,7 @@ export const CreateAgentBody = Type.Object(
     credentialSources: Type.Optional(AgentCredentialSourcesSchema),
     executionMode: Type.Optional(HarnessExecutionModeSchema),
     gatewayManagedMode: Type.Optional(GatewayManagedModeSchema),
+    gatewayOutbound: Type.Optional(GatewayOutboundPolicySchema),
     plugins: Type.Optional(Type.Ref("PluginDesiredState")),
     pluginApprovers: Type.Optional(Type.Ref("PluginApprovers")),
     repositoryBindings: Type.Optional(RepositoryBindingRequestsSchema),
@@ -773,6 +794,7 @@ export const ProvisionAgentBody = Type.Object(
     ),
     executionMode: Type.Optional(HarnessExecutionModeSchema),
     gatewayManagedMode: Type.Optional(GatewayManagedModeSchema),
+    gatewayOutbound: Type.Optional(GatewayOutboundPolicySchema),
     plugins: Type.Optional(Type.Ref("PluginDesiredState")),
     pluginApprovers: Type.Optional(Type.Ref("PluginApprovers")),
     repositoryBindings: Type.Optional(RepositoryBindingRequestsSchema),
@@ -807,6 +829,7 @@ export const ValidateAgentCreateBody = Type.Object(
     ),
     executionMode: Type.Optional(HarnessExecutionModeSchema),
     gatewayManagedMode: Type.Optional(GatewayManagedModeSchema),
+    gatewayOutbound: Type.Optional(GatewayOutboundPolicySchema),
     plugins: Type.Optional(Type.Ref("PluginDesiredState")),
     pluginApprovers: Type.Optional(Type.Ref("PluginApprovers")),
     harnessAuth: Type.Optional(
@@ -860,6 +883,7 @@ export const UpdateAgentBody = Type.Object(
     credentialSources: Type.Optional(AgentCredentialSourcesSchema),
     executionMode: Type.Optional(HarnessExecutionModeSchema),
     gatewayManagedMode: Type.Optional(GatewayManagedModeSchema),
+    gatewayOutbound: Type.Optional(GatewayOutboundPolicySchema),
     plugins: Type.Optional(Type.Ref("PluginDesiredState")),
     pluginApprovers: Type.Optional(Type.Union([Type.Ref("PluginApprovers"), Type.Null()])),
     repositoryBindings: Type.Optional(RepositoryBindingRequestsSchema),
@@ -867,7 +891,11 @@ export const UpdateAgentBody = Type.Object(
   },
   {
     additionalProperties: false,
-    anyOf: [{ required: ["configurationId"] }, { required: ["gatewayManagedMode"] }],
+    anyOf: [
+      { required: ["configurationId"] },
+      { required: ["gatewayManagedMode"] },
+      { required: ["gatewayOutbound"] },
+    ],
   },
 );
 

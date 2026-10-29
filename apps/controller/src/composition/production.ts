@@ -1,5 +1,6 @@
 import { installEgressAuthority } from "./egress-authority.ts";
 import { installationControllerOptions } from "./installation-config.ts";
+import { gatewayIngressTarget } from "./gateway-ingress.ts";
 import type { AuditEvent } from "@openclaw-enterprise/contracts";
 import {
   validateAuthAccountPrincipalSeed,
@@ -280,6 +281,9 @@ export async function composeProduction(
     phaseCompleted("computePreflight");
     const controller = new OpenClawController(persistedInstallation, {
       ...installationControllerOptions(config.drivers.installation),
+      ...(config.drivers.gatewaySandboxDriver === undefined
+        ? {}
+        : { gatewaySandboxDriver: config.drivers.gatewaySandboxDriver }),
       state,
       ...(config.drivers.tokenService && { preparedTokens: config.drivers.tokenService }),
       recordOperations: true,
@@ -357,7 +361,11 @@ export async function composeProduction(
     if (workspaceFilesAccess === undefined && config.gatewayApiKeyPath !== undefined) {
       const gatewayApiKeyPath = config.gatewayApiKeyPath;
       await validateWorkspaceFilesApiKeyPath(gatewayApiKeyPath);
-      workspaceFilesAccess = createWorkspaceFilesAccess(computeDriver, gatewayApiKeyPath);
+      workspaceFilesAccess = createWorkspaceFilesAccess(
+        computeDriver,
+        gatewayApiKeyPath,
+        config.drivers.gatewayIngressAuthority,
+      );
     }
     if (config.nativeAdmin?.enabled === true && config.gatewayApiKeyPath === undefined) {
       throw new Error("Native admin UI access requires OCC_GATEWAY_API_KEY_PATH.");
@@ -374,6 +382,8 @@ export async function composeProduction(
       secretDriver,
       publicOrigin: config.authBaseURL,
       ...(config.nativeAdmin === undefined ? {} : { nativeAdmin: config.nativeAdmin }),
+      nativeAdminGatewayIngress: (revision, endpoint) =>
+        gatewayIngressTarget(config.drivers.gatewayIngressAuthority, revision, endpoint),
       agentRuntimeLogs: {
         enabled: config.agentRuntimeLogsEnabled !== false,
         cursorSecret: config.authSecret,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { controlledGatewayFixture } from "../helpers/kubernetes-compute.mjs";
 import { admitLoggingConfiguration } from "../../packages/contracts/src/index.ts";
 import {
   KubernetesComputeDriver,
@@ -35,6 +36,7 @@ export function providerReadinessFixture({
   nodeEnrollment,
   workspaceNodePeerLabels = async ({ revision }) => supervisorPeerLabels(revision.id),
 } = {}) {
+  const containedGateway = controlledGatewayFixture();
   const driver = new KubernetesComputeDriver(
     routedOptions({
       runtime: {
@@ -55,6 +57,7 @@ export function providerReadinessFixture({
           }),
     }),
     {
+      ...containedGateway.selection,
       lifecycleDrivers,
       nodeEnrollment: nodeEnrollment ?? {
         async isConnected() {
@@ -196,6 +199,7 @@ export function providerReadinessFixture({
   driver.apiClients = Promise.resolve({ core });
   return {
     driver,
+    containedGateway,
     revision,
     namespace,
     deployment,
