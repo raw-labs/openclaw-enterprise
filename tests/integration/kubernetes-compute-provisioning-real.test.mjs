@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { isIP } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 import { kubernetesConfigurationName } from "../../apps/controller/src/drivers/configuration/kubernetes/index.ts";
@@ -504,6 +505,37 @@ test(
     const nodeEnrollment = createGatewayNodeEnrollment(
       async () => "fixture-node-enrollment-api-key",
     );
+    const controllerImage = process.env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE;
+    assert.match(
+      controllerImage ?? "",
+      /^\S+@sha256:[a-f0-9]{64}$/i,
+      "provisioning requires the actual imported controller image for its Gateway proxy",
+    );
+    const kubernetesService = JSON.parse(
+      await kubectl("get", "service", "kubernetes", "--namespace", "default", "-o", "json"),
+    );
+    const kubernetesEndpoints = JSON.parse(
+      await kubectl("get", "endpoints", "kubernetes", "--namespace", "default", "-o", "json"),
+    );
+    const infrastructureAddresses = [
+      ...(kubernetesService.spec.clusterIPs ?? [kubernetesService.spec.clusterIP]),
+      ...(kubernetesEndpoints.subsets ?? []).flatMap(({ addresses = [] }) =>
+        addresses.map(({ ip }) => ip),
+      ),
+    ];
+    const denyCidrs = [
+      ...new Set(
+        infrastructureAddresses.map((address) => {
+          const family = isIP(address);
+          assert.notEqual(
+            family,
+            0,
+            "the selected cluster must report literal infrastructure addresses",
+          );
+          return `${address}/${family === 4 ? 32 : 128}`;
+        }),
+      ),
+    ];
     const { driver, kubernetesNamespaceName } = await createDriver(
       {
         authentication: controller.authentication,
@@ -516,8 +548,13 @@ test(
         runtime: {
           transportSecretPrefix: "transport",
           gatewayStorageClassName: "local-path",
-          // The provisioned Agent enables Slack, which needs the Installation's channel runtime.
-          channels: { proxyUrl: "http://10.42.0.15:3128" },
+          // The real proxy serves the admitted Slack requirements; fixture credentials
+          // and the fixture runtime establish projection, not a Slack connection.
+          gatewayOutbound: {
+            enabled: true,
+            image: controllerImage,
+            denyCidrs,
+          },
           gatewayNodeSelector: {
             "kubernetes.io/hostname": JSON.parse(await kubectl("get", "nodes", "-o", "json"))
               .items[0].metadata.name,
@@ -588,6 +625,15 @@ test(
       },
     );
     assert.equal(slackBotSecret.status, 201, JSON.stringify(slackBotSecret.body));
+    const slackAppSecret = await fixture.request(
+      "POST",
+      `/namespaces/${namespaceOwner.id}/secrets`,
+      {
+        name: `Provisioning Slack app token ${randomUUID().slice(0, 8)}`,
+        value: `xapp-${randomUUID()}`,
+      },
+    );
+    assert.equal(slackAppSecret.status, 201, JSON.stringify(slackAppSecret.body));
 
     // Before creating the Agent, use the actual Kubernetes-backed PAT through the
     // real discovery Driver; only the external provider responses are controlled.
@@ -676,6 +722,17 @@ test(
       slackBotSecretRef: slackBotSecret.data.ref,
       authMethod: "codex_pat",
     });
+    // Socket Mode needs both saved roles; provider auth.test remains the explicit external fixture.
+    body.configuration.values.channels.slack.mode = "socket";
+    body.configuration.values.channels.slack.appToken = {
+      source: "env",
+      provider: "default",
+      id: "SLACK_APP_TOKEN",
+    };
+    body.configuration.secretBindings.SLACK_APP_TOKEN = {
+      source: slackAppSecret.data.ref,
+      delivery: { type: "env" },
+    };
     assert.equal(
       JSON.stringify(body).includes(rotatedPat),
       false,
@@ -733,6 +790,23 @@ test(
     assert.equal(exactRevision.status, 200, JSON.stringify(exactRevision.body));
     assert.equal(exactRevision.data.compute.id, driver.id);
     assert.equal(exactRevision.data.compute.implementation, driver.implementation);
+    assert.deepEqual(
+      exactRevision.data.gatewayOutbound,
+      {
+        selection: { mode: "channelsOnly" },
+        requirements: [
+          {
+            source: "slack",
+            destinations: ["slack.com", "slack-edge.com", "slack-msgs.com"].map((host) => ({
+              host,
+              includeSubdomains: true,
+            })),
+          },
+        ],
+        denyCidrs,
+      },
+      "the worker must freeze automatic Slack requirements without an extra Agent policy setting",
+    );
 
     const configuration = await resource(
       "configmap",
@@ -753,7 +827,7 @@ test(
     );
     assert.equal(
       provisionedSecrets.length,
-      2,
+      3,
       "Console-saved Secrets must be stored through the real Kubernetes Secret Driver",
     );
     const transportName = `transport-${hash(provisioned.agentId)}`;
@@ -778,6 +852,50 @@ test(
     for (const name of canonicalNames) {
       await resource("secret", name, placement);
     }
+
+    // This is the actual managed proxy process; the fixture Gateway makes no Slack connection.
+    const proxyName = `gateway-outbound-${hash(provisioned.agentId)}-${hash(provisioned.revisionId)}`;
+    await fixture.startWorker();
+    const proxyPod = await waitFor(
+      "the provisioned revision's managed proxy to become ready",
+      async () =>
+        (await resources("pods", gatewayPlacement)).find(
+          ({ metadata, status }) =>
+            metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId &&
+            metadata.labels?.["openclaw.dev/revision"] === provisioned.revisionId &&
+            metadata.labels?.["openclaw.dev/workload-role"] === "gateway-outbound" &&
+            status.conditions?.some(({ type, status }) => type === "Ready" && status === "True"),
+        ),
+    );
+    await fixture.stopWorker();
+    const proxyDeployment = await resource("deployment", proxyName, gatewayPlacement);
+    const proxyService = await resource("service", proxyName, gatewayPlacement);
+    const proxyConfiguration = await resource("configmap", proxyName, gatewayPlacement);
+    assert.equal(proxyDeployment.spec.template.spec.containers[0].image, controllerImage);
+    assert.ok(
+      proxyDeployment.spec.template.spec.volumes.some(
+        ({ configMap }) => configMap?.name === proxyConfiguration.metadata.name,
+      ),
+      "the owning proxy Deployment must consume its revision policy ConfigMap",
+    );
+    assert.ok(
+      Object.entries(proxyService.spec.selector).every(
+        ([key, value]) => proxyPod.metadata.labels[key] === value,
+      ),
+      "the owning Service must select the real ready proxy Pod",
+    );
+    const proxyPolicy = JSON.parse(proxyConfiguration.data["policy.json"]);
+    assert.equal(proxyPolicy.mode, "restricted");
+    assert.equal(proxyPolicy.agentId, provisioned.agentId);
+    assert.equal(proxyPolicy.revisionId, provisioned.revisionId);
+    assert.deepEqual(
+      new Set(proxyPolicy.destinations),
+      new Set([
+        { host: "slack-edge.com", includeSubdomains: true },
+        { host: "slack-msgs.com", includeSubdomains: true },
+        { host: "slack.com", includeSubdomains: true },
+      ]),
+    );
 
     // Seed an owned pre-upgrade RWX workspace without altering any supported Agent.
     // No RWX provisioner is needed: rejection must happen before mounting the claim.
@@ -976,7 +1094,7 @@ test(
 
 test(
   "trusted embedded channel opt-in projects exact Secrets through API provisioning, revisions and stop",
-  { ...requiresKubernetesAndPostgres, timeout: 360_000 },
+  { ...requiresKubernetesAndPostgres, timeout: 480_000 },
   async (context) => {
     await assertKubernetesFixtureAvailable();
     const installationId = `ins_${randomUUID()}`;
@@ -1032,7 +1150,17 @@ test(
     const runtime = {
       transportSecretPrefix: "transport",
       gatewayStorageClassName: "local-path",
-      channels: { proxyUrl: "http://10.42.0.15:3128" },
+      gatewayOutbound: {
+        enabled: true,
+        image: process.env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE,
+        denyCidrs: [
+          "10.0.0.0/8",
+          "100.64.0.0/10",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "169.254.0.0/16",
+        ],
+      },
     };
     const network = {
       dns: { namespace: "kube-system", podLabels: { "k8s-app": "kube-dns" } },
@@ -1154,7 +1282,7 @@ test(
       network,
       runtime: {
         ...runtime,
-        channels: { ...runtime.channels, experimentalEmbeddedChannels: true },
+        channels: { experimentalEmbeddedChannels: true },
       },
     });
     const optedIn = await createProvisioningApiFixture(context, driver, controller.authentication);
@@ -1223,15 +1351,44 @@ test(
     const provisioned = await waitFor("embedded channel provisioning to succeed", async () => {
       const observed = await optedIn.request("GET", admitted.data.provisioning.url);
       assert.equal(observed.status, 200, JSON.stringify(observed.body));
-      assert.notEqual(observed.data.status, "failed", JSON.stringify(observed.body));
+      assert.notEqual(
+        observed.data.status,
+        "failed",
+        JSON.stringify(observed.body),
+      );
       return observed.data.status === "succeeded" ? observed.data : undefined;
     });
     const agentPath = `/namespaces/${namespaceId}/agents/${provisioned.agentId}`;
     const gateway = gatewayName(provisioned.agentId);
     const callbackName = `${gateway}-msteams`;
+    const waitForReconciledRevision = async (revisionId) => {
+      // Active revision selection precedes activation and predecessor retirement.
+      // Completion proves the callback cutover and old proxy withdrawal have settled.
+      await waitFor(`embedded revision ${revisionId} reconciliation`, async () => {
+        const work = await optedIn.readWork(`agent_revision:${revisionId}:reconcile`);
+        assert.notEqual(
+          work?.state,
+          "failed_permanent",
+          work?.state,
+        );
+        return work?.state === "succeeded";
+      });
+    };
     const assertServing = async (revisionId) => {
+      await waitForReconciledRevision(revisionId);
+      const admittedRevision = await optedIn.readRevision(
+        namespaceId,
+        provisioned.agentId,
+        revisionId,
+      );
+      assert.deepEqual(admittedRevision.gatewayOutbound.selection, { mode: "channelsOnly" });
+      assert.deepEqual(
+        admittedRevision.gatewayOutbound.requirements.map(({ source }) => source).sort(),
+        ["msteams", "slack"],
+      );
       const deployment = await resource("deployment", gateway, placement);
       assert.equal(deployment.metadata.annotations["openclaw.dev/agent-revision-id"], revisionId);
+      assert.equal(deployment.metadata.annotations["openclaw.dev/msteams-webhook"], "true");
       const environment = deployment.spec.template.spec.containers[0].env;
       const expectedEnvironment = {};
       const canonicalSecrets = await resources("secrets", placement);
@@ -1281,16 +1438,51 @@ test(
       );
       assert.equal(
         environment.find(({ name }) => name === "HTTPS_PROXY").value,
-        runtime.channels.proxyUrl,
+        `http://${driver.gatewayOutboundName(admittedRevision)}.${placement}.svc:3128`,
       );
       assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
+      assert.equal(environment.find(({ name }) => name === "OPENCLAW_PROXY_ACTIVE").value, "1");
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
+      assert.ok(
+        environment
+          .find(({ name }) => name === "NO_PROXY")
+          .value.split(",")
+          .includes("127.0.0.1"),
+      );
+      const proxy = await resource(
+        "deployment",
+        driver.gatewayOutboundName(admittedRevision),
+        placement,
+      );
+      assert.equal(
+        proxy.spec.template.spec.containers[0].env?.some(
+          ({ valueFrom }) => valueFrom?.secretKeyRef,
+        ) ?? false,
+        false,
+      );
+      const proxyPolicy = await resource(
+        "configmap",
+        driver.gatewayOutboundName(admittedRevision),
+        placement,
+      );
+      const policy = JSON.parse(Object.values(proxyPolicy.data)[0]);
+      assert.equal(policy.mode, "restricted");
+      assert.deepEqual(
+        policy.destinations.map(({ host }) => host).sort(),
+        [
+          ...new Set(
+            admittedRevision.gatewayOutbound.requirements.flatMap(({ destinations }) =>
+              destinations.map(({ host }) => host),
+            ),
+          ),
+        ].sort(),
+      );
       assert.equal(
         (await resources("deployments", placement)).filter(
           ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId,
         ).length,
-        1,
-        "embedded remains one combined OpenClaw workload",
+        2,
+        "embedded has one combined OpenClaw workload and a credential-free outbound proxy",
       );
       const callback = await resource("httproute", callbackName, placement);
       assert.equal(callback.metadata.annotations["openclaw.dev/agent-revision-id"], revisionId);
@@ -1305,6 +1497,18 @@ test(
         false,
       );
     };
+    // The normal Agent update route cannot grant extra destinations to embedded execution.
+    for (const gatewayOutbound of [
+      { mode: "restricted", hosts: ["example.com"] },
+      { mode: "publicHttps" },
+    ]) {
+      const additional = await optedIn.request("PATCH", agentPath, {
+        configurationId: provisioned.configurationId,
+        gatewayOutbound,
+      });
+      assert.equal(additional.status, 409, JSON.stringify(additional.body));
+      assert.match(additional.error.message, /dedicated/);
+    }
     await assertServing(provisioned.revisionId);
     const candidate = await optedIn.request("POST", `${agentPath}/deploy`);
     assert.equal(candidate.status, 202, JSON.stringify(candidate.body));
@@ -1343,15 +1547,83 @@ test(
         (await optedIn.request("GET", agentPath)).data.activeRevisionId ===
         disabledRevision.data.id,
     );
-    for (const kind of ["httproute", "service", "securitypolicy", "networkpolicy"]) {
-      assert.equal(await missing(kind, callbackName, placement), true);
-    }
+    await waitForReconciledRevision(disabledRevision.data.id);
+    // The active pointer is committed before resource reconciliation finishes.
+    // Wait for actual callback withdrawal, not only the API's selected revision.
+    await waitFor("disabled Teams callback resources to be withdrawn", async () =>
+      (
+        await Promise.all(
+          ["httproute", "service", "securitypolicy", "networkpolicy"].map((kind) =>
+            missing(kind, callbackName, placement),
+          ),
+        )
+      ).every(Boolean),
+    );
     const disabledGateway = await resource("deployment", gateway, placement);
+    assert.equal(disabledGateway.metadata.annotations["openclaw.dev/msteams-webhook"], "false");
     assert.equal(
       disabledGateway.spec.template.spec.containers[0].env.some(
         ({ name }) => name === "MSTEAMS_APP_PASSWORD",
       ),
       false,
+    );
+    const slackOnly = await optedIn.readRevision(
+      namespaceId,
+      provisioned.agentId,
+      disabledRevision.data.id,
+    );
+    assert.deepEqual(
+      slackOnly.gatewayOutbound.requirements.map(({ source }) => source),
+      ["slack"],
+    );
+    const teamsOnlyValues = {
+      ...values,
+      channels: { ...values.channels, slack: { enabled: false } },
+    };
+    const teamsOnlySaved = await optedIn.request("PATCH", configurationPath, {
+      values: teamsOnlyValues,
+      secretBindings: { MSTEAMS_APP_PASSWORD: secretBindings.MSTEAMS_APP_PASSWORD },
+    });
+    assert.equal(teamsOnlySaved.status, 200, JSON.stringify(teamsOnlySaved.body));
+    const teamsOnlyDeployed = await optedIn.request("POST", `${agentPath}/deploy`);
+    assert.equal(teamsOnlyDeployed.status, 202, JSON.stringify(teamsOnlyDeployed.body));
+    await waitFor(
+      "Teams-only embedded cutover",
+      async () =>
+        (await optedIn.request("GET", agentPath)).data.activeRevisionId ===
+        teamsOnlyDeployed.data.id,
+    );
+    await waitForReconciledRevision(teamsOnlyDeployed.data.id);
+    const teamsOnly = await optedIn.readRevision(
+      namespaceId,
+      provisioned.agentId,
+      teamsOnlyDeployed.data.id,
+    );
+    assert.deepEqual(
+      teamsOnly.gatewayOutbound.requirements.map(({ source }) => source),
+      ["msteams"],
+    );
+    const teamsGateway = await resource("deployment", gateway, placement);
+    assert.equal(teamsGateway.metadata.annotations["openclaw.dev/msteams-webhook"], "true");
+    assert.equal(
+      teamsGateway.spec.template.spec.containers[0].env.some(
+        ({ name }) => name === "SLACK_BOT_TOKEN" || name === "SLACK_APP_TOKEN",
+      ),
+      false,
+    );
+    assert.equal(
+      (await resource("httproute", callbackName, placement)).metadata.annotations[
+        "openclaw.dev/agent-revision-id"
+      ],
+      teamsOnly.id,
+    );
+    assert.deepEqual(
+      (
+        await optedIn.readRevision(namespaceId, provisioned.agentId, provisioned.revisionId)
+      ).gatewayOutbound.requirements
+        .map(({ source }) => source)
+        .sort(),
+      ["msteams", "slack"],
     );
     const reenabled = await optedIn.request("PATCH", configurationPath, { values, secretBindings });
     assert.equal(reenabled.status, 200, JSON.stringify(reenabled.body));
@@ -1388,6 +1660,36 @@ test(
         (await missing("deployment", gateway, placement)) &&
         (await missing("httproute", callbackName, placement)),
     );
+    await waitFor("all embedded Agent and revision proxy workloads to stop", async () =>
+      (await resources("deployments", placement)).every(
+        ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] !== provisioned.agentId,
+      ),
+    );
+    // Stopped proxy Pods are insufficient: retained Services or policy objects could
+    // expose an obsolete revision again. Verify cleanup after both provider cutovers.
+    for (const revisionId of [
+      provisioned.revisionId,
+      candidate.data.id,
+      disabledRevision.data.id,
+      teamsOnly.id,
+      resumed.data.id,
+    ]) {
+      const stoppedRevision = await optedIn.readRevision(
+        namespaceId,
+        provisioned.agentId,
+        revisionId,
+      );
+      const proxyName = driver.gatewayOutboundName(stoppedRevision);
+      await waitFor(`revision ${revisionId} proxy resources to be withdrawn`, async () => {
+        const absent = await Promise.all([
+          ...["service", "serviceaccount", "configmap", "networkpolicy"].map((kind) =>
+            missing(kind, proxyName, placement),
+          ),
+          missing("networkpolicy", `${proxyName}-gateway`, placement),
+        ]);
+        return absent.every(Boolean);
+      });
+    }
     for (const kind of ["service", "securitypolicy", "networkpolicy"]) {
       assert.equal(await missing(kind, callbackName, placement), true);
     }

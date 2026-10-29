@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
-updated: 2026-10-26
-last_updated_session: authoring-run/3032d748-8d18-4cef-a903-f9a72ed8cda9
+updated: 2026-10-28
+last_updated_session: authoring-run/f9565ffe-e506-4945-a47d-eb61a05fb2cd
 ---
 
 # Container publication flow
@@ -128,7 +128,8 @@ Final image checks require `@openclaw/proc-safe/reaper` to return true from
 
 `scripts/ci/container-release.mjs:smoke` requires a native runner matching the
 selected platform. It binds the OCI export to the build output digest, loads it
-with Skopeo, checks Docker's config ID and architecture, and runs the existing
+through a temporary Skopeo Docker archive and Docker's CLI, removes the archive,
+checks Docker's config ID and architecture, and runs the existing
 startup suite with native deadlines. A success receipt binds the platform digest
 to the source, workflow, run/attempt, CI evidence, image, and build base. Failed
 smokes cannot upload platform artifacts. The temporary loaded image is removed.
@@ -243,6 +244,8 @@ owns package-write access and coordination.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-28 22:51: Retain native OCI archive import with loaded-config, source and architecture checks. (authoring-run/f9565ffe-e506-4945-a47d-eb61a05fb2cd - 9f6bf0987dd2b4aae823eda7894086e0bf988eb5)
 
 - 2026-10-26 10:23: Read OpenClaw source metadata from one manifest; validate build arguments and provenance. (authoring-run/3032d748-8d18-4cef-a903-f9a72ed8cda9 - 37d28e211ed5831dc201433d36bb23eadd834f6b)
 

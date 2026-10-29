@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
 updated: 2026-10-28
-last_updated_session: authoring-run/ebaa9b91-58b3-47dc-97d9-ad103250247d
+last_updated_session: authoring-run/1e6506f2-51c0-4fe1-ad6e-0012e3c730f6
 ---
 
 # Installation Profile Rendering Flow
@@ -86,8 +86,8 @@ Codex CIDRs make Helm values depend on DNS.
 
 Closed sections reject unknown fields, including unused readiness flags;
 OpenClaw rejects Codex-only inputs.
-`channels.experimentalEmbeddedChannels` must be boolean; true requires a managed
-or external runtime proxy. Directory-only proxy wiring cannot enable the trial.
+`channels.experimentalEmbeddedChannels` must be boolean; true requires
+`gatewayOutbound.enabled`. Control-plane proxy wiring alone cannot enable the trial.
 
 Startup consumes no discovery or runtime token values. Preflight directs
 operators to add `codex_pat` later through a same-Namespace Secret or the
@@ -169,10 +169,10 @@ already checked in step 3 with the API's `parseCidr` rules
 IPv4-mapped address, and no range that covers every IPv4 peer. Like the chart,
 preflight also refuses a zone ID, which the API accepts.
 
-When `channels.managedSlackProxy` is true, the values also enable the
-chart-managed Slack proxy Service. The chart allows that proxy public IPv4 HTTPS
-egress, excluding private and reserved ranges, and the proxy authorizes Slack
-hostnames. Repository values render only when the input explicitly sets
+`gatewayOutbound` enables Compute's per-revision proxy using
+`controlPlane.controllerImage` and infrastructure exclusions.
+`controlPlaneOutbound.managedProxy` enables the separately restricted API proxy.
+Selected Drivers supply its management destinations; Agent settings cannot broaden it. Repository values render only when the input explicitly sets
 `repository.enabled: true`. Repository provider CIDRs pass through unchanged,
 so operators can keep their existing GitHub ranges without DNS snapshots. The
 renderer copies `repository.serviceName` only when the input sets it, and only
@@ -196,14 +196,14 @@ before writing `installation.yaml`. Optional `runtime.codexModelBaseUrl` gets
 Compute's endpoint rule. When optional
 managed ServiceAccount inputs are supplied, it emits the ChatGPT Backend and a
 matching ServiceAccount Driver; otherwise Codex Agents use the existing
-`codex_pat` token path configured at Agent creation. If the chart-managed Slack
-proxy is enabled, Compute receives the generated Service DNS URL and selector
-for gateway-to-proxy egress; the chart grants API-to-proxy egress. Repository
+`codex_pat` token path configured at Agent creation. Managed Gateway outbound
+configures revision-owned proxies through Compute. The separate control-plane
+proxy receives only trusted Driver management requirements and API egress. Repository
 opt-in adds the GitHub Backend, Repo Driver,
 and worker peer expected by the broker sidecar.
 
 An explicit `channels.experimentalEmbeddedChannels` value reaches Compute's
-`runtime.channels` for either proxy path. Omission leaves the default refusal;
+`runtime.channels.experimentalEmbeddedChannels`. Omission leaves the default refusal;
 true adds a shared-credential, unsupported-production preflight warning. Agent
 native JSON cannot set this Installation option. Its bytes enter the paired checksum.
 
@@ -299,6 +299,8 @@ activation, and repository registry creation need separate evidence.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-28 22:44: Compose embedded opt-in with revision-owned managed outbound; runtime qualification remains pending. (authoring-run/1e6506f2-51c0-4fe1-ad6e-0012e3c730f6 - 9f6bf0987dd2b4aae823eda7894086e0bf988eb5)
 
 - 2026-10-28 20:25: Refuse input/output file collisions before cleanup in the accompanying change. (authoring-run/ebaa9b91-58b3-47dc-97d9-ad103250247d - 420d76bcbd15dcd3644e474d413484c35ce22797)
 

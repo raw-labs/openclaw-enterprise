@@ -78,9 +78,8 @@ export function requireWorkspaceNodePlugins(
 }
 
 /**
- * Enabled channels need a dedicated workload (unless the trusted evaluation option is
- * enabled) and an Installation channel runtime
- * (`runtime.channels`: credential delivery and a reviewed proxy). `providers` lists the
+ * Enabled channels need a dedicated workload unless the trusted embedded trial is
+ * enabled, and managed transport through `runtime.gatewayOutbound`. `providers` lists the
  * enabled channel providers, in Configuration order.
  */
 export function requireChannelTopology(
@@ -686,4 +685,27 @@ export function kubernetesHarnessAuthMethods(
     // Codex runs only dedicated, so its execution mode is not a fix.
     fix: topology === "Dedicated Codex" ? "harnessAuth" : "harnessAuth or executionMode",
   };
+}
+
+const CHANNEL_PROXY_ENVIRONMENT =
+  /^(?:https?_proxy|all_proxy|no_proxy|node_use_env_proxy|openclaw_proxy_(?:active|ca_file))$/i;
+
+/** Only trusted Compute configuration can select the proxy and delegate guarded-fetch checks. */
+export function requireChannelProxyEnvironment(
+  configuration: Readonly<OpenClawConfigurationDocument>,
+  createError: SettingError,
+): void {
+  const env = asRecord(configuration.env);
+  for (const [parent, values] of [
+    ["env", env],
+    ["env.vars", asRecord(env?.vars)],
+  ] as const) {
+    const name = Object.keys(values ?? {}).find((key) => CHANNEL_PROXY_ENVIRONMENT.test(key));
+    if (name !== undefined) {
+      throw createError(
+        keyedSettingPath(parent, name),
+        "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
+      );
+    }
+  }
 }

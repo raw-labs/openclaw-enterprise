@@ -44,6 +44,7 @@ export const backendFixtures = Object.freeze([
 function computeDriver({
   repositoryCredentials = false,
   channelRuntime = false,
+  gatewayOutbound,
   routed = true,
   discoverHarnessModels = async () => [],
   agentProvisioning = false,
@@ -59,6 +60,7 @@ function computeDriver({
     sandboxDriver,
     credentialGatewayDriver,
     channelRuntime,
+    ...(gatewayOutbound === undefined ? {} : { gatewayOutbound }),
     routed,
   });
 
@@ -421,6 +423,7 @@ export async function createConsoleAppFixture(t, options = {}) {
       computeDriver({
         repositoryCredentials: options.repositoryCredentials === true,
         channelRuntime: options.channelRuntime === true,
+        gatewayOutbound: options.gatewayOutbound,
         routed: options.routed !== false,
         discoverHarnessModels: options.discoverHarnessModels,
         agentProvisioning: options.agentProvisioning,
@@ -430,6 +433,7 @@ export async function createConsoleAppFixture(t, options = {}) {
       }),
     configurationDriver:
       configurationDriver ?? createTestConfigurationDriver({ id: "console-configuration" }),
+    ...(options.channelDriver === undefined ? {} : { channelDriver: options.channelDriver }),
     ...(options.sandboxDriver === undefined ? {} : { sandboxDriver: options.sandboxDriver }),
     ...(secretDriver === undefined || secretDriver === null ? {} : { secretDriver }),
     ...(publicOrigin === undefined ? {} : { publicOrigin }),

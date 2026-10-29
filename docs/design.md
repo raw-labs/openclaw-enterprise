@@ -196,7 +196,14 @@ Other Drivers participate through
 [Compute lifecycle hooks](flows/compute-driver-lifecycle-hooks.md) with defined
 startup and cleanup operations.
 
-## Security Boundaries
+Dedicated Gateway integration access is an Agent approval enforced by the selected
+Compute Driver. Kubernetes uses a separate proxy for each admitted revision;
+the control plane uses a separate restricted management instance. Proxy policy
+contains no credentials and does not change Harness/Sandbox networking. See
+[Gateway outbound HTTPS](reference/gateway-outbound.md) for supported modes and
+verification limits.
+
+## Security boundaries
 
 IAM checks exact resources and protected references. Agent-scoped identities,
 Namespace isolation, and explicit Secret bindings constrain access. Secret

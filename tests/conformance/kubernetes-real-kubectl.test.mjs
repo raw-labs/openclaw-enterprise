@@ -1344,6 +1344,8 @@ test(
       [
         ...[
           "gatewayForward",
+          "inClusterApiForward",
+          "inClusterWorker",
           "worker",
           "productionApp",
           "observerPool",
@@ -1449,6 +1451,8 @@ test(
     `);
     assert.deepEqual(exited.stdout.match(/^attempted .+$/gm), [
       "attempted gatewayForward",
+      "attempted inClusterApiForward",
+      "attempted inClusterWorker",
       "attempted worker",
       "attempted productionApp",
       "attempted observerPool",

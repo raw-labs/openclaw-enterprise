@@ -1893,7 +1893,7 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
   // A disabled unsupported channel and a non-credential env name still save.
   for (const values of [
     { ...valid, channels: { discord: { enabled: false } } },
-    { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
+    { ...valid, env: { vars: { FEATURE_LABEL: "evaluation" } } },
   ]) {
     const accepted = await request(context.app, "PATCH", item, { body: { values } });
     assert.equal(

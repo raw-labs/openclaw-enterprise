@@ -124,6 +124,7 @@ import {
 } from "./device-authorization.ts";
 import type {
   Agent,
+  GatewayOutboundSelection,
   AgentCredentialSourceBinding,
   AgentRead,
   AgentRevisionSummary,
@@ -186,6 +187,7 @@ import type {
   PluginCatalogPage,
   PluginDriver,
   ChannelDriver,
+  GatewayOutboundRequirement,
   ChannelDirectoryResult,
   ChannelDirectoryLookupInput,
   PluginRevisionState,
@@ -222,6 +224,8 @@ import type {
 } from "@openclaw-enterprise/contracts";
 import {
   HARNESS_EXECUTION_MODES,
+  validGatewayOutboundSelection,
+  validGatewayOutboundSnapshot,
   isName,
   NAME_RULE,
   normalizeInitialWorkspaceFiles,
@@ -774,6 +778,8 @@ export interface ControllerOptions {
   readonly configuredServiceAccountDriverId?: string;
   /** Installation startup `runtime.nativeWorkerSupport`; never set from the API. */
   readonly nativeWorkerSupport?: NativeWorkerSupport;
+  /** Pure Channel Driver declaration for worker admission; exposes no provider operations. */
+  readonly channelNetworkRequirements?: ChannelDriver["gatewayNetworkRequirements"];
   /** Installation startup `drivers.credential_proxy.requestCapacity`; defaults when absent. */
   readonly credentialProxyCapacity?: CredentialProxyCapacity;
 }
@@ -915,6 +921,7 @@ interface RemoveStandingApprovalInput {
 }
 
 export interface UpdateAgentInput {
+  readonly gatewayOutbound?: GatewayOutboundSelection;
   readonly repositoryStandingApproval?: {
     readonly repositoryRef: string;
     readonly approvalId: string;
@@ -1926,6 +1933,7 @@ export class OpenClawController {
   private readonly nativeAdminOrigin: ControllerOptions["nativeAdminOrigin"];
   private readonly backendMap: ReadonlyMap<string, BackendDefinition>;
   private readonly configuredServiceAccountDriverId: string | undefined;
+  private readonly channelNetworkRequirements: ControllerOptions["channelNetworkRequirements"];
 
   constructor(installation: Installation, options: ControllerOptions = {}) {
     if (!isNonEmptyString(installation.id)) {
@@ -1956,6 +1964,7 @@ export class OpenClawController {
       this.configurations.register(registration);
     }
     this.authorization = options.authorize;
+    this.channelNetworkRequirements = options.channelNetworkRequirements;
     this.preparedTokens = options.preparedTokens;
     this.clock = options.now ?? (() => new Date());
     this.identifier = options.createId;
@@ -2145,6 +2154,8 @@ export class OpenClawController {
     const nativeWorkers = openclaw.executionModes.includes("dedicated")
       ? this.nativeWorkers
       : undefined;
+    const outbound = (this.selections.get("compute")?.driver as ComputeDriver | undefined)
+      ?.gatewayOutboundCapabilities;
     const gatewayTypes = this.selections.has("credential_gateway")
       ? await this.credentialGatewayOperation(() =>
           this.credentialGatewayDriver().listSourceTypes({
@@ -2159,6 +2170,7 @@ export class OpenClawController {
     ];
     const capabilities = {
       ...declared,
+      ...(outbound === undefined ? {} : { gatewayOutbound: outbound }),
       ...(nativeWorkers === undefined ? {} : { nativeWorkers: { support: nativeWorkers } }),
       openclaw,
       ...(gatewayTypes || types.length ? { credentialSources: { types } } : {}),
@@ -9540,6 +9552,40 @@ export class OpenClawController {
     });
   }
 
+  async getAgentGatewayOutboundCapabilities(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+  ) {
+    const target: ResourceRef = { kind: "agent", id: agentId, namespaceId };
+    await this.authorize(principalId, "read", target);
+    const agent = await this.read((state) => state.agents.findAgent(namespaceId, agentId));
+    if (agent === undefined) {
+      throw new ScopeViolationError("The Agent does not belong to the exact Namespace.");
+    }
+    const capabilities = (this.selections.get("compute")?.driver as ComputeDriver | undefined)
+      ?.gatewayOutboundCapabilities;
+    const update = await this.authorizationDecision(principalId, "update", target);
+    const administer = await this.authorizationDecision(principalId, "administer", target);
+    const readable = await this.canRead(principalId, {
+      kind: "configuration",
+      id: agent.configurationId,
+      namespaceId,
+    });
+    const configuration = readable
+      ? await this.getConfiguration(principalId, namespaceId, agent.configurationId)
+      : undefined;
+    return {
+      ...(configuration === undefined
+        ? {}
+        : { requirements: this.gatewayNetworkRequirements(configuration.values) }),
+      restricted: capabilities?.restricted === true,
+      publicHttps: capabilities?.publicHttps === true,
+      canConfigure:
+        update.decision.allowed && administer.decision.allowed && agent.status === "active",
+    };
+  }
+
   /**
    * Create Agent's preflight, for a Configuration the caller has not saved yet: createConfiguration's
    * content rules, then createAgent's checks of plugin selections and initial workspace files
@@ -9794,6 +9840,12 @@ export class OpenClawController {
     if (input.configurationId !== undefined && !isNonEmptyString(input.configurationId)) {
       throw new ScopeViolationError("The exact Agent Configuration identity is missing.");
     }
+    if (
+      input.gatewayOutbound !== undefined &&
+      !validGatewayOutboundSelection(input.gatewayOutbound)
+    ) {
+      throw new ScopeViolationError("The Gateway outbound selection is invalid.");
+    }
     if (input.configurationId === undefined && input.gatewayManagedMode === undefined) {
       throw new ScopeViolationError(
         "An Agent update must name a Configuration or Gateway managed mode.",
@@ -9819,6 +9871,13 @@ export class OpenClawController {
         id: input.agentId,
         namespaceId: input.namespaceId,
       });
+      if (input.gatewayOutbound !== undefined) {
+        await this.authorize(principalId, "administer", {
+          kind: "agent",
+          id: input.agentId,
+          namespaceId: input.namespaceId,
+        });
+      }
       const namespace = await this.lockNamespace(state, input.namespaceId);
       const agent = await state.agents.lockAgent(namespace.id, input.agentId);
       if (!agent) {
@@ -9853,6 +9912,20 @@ export class OpenClawController {
       }
       await this.guardAgentProvisioning(state, namespace.id, agent.id);
       await this.guardProvisioningConfiguration(state, namespace.id, configurationId);
+      const outbound = input.gatewayOutbound ?? agent.gatewayOutbound ?? { mode: "channelsOnly" };
+      if (
+        outbound.mode !== "channelsOnly" &&
+        (input.gatewayOutbound !== undefined ||
+          (input.executionMode !== undefined && input.executionMode !== agent.executionMode))
+      ) {
+        const compute = this.selectedDriver("compute") as ComputeDriver;
+        if (compute.validateGatewayOutbound === undefined) {
+          throw new ResourceStateConflictError(
+            "The selected Compute Driver does not support Gateway outbound access.",
+          );
+        }
+        compute.validateGatewayOutbound(outbound, input.executionMode ?? agent.executionMode);
+      }
       const previousAuth = this.harnessAuthBinding(agent.harnessAuth);
       // Every update needs the caller's grant on each source the Agent binds now, but not a
       // usable record: after a Secret Driver or Credential Gateway change, an update must still
@@ -9960,6 +10033,7 @@ export class OpenClawController {
         repositoryAccess,
         requestedSources,
         gatewayManagedMode,
+        input.gatewayOutbound,
       );
       if (!updated) {
         throw new ResourceStateConflictError("The Agent Configuration changed during its update.");
@@ -10043,6 +10117,17 @@ export class OpenClawController {
     resolveHarness: HarnessResolver,
   ): Promise<Readonly<AgentRevision>> {
     return (await this.deployAgentWithAuthorization(principalId, input, resolveHarness)).revision;
+  }
+
+  private gatewayNetworkRequirements(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly GatewayOutboundRequirement[] {
+    const driver = this.selections.get("channel")?.driver as ChannelDriver | undefined;
+    return (
+      this.channelNetworkRequirements?.(configuration) ??
+      driver?.gatewayNetworkRequirements?.(configuration) ??
+      []
+    );
   }
 
   private async validateChannelCredentials(
@@ -10363,6 +10448,31 @@ export class OpenClawController {
       // Configuration save does not know which Agents use it: check the admitted pair again.
       this.validatePluginConfiguration(pluginState?.plugins, admittedConfiguration);
       this.validatePluginPlacement(pluginState?.plugins, revisionHarness);
+      const requirements = this.gatewayNetworkRequirements(admittedConfiguration);
+      const selection = lockedAgent.gatewayOutbound ?? { mode: "channelsOnly" as const };
+      const gatewayOutbound = compute.admitGatewayOutbound?.({
+        selection,
+        executionMode: lockedAgent.executionMode,
+        requirements,
+      });
+      if (gatewayOutbound !== undefined && !validGatewayOutboundSnapshot(gatewayOutbound)) {
+        throw new ResourceStateConflictError(
+          "The Compute Driver returned invalid Gateway outbound admission.",
+        );
+      }
+      if (
+        gatewayOutbound !== undefined &&
+        (compute.revisionAccessStatus === undefined || compute.withdrawRevisionAccess === undefined)
+      ) {
+        throw new ResourceStateConflictError(
+          "The selected Compute Driver cannot withdraw Gateway outbound access.",
+        );
+      }
+      if (selection.mode !== "channelsOnly" && gatewayOutbound === undefined) {
+        throw new ResourceStateConflictError(
+          "The selected Compute Driver cannot admit Gateway outbound access.",
+        );
+      }
       // Decode every earlier revision: one that is unreadable refuses the deploy here (503,
       // nothing created), because the worker must decode them all to stop or retire them.
       const previous = await state.revisions.listRevisions(namespace.id, lockedAgent.id);
@@ -10559,6 +10669,7 @@ export class OpenClawController {
         // The name then becomes the served Agent's OpenClaw display name.
         configuration: frozenValues(withAgentIdentityName(admittedConfiguration, lockedAgent.name)),
         gatewayManagedMode: lockedAgent.gatewayManagedMode,
+        ...(gatewayOutbound === undefined ? {} : { gatewayOutbound }),
         harness: revisionHarness,
         compute: { id: compute.id, implementation: compute.implementation },
         ...(sandbox === undefined ? {} : { sandboxDriverId: sandbox.id }),
@@ -10581,15 +10692,29 @@ export class OpenClawController {
         throw new ConfigurationHarnessError(GATEWAY_MANAGED_MODE_UNSUPPORTED);
       }
       const computeAdmission = compute.admitRevision?.(freezeAgentRevision(revisionDraft));
-      const revision = await state.revisions.createRevision(
-        freezeAgentRevision({
-          ...revisionDraft,
-          compute: {
-            ...revisionDraft.compute,
-            ...(computeAdmission === undefined ? {} : { admission: computeAdmission }),
-          },
-        }),
-      );
+      const admittedRevision = freezeAgentRevision({
+        ...revisionDraft,
+        compute: {
+          ...revisionDraft.compute,
+          ...(computeAdmission === undefined ? {} : { admission: computeAdmission }),
+        },
+      });
+      const accessStatus = compute.revisionAccessStatus?.(admittedRevision) ?? "none";
+      if (!["none", "current", "withdrawn"].includes(accessStatus)) {
+        throw new ResourceStateConflictError(
+          "The Compute Driver returned invalid revision access status.",
+        );
+      }
+      const hasRevisionAccess = accessStatus !== "none";
+      if (
+        (gatewayOutbound !== undefined && !hasRevisionAccess) ||
+        (hasRevisionAccess && compute.withdrawRevisionAccess === undefined)
+      ) {
+        throw new ResourceStateConflictError(
+          "The selected Compute Driver cannot withdraw admitted revision access.",
+        );
+      }
+      const revision = await state.revisions.createRevision(admittedRevision);
       const running = await state.agents.transitionAgentDesiredRuntimeState(
         namespace.id,
         lockedAgent.id,

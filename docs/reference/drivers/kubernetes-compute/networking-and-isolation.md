@@ -144,13 +144,16 @@ endpoint, Pod and Service CIDRs, and metadata endpoint fall inside them. A
 dedicated Agent has one authentication-only egress policy, pinned to its latest
 prepared Agent revision ID. Stop leaves it and the Agent's runtime and plugin-status
 policies, selecting no Pod, until the next preparation or Agent deletion.
-Channels require reviewed literal-IP HTTP(S) `runtime.channels.proxyUrl` or Helm
-`runtime.channels.managedProxy`. Dedicated Gateways deny direct provider access.
-[Teams trial](../../../guides/integrations/teams.md) requires
-`gatewayRouting.channels.hostname` and public HTTPS; Compute owns callbacks. Default-off `runtime.channels.experimentalEmbeddedChannels` permits
-the [unsupported embedded trial](../../../guides/integrations/embedded-channel-trial.md).
+Supported channels and approved Gateway HTTPS use a per-revision proxy. Direct
+public access remains denied. Default-off `runtime.channels.experimentalEmbeddedChannels`
+permits the [embedded trial](../../../guides/integrations/embedded-channel-trial.md)
+with enabled managed outbound and channel-derived destinations only.
+See [Gateway outbound](../../gateway-outbound.md).
 
 ## Explicit network profiles
+
+Proxy Pods use `gateway-outbound-v1`; only their exact Gateway revision receives
+access.
 
 Ordinary DNS, model, repository-credential, authentication, channel, workspace-node,
 plugin-status, sandbox-preview ingress and gateway/Harness allow policies require the reserved Pod label

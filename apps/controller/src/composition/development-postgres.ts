@@ -30,8 +30,8 @@ import {
 import { createDockerDevelopmentComputeDriverFromEnv } from "../drivers/compute/docker/index.ts";
 import { createFilesystemDevelopmentConfigurationDriverFromEnv } from "../drivers/configuration/filesystem/index.ts";
 import { createFastifyApp } from "../index.ts";
+import { createBundledChannelCapabilities } from "./channel.ts";
 import type { ConsoleTheme } from "../console-theme.ts";
-import { SlackChannelDriver } from "../drivers/channel/slack.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -245,6 +245,8 @@ export async function composePostgresDevelopment(
     };
 
     const loggingLevel = config.logging?.level ?? drivers?.installation.logging.level;
+    const { driver: channelDriver, channelNetworkRequirements } =
+      createBundledChannelCapabilities();
     const controller = new OpenClawController(persistedInstallation, {
       ...installationControllerOptions(drivers?.installation),
       state,
@@ -256,6 +258,7 @@ export async function composePostgresDevelopment(
       defaultPresets: drivers?.defaultPresets ?? [],
       bundledPresetVersions: drivers?.bundledPresetVersions ?? [],
       refreshBundledDefaultPresets: drivers?.installation.presets?.includeDefaults === true,
+      channelNetworkRequirements,
       ...(loggingLevel === undefined ? {} : { loggingLevel }),
       ...(drivers === undefined ? {} : { backends: drivers.installation.backend }),
     });
@@ -263,7 +266,6 @@ export async function composePostgresDevelopment(
     controller.selectDriver("iam", driverId);
     controller.registerDriver(computeDriver);
     controller.selectDriver("compute", computeDriver.id);
-    const channelDriver = new SlackChannelDriver();
     controller.registerDriver(channelDriver);
     controller.selectDriver("channel", channelDriver.id);
     if (protectedDriver !== undefined) {

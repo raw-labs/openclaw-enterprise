@@ -13,15 +13,18 @@ add the opt-in to the existing trusted site-input JSON:
 ```json
 {
   "channels": {
-    "runtimeProxyUrl": "http://192.0.2.10:3128",
     "experimentalEmbeddedChannels": true
+  },
+  "gatewayOutbound": {
+    "enabled": true,
+    "denyCidrs": ["10.42.0.0/16", "10.43.0.0/16", "192.0.2.20/32"]
   }
 }
 ```
 
 Render with `--profile openclaw`; the option also works with `codex` when selecting
-embedded OpenClaw Agents. It requires `runtimeProxyUrl` or the existing
-`managedSlackProxy: true` input. Omit the option or set it to false to keep the default
+embedded OpenClaw Agents. It requires `gatewayOutbound.enabled: true` and the
+actual infrastructure exclusions described in [Gateway outbound](../../reference/gateway-outbound.md). Omit the option or set it to false to keep the default
 refusal. Preflight warns about the shared-credential risk when enabled. Apply the
 paired startup YAML and Helm values in the guide's order so API and worker load
 the same configuration. The option does not configure Teams ingress or broaden
@@ -35,16 +38,18 @@ runtime:
   transportSecretPrefix: transport
   gatewayStorageClassName: local-path
   channels:
-    proxyUrl: "http://192.0.2.10:3128"
     experimentalEmbeddedChannels: true
+  gatewayOutbound:
+    enabled: true
+    image: "registry.example.com/controller@sha256:<approved-digest>"
+    denyCidrs: ["10.42.0.0/16", "10.43.0.0/16", "192.0.2.20/32"]
 ```
 
-The example proxy address is a placeholder. Use an approved real endpoint that
-the Agent can reach; preserve the existing `managedProxy` peer configuration if
-using an approved Kubernetes Service. The chart-managed proxy also requires
-`gatewayRouting.enabled` for ingress from Agent namespaces. Load the same trusted configuration into
-API and worker. Record the administrator's trust decision with the Installation's
-configuration change. Adding this flag to native OpenClaw JSON grants no authority.
+Replace the image and CIDRs with approved values for the Installation. Compute
+creates the revision-owned proxy; no external channel proxy URL is accepted.
+Load the same trusted configuration into API and worker. Record the administrator's
+trust decision with the Installation configuration change. Adding the flag to
+native OpenClaw JSON grants no authority.
 
 The default refuses embedded channels. This trusted opt-in permits ordinary Agent
 creation/deployment and provisioning with `executionMode: embedded` and the
@@ -62,15 +67,14 @@ reviewable from the embedded exception.
 
 ## Verify networking and credentials
 
-Channel enablement sets `HTTPS_PROXY`, `NODE_USE_ENV_PROXY=1` and a loopback/Service
-`NO_PROXY` list for the entire Gateway. This includes native plugins and ordinary
-native model requests. The stock proxy allows Slack only; its explicit Teams option
-adds bounded Microsoft destinations. Both still refuse Composio, ClawHub and model
-endpoints. Authentication probes use sanitized subprocess environments without
-the Gateway proxy variables, so startup authentication alone does not prove the
-normal model/plugin proxy path. Use an approved external proxy with the required destination policy for
-a channel-plus-native-plugin/model trial. Opening direct TCP/443 does not override
-a client using the restrictive proxy.
+Compute supplies the managed proxy environment and native guarded-fetch trust
+marker to the channel-enabled Gateway. Its revision policy contains only enabled
+Channel Driver destinations. Additional approved hosts remain dedicated-only.
+Caller proxy and trust-marker overrides are refused.
+
+Embedded model endpoints use their existing model egress grant and bypass the
+channel proxy through exact `NO_PROXY` hosts. Startup authentication alone does
+not prove ordinary model or provider traffic; run the selected native runtime proof.
 
 The proxy is not a per-Agent credential or identity authority. Embedded tool/process
 execution can bypass proxy environment settings and retains the existing public
@@ -96,8 +100,9 @@ their management contract.
 
 Stop the trial Agents, remove `experimentalEmbeddedChannels` or set it to false,
 and load the default configuration into both processes. Disabling the option
-prevents future channel admission/preparation/activation; it does not retroactively
-withdraw credentials from an already running Pod. Stop/delete remain available.
+prevents future channel admission/preparation/activation and withdraws its managed
+route during revision access maintenance. It does not revoke provider tokens or
+erase retained Gateway state. Stop/delete remain available.
 Stop removes revision credential copies but retains private Gateway state;
 canonical Namespace Secrets remain separate resources. Delete the trial Agent to
 remove its retained state, and revoke or rotate provider credentials. Do not treat

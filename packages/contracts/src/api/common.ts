@@ -1,3 +1,4 @@
+import { GATEWAY_OUTBOUND_HOST_PATTERN } from "../gateway-outbound.ts";
 import { Type } from "typebox";
 import {
   BACKEND_ID_MAX_CHARACTERS,
@@ -781,6 +782,22 @@ export const ProvisionAgentBody = Type.Object(
   { additionalProperties: false },
 );
 
+export const GatewayOutboundSelectionSchema = Type.Union([
+  Type.Object({ mode: Type.Literal("channelsOnly") }, { additionalProperties: false }),
+  Type.Object(
+    {
+      mode: Type.Literal("restricted"),
+      hosts: Type.Array(Type.String({ maxLength: 253, pattern: GATEWAY_OUTBOUND_HOST_PATTERN }), {
+        minItems: 1,
+        maxItems: 64,
+        uniqueItems: true,
+      }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object({ mode: Type.Literal("publicHttps") }, { additionalProperties: false }),
+]);
+
 export const ValidateAgentCreateBody = Type.Object(
   {
     name: Type.Optional(
@@ -858,6 +875,7 @@ export const UpdateAgentBody = Type.Object(
     backendId: Type.Optional(Type.Union([BackendId, Type.Null()])),
     harnessAuth: Type.Optional(Type.Union([HarnessAuthBindingSchema, Type.Null()])),
     credentialSources: Type.Optional(AgentCredentialSourcesSchema),
+    gatewayOutbound: Type.Optional(GatewayOutboundSelectionSchema),
     executionMode: Type.Optional(HarnessExecutionModeSchema),
     gatewayManagedMode: Type.Optional(GatewayManagedModeSchema),
     plugins: Type.Optional(Type.Ref("PluginDesiredState")),

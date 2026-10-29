@@ -8,6 +8,7 @@ import { KubernetesComputeDriver } from "../../apps/controller/src/drivers/compu
  *   authentication?: import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesComputeDriverOptions["authentication"],
  *   repositoryCredentials?: boolean, gatewayRuntime?: boolean, channelRuntime?: boolean,
  *   routed?: boolean, gatewayTrustedProxyCidrs?: string[],
+ *   gatewayOutbound?: NonNullable<import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesComputeDriverOptions["runtime"]>["gatewayOutbound"],
  * }} [options]
  */
 export function createTestKubernetesComputeDriver(
@@ -15,11 +16,12 @@ export function createTestKubernetesComputeDriver(
   {
     repositoryCredentials = false,
     gatewayRuntime = false,
-    // An Installation with runtime.channels: isolated channel credentials and a reviewed proxy.
+    // An Installation with runtime.gatewayOutbound: isolated channel credentials and a reviewed proxy.
     channelRuntime = false,
     // false: runtime storage without gateway routing or node enrollment, which dedicated Agents
     // cannot use (provisioning and deployment admission refuse them).
     routed = true,
+    gatewayOutbound,
     authentication = { mode: "inCluster" },
     gatewayTrustedProxyCidrs = ["127.0.0.1/32"],
     sandboxDriver,
@@ -34,7 +36,7 @@ export function createTestKubernetesComputeDriver(
 
   // Runtime storage that dedicated Agents can use needs gateway routing, node enrollment and a
   // Gateway node selector; deployment admission refuses dedicated Agents otherwise.
-  const runtime = repositoryCredentials || channelRuntime || gatewayRuntime;
+  const runtime = repositoryCredentials || channelRuntime || gatewayRuntime || gatewayOutbound !== undefined;
   const placed = runtime && routed;
   return new KubernetesComputeDriver(
     {
@@ -79,7 +81,15 @@ export function createTestKubernetesComputeDriver(
               transportSecretPrefix: "transport",
               gatewayStorageClassName: "local-path",
               ...(placed ? { gatewayNodeSelector: { "oce-role": "control" } } : {}),
-              ...(channelRuntime ? { channels: { proxyUrl: "http://10.42.0.15:3128" } } : {}),
+              ...(channelRuntime || gatewayOutbound !== undefined
+                ? {
+                    gatewayOutbound: gatewayOutbound ?? {
+                      enabled: true,
+                      image: "controller:local",
+                      denyCidrs: ["10.0.0.0/8"],
+                    },
+                  }
+                : {}),
             },
           }
         : {}),

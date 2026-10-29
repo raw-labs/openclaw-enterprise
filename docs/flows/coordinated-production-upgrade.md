@@ -65,11 +65,10 @@ graph TD
 Before protected-file reads, evidence writes, or cluster access, every upgrade
 attempt requires the repository root's Git `HEAD` to match `--source-revision`.
 This does not verify uncommitted changes or image provenance.
-
 The script verifies protected files, cluster, deployed Helm release, and matching
 OCC and Secret Installation IDs. It compares protected and live configuration,
-including image fields, and captures separate reviewed candidates. Only the Slack
-directory proxy and curated Codex PluginDriver selection may change; all other
+including image fields, and captures separate reviewed candidates. Only the control-plane
+outbound proxy (`api.controlPlaneOutboundProxyUrl`) and curated Codex PluginDriver selection may change; all other
 settings remain protected. The broker guard compares references, not ConfigMap or
 Secret contents. Image flags apply after comparison. Runtime releases record each running Agent's
 baseline version from complete authorized inventory. Nonterminal deployments,
@@ -347,7 +346,12 @@ Agents or Secrets.
 - 2026-10-23 09:50: Document preflight-only rehearsal and fresh checks at deployment. (authoring-run/3c1a4d88-d619-47e3-9eba-dbaf0988d2e9 - 4e9f5935d5fa4878a719e82db5e504ec6ae55d64)
 - 2026-10-20 01:48: Preserve field diagnostics before quiescence. (authoring-run/9d1ff825-b9f4-492a-9420-1e316d820e28 - e7e5f3321cb0a8471d74964eba56ddd069a4e4c5)
 - 2026-10-19 22:34: Document that pending repository cleanup does not block upgrade preparation. (authoring-run/d59b973b-1f0b-46bb-b16f-d67bd24ed6d3 - 57acafe81482a890b02ae530793246f2c2e7be79)
+- 2026-10-19 13:31: Retain proxy ownership alongside upstream upgrade preflight. (authoring-run/40820368-0ee7-4901-9224-041654014ae4 - b10157ca9)
+
 - 2026-10-18: The initialization hook checks the Installation before migration.
+
+- 2026-10-15 10:01: Name the canonical control-plane outbound proxy in candidate protection. (authoring-run/903d04fd-a3a7-4825-aca7-f94d828ab2d8 - 313a70262e432192306a2db431bf0b6f0459a957)
+
 - 2026-10-12 15:14: Record bootstrap Job grants required by the two-cluster upgrade preflight alongside the fixture correction. (authoring-run/ebb1c629-97b2-4b9a-aa67-a5e750346031 - 9578f6f7aaff9b8545346f43043cbc5b9bcf674e)
 - 2026-10-10 03:30: Say that the worker's next preparation of an existing version applies the new controller's Pod templates and rolls changed Pods once. (fix-990-991)
 - 2026-10-10 02:10: Require complete successful API responses before publishing the split-layout export bundle. (authoring-run/35b00357-b0c6-459f-aec1-b4fb63620dff - 0886f47d05fdeb2fa4359f4840fb77378d643bac)

@@ -115,7 +115,7 @@ are dispatched by the
 [controller request handler](../../apps/controller/src/index.ts) to
 `OpenClawController.createConfiguration`, `getConfiguration`,
 `updateConfiguration`, or `deleteConfiguration` in
-[OCC](../../packages/occ/src/index.ts). OCC resolves server-owned Namespace
+[OCC](../../packages/occ/src/index.ts). OCC resolves Namespace
 identity and checks the selected IAM Driver before touching tenant data:
 creation targets the exact Namespace-owned Configuration resource; reads,
 updates, and deletes target the exact Configuration identifier in that
@@ -219,6 +219,7 @@ its optional integration is skipped.
 ## Changelog
 
 - 2026-10-28 21:12: Preserve shared Secret-reference validation and the embedded trial revision guidance. (authoring-run/096f88e1-170b-4633-9cba-7b607caade55 - 94346f8101230627f206ed9731f2c32beba27bad)
+- 2026-10-14 16:40: Document Gateway outbound admission (authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3 - bd8fe1f)
 
 - 2026-10-25: Writes refuse a Slack token SecretRef the Slack Channel Driver cannot read. (finding 2514)
 - 2026-10-25 13:00: Writes, provisioning and the Create Agent preflight refuse an enabled channel's unbound credential reference. (fix-2319, finding 2319)

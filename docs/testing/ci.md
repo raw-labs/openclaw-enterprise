@@ -46,14 +46,25 @@ same-source qualification. Unset variables retain the workflow defaults. Select
 ephemeral Linux runners with sufficient resources, enforcing NetworkPolicies for
 k3d and the required browser sandbox support. `CI_RUNNER_FILE_CONCURRENCY`
 optionally bounds ordinary CI/advisory test-file concurrency from 1 through 32.
-`CI_SANDBOX_RUNNER` optionally selects a separate runner for `images-runtime-startup`;
-otherwise it follows the large-runner selection. Ordinary CI and same-source
-qualification use the same selection. On AppArmor hosts, this lane installs the
+`CI_SANDBOX_RUNNER` optionally selects a separate runner for the runtime startup lanes.
+`CI_COMPAT_RUNNER` selects the fallback for `images-runtime-startup` and
+`postgres-auth` before the large-runner selection. Ordinary CI and same-source
+qualification use the same selection. On AppArmor hosts, `images-runtime-startup` installs the
 named [CI container profile](../../scripts/ci/codex-bwrap.apparmor) and removes it
 after container cleanup. It preserves Docker’s default process, `/proc` and `/sys`
 restrictions while permitting Bubblewrap’s nested mounts, bounded by the existing
 reviewed seccomp profile and dropped capabilities. It does not select an unconfined
 policy, modify host sysctls or change production container policy.
+The nonpublishing native image check uses `CI_COMPAT_RUNNER` for the AMD64
+runtime job when configured; ARM64 keeps its native runner. Both runtime jobs
+install the same named CI AppArmor profile when Docker enforces AppArmor, pass
+its name to the sandbox helpers, and remove it after smoke cleanup.
+For local OCI import, the check requires Skopeo 1.4.1 on Ubuntu 22.04 or 1.13.3
+on Ubuntu 24.04. Skopeo converts the export to a temporary Docker archive, and
+Docker's CLI loads it with its negotiated daemon API. The archive is removed
+before startup checks. Export digest, loaded config identity, native architecture
+and startup checks remain required. Registry publication retains its separate
+Skopeo gate and authorization.
 Manual dispatch inputs are per-run values; use the commands below.
 
 ### Shared Settings
@@ -146,6 +157,13 @@ slot for First Agent `images` and `run`; only a distinct slot isolates host-wide
 Cleanup timeout/grace overrides that are not positive numbers use defaults.
 Deadlines include pipe drain; a wait timeout does not prove deletion. Preparation
 verifies imported image references on every node and fails on import timeout.
+
+The `k3d-fixture-state` lane also imports the actual controller image as
+`OCC_TEST_PRODUCTION_CONTROLLER_IMAGE` for enabled Slack provisioning through
+the managed Gateway proxy. Preparation builds it if no image was selected; file
+preparation reuses its recorded immutable reference. Gateway and provider responses
+remain fixtures: this checks proxy resource lifecycle and Secret projection,
+not native Slack connectivity. See the [fixture procedure](kubernetes.md#kubernetes-http-fixture).
 
 <a id="github-actions"></a>
 

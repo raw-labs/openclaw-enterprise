@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
 updated: 2026-10-28
-last_updated_session: authoring-run/096f88e1-170b-4633-9cba-7b607caade55
+last_updated_session: authoring-run/f9565ffe-e506-4945-a47d-eb61a05fb2cd
 ---
 
 # Agent channel runtime
@@ -70,12 +70,16 @@ into the owning Gateway. Dedicated Harnesses receive model authentication separa
 OpenClaw instead receives both channel and model credentials in its combined
 Gateway/execution Pod. This preserves exact resource ownership but weakens
 credential separation within that Agent.
-`reconcileChannelNetworkPolicy` permits the configured exact proxy endpoint; its
-hostname policy belongs to the external proxy or opt-in chart-managed process.
-`deployment` applies `HTTPS_PROXY`, `NODE_USE_ENV_PROXY` and internal `NO_PROXY`
-settings to the whole channel-enabled Gateway. Native integrations using that
-proxy need its destination authorization too. Embedded processes retain their
-existing direct public egress and can bypass these environment settings.
+`admitGatewayOutbound` freezes channel-derived destinations and infrastructure
+exclusions. `reconcileGatewayOutbound` creates a credential-free proxy, Service,
+immutable policy ConfigMap and exact revision NetworkPolicies before the Gateway
+starts. Embedded admission requires both the trusted opt-in and enabled managed
+outbound, and refuses additional restricted or public destinations.
+`deployment` supplies proxy variables and the guarded-fetch trust marker only to
+the Gateway. `gatewayOutboundTransport` exempts exact embedded model endpoints
+from the channel proxy so they retain their separate model egress grant. Dedicated
+Harnesses receive neither channel credentials nor this trust marker. Caller proxy
+and trust-marker overrides fail Configuration admission.
 
 The runtime image selects upstream `msteams` in
 `deploy/runtime/Dockerfile` and `scripts/build-runtime-assets.mjs`. No independent
@@ -85,7 +89,9 @@ Teams message engine or channel credential broker is introduced.
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback`
 reads the owned Gateway Deployment. A candidate whose revision does not match
-that Deployment cannot claim or delete its predecessor's callback.
+that Deployment cannot claim or delete its predecessor's callback. The serving
+Deployment must also carry `openclaw.dev/msteams-webhook: "true"`; matching the
+revision does not authorize a callback for a workload without that listener.
 `activateRevisionWorkloads` rejects stale activation before publishing the new route.
 
 The `channels` HTTPS listener accepts an exact Agent path and POST method, rewrites
@@ -104,7 +110,9 @@ then its NetworkPolicy, using the exact revision, observed UID and resourceVersi
 Retiring an older revision cannot delete a newer callback. Existing Agent deletion
 uses the same owned Gateway cleanup and removes retained credential artifacts.
 Stop/delete do not consult the opt-in topology gate: disabling the trusted option
-must not prevent credential withdrawal from an existing trial workload.
+must not prevent credential withdrawal from an existing trial workload. Revision
+retirement and stop remove the revision proxy and its policy resources. Disabling
+the trial also withdraws the managed route through revision access maintenance.
 
 ## Debugging and Verification
 
@@ -125,6 +133,10 @@ it does not establish native plugin support or execution containment.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-28 22:48: Restore serving Deployment authority for Teams callback publication. (authoring-run/f9565ffe-e506-4945-a47d-eb61a05fb2cd - 9f6bf0987dd2b4aae823eda7894086e0bf988eb5)
+
+- 2026-10-28 22:44: Compose embedded opt-in with revision-owned managed outbound; runtime qualification remains pending. (authoring-run/1e6506f2-51c0-4fe1-ad6e-0012e3c730f6 - 9f6bf0987dd2b4aae823eda7894086e0bf988eb5)
 
 - 2026-10-28 21:12: Keep Configuration drafts separate from Teams deployment prerequisites and preserve shared Secret validation. (authoring-run/096f88e1-170b-4633-9cba-7b607caade55 - 94346f8101230627f206ed9731f2c32beba27bad)
 

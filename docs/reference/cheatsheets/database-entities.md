@@ -43,7 +43,7 @@ Stores Agent drafts, their desired runtime state, and the selected version refer
 - `name`
 - `configuration_id`
 - `backend_id`
-- `execution_mode`
+- `execution_mode`, `gateway_outbound`
 - `gateway_managed_mode`
 - `plugins`
 - `plugin_approvers`
