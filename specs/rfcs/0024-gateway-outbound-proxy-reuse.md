@@ -56,10 +56,10 @@ flowchart TB
     G["<b>OpenClaw Gateway</b><br/>Native integrations"]
   end
   S["<b>Proxy Service</b><br/>TCP/3129"]
-  subgraph ProxyPod["New proxy Pod"]
-    R["<b>socat TCP relay</b><br/>Port 3129"]
+  subgraph ProxyPod["Pod hosting OpenShell"]
+    R["<b>TCP port forwarder</b><br/>socat on port 3129"]
     P["<b>OpenShell proxy</b><br/>127.0.0.1:3128"]
-    R -->|copy bytes| P
+    R -->|forward TCP connection| P
   end
   E["<b>External service</b><br/>Approved integration"]
   H["<b>Existing Harness</b><br/>Separate workload"]
@@ -77,7 +77,7 @@ flowchart TB
   style ProxyPod fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
 ```
 
-The proxy Pod runs stock OpenShell supervisor network-proxy mode and `socat`, with no Gateway, Harness, workspace or credentials. OpenShell 0.1.5 listens only on loopback in this mode. The relay exposes that listener; OpenShell alone evaluates policy.
+OpenShell is the proxy; the Pod hosts it. OpenShell handles CONNECT requests and authorizes destinations. Because OpenShell 0.1.5 listens only on loopback in this mode, `socat` forwards TCP connections from port 3129 to that listener. The port forwarder does not make policy decisions or terminate TLS. The Pod contains no Gateway, Harness, workspace or integration credentials.
 
 A separate Pod gives the proxy Internet permission without giving it to the Gateway. A Gateway sidecar would share Pod-level network permissions and would not establish this separation.
 
