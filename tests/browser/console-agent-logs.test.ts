@@ -2490,6 +2490,9 @@ test("a member's Back reuses a followed Logs view, and not once log access is re
   // A paused clock keeps a follow read from being in flight when the member leaves.
   await page.clock.install({ time: new Date("2026-09-30T12:00:00Z") });
   await page.clock.pauseAt(new Date("2026-09-30T12:00:01Z"));
+  const nativeAccess = page.waitForResponse((response) =>
+    response.url().endsWith(`/agents/${agent.id}/native-admin`),
+  );
   await login(
     page,
     fixture,
@@ -2498,8 +2501,8 @@ test("a member's Back reuses a followed Logs view, and not once log access is re
   );
   const pane = page.getByRole("log", { name: "Runtime log output" });
   await pane.getByText("member before leaving").waitFor();
-  // The member is refused runtime status, and the view says so. The permission answer already
-  // says the member lacks Agent administer, so native administration is never asked.
+  // Runtime status and native access are independently authorized. The native access
+  // denial is retained; returning must not replay that audited request.
   await page.getByText(/Runtime status requires Agent operate/).waitFor();
   await page.getByRole("button", { name: "Follow" }).click();
   computeDriver.state.lines = [...computeDriver.state.lines, line(2, "member first poll")];
@@ -2509,7 +2512,8 @@ test("a member's Back reuses a followed Logs view, and not once log access is re
   const panel = await pane.elementHandle();
   const nativeAdminReads = () =>
     requests.filter(({ path }) => path.endsWith(`/agents/${agent.id}/native-admin`)).length;
-  assert.equal(nativeAdminReads(), 0);
+  assert.equal((await nativeAccess).status(), 403);
+  assert.equal(nativeAdminReads(), 1);
   const logPaths = () =>
     requests.filter(({ path }) => path.includes("/runtime/logs")).map(({ path }) => path);
 
@@ -2535,8 +2539,8 @@ test("a member's Back reuses a followed Logs view, and not once log access is re
     readAfterBack.filter((path) => readBeforeLeaving.has(path) || path.includes("tailLines")),
     [],
   );
-  // Back does not ask native administration either (each refusal would be an audited denial).
-  assert.equal(nativeAdminReads(), 0);
+  // Back retains the native access denial without another audited request.
+  assert.equal(nativeAdminReads(), 1);
 
   // Log access is revoked while the member is away: Back must not paint the cached output.
   await leave();

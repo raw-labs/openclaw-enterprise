@@ -4694,8 +4694,11 @@ test("Secret summaries retain revision bindings and distinguish unreadable metad
     .waitFor();
   await page.getByRole("button", { name: "Open draft", exact: true }).last().click();
   await page.getByRole("tab", { name: "Channels", exact: true }).click();
-  await page.getByText("No Secret bound", { exact: true }).first().waitFor();
-  assert.equal(await page.getByText("No Secret bound", { exact: true }).count(), 2);
+  const slackCard = page
+    .locator(".channel-card")
+    .filter({ has: page.getByRole("heading", { name: /^Slack/ }) });
+  await slackCard.getByText("No Secret bound", { exact: true }).first().waitFor();
+  assert.equal(await slackCard.getByText("No Secret bound", { exact: true }).count(), 2);
   await page.getByRole("tab", { name: "Configuration", exact: true }).click();
   await page.getByRole("link", { name: "Draft model", exact: true }).waitFor();
 });

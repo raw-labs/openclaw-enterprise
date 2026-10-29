@@ -314,7 +314,19 @@ async function preflight(client, manifest) {
   }
   const native = manifest.catalogs[shape];
   const actual = catalogDigest(await migrationCatalog(client));
-  if (actual !== native && actual !== manifest.logicalRestoreCatalogs?.[native]) {
+  // A restored prefix followed by native SQL can retain mixed function representations.
+  // Only completed receipts may use an exactly measured upgrade from a supported prefix.
+  const restoredUpgrade =
+    shape === "completed" &&
+    Object.values(manifest.catalogs).some((prefix) => {
+      const variants = manifest.restoredUpgradeCatalogs?.[prefix];
+      return Array.isArray(variants) && variants.includes(actual);
+    });
+  if (
+    actual !== native &&
+    actual !== manifest.logicalRestoreCatalogs?.[native] &&
+    !restoredUpgrade
+  ) {
     refuse(`catalog objects or effective grants differ for ${shape}`);
   }
   if (shape === "providerCompleted" || shape === "backendCompleted") {

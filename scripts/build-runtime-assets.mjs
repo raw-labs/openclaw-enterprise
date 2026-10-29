@@ -27,7 +27,7 @@ const appliedPatches = [
   },
   {
     file: "openclaw-trusted-proxy-role.patch",
-    sha256: "b6bdbe8f4608f62332371b00609cb2c17aeee4f75f6b9aeb947e3f59925c67b9",
+    sha256: "619e1ecfe75899b3da65a07bcec9089cf3d4b77043eba5d20fcf7a31197ec6c5",
     field: "openclawTrustedProxyRolePatchSha256",
   },
   {

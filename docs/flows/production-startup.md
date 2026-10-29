@@ -1,7 +1,7 @@
 ---
 created: 2026-08-25
-updated: "2026-10-28"
-last_updated_session: "authoring-run/e071870d-9569-4129-9922-8f80e1c20278"
+updated: 2026-10-29
+last_updated_session: authoring-run/1440d35f-ec5e-475f-9cd5-925f61f3ccfd
 ---
 
 # Production Startup Flow
@@ -153,9 +153,10 @@ not `.` or a `..` prefix.
 `scripts/migrate-production.mjs:1`, `scripts/migration-history.mjs:migrateWithHistory`
 
 Migration verifies the SQL source, dedicated role, receipts and catalog under
-one advisory lock on Drizzle's transaction connection. For a recognized history, it accepts the native catalog digest or
-the reviewed restore digest bound to it. Unsupported histories fail before
-migration DDL and bootstrap. See [migration history and recovery](../reference/settings/operations.md#migration-history).
+one advisory lock on Drizzle's transaction connection. For a recognized history,
+it accepts the native catalog digest or the reviewed restore digest bound to it. Completed receipts also admit exact
+measured final catalogs from restored supported prefixes. Object and effective-grant
+drift still fail before migration DDL and bootstrap. See [migration history and recovery](../reference/settings/operations.md#migration-history).
 
 `scripts/lib/bootstrap-configuration.mjs:authBaseURL` checks HTTP(S) origin before
 database access. Production requires HTTPS except HTTP loopback verification
@@ -339,6 +340,8 @@ until tenant deployment/TUI procedures run.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-29 01:04: Recognize only measured restored-prefix upgrades with completed receipts. (authoring-run/1440d35f-ec5e-475f-9cd5-925f61f3ccfd - 09d327de7fe56bf5d896a4e58917a48355c4d0c3)
 
 - 2026-10-28 23:31: Verify bundled Slack and Teams requirements through the API outbound proxy startup. (authoring-run/e071870d-9569-4129-9922-8f80e1c20278 - e58f9e251e346b7336d22091831ad447b886c52b)
 

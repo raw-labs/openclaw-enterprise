@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
-updated: 2026-10-28
-last_updated_session: authoring-run/c5313baa-4413-41e8-b96e-e13dc1933f2f
+updated: 2026-10-29
+last_updated_session: authoring-run/1440d35f-ec5e-475f-9cd5-925f61f3ccfd
 ---
 
 # Gateway Outbound Flow
@@ -143,8 +143,10 @@ Gateway startup before plugin execution.
 `apps/controller/src/gateway/outbound-proxy.mjs:createOutboundProxyServer`
 handles CONNECT/443. It validates authority syntax and destination policy,
 resolves through the OS resolver once, rejects any prohibited answer, then
-connects to a vetted literal IPv4 address. Subsequent TLS remains between the
-native client and destination. The proxy holds neither provider nor model
+connects to a vetted literal IPv4 address. During DNS and connection admission,
+it reads at most 64 KiB of client preface so a disconnect cancels the attempt.
+It forwards that preface only after admission; late DNS cannot open a cancelled
+tunnel. Subsequent TLS remains between the native client and destination. The proxy holds neither provider nor model
 credentials. Health and bounded denial diagnostics contain no request secrets.
 
 `apps/controller/src/gateway/control-plane-outbound-proxy.mjs` loads a separate
@@ -227,6 +229,8 @@ compatibility with every native plugin transport or provider.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-29 01:04: Observe client disconnects during DNS without losing the bounded CONNECT preface. (authoring-run/1440d35f-ec5e-475f-9cd5-925f61f3ccfd - 09d327de7fe56bf5d896a4e58917a48355c4d0c3)
 
 - 2026-10-28 21:33: Preserve Gateway managed mode alongside outbound approval and append the outbound migration after the current schema. (authoring-run/c5313baa-4413-41e8-b96e-e13dc1933f2f - a50b14647d4311764cce3359150149bc81f23431)
 

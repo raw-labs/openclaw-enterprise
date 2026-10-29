@@ -1281,19 +1281,17 @@ test("full-integration runs kernel- and sandbox-sensitive same-SHA lanes on ci.y
   const expression = job["runs-on"].replace(/^\$\{\{\s*|\s*\}\}$/g, "");
   const runnerFor = (lane, vars = {}) =>
     runInNewContext(expression, {
-      matrix: { lane },
+      matrix: {
+        lane,
+        runner: job.strategy.matrix.include.find((entry) => entry.lane === lane)?.runner,
+      },
       vars,
       startsWith: (value, prefix) => value.startsWith(prefix),
     });
   const ciRunners = new Map(laneTable().map((row) => [row.lane, row.runner]));
   const lanes = job.strategy.matrix.include.map((entry) => entry.lane);
-  const pinned = lanes.filter(
-    (lane) =>
-      lane === "postgres-auth" ||
-      lane.startsWith("images-runtime-startup") ||
-      lane.startsWith("k3d-fixture-") ||
-      lane === "k3d-observability",
-  );
+  // Every shared lane retains its default capacity, including startup shard 3.
+  const pinned = lanes.filter((lane) => ciRunners.has(lane));
   for (const lane of ["postgres-auth", "images-runtime-startup", "k3d-observability"]) {
     assert.ok(pinned.includes(lane), lane);
   }
@@ -1330,6 +1328,27 @@ test("full-integration runs kernel- and sandbox-sensitive same-SHA lanes on ci.y
     }),
     "sandbox-runner",
   );
+  for (const lane of pinned) {
+    for (const vars of [
+      { CI_COMPAT_RUNNER: "compat-runner" },
+      { CI_SANDBOX_RUNNER: "sandbox-runner" },
+      {
+        CI_LARGE_RUNNER: "large-runner",
+        CI_COMPAT_RUNNER: "compat-runner",
+        CI_SANDBOX_RUNNER: "sandbox-runner",
+      },
+    ]) {
+      assert.equal(
+        runnerFor(lane, vars),
+        runInNewContext(ciExpression, {
+          vars,
+          matrix: { lane, runner: ciRunners.get(lane) },
+          startsWith: (value, prefix) => value.startsWith(prefix),
+        }),
+        lane,
+      );
+    }
+  }
 });
 
 test("Suite Audit and Static Checks runs the audit and every check the lanes skip", () => {

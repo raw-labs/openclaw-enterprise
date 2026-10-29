@@ -7,7 +7,6 @@ import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 
-import { InMemoryAuditSink } from "../../packages/audit/src/index.ts";
 import { SlackChannelDriver } from "../../apps/controller/src/drivers/channel/slack.ts";
 import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
 import { assertApiError } from "../helpers/api-error.mjs";

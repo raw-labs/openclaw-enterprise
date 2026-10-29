@@ -173,7 +173,7 @@ async function transportOwner(t, { authorize, append }) {
       async lookupIdentity() {
         return {
           kind: "principal",
-          id: "actor_1",
+          id: "prn_00000000-0000-4000-8000-000000000001",
           issuer: "https://issuer.example",
           subject: "user-1",
         };
@@ -252,7 +252,7 @@ async function transportOwner(t, { authorize, append }) {
 function assertTransportDenial(owner, revisionId) {
   assert.equal(owner.denials().length, 1, "one attributable denial audit attempt");
   const event = owner.denials()[0];
-  assert.equal(event.actor.principalId, "actor_1");
+  assert.equal(event.actor.principalId, "prn_00000000-0000-4000-8000-000000000001");
   assert.equal(event.action, "openclaw.agents.native_admin.proxy.authorize");
   assert.deepEqual(event.resource, { kind: "agent", id: "agent_a", namespaceId: "ns_a" });
   assert.equal(event.details.nativeAdmin.host, owner.host);
@@ -561,7 +561,7 @@ function denialOwner(t, overrides = {}) {
       async lookupIdentity() {
         return {
           kind: "principal",
-          id: "actor_1",
+          id: "prn_00000000-0000-4000-8000-000000000001",
           issuer: "https://issuer.example",
           subject: "user-1",
         };
@@ -629,7 +629,7 @@ test("native-admin denial ownership closes before a delayed or rejected append",
     await settleCallbacks();
     assert.equal(socket.destroyed, true);
     assert.equal(owner.denials().length, 1);
-    assert.equal(owner.denials()[0].actor.principalId, "actor_1");
+    assert.equal(owner.denials()[0].actor.principalId, "prn_00000000-0000-4000-8000-000000000001");
     assert.equal(owner.denials()[0].authorization.action, "administer");
     append.reject(new Error("synthetic sink failure"));
     await settleCallbacks();
@@ -1089,7 +1089,7 @@ test("a client reset during a pending native-admin denial still records the deni
         async lookupIdentity() {
           return {
             kind: "principal",
-            id: "actor_1",
+            id: "prn_00000000-0000-4000-8000-000000000001",
             issuer: "https://issuer.example",
             subject: "user-1",
           };
@@ -1163,7 +1163,7 @@ test("a client reset during a pending native-admin denial still records the deni
     assert.equal(admissionEntered, true);
     assert.equal(audits.length, 1);
     assert.equal(audits[0].kind, "authorization_denial");
-    assert.equal(audits[0].actor.principalId, "actor_1");
+    assert.equal(audits[0].actor.principalId, "prn_00000000-0000-4000-8000-000000000001");
     assert.equal(audits[0].outcome, "denied");
     assert.equal(audits[0].details.nativeAdmin.reason, "authorization_denied");
     assert.equal(audits[0].details.nativeAdmin.host, host);
@@ -1256,7 +1256,7 @@ for (const phase of ["admission", "gateway key"]) {
           async lookupIdentity() {
             return {
               kind: "principal",
-              id: "actor_1",
+              id: "prn_00000000-0000-4000-8000-000000000001",
               issuer: "https://issuer.example",
               subject: "user-1",
             };

@@ -268,6 +268,8 @@ export function createOutboundProxyServer({ policy: input }) {
     let connected = false;
     let settled = false;
     let deadline;
+    const pending = [head];
+    let pendingBytes = head.length;
     const refuse = (reason, status = 403, message = "Forbidden") => {
       if (settled || client.destroyed) {
         return;
@@ -283,6 +285,14 @@ export function createOutboundProxyServer({ policy: input }) {
       settled = true;
       clearTimeout(deadline);
       upstream?.destroy();
+    });
+    client.once("end", () => {
+      if (!connected) {
+        settled = true;
+        clearTimeout(deadline);
+        upstream?.destroy();
+        client.destroy();
+      }
     });
     if (target === undefined || head.length > 65536) {
       refuse("invalid_target");
@@ -305,6 +315,18 @@ export function createOutboundProxyServer({ policy: input }) {
       CONNECT_TIMEOUT_MS,
     );
     deadline.unref();
+    // A paused CONNECT socket cannot observe a peer's FIN during DNS. Read a
+    // bounded preface until the tunnel opens so cancellation closes admission.
+    const retainPreface = (chunk) => {
+      pendingBytes += chunk.length;
+      if (pendingBytes > 65536) {
+        refuse("invalid_target");
+        return;
+      }
+      pending.push(chunk);
+    };
+    client.on("data", retainPreface);
+    client.resume();
     let addresses;
     if (target.family === 4) {
       addresses = [{ address: target.host, family: 4 }];
@@ -350,9 +372,11 @@ export function createOutboundProxyServer({ policy: input }) {
       connected = true;
       settled = true;
       clearTimeout(deadline);
+      client.pause();
+      client.removeListener("data", retainPreface);
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      if (head.length > 0) {
-        upstream.write(head);
+      for (const chunk of pending) {
+        upstream.write(chunk);
       }
       // No idle timeout after admission: channel WebSockets may remain idle for
       // longer than a connect deadline. Backpressure remains Node stream-owned.

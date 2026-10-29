@@ -4,8 +4,7 @@ Configure worker, Compose and PostgreSQL here; [settings](../settings.md) owns s
 
 ## PostgreSQL connection authentication
 
-Both PostgreSQL API modes, the worker, shared Installation bootstrap, and
-migration commands use the same connection pool factory.
+The PostgreSQL APIs, worker, bootstrap, and migration commands share one pool factory.
 `OCC_DATABASE_AUTH` defaults to `password`, preserving PostgreSQL URL
 credentials. Its other mode is `azure-workload-identity`; unknown
 modes fail before opening a pool.
@@ -29,7 +28,6 @@ migrator identity.
 Each new pool connection requests an Azure SDK `WorkloadIdentityCredential` token
 for `https://ossrdbms-aad.database.windows.net/.default`. The SDK handles caching
 and renewal; OCC does not persist tokens or fall back to a developer login.
-Use `pnpm db:migrate` or `pnpm db:migrate:production` in this mode.
 
 See [operator setup](../../guides/deploy/production-installation.md#azure-postgresql-workload-identity)
 for deployment-owned identity inputs and chart limits, and
@@ -77,8 +75,7 @@ has 46 through `0046_model_probe_failure_cause`;
 `0047_provisioning_configuration_release`; `preCodexPatSources` has 48 through
 `0048_administrator_credential_source_grants`; `preAgentCredentialSources` has 49
 through `0049_codex_pat_sources`; `preCredentialWithdrawalRequester` has 50
-through `0050_agent_credential_sources`. The published role, assigning-session,
-outbound and embedded migrations retain their original identities. The 62-receipt
+through `0050_agent_credential_sources`. Published migration identities stay unchanged. The 62-receipt
 prefix ends at `0062_administrator_sandbox_policy_grants` (`preCredentialProxy`).
 `prePreparedAttemptSettlement` has 65 receipts through
 `0065_credential_delivery_custody`; `preGatewayManagedMode` has 66 through
@@ -93,10 +90,12 @@ first migration is also supported.
 
 For a [logical restore](../../guides/deploy/upgrade-baseline.md#record-the-database),
 the manifest pairs the PostgreSQL 18.6 restored catalog with its exact native
-digest. For the next schema, qualify both upgrading that restore and restoring
-the new schema. A match cannot establish backup completeness or provenance.
+digest. `restoredUpgradeCatalogs` records measured final digests after each supported
+prefix is restored and upgraded. These variants require completed receipts; grants
+and objects must still match exactly. Qualify both upgrade and restore for each
+new schema. A match does not establish backup completeness or provenance.
 
-After checking, confirm the target and authorization. Run `pnpm db:migrate`
+Confirm the target and authorization, then run `pnpm db:migrate`
 (development) or `pnpm db:migrate:production`. Both check source, roles, receipts,
 definitions and effective privileges under one advisory lock; Drizzle applies SQL
 and new receipts transactionally. Production also accepts `--check`.

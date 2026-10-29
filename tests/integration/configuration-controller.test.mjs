@@ -2147,7 +2147,7 @@ test("Configuration create, update and Agent create's check refuse a channel cre
   assert.deepEqual(stored.body.data.values, slack);
   assertRefused(
     await request(context.app, "PATCH", item, {
-      body: { values: { ...slack, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } } },
+      body: { values: { ...slack, env: { vars: { APP_REGION: "test" } } } },
     }),
     appRefusal,
     { label: "unrelated update of a stored row" },

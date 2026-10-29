@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { KubernetesComputeDriver } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
 
 /**
@@ -149,4 +151,65 @@ export function conformanceKubernetesOptions({ gatewayTrustedProxyCidrs, runtime
     servicePrincipalCredentials: { mode: "disabled" },
     ...(runtime === undefined ? {} : { runtime }),
   };
+}
+
+/** Passive API storage only; the production Driver owns credential generation and admission. */
+export function createKubernetesCredentialStorage() {
+  const namespaces = new Map();
+  const secrets = new Map();
+  const notFound = () =>
+    Object.assign(new Error("Fixture Kubernetes resource missing."), {
+      statusCode: 404,
+    });
+  // Only Kubernetes transport/storage is substituted. The real Driver generates
+  // credentials and validates ownership/completeness; no workload is started.
+  const clients = {
+    core: {
+      async listNamespace({ labelSelector }) {
+        const [label, value] = labelSelector.split("=");
+        return {
+          items: [...namespaces.values()].filter(
+            ({ metadata }) => metadata.labels[label] === value,
+          ),
+        };
+      },
+      async readNamespace({ name }) {
+        const value = namespaces.get(name);
+        if (!value) {
+          throw notFound();
+        }
+        return structuredClone(value);
+      },
+      async readNamespacedSecret({ namespace, name }) {
+        const value = secrets.get(`${namespace}/${name}`);
+        if (!value) {
+          throw notFound();
+        }
+        return structuredClone(value);
+      },
+      async createNamespacedSecret({ namespace, body }) {
+        const key = `${namespace}/${body.metadata.name}`;
+        assert.equal(secrets.has(key), false);
+        const { stringData, ...rest } = body;
+        const saved = {
+          ...structuredClone(rest),
+          metadata: { ...body.metadata, uid: randomUUID() },
+          data: Object.fromEntries(
+            Object.entries(stringData).map(([name, value]) => [
+              name,
+              Buffer.from(value).toString("base64"),
+            ]),
+          ),
+        };
+        secrets.set(key, saved);
+        return structuredClone(saved);
+      },
+    },
+    apps: {
+      async listNamespacedDeployment() {
+        return { items: [] };
+      },
+    },
+  };
+  return { namespaces, clients };
 }

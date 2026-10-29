@@ -1914,7 +1914,7 @@ assert.equal(provenance.openclawBridgePatchSha256, "f8d1e51706f59964839d23181890
 assert.equal(Object.hasOwn(provenance, "openclawConnectPatchSha256"), false);
 assert.equal(provenance.codexDependencyPinPatchSha256, "d7eea3944eaaf4469ede0261d4f706148cd672f29f1efedd59e325c46c90d119");
 assert.equal(provenance.openclawRequiredWorkerAuthorityRegressionPatchSha256, "4d7b31957dab6e8427eeb9a8cce0a8013f0f96b999e2692fdd6903595c3c4804");
-assert.equal(provenance.openclawTrustedProxyRolePatchSha256, "b6bdbe8f4608f62332371b00609cb2c17aeee4f75f6b9aeb947e3f59925c67b9");
+assert.equal(provenance.openclawTrustedProxyRolePatchSha256, "619e1ecfe75899b3da65a07bcec9089cf3d4b77043eba5d20fcf7a31197ec6c5");
 assert.deepEqual(provenance.patches, {
   "openclaw-trusted-proxy-role.patch": provenance.openclawTrustedProxyRolePatchSha256,
   "openclaw-codex-read-only-paths.patch": provenance.openclawBridgePatchSha256,

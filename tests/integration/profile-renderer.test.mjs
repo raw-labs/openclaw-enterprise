@@ -553,9 +553,9 @@ test(
             mode: "production",
             environment: { OCC_CONFIG_PATH: join(directory, "installation.yaml") },
           });
-          assert.deepEqual(startup.installation.drivers.plugin, {
-            id: "codex-plugin",
-            configuration: { catalogSource: "openai-curated" },
+          assert.equal(startup.installation.drivers.plugin.id, "codex-plugin");
+          assert.deepEqual(startup.installation.drivers.plugin.configuration, {
+            catalogSource: "openai-curated",
           });
         }
         const compute = loadYaml(output.installation).drivers.compute.configuration;

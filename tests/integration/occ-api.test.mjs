@@ -3522,6 +3522,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   // At most 20 IDs are hydrated in one request.
   const tooManyIds = await controller.request("POST", path, {
     body: {
+      provider: "slack",
       secretId: secret.data.id,
       kind: "users",
       ids: Array.from({ length: 21 }, (_, index) => `U${index}`),

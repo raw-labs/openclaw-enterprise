@@ -10670,7 +10670,7 @@ test("embedded channels require a trusted boolean and retain native provider sel
         runtime: {
           ...runtime,
           gatewayOutbound,
-          channels: { experimentalEmbeddedChannels: flag },
+          channels: flag === undefined ? {} : { experimentalEmbeddedChannels: flag },
         },
       }),
     );

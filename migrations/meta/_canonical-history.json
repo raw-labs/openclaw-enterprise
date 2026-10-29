@@ -499,7 +499,7 @@
       "sha256": "5693d93865d61360d2b8943846cfbfb5590c9e52e90f89eac50fec7bd3672498"
     },
     {
-      "idx": 62,
+      "idx": 63,
       "version": "7",
       "when": 1787000000063,
       "tag": "0063_credential_proxy_admission",
@@ -507,7 +507,7 @@
       "sha256": "443f236fc6369d73c5bc5c24aa85cb7266e306da34fcc21168ce37d386f117e8"
     },
     {
-      "idx": 63,
+      "idx": 64,
       "version": "7",
       "when": 1787000000064,
       "tag": "0064_repository_credential_authority",
@@ -515,7 +515,7 @@
       "sha256": "9112cbb85635fe7d0aaa3d7b59ba074834c83afd482fc27cd7bcfe7bc1c038d5"
     },
     {
-      "idx": 64,
+      "idx": 65,
       "version": "7",
       "when": 1787000000065,
       "tag": "0065_credential_delivery_custody",
@@ -523,7 +523,7 @@
       "sha256": "8620776aa1b4ecc8f640258015d88c0ff21afa3e75d2ca7cf26aabb69c7dc772"
     },
     {
-      "idx": 65,
+      "idx": 66,
       "version": "7",
       "when": 1787000000066,
       "tag": "0066_prepared_attempt_settlement",
@@ -531,7 +531,7 @@
       "sha256": "af9fc293091700eb148a4c45826daa0903598399a730de23a25f7c81b49a7db6"
     },
     {
-      "idx": 66,
+      "idx": 67,
       "version": "7",
       "when": 1787000000067,
       "tag": "0067_gateway_managed_mode",
@@ -607,6 +607,7 @@
     "initialized": "62946da6b1fc2b06df09e97dda4cf1831f170a2f3d5ff35a9f107af206c425dc",
     "completed": "5693317372204660303ec53ce8d96322d9b2404fc484401b95b846e3fb4c88e9"
   },
+  "restoredUpgradeCatalogs": null,
   "logicalRestoreCatalogs": {
     "7fe2e7ccc13ce974d03137b5117752ff03e7c001d2916d50c300ddbdf826207a": "7a23fb23f990bde65b178ce2910ea58ad17c8ead923e42ba4ef9466fccb4d1f8",
     "bd490d16dd23ec1ea722bb370155e9454fb52187bd2b16cd8a0fe277e3e41bde": "65bad9e88c72a67c5e7326bac16a64261ccbd9f15bf9029c3d424e75afcfd913",

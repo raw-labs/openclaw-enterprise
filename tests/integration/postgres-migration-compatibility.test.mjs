@@ -2769,6 +2769,22 @@ test(
           history: "completed",
         });
         assert.deepEqual(await logicalRestoreSnapshot(restored), upgraded);
+        // Completed mixed catalogs still enforce effective grants, and refusing
+        // drift must leave the populated upgraded database and receipts intact.
+        await restored.migrator.query("REVOKE SELECT ON occ.iam_identities FROM occ_app");
+        const upgradedDrift = await historySnapshot(restored);
+        for (const flag of ["--check", undefined]) {
+          assert.deepEqual(
+            await runHistoryCommand(
+              restored,
+              "production",
+              flag,
+              /catalog objects or effective grants differ/,
+            ),
+            { ok: false, code: "MIGRATION_HISTORY_UNSUPPORTED" },
+          );
+          assert.deepEqual(await historySnapshot(restored), upgradedDrift);
+        }
       });
     }
   },
@@ -3119,7 +3135,7 @@ test(
       ["catalog-object", 25, "CREATE TABLE occ.unexplained(id integer)"],
       [
         "draft-pull-privilege",
-        62,
+        65,
         "GRANT DELETE ON occ.prepared_repository_draft_pulls TO occ_app",
       ],
       ["ledger-grant", 25, "GRANT SELECT ON drizzle.__drizzle_migrations TO occ_app"],

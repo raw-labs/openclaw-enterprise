@@ -1880,6 +1880,9 @@ test("Teams editor persists separate personal and channel access with an authori
     "Replacement Teams password",
     "synthetic-replacement-password",
   );
+  // The picker loads the readable Secret inventory on entry. Refresh after creation.
+  await page.reload();
+  await page.getByLabel("Teams app password", { exact: true }).waitFor();
   await selectSecret(page, "Teams app password", replacement);
   restrict(fixture.policy, "operate", "secret", {
     namespaceId: namespace.id,

@@ -294,7 +294,8 @@
     {
       "path": "tests/integration/gateway-outbound-proxy.test.mjs",
       "expectedTests": [
-        "managed channel transport refuses unsafe DNS and late resolution without opening an upstream"
+        "managed channel transport refuses unsafe DNS and late resolution without opening an upstream",
+        "managed channel transport preserves and bounds a preface while DNS is pending"
       ]
     },
     {

@@ -548,3 +548,84 @@ test(
     assert.equal((await bound(closed, "pending DNS proxy shutdown"))[0], 0);
   },
 );
+
+test("managed channel transport preserves and bounds a preface while DNS is pending", async (t) => {
+  const preface = Buffer.alloc(65536, 97);
+  const sockets = new Set();
+  let upstreamConnections = 0;
+  const upstream = net.createServer((socket) => {
+    upstreamConnections += 1;
+    sockets.add(socket);
+    const chunks = [];
+    let received = 0;
+    socket.on("data", (chunk) => {
+      chunks.push(chunk);
+      received += chunk.length;
+      if (received >= preface.length) {
+        assert.deepEqual(Buffer.concat(chunks), preface);
+        socket.end("preface received");
+      }
+    });
+  });
+  t.after(async () => {
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+    await new Promise((resolve) => upstream.close(resolve));
+  });
+  await new Promise((resolve, reject) => {
+    upstream.once("error", reject);
+    upstream.listen(0, "127.0.0.1", resolve);
+  });
+  const hosts = ["preface.example.test", "oversized.example.test"];
+  const proxy = await startControlledOutboundProxy(t, {
+    upstreamPort: upstream.address().port,
+    upstreamHosts: hosts,
+    approvedHosts: hosts,
+    dnsAnswers: Object.fromEntries(
+      hosts.map((host) => [
+        host,
+        { delayMs: 1000, addresses: [{ address: "93.184.216.34", family: 4 }] },
+      ]),
+    ),
+  });
+  for (const [index, host] of hosts.entries()) {
+    const client = proxy.track(net.connect({ host: "127.0.0.1", port: proxy.port }));
+    const chunks = [];
+    const response = new Promise((resolve, reject) => {
+      client.on("data", (chunk) => chunks.push(chunk));
+      client.once("error", reject);
+      client.once("end", () => resolve(Buffer.concat(chunks).toString()));
+    });
+    await once(client, "connect");
+    client.write(`CONNECT ${host}:443 HTTP/1.1\r\nHost: ${host}\r\n\r\n`);
+    await bound(
+      (async () => {
+        while (!proxy.stderr().includes(`"event":"fixture.dns_started","host":"${host}"`)) {
+          await delay(25);
+        }
+      })(),
+      "pending preface DNS",
+    );
+    // Bytes arriving after CONNECT must survive admission in order, but the
+    // same pending-DNS path must refuse one byte over its 64 KiB bound.
+    client.write(index === 0 ? preface : Buffer.alloc(preface.length + 1, 97));
+    const answer = await bound(response, "preface response");
+    if (index === 0) {
+      assert.match(answer, /^HTTP\/1\.1 200 Connection Established/);
+      assert.ok(answer.endsWith("preface received"));
+    } else {
+      assert.match(answer, /^HTTP\/1\.1 403 Forbidden/);
+      await bound(
+        (async () => {
+          while (!proxy.stderr().includes(`"event":"fixture.dns_resolved","host":"${host}"`)) {
+            await delay(25);
+          }
+        })(),
+        "oversized preface DNS settlement",
+      );
+    }
+    assert.equal(await readiness(proxy.port), 200);
+    assert.equal(upstreamConnections, 1);
+  }
+});

@@ -10,7 +10,10 @@ import {
   ADMINISTRATOR_RUNTIME_ROLE,
   renderPresetTemplate,
 } from "../../packages/contracts/src/index.ts";
-import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
+import {
+  createTestKubernetesComputeDriver,
+  createKubernetesCredentialStorage,
+} from "../helpers/kubernetes-compute.mjs";
 import { deriveNativeAdminHost } from "../../apps/controller/src/gateway/native-admin.ts";
 import { assertApiError } from "../helpers/api-error.mjs";
 import {
@@ -68,7 +71,7 @@ function nativeAdminHarnessConfiguration(nativeOrigin) {
 
 function nativeComputeDriver(
   upstreamPort,
-  { exclusiveReplacement = false, automatic = false } = {},
+  { exclusiveReplacement = false, automatic = false, credentialStorage } = {},
 ) {
   const lifecycle = {
     // Kubernetes dedicated revisions stop their predecessors before they start.
@@ -113,6 +116,7 @@ function nativeComputeDriver(
   const driver = createTestKubernetesComputeDriver("native-admin-compute", {
     gatewayRuntime: true,
   });
+  driver.apiClients = Promise.resolve(credentialStorage.clients);
   // Cluster effects and the upstream endpoint are controlled boundaries. The production
   // Compute Driver still owns admission, auth validation and runtime document rendering.
   return Object.assign(driver, {
@@ -195,6 +199,7 @@ async function startNativeHttpsUpstream(t) {
 
 async function createNativeAdminFixture(t, options = {}) {
   const upstream = await startNativeHttpsUpstream(t);
+  const credentialStorage = createKubernetesCredentialStorage();
   const fixture = await createConsoleAppFixture(t, {
     provisionedPeople: [],
     publicOrigin: options.publicOrigin ?? publicOrigin,
@@ -217,12 +222,23 @@ async function createNativeAdminFixture(t, options = {}) {
     computeDriver: nativeComputeDriver(upstream.port, {
       exclusiveReplacement: options.exclusiveReplacement,
       automatic: options.automatic === true,
+      credentialStorage,
     }),
   });
   await fixture.bootstrap("Native admin access test");
   const namespace = await fixture.createNamespace("Native admin", {
     ready: true,
   });
+  if (options.automatic) {
+    // Namespace provisioning is outside this proxy journey. Model the ready
+    // namespace with the Driver's ownership labels; it creates its own Secrets.
+    const compute = fixture.controller.selectedDriver("compute");
+    const resource = compute.gatewayNamespaceManifest({ namespaceId: namespace.id });
+    credentialStorage.namespaces.set(resource.metadata.name, {
+      ...resource,
+      status: { phase: "Active" },
+    });
+  }
   const { agent, revision, runtimeBinding } = await createLiveNativeAgent(
     fixture,
     namespace,
@@ -266,11 +282,24 @@ async function createLiveNativeAgent(fixture, namespace, name, options = {}) {
   if (options.deployed === false) {
     return { agent };
   }
+  const credentialsPath = `/namespaces/${namespace.id}/agents/${agent.id}/runtime-credentials`;
+  if (options.automatic) {
+    const before = await fixture.request("GET", credentialsPath);
+    assert.equal(before.status, 200);
+    assert.equal(before.data.transportConfigured, false);
+  }
   const revision = await fixture.controller.deployAgent(
     adminPrincipal(fixture).id,
     { namespaceId: namespace.id, agentId: agent.id },
     resolveApprovedHarness,
   );
+  if (options.automatic) {
+    // First deployment creates missing owned transport Secrets through Compute;
+    // no fixture-supplied credential or readiness answer substitutes for custody.
+    const after = await fixture.request("GET", credentialsPath);
+    assert.equal(after.status, 200);
+    assert.equal(after.data.transportConfigured, true);
+  }
   await fixture.activateRevision(namespace.id, agent.id, revision.id, undefined);
   const current = await fixture.request("GET", `/namespaces/${namespace.id}/agents/${agent.id}`);
   assert.equal(current.data.desiredRuntimeState, "running");
@@ -413,9 +442,7 @@ test("native admin status requires an exact person/Agent runtime assignment and 
   const exactAvailable = await nativeStatus(context, { session: exactAdministerOnlySession });
   assert.equal(exactAvailable.status, 200);
   assert.equal(exactAvailable.data.status, "available");
-  await assertSiblingStatusDenied(context, exactAdministerOnlySession, (target) =>
-    nativeRuntimeDenied(target),
-  );
+  await assertSiblingStatusDenied(context, exactAdministerOnlySession, () => GENERIC_DENIAL);
 
   // An IAM outage is a dependency failure, never an Agent lifecycle state: the console must
   // not read it as "unavailable" (deploying) for an Agent the caller may not even administer.

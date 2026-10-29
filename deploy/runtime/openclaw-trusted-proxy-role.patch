@@ -683,11 +683,11 @@ diff --git a/src/gateway/server.plugin-http-role-scopes.test.ts b/src/gateway/se
 -import { setUserProfileRole } from "../state/user-profile-writes.worker.js";
 +import { linkEmail, setUserProfileRole } from "../state/user-profile-writes.worker.js";
  import { ensureProfileForEmail } from "../state/user-profiles.js";
-+import { readResidentUserProfileIdentity } from "../state/user-profile-list.js";
++import { prepareUserProfileCatalog } from "../state/user-profile-list.js";
  import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
  import { resolveGatewayAuth } from "./auth.js";
  import { authorizeOperatorScopesForMethod, CLI_DEFAULT_OPERATOR_SCOPES } from "./method-scopes.js";
-@@ -300,3 +303,161 @@
+@@ -300,3 +303,168 @@
        }
      },
    ));
@@ -844,7 +844,14 @@ diff --git a/src/gateway/server.plugin-http-role-scopes.test.ts b/src/gateway/se
 +        });
 +        expect(ambiguous.res.statusCode).toBe(401);
 +        expect(calls).toBe(beforeAmbiguous);
-+        expect(readResidentUserProfileIdentity(profileId!)?.role).toBe("reviewer");
++        // The HTTP request released its catalog lease. Retain the real catalog
++        // for this independent assertion and release it before the state fixture closes.
++        const catalog = await prepareUserProfileCatalog();
++        try {
++          expect(catalog.readCurrentIdentity(profileId!)?.role).toBe("reviewer");
++        } finally {
++          catalog.release();
++        }
 +      },
 +    });
 +  });
