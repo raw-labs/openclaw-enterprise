@@ -3796,40 +3796,61 @@ test("a delayed restored Preset list cannot read a selection after starting with
 });
 
 test("denied Preset reads do not automatically start an Agent form", async (t) => {
-  const fixture = await createConsoleAppFixture(t);
-  await fixture.bootstrap();
-  const namespace = await fixture.createNamespace("Denied Preset", { ready: true });
-  const starter = await defaultPresetSummary(fixture, namespace.id);
-  const { page } = await newPage(t, fixture);
-  await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
-  await page
-    .getByRole("button", { name: "Start with default Preset" })
-    .waitFor({ state: "visible" });
-  await page.waitForFunction(
-    () => globalThis.document.querySelector<HTMLSelectElement>("#agent-preset")?.disabled === false,
-  );
-  // Deny the exact read after the list is visible to exercise a changed grant.
-  restrict(fixture.policy, "read", "preset", { namespaceId: namespace.id, resourceId: starter.id });
-  const denied = page.waitForResponse((response) =>
-    response.url().endsWith(`/namespaces/${namespace.id}/presets/${starter.id}`),
-  );
-  await page.getByRole("button", { name: "Start with default Preset" }).click();
-  assert.equal((await denied).status(), 403);
-  // The API's named denial (finding 2534) names the Preset the request sent.
-  await page
-    .getByRole("alert")
-    .filter({ hasText: callerDenied("Preset read", `Preset ${starter.id}`) })
-    .waitFor();
-  assert.equal(await page.locator("#create-agent-form").count(), 0);
-  await page.getByRole("button", { name: "Start without Preset" }).click();
-  assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
-  // A later list filters the now-unreadable Preset; the independent action remains available.
-  // Cancel discards the untouched form without asking.
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.getByRole("button", { name: "Create Agent", exact: true }).click();
-  await page.getByText(/^No Presets available to you in this Namespace\./).waitFor();
-  await page.getByRole("button", { name: "Start without Preset" }).click();
-  assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
+  for (const starterName of ["default-codex", "Custom starter"]) {
+    await t.test(starterName, async (t) => {
+      const fixture = await createConsoleAppFixture(t);
+      await fixture.bootstrap();
+      const namespace = await fixture.createNamespace("Denied Preset", { ready: true });
+      const starter = await defaultPresetSummary(fixture, namespace.id);
+      if (starterName !== "default-codex") {
+        // Rename the only installed Preset through the API so quick-start must use its custom name.
+        const renamed = await fixture.request(
+          "PATCH",
+          `/namespaces/${namespace.id}/presets/${starter.id}`,
+          { body: { name: starterName } },
+        );
+        assert.equal(renamed.status, 200);
+      }
+      const shortcutName =
+        starterName === "default-codex" ? "Start with default Preset" : `Start with ${starterName}`;
+      const { page } = await newPage(t, fixture);
+      const requests = apiRequests(page, fixture.origin);
+      await login(page, fixture, `/console/agents/new?namespace=${namespace.id}`);
+      await page
+        .getByRole("button", { name: shortcutName, exact: true })
+        .waitFor({ state: "visible" });
+      await page.waitForFunction(
+        () =>
+          globalThis.document.querySelector<HTMLSelectElement>("#agent-preset")?.disabled === false,
+      );
+      // Deny the exact read after the list is visible to exercise a changed grant.
+      restrict(fixture.policy, "read", "preset", {
+        namespaceId: namespace.id,
+        resourceId: starter.id,
+      });
+      const denied = page.waitForResponse((response) =>
+        response.url().endsWith(`/namespaces/${namespace.id}/presets/${starter.id}`),
+      );
+      await page.getByRole("button", { name: shortcutName, exact: true }).click();
+      assert.equal((await denied).status(), 403);
+      // The API's named denial (finding 2534) names the Preset the request sent.
+      await page
+        .getByRole("alert")
+        .filter({ hasText: callerDenied("Preset read", `Preset ${starter.id}`) })
+        .waitFor();
+      assert.equal(await page.locator("#create-agent-form").count(), 0);
+      assert.deepEqual(nonAuthWriteRequests(requests), []);
+      await page.getByRole("button", { name: "Start without Preset" }).click();
+      assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
+      // A later list filters the now-unreadable Preset; the independent action remains available.
+      // Cancel discards the untouched form without asking.
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      await page.getByRole("button", { name: "Create Agent", exact: true }).click();
+      await page.getByText(/^No Presets available to you in this Namespace\./).waitFor();
+      await page.getByRole("button", { name: "Start without Preset" }).click();
+      assert.equal(await page.getByLabel("Agent name", { exact: true }).inputValue(), "");
+    });
+  }
 });
 
 test("The console quick-start prefers the readable installed default, then the first readable Preset by name", async (t) => {
