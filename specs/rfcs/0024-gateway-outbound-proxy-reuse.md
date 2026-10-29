@@ -8,58 +8,52 @@ author: miguelbranco80
 
 ## Problem
 
-A dedicated Gateway runs Channels, plugins and integrations that call external services. Today, its outbound route uses the [bundled Slack proxy](../../apps/controller/src/slack-proxy.mjs), which allows Slack destinations on TCP/443 and rejects other services. Kubernetes blocks direct Internet access. A plugin therefore cannot call an administrator-approved non-Slack service through this route.
+A dedicated Gateway runs Channels, plugins and integrations that call external services. Its [bundled Slack proxy](../../apps/controller/src/slack-proxy.mjs) allows Slack destinations on TCP/443 and rejects other services. Kubernetes blocks direct Internet access. A plugin therefore needs a route to the additional services approved for its Agent.
 
 ## Proposed change
 
-Replace the Gateway's Slack-only route with a destination-controlled proxy:
+Give each Agent its own outbound destination list and enforce it through the selected Credential Proxy capability:
 
-**Gateway → OpenShell proxy → Slack or another approved HTTPS service.**
+**Gateway → OpenShell proxy → services approved for that Agent.**
 
-Extend the existing Credential Proxy capability to authorize Gateway destinations. The selected OpenShell Driver runs one proxy Pod per Agent revision, using OpenShell's existing proxy software and policy engine.
+The selected OpenShell Driver runs one proxy Pod per Agent revision, using OpenShell's existing proxy software and policy engine. Enabled Channels automatically contribute their required destinations. Each revision saves its Agent's approved destinations and Channel requirements.
 
-Every supported dedicated Gateway uses this route. It cannot fall back to the old Slack proxy or direct Internet access. Gateway and Harness placement stays unchanged, as do the Harness's existing protections.
-
-This proposal covers dedicated execution on single-cluster Kubernetes deployments. Embedded networking and separate execution clusters are outside its scope.
+Every dedicated Gateway in a single-cluster Kubernetes deployment uses this route for external HTTPS. Gateway and Harness placement and the Harness's existing protections stay unchanged. Embedded networking and separate execution clusters retain their existing behavior.
 
 <a id="one-request-before-and-after"></a>
 
 ## How a request works
 
-Suppose a Gateway plugin needs `api.example.com:443`:
+Suppose a plugin on Agent A needs `api.example.com:443`:
 
-1. The administrator adds that destination to the allowed list.
-2. At deployment, the controller saves the policy and starts the revision's proxy before its Gateway.
+1. An administrator adds that destination to Agent A's outbound settings.
+2. At deployment, the controller saves the policy in a new Agent revision and starts its proxy before its Gateway.
 3. The plugin's HTTP client requests a CONNECT tunnel through the proxy.
-4. OpenShell checks the destination. If allowed, it opens the tunnel; otherwise it refuses the request. HTTPS remains end-to-end between the Gateway and the external service.
-5. Kubernetes blocks attempts to bypass the proxy.
+4. OpenShell checks the destination and opens an allowed tunnel. HTTPS remains end-to-end between the Gateway and the external service.
+5. Kubernetes blocks attempts to bypass the proxy. Agent B retains its own permissions.
 
-Gateway HTTP and WebSocket clients must use this explicit proxy; connections are not intercepted transparently. Enabled Slack supplies its required destinations and uses the same route as other integrations. Its API and Socket Mode connections must continue working.
+Gateway HTTP and WebSocket clients must use this explicit proxy. Slack API and Socket Mode connections use the same route as other integrations.
 
-## Destination policy and configuration
+## Agent permissions and deployment
 
-Each Gateway proxy enforces a policy saved for one Namespace, Agent and revision. The controller combines two inputs:
-
-- **Installation-wide administrator destinations.** The Kubernetes Compute Driver's `runtime.gatewayOutbound.destinations` list supplies a common baseline for every dedicated Gateway managed by that Driver.
-- **Agent-specific Channel destinations.** Each enabled Channel contributes its required hosts from that Agent's configuration. Slack includes suffix wildcards for rotating WebSocket endpoints. A Channel must not contribute permissions to another Agent's policy.
-
-Configuration fragment within the Compute Driver's installation configuration:
+The proposed Agent field `gatewayOutbound.destinations` holds additional approved destinations, separately from native OpenClaw Configuration. For example, Agent A's setting is:
 
 ```yaml
-runtime:
-  gatewayOutbound:
-    destinations:
-      - host: api.example.com
-        port: 443
+gatewayOutbound:
+  destinations:
+    - host: api.example.com
+      port: 443
 ```
 
-`gatewayOutbound` configures destination rules; it does not enable or disable proxy routing. If the section or list is absent or empty, the administrator baseline is empty and enabled Channels still contribute their requirements. A missing proxy capability refuses deployment; it does not restore the Slack-only route or direct Internet access.
+The default list is empty. Each enabled Channel contributes its required hosts from that Agent's configuration. Enabling Slack supplies its API and Socket Mode destinations automatically, including suffix wildcards for rotating WebSocket endpoints. Additional plugin services require explicit entries in the Agent's list.
 
-The common baseline makes administrator configuration simple, but grants each listed destination to every dedicated Gateway using that Compute Driver. Separate per-revision policies do not make those common grants Agent-specific. This RFC does not add a per-Agent custom-destination field or automatic discovery of arbitrary plugin endpoints. Additional plugin services must be explicitly approved in the administrator list; Channel contributions alone do not cover them.
+The controller combines only that Agent's additional destinations and enabled Channel requirements. Manual entries use exact DNS hosts on TCP/443; trusted Channel Drivers can contribute DNS suffix wildcards. Installation policy sets the maximum permitted access and mandatory address exclusions. Admission rejects any required destination that conflicts with those limits.
 
-The destination list uses exact administrator DNS hosts on TCP/443 and trusted Channel suffix wildcards. An initially permissive compatibility policy is acceptable, but it must preserve the private-address restrictions below. Permissions apply to hosts and ports, not encrypted API actions.
+Setting or changing destinations requires both `update` and `administer` on the exact Agent. OpenClaw Control Plane (OCC) validates and persists the setting through the Agent API and exposes it through the Console and CLI. It records attributable mutations and authorization denials. Native Configuration edits and plugin installation cannot grant additional destinations.
 
-Compute saves the combined policy in the immutable Agent revision. Editing installation configuration does not change an existing revision's policy; deploying with changed destinations requires a new revision.
+Deployment uses the existing deployment permissions. OCC saves the Agent's destination list, enabled Channel requirements, effective policy and selected Driver identities in the immutable Agent revision. The policy binds the Namespace, Agent and revision. Compute validates it against Installation restrictions before deployment. Later Agent edits take effect through a new revision; reconciliation uses the policy saved in the existing revision. Disabling a Channel removes its contribution on the next deployment while preserving independently approved destinations.
+
+Destination permissions cover hosts and ports. The Gateway retains integration credentials, and each external service authorizes the encrypted API requests.
 
 ## Processes, Pods and connections
 
@@ -111,52 +105,54 @@ flowchart TB
   style ProxyPod fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
 ```
 
-OpenShell is the proxy; the Pod hosts it. In the pinned OpenShell 0.1.5 standalone `network-proxy` mode, the listener must use loopback. [OpenShell v0.1.6 enforces the same restriction](https://github.com/NVIDIA/OpenShell/blob/v0.1.6/crates/openshell-supervisor/src/lib.rs#L651-L675), so that upgrade alone does not remove the need for the forwarder. `socat` exposes the listener to the Service; it makes no policy decisions and does not terminate TLS. Remove the forwarder when the selected OpenShell version supports a suitable listener directly.
+The pinned OpenShell standalone `network-proxy` listener binds to loopback. `socat` forwards TCP from Service port 3129 to OpenShell at `127.0.0.1:3128`. OpenShell authorizes CONNECT destinations; TLS passes through to the external service. Remove the forwarder when the selected OpenShell version supports the required network listener directly.
 
-The proxy runs separately from the Gateway because Kubernetes network permissions apply to the Pod. A sidecar would share the Gateway's Pod-level permissions and would not provide this separation. The standalone proxy does not require a second OpenShell management-server installation.
+The proxy uses a separate Pod so Kubernetes can give it external access while restricting the Gateway to the proxy and required internal services.
 
-## Instance and lifecycle tradeoffs
+## Proxy lifecycle and cost
 
-One proxy per Agent revision keeps policy and cleanup independent. Stopping one revision must close its connections without disrupting another Agent. A policy change creates a new revision and proxy rather than changing shared policy in place.
+One proxy per Agent revision keeps its policy and connections independent. A policy change creates a new revision and proxy. Stopping one revision closes its connections while other Agents continue running.
 
-The cost grows with deployed revisions: 100 running dedicated revisions require 100 additional proxy Pods, each with a Deployment, Service, policy files and network rules. Existing Harness-side proxying and the control-plane Slack proxy remain separate. Scheduling, resource use, readiness and cleanup add operational work.
+Each running revision adds a proxy Pod, Deployment, Service, immutable policy files and network rules. A shared proxy would reduce resource use but require authenticated Agent identification, per-revision policy selection and independent connection removal. Separate instances use Kubernetes peer selection and workload termination for those responsibilities.
 
-A shared Gateway proxy would reduce instance count, but would need to identify the originating Agent and revision, select the correct policy, and close one revision's connections without disrupting others. Keeping a proxy across revisions of one Agent would also require policy updates and connection draining. This proposal chooses per-revision instances to avoid those shared lifecycle requirements. Reusing the Credential Proxy interface or OpenShell engine does not require sharing one running process.
+## Control-plane networking
 
-## Why control-plane networking stays unchanged
+OCC keeps its existing installation-level routes for sign-in, provider services and Slack setup. Its bundled Slack proxy serves bot-token validation and user/channel directory lookups, including before any Agent is deployed. This retains a separate Slack-only proxy implementation and gives control-plane operations a route independent of Agent lifecycles.
 
-The OpenClaw Control Plane (OCC) API does not run Agent plugins. Its external requests serve installation-level features such as sign-in, provider services and Slack setup. Their destinations depend on the installation's configuration, not on each Agent's plugin list.
+## Platform responsibilities
 
-The OCC API keeps its existing routes. In particular, it uses the bundled Slack proxy for bot-token validation and user/channel directory lookups. The API performs those operations by calling Slack; the proxy only supplies the network route. These calls can occur before any Agent is deployed, so their route must not depend on an Agent revision.
-
-**The bundled Slack proxy remains for those control-plane calls, not for dedicated Gateways.** Keeping it avoids expanding this Gateway change into a control-plane egress redesign. The cost is retaining a separate Slack-only proxy implementation. Replacing it later would require installation-owned policy and client configuration for the affected platform features. This RFC does not add an installation-level OpenShell proxy.
-
-## Platform responsibilities and enforcement
-
-The controller extends existing interfaces:
-
-- **Compute** owns Gateway deployment and Kubernetes networking. It saves the policy and selected Driver identities in the Agent revision, configures the proxy address, preserves required internal routes and blocks bypass.
-- **Credential Proxy** adds destination-policy admission alongside its existing protected-credential operations. Gateway destination control must not require disabling Harness protection.
-- **OpenShell Sandbox Driver** manages the revision's proxy Pod, Service, policy files and network rules. This is resource management, not placement of the Gateway inside a sandbox.
+- **OCC** owns Agent destination settings, authorization, persistence and revision snapshots.
+- **Compute** owns Gateway deployment and Kubernetes networking. It validates the revision's policy, configures the proxy address, preserves required internal routes and blocks bypass.
+- **Credential Proxy** admits Gateway destination policies alongside its protected-credential operations.
+- **OpenShell Sandbox Driver** manages the revision's proxy Pod, Service, policy files and network rules.
 - **Channel Drivers** contribute the destinations required by the Agent's enabled Channels.
 
-The proposed extensions are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts). Compute calls those interfaces, not an OpenShell-specific forwarding engine. Sandbox and Credential Proxy retain the existing [paired Driver registration](../../docs/reference/drivers/selection.md#select-a-protected-sender). The selected Driver must support both Gateway destination control and protected Harness operations; these can use separate proxy instances.
+The Driver extensions are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts). Compute passes the revision and its destinations to those interfaces. Sandbox and Credential Proxy use the existing [paired Driver registration](../../docs/reference/drivers/selection.md#select-a-protected-sender). The selected Driver must support both Gateway destination control and protected Harness operations, with separate permissions and proxy instances.
 
-OpenShell authorizes destinations; Kubernetes prevents bypass. Gateway egress must reach only its own proxy and required internal services. Proxy ingress must select that revision's Gateway. External proxy rules must exclude private, loopback, link-local, metadata and infrastructure ranges, alongside OpenShell's DNS/address checks. Allowed DNS names must not create a route to private addresses.
+## Network enforcement and failure
 
-This requires an enforcing Kubernetes network plugin and trusted writers of Pod labels and network rules. Standalone OpenShell supplies no cryptographic Gateway identity. Remove the Gateway's old Channel egress grant, remove its access from the bundled Slack proxy's ingress rules, and prevent broader rules from granting it an alternate route. Kubernetes allow rules are additive; a deny-all policy cannot cancel another allow rule. Removing proxy environment variables must not restore Internet access.
+OpenShell authorizes destinations; Kubernetes prevents bypass. Gateway egress reaches only its revision's proxy and required internal services. Proxy ingress selects only that revision's Gateway. The Gateway's external HTTPS route is exclusively through OpenShell, including Slack. Compute refuses deployment when the selected capability or policy is unavailable. Proxy failure blocks external traffic.
 
-Before starting a Gateway, verify resource ownership, immutable policy, pinned images and readiness of OpenShell itself, not just the forwarder. Refuse changed or missing dependencies. Proxy failure must not open another route. Stop or replacement first stops the old Gateway, then removes its proxy and waits for its Pods and established connections to disappear. Delete only that revision's resources; Service removal alone does not close established tunnels.
+Proxy network rules and OpenShell's DNS/address checks exclude private, loopback, link-local, metadata and infrastructure addresses. An approved DNS name must resolve to an allowed external address. Native TLS certificate and hostname verification remain enabled.
+
+Enforcement requires a Kubernetes network plugin that enforces NetworkPolicies and trusted writers of Pod labels and network rules. Kubernetes allow rules are additive. Remove the Gateway's old Channel egress grant and its access to the bundled Slack proxy, and ensure other rules cannot admit an alternate external route. Direct connections remain blocked when proxy environment variables are absent.
+
+Before starting a Gateway, verify resource ownership, immutable policy, pinned images and readiness of OpenShell itself. Refuse changed or missing dependencies. Stop or replacement first stops the old Gateway, then removes its proxy and waits for its Pods and established connections to disappear. Delete only that revision's resources. Service removal alone cannot close established tunnels.
+
+<a id="required-evidence-and-current-status"></a>
 
 ## Acceptance criteria
 
-Exercise the regular Agent deploy, activation, replacement and stop path to establish:
+Exercise the regular Agent authoring, deploy, activation, replacement and stop paths to establish:
 
-- Approved non-Slack HTTPS and preserved Slack API/Socket Mode connections through the revision proxy.
-- Existing Harness containment and protected credential requests alongside Gateway destination control, without sharing permissions between the two traffic paths.
-- Unchanged control-plane Slack validation, directory lookups and other installation-level network routes, including with no Agent deployed.
-- Refusal of denied hosts and ports, wrong policies, changed proxy resources and proxy/forwarder outages.
-- Denial of direct TCP, raw-IP, HTTP, UDP/QUIC, bundled Slack-proxy and alternate-proxy bypass attempts, including without proxy variables; private-address protection and cross-Agent isolation.
-- Revision-specific access, complete cleanup and closure of established connections after stop or replacement.
+- Agent-specific destination writes, required permissions, audit evidence and persistence through the API, Console and CLI.
+- Different extra destinations for two Agents: each can reach its approved service and is denied the other's service.
+- Automatic Slack destinations for an Agent with Slack enabled, including API and Socket Mode connections.
+- Immutable revision policies after Agent edits, with changes applied on a new deployment.
+- Existing Harness containment and protected credential requests alongside Gateway destination control.
+- Control-plane Slack validation, directory lookups and other installation-level routes, including with no Agent deployed.
+- Refusal of denied hosts and ports, forbidden addresses, wrong policies, changed resources and proxy or forwarder outages.
+- Denial of direct TCP, raw-IP, HTTP, UDP/QUIC, bundled Slack-proxy and alternate-proxy bypass attempts, including without proxy variables.
+- Complete cleanup and closure of established connections after stop or replacement, preserving other Agents and the successor revision.
 
 The [implementation plan](../plans/0024-gateway-outbound-proxy-reuse.md), [source flow](../../docs/flows/gateway-outbound-destinations.md) and [QA procedure](../../docs/testing/gateway-outbound-destinations.md) hold delivery and verification details. See the pinned OpenShell [standalone role](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-supervisor/src/lib.rs#L536-L629) and [policy rules](../../deploy/runtime/gateway-proxy/sandbox-policy.rego).
