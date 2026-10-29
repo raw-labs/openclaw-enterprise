@@ -8,7 +8,7 @@ author: miguelbranco80
 
 - **ID:** RFC-0024
 - **Created:** 2026-10-28
-- **Last updated:** 2026-10-28
+- **Last updated:** 2026-10-29
 - **Implementation plan:** [Gateway connectivity](../plans/0024-dedicated-gateway-containment.md)
 
 ## Application problem
@@ -65,8 +65,8 @@ The contained path must deliberately replace the existing cooperative channel
 proxy route for these sockets. Do not leave `HTTPS_PROXY` accidentally routing
 requests through a second proxy and then claim that OpenShell checked Slack's
 destination. Required application/upstream proxies need explicit handling or
-rejection before deployment. Ordinary, non-contained deployments keep their
-existing channel-proxy configuration.
+rejection before deployment. The dedicated path in this proposal replaces the
+existing channel-proxy route; it has no uncontained alternative.
 
 ## Processes, Pods and connections
 
@@ -139,15 +139,18 @@ realization, not leave an uncontained serving copy beside the contained one.
 
 ## Dedicated and embedded behavior
 
-**Dedicated, with Gateway containment selected:** move only the Gateway's
-realization into the OpenShell runtime above. Keep the separate Harness's
+**Dedicated:** require Gateway containment for the dedicated workflow in this
+proposal. Configure its egress policy, not a containment bypass. Move only the
+Gateway's realization into the OpenShell runtime above. Keep the separate Harness's
 placement, descriptor, workspace, authentication and model-credential delivery
 unchanged. Derive allowed private Harness destinations from its rendered
 transport configuration; do not infer them from a public wildcard grant.
 
-**Dedicated, without opt-in:** retain the current Gateway deployment and channel
-proxy. Unsupported containment requests fail before an uncontained candidate
-starts; they must not silently select the ordinary path.
+If the selected Gateway containment capability is absent or setup fails,
+deployment fails before an uncontained candidate starts. Do not fall back to
+the old Gateway deployment or channel proxy. Policy defaults for runtime,
+enabled-channel and additional plugin access remain a review decision; required
+connectivity must be explicit when replacing the proxy.
 
 **Embedded:** keep the existing combined Gateway/Harness workload, workspace,
 credential mounts and networking unchanged. This proposal neither contains that

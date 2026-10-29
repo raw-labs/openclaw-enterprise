@@ -43,8 +43,9 @@ filesystem and process restrictions active. Check the exact image identity,
 command, mounts, init steps, probes, resources and namespace/Agent ownership.
 A proxy sidecar beside an otherwise uncontained Gateway fails this requirement.
 
-Record the ordinary dedicated Gateway's configured channel-proxy path before
-opt-in. After opt-in, inspect the OpenShell workload and supervisor Pods, and
+Record the current implementation's channel-proxy path as the before comparison,
+not a selectable mode in the proposal. For the proposed dedicated path, inspect
+the OpenShell workload and supervisor Pods, and
 confirm the ordinary Gateway workload is not also serving. Check that automatic
 `HTTPS_PROXY` injection does not send the probe through an unintended second
 proxy. If a required upstream proxy is unsupported, deployment must reject it
@@ -93,9 +94,9 @@ do not expose it on the public operator route.
 
 ### Separate Harness and credentials
 
-Before and after opt-in, compare admitted Harness descriptors, authentication
-source, runtime image, selected placement, PVCs, projected identity and Secret
-references. Values remain redacted. Confirm that only the Harness retains its
+Before and after the implementation change, compare admitted Harness
+descriptors, authentication source, runtime image, selected placement, PVCs,
+projected identity and Secret references. Values remain redacted. Confirm that only the Harness retains its
 model credential and that the Gateway receives only its existing transport and
 channel/integration material.
 
@@ -104,9 +105,11 @@ model/tool turn through that Harness. A healthy supervisor or Gateway HTTP
 health endpoint alone does not establish an operational Agent.
 
 Verify an embedded Agent still uses its existing combined workload, credentials,
-workspace and networking, without this Gateway containment capability. Check a
-dedicated Agent without opt-in retains its ordinary channel-proxy path. This
-proposal adds no embedded channel or egress support.
+workspace and networking, without this Gateway containment capability. Reject
+dedicated deployment if containment support is absent or setup fails; no
+ordinary Gateway or channel-proxy fallback may serve. Inspect egress policy
+separately from containment and record the defaults used. This proposal adds
+no embedded channel or egress support.
 
 ### State and lifecycle
 

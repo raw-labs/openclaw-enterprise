@@ -36,8 +36,8 @@ network grant. The separate Harness's egress policy does not affect a Slack SDK
 request made by that Gateway. See the RFC's
 [concrete request](../rfcs/0024-dedicated-gateway-containment.md#one-outbound-request-before-and-after).
 
-After opt-in, OpenShell owns the Gateway workload Pod and its existing separate
-supervisor Pod, using its [Kubernetes runtime layout](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-driver-kubernetes/src/driver.rs). The workload's boundary process mediates native Gateway sockets;
+In the proposed dedicated path, OpenShell owns the Gateway workload Pod and its
+existing separate supervisor Pod, using its [Kubernetes runtime layout](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-driver-kubernetes/src/driver.rs). The workload's boundary process mediates native Gateway sockets;
 the supervisor authorizes and opens upstream TCP connections. A Slack token
 stays in the Gateway and crosses this path inside native end-to-end TLS. The
 separate Harness Pod retains its workspace, model credential and authenticated
@@ -56,19 +56,23 @@ when only a second proxy's address was authorized.
 Embedded execution keeps its existing combined Gateway/Harness Pod, credentials,
 workspace and networking. It does not invoke this dedicated-only capability;
 an explicit embedded containment request fails admission without changing mode.
-Dedicated deployment without opt-in also keeps its current channel-proxy route.
-These unchanged paths need regression proof, not new containment features.
+The dedicated path requires the selected Gateway containment capability;
+missing support or setup failure rejects deployment, with no ordinary Gateway
+or channel-proxy fallback. Only egress permissions are configurable. Defaults
+remain a review decision and must cover required runtime and enabled-channel
+connections when the proxy is removed. Embedded behavior needs regression proof,
+not new containment features.
 
 ## Implementation scope review
 
-| Owner                                           | Required change                                                                                                                   | Excluded expansion                                                              |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Contracts                                       | Gateway-specific Sandbox lifecycle/endpoint inputs and non-secret Channel destination contributions                               | Generic arbitrary-workload or Kubernetes-template API                           |
-| Installation composition and Kubernetes Compute | Dedicated-only Gateway opt-in, replacing its ordinary realization and channel-proxy route; preserve embedded behavior and cleanup | Reusing Harness `sandboxDriverId` or enabling its credential delivery           |
-| OpenShell Sandbox Driver                        | Translate Gateway startup/state and egress into supported provider calls; reuse socket mediation and supervisor authorization     | New forwarder, uncontained fallback, or copying provider behavior into OCC core |
-| Channel Driver and admission                    | Collect enabled-channel destinations into the Agent revision; Slack first                                                         | Provider host lists hardcoded in Compute or credentials stored in policy        |
-| Existing ingress owners                         | Minimum compatible authenticated final hop for operator and node traffic                                                          | General-purpose ingress product or ordinary loopback trust                      |
-| Existing Agent QA                               | Genuine Gateway HTTPS/WSS, model turn, state and cleanup with unchanged Harness                                                   | Harness-only qualification presented as Gateway proof                           |
+| Owner                                           | Required change                                                                                                                            | Excluded expansion                                                              |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| Contracts                                       | Gateway-specific Sandbox lifecycle/endpoint inputs and non-secret Channel destination contributions                                        | Generic arbitrary-workload or Kubernetes-template API                           |
+| Installation composition and Kubernetes Compute | Required dedicated Gateway containment, replacing its ordinary realization and channel-proxy route; preserve embedded behavior and cleanup | Reusing Harness `sandboxDriverId` or enabling its credential delivery           |
+| OpenShell Sandbox Driver                        | Translate Gateway startup/state and egress into supported provider calls; reuse socket mediation and supervisor authorization              | New forwarder, uncontained fallback, or copying provider behavior into OCC core |
+| Channel Driver and admission                    | Collect enabled-channel destinations into the Agent revision; Slack first                                                                  | Provider host lists hardcoded in Compute or credentials stored in policy        |
+| Existing ingress owners                         | Minimum compatible authenticated final hop for operator and node traffic                                                                   | General-purpose ingress product or ordinary loopback trust                      |
+| Existing Agent QA                               | Genuine Gateway HTTPS/WSS, model turn, state and cleanup with unchanged Harness                                                            | Harness-only qualification presented as Gateway proof                           |
 
 Source owners are `packages/contracts/src/index.ts`,
 `apps/controller/src/composition/installation-config.ts`, Kubernetes Compute,
@@ -160,9 +164,9 @@ operator-versus-node transport access, identity, short validity, replay defense
 and request binding. Bind the original Origin and presentation/request facts
 without ignoring Envoy path rewrites or the relay's Host replacement. Keep
 signing authority outside the Sandbox; deliver verification material only to
-the Gateway. This plan does not finalize a wire format or authorize edits to
-the native repository. The RFC owner must authorize that external work and
-obtain review of its authentication design.
+the Gateway. This plan does not finalize a wire format. Carry any required
+OpenClaw change through the existing OCE runtime patch build and obtain review
+of its authentication design; a separate upstream PR is not a prerequisite.
 
 ### OCE callers, nodes and private status
 
@@ -205,9 +209,9 @@ only OpenShell's external relay still leaves final-hop verification unresolved.
 
 ## Implementation
 
-1. Obtain authority and design review for native verified ingress, then provide
-   an approved native image. Resolve node attribution and private-status mapping
-   above. The submitted OCE RFC is not authority to alter another repository.
+1. Design and review native verified ingress, carrying required changes through
+   the OCE runtime patch build. Provide an approved runtime image and resolve
+   node attribution and private-status mapping above.
 2. Add the dedicated-only Gateway capability and independent composition. Replace
    its ordinary deployment/channel-proxy path, preserve provider fencing, and
    leave the Harness and embedded paths unchanged. Translate Gateway startup,
@@ -221,9 +225,9 @@ only OpenShell's external relay still leaves final-hop verification unresolved.
    unchanged. Update current references and the owning runtime flow with code.
 5. Execute the Linux scenario with the separate dedicated Harness: native
    HTTPS/WSS, enabled-channel policy and live channel separately, a model/tool
-   turn, state across replacement, stop/start and delete. Check embedded and
-   dedicated behavior without opt-in. Preserve unrelated infrastructure and remove
-   only run-owned effects.
+   turn, state across replacement, stop/start and delete. Check unchanged embedded
+   behavior and reject dedicated deployment without containment. Preserve
+   unrelated infrastructure and remove only run-owned effects.
 
 Steps 2–5 are not implemented or qualified. Do not mark the experiment complete
 when step 1 is documented or when a fixture passes.
@@ -284,6 +288,9 @@ dedicated Harness while containing the Gateway independently.
 - 2026-10-28: Rewrote application/request and Pod explanations before interfaces;
   corrected existing channel-proxy handling and explicit embedded non-change.
   No runtime implementation or qualification is claimed.
+- 2026-10-29: Removed the uncontained dedicated variant. Gateway containment is
+  required in this proposal; egress policy remains configurable and embedded
+  behavior remains unchanged. Corrected native patch ownership to the OCE build.
 
 ## Changelog
 
