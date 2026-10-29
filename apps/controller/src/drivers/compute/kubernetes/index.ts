@@ -213,6 +213,7 @@ import {
   requireChannelTopology,
   requireChannelProxyEnvironment,
   requireTeamsConfiguration,
+  requireHarnessPluginPolicy,
   type KubernetesHarnessTopology,
   kubernetesHarnessAuthMethods,
   providerWaitsOnVariable,
@@ -4746,12 +4747,24 @@ export class KubernetesComputeDriver implements ComputeDriver {
       );
     }
     if (openclaw) {
+      requireHarnessPluginPolicy(
+        configuration,
+        authentication.providerId,
+        `for the OpenClaw ${authentication.providerId} model provider`,
+        callerSettingError,
+      );
       harnessProbeConfiguration(configuration);
     }
     if (native) {
       nativeRuntimeConfiguration(configuration, callerSettingError, auth.method);
     }
     if (codex) {
+      requireHarnessPluginPolicy(
+        configuration,
+        "codex",
+        "for the Codex Harness",
+        callerSettingError,
+      );
       requireCodexGatewayConfigurationShape(configuration);
     }
     if (native || codex) {

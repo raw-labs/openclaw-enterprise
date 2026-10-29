@@ -74,6 +74,12 @@ An associated
 `access_token` additionally requires dedicated Codex; the frozen account
 contains only its OCC identity, credential kind, and opaque Secret reference.
 
+`apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts:requireHarnessPluginPolicy`
+rejects policies that block Codex or OpenClaw’s selected provider during Harness
+admission, including provisioning replay, retry and worker checks before effects.
+Required-plugin aliases must be unique. Channel-derived or administrator-approved
+[Gateway outbound access](gateway-outbound.md) does not override this plugin policy.
+
 ### 2. Claim work and realize the approved topology
 
 `apps/controller/src/worker.ts:ControllerWorker`
