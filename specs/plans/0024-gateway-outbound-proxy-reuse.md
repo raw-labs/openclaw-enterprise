@@ -177,6 +177,30 @@ incomplete.
   guide and networking reference remain coherent single-topic pages; redundant
   experiment detail links to the flow instead of expanding those references.
 
+### Real Kubernetes attachment repair
+
+2026-10-29, source based on `e69e52e99` plus the accompanying repair:
+
+- The new real-API regression failed before the repair because SDK serialization
+  dropped `ingress.from`. It now passes with **1 passed, no skips**, including
+  read-back, repeated preparation and refusal of a valid broadened peer rule.
+- The same case with the cached native Gateway image selected passes with
+  **1 passed, no skips** on fresh k3s 1.35.5. It verifies actual stock proxy and
+  relay readiness, native ClawHub HTTPS, denied-host refusal, foreign-Pod refusal,
+  private TCP/443 egress denial with a reachable control, and attachment removal.
+- Live execution also exposed omitted false Pod defaults, the Deployment
+  controller revision annotation, and kubelet ownership of the TLS volume root.
+  The repair accepts only those known API defaults and uses a private child TLS
+  directory created by the non-root stock process. Pod image specifications and
+  observed immutable image identities remain checked. The attachment fingerprint
+  version changes with the layout.
+- These are direct attachment component tests with real Kubernetes and native
+  clients, not the regular Agent API/worker deployment journey. They do not prove
+  Compute-generated Gateway direct-egress restrictions, authenticated integrations,
+  model execution or full revision connection fencing. Those acceptance items
+  remain open. The run-owned cluster, imported layers and temporary tags were
+  removed; existing resources were preserved.
+
 ## Installation inputs and live-proof blockers
 
 `drivers.credential_proxy.usage: gateway` selects the existing paired capabilities

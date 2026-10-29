@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(new URL("../../apps/controller/package.json", import.meta.url));
 const { KubernetesObjectApi } = require("@kubernetes/client-node");
+const { ObjectSerializer } = require("@kubernetes/client-node/dist/serializer.js");
 
 /**
  * API observations for Compute conformance scenarios whose subject is the Harness.
@@ -14,7 +15,11 @@ export function gatewayProxyApiFixture(base = {}) {
   const absent = () => Object.assign(new Error("not found"), { statusCode: 404 });
   let version = 0;
   const save = (object) => {
-    const stored = structuredClone(object);
+    // Match ObjectApi's real write boundary, including SDK aliases such as ingress._from.
+    const stored =
+      object.kind === "NetworkPolicy"
+        ? ObjectSerializer.serialize(object, "V1NetworkPolicy")
+        : structuredClone(object);
     stored.metadata.uid ??= "fixture-" + stored.kind + "-" + stored.metadata.name;
     stored.metadata.resourceVersion ??= String(++version);
     resources.set(key(stored), stored);

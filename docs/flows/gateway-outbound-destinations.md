@@ -39,9 +39,10 @@ validation and directory lookup; separate execution clusters retain their existi
 remain refused in embedded mode. See the
 [Slack consumer paths](../guides/integrations/slack.md#configure-both-slack-proxies).
 
-The stock OpenShell/relay Docker test passes. Actual Gateway client compatibility,
-Channel/WebSocket traffic, Kubernetes enforcement and the complete Agent workflow
-remain unverified. Source inspection and fixture results do not establish them.
+The stock OpenShell/relay Docker test and scoped real attachment checks pass.
+Full Gateway integration traffic, Channel behavior, Compute network enforcement
+and the complete Agent workflow remain unverified. The
+[QA procedure](../testing/gateway-outbound-destinations.md) defines each proof boundary.
 
 ## Entry Points
 
@@ -161,15 +162,23 @@ route before calling the paired Sandbox. Gateway preparation waits for that resu
 `apps/controller/src/drivers/sandbox/gateway-proxy-attachment.ts:openShellGatewayProxyAttachment`
 creates a revision-owned immutable ConfigMap, NetworkPolicy, Deployment, and
 ClusterIP Service. It checks ownership and authored fields instead of patching
-an existing attachment into a different policy.
+an existing attachment into a different policy. Before `KubernetesObjectApi.create`,
+it deserializes the NetworkPolicy manifest into the SDK model so `ingress.from`
+uses the SDK's `_from` field. Read verification restores the wire field and compares
+the complete policy. Pod verification accepts omitted false host-access defaults;
+Deployment verification permits only the controller's numeric revision annotation
+in addition to the attachment annotations.
 
 The separate Pod runs stock OpenShell `--role=network-proxy` on
 `127.0.0.1:3128` and stock `socat` on TCP/3129. The relay transports bytes to
 loopback; it does not implement HTTP authorization. The Pod has no Gateway,
 Harness, credential Secret, workspace, projected identity, or service-account
 token. Readiness requests a denied CONNECT from the actual policy engine; a
-listening relay alone is insufficient. The adapter also compares the observed
-container image identities with the pinned digests. A false readiness result
+listening relay alone is insufficient. Stock OpenShell creates `/tls/private` as
+UID 10001 with mode 0700 inside the memory-backed volume; it does not use the
+kubelet-owned volume root as its private directory. The adapter checks the pinned
+Pod image specifications and observed container image digests. It does not require
+the container runtime's reported image name to retain the input spelling. A false readiness result
 keeps preparation pending. Unexpected ownership or configuration throws.
 
 The attachment authors DNS and public IPv4 TCP/443 egress using exactly the
@@ -241,6 +250,7 @@ syntax-only checks cannot qualify the stock binary or CNI boundary.
 
 ## Changelog
 
+- 2026-10-29 23:01: Correct SDK NetworkPolicy creation, API default comparisons and non-root proxy TLS storage in the accompanying fix. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - e69e52e999ba61a4718c603e9e00b1a860e57ce0)
 - 2026-10-29 16:36: Trace independent Gateway selection, exclusions and portable profile validation in the accompanying implementation. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - 72fa7ce820fe53ad3cd5aee248a8aaea9d4da72b)
 - 2026-10-29 12:35: Trace Agent-owned settings, composed admission and mandatory routing in the accompanying implementation. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - fae0c334f7736612e6d85a87ff419b9794384caa)
 - 2026-10-28 19:04: Trace experimental draft source and mark runtime acceptance unverified. (authoring-run/e4a4150b-1969-47ea-a5ab-88dc8b4a2061 - 45224b0b8ea6927e16d95c2e525ca182c28f365f)

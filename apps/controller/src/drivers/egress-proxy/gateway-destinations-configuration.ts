@@ -2,7 +2,7 @@ import { isIPv4 } from "node:net";
 
 export const STOCK_GATEWAY_PROXY = Object.freeze({
   revision: "bdb956f2cd65a635f1294fccf1d138d263bf650f",
-  attachmentVersion: 1,
+  attachmentVersion: 2,
   supervisorDigests: [
     "fabcd01f656e9d23df4386f82e80b4f48b90f3452d7d5c58889007643a069161",
     "07cc8b62b34a0b54a3ebeb485cebe9f223cffe10dad819af550849cf0699816f",

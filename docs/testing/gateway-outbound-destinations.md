@@ -58,6 +58,38 @@ Do not interpret a nonempty `blockedCidrs` list as evidence that the ranges are
 complete or the cluster enforces them. Inspect all matching NetworkPolicies:
 Kubernetes allows are additive, so a deny-all policy cannot cancel a broad allow.
 
+## Run the attachment regression without model credentials
+
+The real Kubernetes attachment test needs an explicit disposable loopback k3d
+kubeconfig and context. It uses the production attachment and SDK against the
+real API, checks stored ingress peers, and refuses a valid broadened peer rule.
+It is registered in the ordinary k3d state lane.
+
+For live traffic, also select an approved Gateway runtime image already imported
+into that cluster. Import the pinned supervisor and relay images first. The
+selected image must support Node environment proxy settings. No Slack or model
+credential is needed:
+
+```sh
+OCC_TEST_KUBERNETES_KUBECONFIG="<private kubeconfig path>" \
+OCC_TEST_KUBERNETES_CONTEXT="<k3d context>" \
+OCC_TEST_KUBERNETES_GATEWAY_IMAGE="<approved imported Gateway image>" \
+  node --test tests/integration/gateway-proxy-kubernetes-real.test.ts
+```
+
+Without `OCC_TEST_KUBERNETES_GATEWAY_IMAGE`, the case proves only API
+creation, read-back and tamper refusal. With it, the case requires stock proxy
+readiness, successful ClawHub HTTPS, denied-host refusal, foreign-Pod refusal,
+private egress denial with a reachable TCP control, and production attachment
+removal. An unavailable selected image or failed control fails the test.
+The case deletes its own namespace. The preparation owner must delete the
+run-owned cluster and imported layers afterward.
+
+These are attachment component checks with real native clients and networking.
+They do not deploy an Agent through the API and worker, run the Gateway server,
+or qualify Compute-generated Gateway direct-egress restrictions. Keep the full
+workflow and remaining acceptance cases below open.
+
 ## Run the explicit scenario
 
 This scenario is excluded from `OCC_TEST_QA_SCENARIOS=all` and is not an automatic
@@ -130,10 +162,9 @@ acceptance conditions open until evidence exists for the final implementation:
   exact reciprocal selectors, and every additive network grant in the real cluster.
 
 The stock supervisor/relay Docker test passes. Agent API and real PostgreSQL
-authoring tests also pass. Full Compute conformance has dedicated-path failures
-under repair; the [plan](../../specs/plans/0024-gateway-outbound-proxy-reuse.md#verification-evidence)
-records current results. Local checks do not qualify CNI enforcement, credential
-placement, or Agent cleanup.
+authoring tests also pass. The [plan](../../specs/plans/0024-gateway-outbound-proxy-reuse.md#verification-evidence)
+records current results. The attachment regression provides only the CNI checks
+named above; it does not qualify full Agent credential placement or cleanup.
 Real Agent execution is **not run**. Local cluster tools are available, but the
 required enforcing lane, approved image provenance, authorized model and Slack
 credentials, and independent public probe endpoints are not prepared. The normal dedicated

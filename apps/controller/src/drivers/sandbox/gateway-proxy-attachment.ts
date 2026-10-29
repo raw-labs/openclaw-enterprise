@@ -3,6 +3,7 @@ import {
   type KubernetesObject,
   type V1NetworkPolicySpec,
 } from "@kubernetes/client-node";
+import { ObjectSerializer } from "@kubernetes/client-node/dist/serializer.js";
 import type {
   GatewayDestinationPlan,
   GatewayProxyAttachment,
@@ -105,7 +106,8 @@ export function openShellGatewayProxyAttachment(
             "--listen=127.0.0.1:3128",
             "--policy-rules=/policy/sandbox-policy.rego",
             "--policy-data=/policy/policy.json",
-            "--tls-dir=/tls",
+            // The volume root belongs to kubelet; stock creates this private child as UID 10001.
+            "--tls-dir=/tls/private",
           ],
           securityContext,
           resources: {
@@ -260,11 +262,20 @@ export function openShellGatewayProxyAttachment(
   }
 
   function owned(actual: KubernetesObject, expected: KubernetesObject): void {
+    const annotations = { ...actual.metadata?.annotations };
+    if (expected.kind === "Deployment") {
+      // The Deployment controller adds this counter after creation, not attachment authority.
+      const revision = annotations["deployment.kubernetes.io/revision"];
+      if (revision !== undefined && !/^[1-9][0-9]*$/.test(revision)) {
+        throw new Error("Gateway proxy Deployment revision annotation is invalid.");
+      }
+      delete annotations["deployment.kubernetes.io/revision"];
+    }
     if (
       actual.metadata?.name !== expected.metadata?.name ||
       actual.metadata?.namespace !== expected.metadata?.namespace ||
       !isDeepStrictEqual(actual.metadata?.labels, expected.metadata?.labels) ||
-      !isDeepStrictEqual(actual.metadata?.annotations, expected.metadata?.annotations)
+      !isDeepStrictEqual(annotations, expected.metadata?.annotations)
     ) {
       throw new Error("Refusing a foreign or changed Gateway proxy resource.");
     }
@@ -288,10 +299,22 @@ export function openShellGatewayProxyAttachment(
     return isDeepStrictEqual(actual, expected);
   }
 
+  function podWithDefaults(value: unknown): Record<string, unknown> | undefined {
+    const pod = asRecord(value);
+    // Kubernetes omits these false defaults; explicit host access must still be refused.
+    return pod === undefined
+      ? undefined
+      : { hostNetwork: false, hostPID: false, hostIPC: false, ...pod };
+  }
+
   function assertResource(actual: KubernetesObject, expected: KubernetesObject): void {
     owned(actual, expected);
     const observed = json(actual) as Record<string, unknown>;
     const desired = json(expected) as Record<string, unknown>;
+    if (expected.kind === "Deployment") {
+      const template = asRecord(asRecord(observed.spec)?.template)!;
+      template.spec = podWithDefaults(template.spec);
+    }
     if (expected.kind === "NetworkPolicy") {
       observed.spec = networkPolicySpecToJson(
         (actual as unknown as { spec: V1NetworkPolicySpec }).spec,
@@ -338,7 +361,7 @@ export function openShellGatewayProxyAttachment(
   }
 
   function assertPod(actual: unknown, expected: unknown): void {
-    const pod = asRecord(actual);
+    const pod = podWithDefaults(actual);
     const wanted = asRecord(expected);
     if (
       !pod ||
@@ -425,7 +448,12 @@ export function openShellGatewayProxyAttachment(
             return false;
           }
         } else {
-          assertResource(await api.create(resource), resource);
+          // ObjectApi serializes SDK models: plain JSON ingress.from would be dropped.
+          const body =
+            resource.kind === "NetworkPolicy"
+              ? ObjectSerializer.deserialize(resource, "V1NetworkPolicy")
+              : resource;
+          assertResource(await api.create(body), resource);
         }
       }
       const deployment = expected.find((item) => item.kind === "Deployment")! as unknown as {
@@ -501,8 +529,7 @@ export function openShellGatewayProxyAttachment(
               item.name === name &&
               item.ready &&
               item.state?.running &&
-              item.image ===
-                (name === "proxy" ? assets.options.supervisorImage : assets.options.relayImage) &&
+              // Pod spec pins the requested image; CRI may normalize its reported name.
               (name === "proxy"
                 ? STOCK_GATEWAY_PROXY.supervisorDigests
                 : STOCK_GATEWAY_PROXY.relayDigests
