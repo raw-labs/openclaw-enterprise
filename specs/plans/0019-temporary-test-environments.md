@@ -47,14 +47,14 @@ must fail closed, not fall back to the Harness host.
 
 Extend the existing owners rather than building an adapter against invented APIs:
 
-| Existing owner | Required change |
-| --- | --- |
-| `packages/contracts/src/` | Resource, operations, states and selected Driver contract; curated exports through the top-level index. |
-| `apps/controller/src/auth/` | Scoped, revocable Agent workload authentication; no human impersonation or shared administrator key. |
-| `apps/controller/src/admission/` and `http/` | Exact-resource authorization, bounded requests, server-derived ownership and redacted responses. |
-| `packages/occ/src/` | Persistent environment ownership, repeat-safe requests, atomic quota reservation, expiry and controller work. |
-| `packages/iam/src/` and `packages/audit/src/` | Resource grants and attributable mutation/denial evidence. |
-| `apps/controller/src/composition/` and `drivers/` | Select the approved implementation; create, observe and delete real resources under durable controller work. |
+| Existing owner                                    | Required change                                                                                               |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `packages/contracts/src/`                         | Resource, operations, states and selected Driver contract; curated exports through the top-level index.       |
+| `apps/controller/src/auth/`                       | Scoped, revocable Agent workload authentication; no human impersonation or shared administrator key.          |
+| `apps/controller/src/admission/` and `http/`      | Exact-resource authorization, bounded requests, server-derived ownership and redacted responses.              |
+| `packages/occ/src/`                               | Persistent environment ownership, repeat-safe requests, atomic quota reservation, expiry and controller work. |
+| `packages/iam/src/` and `packages/audit/src/`     | Resource grants and attributable mutation/denial evidence.                                                    |
+| `apps/controller/src/composition/` and `drivers/` | Select the approved implementation; create, observe and delete real resources under durable controller work.  |
 
 Use the existing PostgreSQL transaction and work-claim conventions. Add database
 constraints for ownership, request uniqueness and allowed transitions where
@@ -101,17 +101,17 @@ Use a disposable database and execution infrastructure, with an approved VM imag
 and enforced networking. Do not start local k3d clusters as an incidental check.
 Infrastructure and credential setup need explicit scope and capacity.
 
-| Outcome | Required integration evidence | Status |
-| --- | --- | --- |
-| Normal Agent workflow | Real deployed Agent invokes unmodified Crabbox and the adapter, transfers an uncommitted change, runs tests and returns output/exit status. | Not run |
-| Repeat-safe acquisition | Interrupt the real response and retry the same identity; observe one allocation and rejection of changed parameters. | Not run |
-| Authorization | Another Agent/Namespace, an expired identity and a forbidden profile cannot allocate, inspect, renew, connect or delete outside their grants. | Not run |
-| Capacity | Concurrent requests cannot exceed reserved limits; failed cleanup keeps capacity accounted for. | Not run |
-| Crash recovery | Kill the client, restart the controller and verify deadline-driven deletion without another LLM call. | Not run |
-| Deletion semantics | Interrupt deletion; observe durable retries and no successful release until provider absence is confirmed. | Not run |
-| Network boundary | Exercise permitted SSH/test traffic and denied cross-tenant, control-plane and unapproved egress from the actual VM. | Not run |
-| k3d workload | Run a disposable cluster inside the temporary VM; verify no host socket/cluster credential exposure and no residual VM/storage. | Not run |
-| Revision retirement | Revoke the caller during a retained lease; reject further use and complete controller-owned cleanup. | Not run |
+| Outcome                 | Required integration evidence                                                                                                                 | Status  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Normal Agent workflow   | Real deployed Agent invokes unmodified Crabbox and the adapter, transfers an uncommitted change, runs tests and returns output/exit status.   | Not run |
+| Repeat-safe acquisition | Interrupt the real response and retry the same identity; observe one allocation and rejection of changed parameters.                          | Not run |
+| Authorization           | Another Agent/Namespace, an expired identity and a forbidden profile cannot allocate, inspect, renew, connect or delete outside their grants. | Not run |
+| Capacity                | Concurrent requests cannot exceed reserved limits; failed cleanup keeps capacity accounted for.                                               | Not run |
+| Crash recovery          | Kill the client, restart the controller and verify deadline-driven deletion without another LLM call.                                         | Not run |
+| Deletion semantics      | Interrupt deletion; observe durable retries and no successful release until provider absence is confirmed.                                    | Not run |
+| Network boundary        | Exercise permitted SSH/test traffic and denied cross-tenant, control-plane and unapproved egress from the actual VM.                          | Not run |
+| k3d workload            | Run a disposable cluster inside the temporary VM; verify no host socket/cluster credential exposure and no residual VM/storage.               | Not run |
+| Revision retirement     | Revoke the caller during a retained lease; reject further use and complete controller-owned cleanup.                                          | Not run |
 
 Mocks may isolate unrelated failure inputs, but cannot replace the controller,
 provider, SSH transport or network enforcement being proved. Follow the

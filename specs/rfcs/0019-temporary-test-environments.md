@@ -45,11 +45,11 @@ A skill guides the Agent; it is not an authorization or resource-limit boundary.
 
 All OCE connections below are proposed:
 
-	the Agent's existing Harness
-	  -> Crabbox CLI and external OCE adapter
-	  -> OCC admission and durable lifecycle
-	  -> selected infrastructure implementation
-	  -> temporary test machine
+    the Agent's existing Harness
+      -> Crabbox CLI and external OCE adapter
+      -> OCC admission and durable lifecycle
+      -> selected infrastructure implementation
+      -> temporary test machine
 
 The CLI then synchronizes files and runs commands over a private SSH connection
 to that machine. Provisioning credentials stay with the controller-side
@@ -84,14 +84,14 @@ its resource and Driver ownership before product implementation.
 Implement the existing external-provider JSON protocol in a separately invoked
 OCE adapter. Initially target Linux and the ordinary SSH lease path:
 
-| Crabbox operation | OCE adapter responsibility |
-| --- | --- |
-| Acquire | Submit an authenticated request and wait for an admitted environment with connection details. |
-| Resolve and list | Return only environments the caller may inspect. |
-| Touch | Request bounded renewal; never override the server's maximum lifetime. |
-| Release | Request deletion and report success only after deletion is confirmed. |
-| Cleanup | Request scoped cleanup without acquiring authority over other owners. |
-| Doctor | Check configuration and access without allocating a machine. |
+| Crabbox operation | OCE adapter responsibility                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| Acquire           | Submit an authenticated request and wait for an admitted environment with connection details. |
+| Resolve and list  | Return only environments the caller may inspect.                                              |
+| Touch             | Request bounded renewal; never override the server's maximum lifetime.                        |
+| Release           | Request deletion and report success only after deletion is confirmed.                         |
+| Cleanup           | Request scoped cleanup without acquiring authority over other owners.                         |
+| Doctor            | Check configuration and access without allocating a machine.                                  |
 
 Use stable, caller-scoped request IDs for repeat-safe acquisition. A repeated
 request with different settings is a conflict, not a new allocation. Connection
