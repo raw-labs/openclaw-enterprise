@@ -99,6 +99,47 @@ The [SandboxDriver](../../docs/reference/drivers/sandbox.md) remains responsible
 for Harness containment. This proposal does not turn its Harness provisioning
 operation into a per-task resource API.
 
+### Enable per Agent; define environments centrally
+
+Temporary environments are disabled for an Agent unless its OCE configuration
+selects a profile. Editing that configuration is sufficient; a new console
+control is not required. For example, the Agent configuration selects:
+
+```yaml
+temporaryEnvironments:
+  profileId: tests-small
+```
+
+The setting belongs to OCE Agent configuration, not the upstream Harness JSON.
+OCC snapshots the selection into the admitted AgentRevision. A saved edit takes
+effect when that revision is deployed, not halfway through an existing runtime.
+Removing the selection disables the next revision; retirement of the old
+revision starts cleanup of its environments. There is no installation-wide
+default that silently enables every Agent.
+
+The operator defines `tests-small` in the selected Compute Driver configuration.
+That definition chooses the digest-pinned container image, CPU, memory, allowed
+network destinations, idle timeout and hard lifetime. Namespace allowlists and
+aggregate quotas bound where and how much it may run. Agent configuration
+contains only a profile reference; it cannot override the image or resource
+limits. Selecting a profile does not grant IAM authority: exact-Agent permission
+and current workload identity are still required. Unknown, disallowed or
+unsupported selections fail admission for that Agent, not unrelated Agents.
+
+The initial Kubernetes implementation supplies a nonroot Linux Pod/container
+with disposable storage and private SSH, **not a VM**. Its image provides the
+remote test tools. Different approved images and sizes are different profiles;
+no arbitrary Pod manifest, cloud VM type or provisioning credential is exposed
+to the Agent. Adding Kubernetes nodes is outside this feature.
+
+Runtime images may contain the unchanged Crabbox CLI and skill files, but only
+an opted-in Agent discovers the Crabbox skills and receives trusted provider
+configuration and its private SSH identity. Disabled Agents receive no such
+setup. Hiding a skill is usability, not security: OCC must also reject direct
+acquisition or renewal without the admitted selection. The adapter uses that
+selection; caller flags cannot switch to another profile. Keep Crabbox's ordinary
+checkout synchronization and SSH command workflow unchanged.
+
 ### Reuse Crabbox without a fork
 
 Implement the existing external-provider JSON protocol in a separately invoked
@@ -194,7 +235,9 @@ boundary explicit.
 
 The [plan](../plans/0019-temporary-test-environments.md) specifies the connected
 implementation and real proof. Source review found a compatible Crabbox extension
-point; no OCE integration or live-machine test has run.
+point. A connected source draft exists, but no live Agent-to-Crabbox
+acceptance test has run. Per-Agent selection and its runtime delivery remain
+part of that draft, not a supported deployment.
 
 Draft implementation of this Kubernetes-first scope was requested on 2026-10-30.
 That permits development of the proposal; it does not mark the RFC accepted or
