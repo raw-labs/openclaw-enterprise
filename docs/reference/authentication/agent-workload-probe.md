@@ -2,8 +2,10 @@
 
 This RFC-0019 draft implements authentication for a temporary-environment
 readiness probe, not temporary environments. Do not deploy it as a remote test
-service. Allocation, durable leases, quota, SSH, expiry, cleanup and nested k3d
-are absent. Other Compute Drivers do not implement workload verification.
+service. Allocation, SSH, cleanup and nested k3d are absent. Internal
+[reservation persistence](../platform-repositories.md#draft-temporary-environment-reservations)
+now exists, but this probe neither admits reservations nor drives their lifecycle.
+Other Compute Drivers do not implement workload verification.
 
 ## Request and authority
 

@@ -34,6 +34,25 @@ Tracks platform Namespaces, their lifecycle status, and any existing Kubernetes 
 - `created_at`
 - `deleted_at`
 
+### `temporary_environment_quotas`
+
+Draft Namespace admission ceilings and reserved usage; see
+[repository semantics](../platform-repositories.md#draft-temporary-environment-reservations).
+
+- `namespace_id`
+- `max_environments`, `max_cpu_millis`, `max_memory_mib`
+- `reserved_environments`, `reserved_cpu_millis`, `reserved_memory_mib`
+
+### `temporary_environments`
+
+Immutable, Agent/revision-owned reservations. Expiry does not release capacity;
+no public acquisition or provider cleanup is connected yet.
+
+- `id`, `namespace_id`, `agent_id`, `revision_id`, `service_principal_id`
+- `request_id`, `profile_id`, `profile_fingerprint`
+- `cpu_millis`, `memory_mib`, `lifetime_seconds`
+- `state` (`reserved` only), `created_at`, `hard_expires_at`
+
 ### `agents`
 
 Stores Agent drafts, their desired runtime state, and the active revision reference.

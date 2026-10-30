@@ -28,7 +28,8 @@
     "tests/integration/postgres-connection-auth.test.mjs",
     "tests/integration/postgres-repository-transactions.test.mjs",
     "tests/integration/postgres-controller-work-targets.test.mjs",
-    "tests/integration/postgres-transaction-commit.test.mjs"
+    "tests/integration/postgres-transaction-commit.test.mjs",
+    "tests/integration/postgres-temporary-environments.test.mjs"
   ],
   "files": [
     {
@@ -219,6 +220,13 @@
       "path": "tests/integration/postgres-github-recovery-replacement.test.mjs",
       "expectedTests": [
         "online recovery replacement moves the reserved lane and survives a restart with the original seed"
+      ]
+    },
+    {
+      "path": "tests/integration/postgres-temporary-environments.test.mjs",
+      "expectedTests": [
+        "memory UOW preserves reservation identity, rollback, expiry accounting and independent quota ceilings",
+        "PostgreSQL UOW persists reservations and serializes aggregate quota across connections"
       ]
     }
   ]

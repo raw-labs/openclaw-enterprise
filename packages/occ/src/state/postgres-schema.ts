@@ -1574,3 +1574,101 @@ export const apikey = occSchema.table(
     index("apikey_reference_id_idx").on(table.referenceId),
   ],
 );
+
+export const temporaryEnvironmentQuotas = occSchema.table(
+  "temporary_environment_quotas",
+  {
+    namespaceId: text("namespace_id")
+      .primaryKey()
+      .references(() => namespaces.id, { onDelete: "restrict", onUpdate: "restrict" }),
+    maxEnvironments: integer("max_environments").notNull(),
+    maxCpuMillis: integer("max_cpu_millis").notNull(),
+    maxMemoryMiB: integer("max_memory_mib").notNull(),
+    reservedEnvironments: integer("reserved_environments").notNull().default(0),
+    reservedCpuMillis: integer("reserved_cpu_millis").notNull().default(0),
+    reservedMemoryMiB: integer("reserved_memory_mib").notNull().default(0),
+  },
+  (table) => [
+    check(
+      "temporary_environment_quotas_max_environments_check",
+      sql`${table.maxEnvironments} BETWEEN 1 AND 1000`,
+    ),
+    check("temporary_environment_quotas_max_cpu_millis_check", sql`${table.maxCpuMillis} > 0`),
+    check("temporary_environment_quotas_max_memory_mib_check", sql`${table.maxMemoryMiB} > 0`),
+    check(
+      "temporary_environment_quota_usage_valid",
+      sql`${table.reservedEnvironments} BETWEEN 0 AND ${table.maxEnvironments} AND ${table.reservedCpuMillis} BETWEEN 0 AND ${table.maxCpuMillis} AND ${table.reservedMemoryMiB} BETWEEN 0 AND ${table.maxMemoryMiB}`,
+    ),
+  ],
+);
+
+export const temporaryEnvironments = occSchema.table(
+  "temporary_environments",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`'tenv_' || gen_random_uuid()::text`),
+    namespaceId: text("namespace_id")
+      .notNull()
+      .references(() => temporaryEnvironmentQuotas.namespaceId, {
+        onDelete: "restrict",
+        onUpdate: "restrict",
+      }),
+    agentId: text("agent_id").notNull(),
+    revisionId: text("revision_id").notNull(),
+    servicePrincipalId: text("service_principal_id").notNull(),
+    requestId: text("request_id").notNull(),
+    profileId: text("profile_id").notNull(),
+    profileFingerprint: text("profile_fingerprint").notNull(),
+    cpuMillis: integer("cpu_millis").notNull(),
+    memoryMiB: integer("memory_mib").notNull(),
+    lifetimeSeconds: integer("lifetime_seconds").notNull(),
+    state: text("state").notNull().default("reserved"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    hardExpiresAt: timestamp("hard_expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique("temporary_environments_request_unique").on(
+      table.namespaceId,
+      table.agentId,
+      table.requestId,
+    ),
+    foreignKey({
+      name: "temporary_environments_revision_owner",
+      columns: [table.namespaceId, table.agentId, table.revisionId],
+      foreignColumns: [agentRevisions.namespaceId, agentRevisions.agentId, agentRevisions.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      name: "temporary_environments_principal_owner",
+      columns: [table.namespaceId, table.agentId, table.servicePrincipalId],
+      foreignColumns: [iamIdentities.namespaceId, iamIdentities.agentId, iamIdentities.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    check(
+      "temporary_environments_request_id_check",
+      sql`char_length(${table.requestId}) BETWEEN 1 AND 128 AND ${table.requestId} ~ '^[A-Za-z0-9]' AND ${table.requestId} !~ '[^A-Za-z0-9._:-]'`,
+    ),
+    check(
+      "temporary_environments_profile_id_check",
+      sql`char_length(${table.profileId}) BETWEEN 1 AND 128 AND ${table.profileId} ~ '^[A-Za-z0-9]' AND ${table.profileId} !~ '[^A-Za-z0-9._:-]'`,
+    ),
+    check(
+      "temporary_environments_profile_fingerprint_check",
+      sql`char_length(${table.profileFingerprint}) = 64 AND ${table.profileFingerprint} !~ '[^a-f0-9]'`,
+    ),
+    check("temporary_environments_cpu_millis_check", sql`${table.cpuMillis} > 0`),
+    check("temporary_environments_memory_mib_check", sql`${table.memoryMiB} > 0`),
+    check(
+      "temporary_environments_lifetime_seconds_check",
+      sql`${table.lifetimeSeconds} BETWEEN 1 AND 86400`,
+    ),
+    check("temporary_environments_state_check", sql`${table.state} = 'reserved'`),
+    check(
+      "temporary_environments_deadline_valid",
+      sql`${table.hardExpiresAt} = ${table.createdAt} + ${table.lifetimeSeconds} * interval '1 second'`,
+    ),
+  ],
+);

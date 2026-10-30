@@ -34,5 +34,28 @@ continues to suppress unsafe controller compensation.
 These are persistence boundaries; they do not authorize a resource operation.
 The controller and worker still enforce the caller's exact resource authority.
 
+## Draft temporary-environment reservations
+
+The `temporaryEnvironments` repository participates in the existing read/UOW
+boundary. Trusted admission code can set Namespace count/CPU/memory ceilings and
+reserve immutable Agent/revision-owned requests. This persistence slice is not
+connected to acquisition HTTP routes, the controller worker or Crabbox allocation.
+It does not authorize callers or validate operator profile approval.
+
+PostgreSQL admission locks the Namespace and Agent in lifecycle order, checks
+ready/running/current-revision state, then spends quota and inserts one record
+in the same transaction. Exact retries preserve identity and deadline; changed
+profile fingerprints or resource/lifetime settings conflict. Missing or exhausted
+quota fails closed. Lowering ceilings below reserved usage is refused. Count
+ceilings are 1–1000; CPU/memory values are positive 32-bit integers; hard lifetimes
+are 1–86400 seconds.
+
+Deadlines and stop never release capacity. The application role cannot delete or
+rewrite reservations or reset usage counters; foreign keys retain their revision
+and identity owners. Confirmed provider cleanup and capacity release remain the
+next lifecycle slice. Memory mirrors these constraints inside its existing
+single-writer transaction. See the
+[implementation trace](../flows/temporary-environment-readiness.md#5-draft-persistence-admission-not-connected-to-the-probe).
+
 See [PostgreSQL testing](../testing/postgresql.md) for contributor setup and
 [controller reconciliation](controller.md) for worker behavior.

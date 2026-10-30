@@ -8,6 +8,13 @@ export function bindPlatformUnitOfWork(
   lifetime: RepositoryTransactionLifetime,
 ): PlatformUnitOfWork {
   return Object.freeze({
+    temporaryEnvironments: bindRepository(repositories.temporaryEnvironments, lifetime, [
+      "getQuota",
+      "findByRequest",
+      "listForAgent",
+      "setQuota",
+      "reserve",
+    ]),
     installations: bindRepository(repositories.installations, lifetime, [
       "findInstallation",
       "getInstallation",

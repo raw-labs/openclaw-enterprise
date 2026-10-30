@@ -430,6 +430,14 @@ export type {
   RepositorySessionReadRepository,
   RepositorySessionRepository,
 } from "./ports/repository-sessions.ts";
+export type {
+  TemporaryEnvironmentRequest,
+  TemporaryEnvironmentReservation,
+  TemporaryEnvironmentQuotaLimits,
+  TemporaryEnvironmentQuota,
+  TemporaryEnvironmentReadRepository,
+  TemporaryEnvironmentRepository,
+} from "./ports/temporary-environments.ts";
 export {
   PostgresPlatformState,
   PostgresPlatformStateStore,

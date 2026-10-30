@@ -132,11 +132,17 @@ packaged in the runtime image recipe. Every lifecycle operation remains refused.
 See the [probe contract](../../docs/reference/authentication/agent-workload-probe.md)
 and [source flow](../../docs/flows/temporary-environment-readiness.md).
 
-No temporary-environment resource, persistent lease, quota reservation, controller
-work, Kubernetes allocation/cleanup, SSH or renewal is implemented. These remain
-required work, not unsupported features accepted as complete. Crabbox CLI/skill
-packaging and genuine in-Agent execution also remain unfinished. This partial
-code draft must not be presented as the requested remote-testing outcome.
+The next bounded checkpoint adds immutable reservation records and atomic
+Namespace count/CPU/memory accounting to the existing persistence/UOW owners.
+It enforces owner-scoped idempotency, active-revision admission, bounded hard
+deadlines, rollback and retained cleanup ownership. The PostgreSQL application
+role cannot reset usage or erase reservations. This is an internal storage
+capability, not a new public acquisition route.
+
+Controller admission/audit/work enqueueing, provider allocation, confirmed cleanup,
+SSH, renewal and expiry reconciliation remain disconnected. Crabbox CLI/skill
+packaging and genuine in-Agent execution remain unfinished. This partial code
+draft must not be presented as the requested remote-testing outcome.
 
 Local API credential-precedence and adapter transport tests are authored. The
 existing Kubernetes API/worker suite is extended to exercise real Pod-bound
@@ -153,9 +159,17 @@ cluster case. TypeScript build, lint, formatting, generated OpenAPI, workspace
 boundary, CI suite ownership, docs links/length and flow structure checks passed.
 These are source/local checks, not live-runtime acceptance.
 
+Persistence checkpoint verification: the new shared UOW integration case passes
+on memory; the actual PostgreSQL case is authored but not run because no migrated
+disposable `OCC_TEST_DATABASE_URL` was supplied. It covers independent dimensions
+and Agents competing for one budget, duplicate replay, rollback, SQL permissions
+and a real lifecycle-lock race. No database, cluster or deployment was created.
+This does not waive the required live SQL and eventual Agent-workflow proof.
+
 ## Manual Notes
 
 ## Changelog
 
+- 2026-10-30: Add the bounded reservation/UOW and atomic-quota checkpoint; public lifecycle remains disabled.
 - 2026-10-30: Add the partial workload-readiness code draft and explicit remaining lifecycle work against baseline `51c19ed91`.
 - 2026-10-30: Drafted the plan against OCE `80725162a`; no implementation or runtime verification claimed.

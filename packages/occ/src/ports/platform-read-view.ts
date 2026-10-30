@@ -8,6 +8,11 @@ export function createPlatformReadView(
   lifetime: RepositoryTransactionLifetime,
 ): PlatformReadView {
   return Object.freeze({
+    temporaryEnvironments: bindRepository(repositories.temporaryEnvironments, lifetime, [
+      "getQuota",
+      "findByRequest",
+      "listForAgent",
+    ]),
     operations: bindRepository(repositories.operations, lifetime, [
       "list",
       "findWork",

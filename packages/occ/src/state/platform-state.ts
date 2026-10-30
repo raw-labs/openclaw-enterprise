@@ -8,6 +8,13 @@ import type {
   RepositorySessionRepository,
 } from "../ports/repository-sessions.ts";
 import { memoryRepositorySessions } from "./memory-repository-sessions.ts";
+import { memoryTemporaryEnvironments } from "./memory-temporary-environments.ts";
+import type {
+  TemporaryEnvironmentQuota,
+  TemporaryEnvironmentReservation,
+  TemporaryEnvironmentReadRepository,
+  TemporaryEnvironmentRepository,
+} from "../ports/temporary-environments.ts";
 import {
   normalizedRepositoryBindings,
   normalizedRepositoryAccess,
@@ -846,6 +853,7 @@ export type { AgentProvisioningRecord } from "./agent-provisioning.ts";
 export type { IAMPolicyReadRepository, IAMPolicyRepository } from "@openclaw-enterprise/contracts";
 
 export interface PlatformReadView {
+  readonly temporaryEnvironments: TemporaryEnvironmentReadRepository;
   readonly installations: InstallationReadRepository;
   readonly namespaces: NamespaceReadRepository;
   readonly configurations: ConfigurationReadRepository;
@@ -863,6 +871,7 @@ export interface PlatformReadView {
 }
 
 export interface PlatformUnitOfWork extends PlatformReadView {
+  readonly temporaryEnvironments: TemporaryEnvironmentRepository;
   readonly installations: InstallationRepository;
   readonly namespaces: NamespaceRepository;
   readonly configurations: ConfigurationRepository;
@@ -915,6 +924,8 @@ interface IAMSubjectSource {
 }
 
 interface PlatformSnapshot {
+  readonly temporaryEnvironmentQuotas: Map<string, Readonly<TemporaryEnvironmentQuota>>;
+  readonly temporaryEnvironmentReservations: Map<string, Readonly<TemporaryEnvironmentReservation>>;
   installation: Readonly<Installation> | undefined;
   readonly namespaces: Map<string, Readonly<PersistedNamespace>>;
   readonly configurations: Map<string, Readonly<ConfigurationOwnership>>;
@@ -1000,6 +1011,8 @@ function cloneSnapshot(snapshot: PlatformSnapshot): PlatformSnapshot {
     workspaceSetups: new Map(
       Array.from(snapshot.workspaceSetups, ([key, setup]) => [key, immutableCopy(setup)]),
     ),
+    temporaryEnvironmentQuotas: new Map(snapshot.temporaryEnvironmentQuotas),
+    temporaryEnvironmentReservations: new Map(snapshot.temporaryEnvironmentReservations),
     // Revisions are copied on ingress/egress; appends replace frozen history arrays.
     // A separate Map isolates this snapshot's future appends without copying history.
     revisions: new Map(snapshot.revisions),
@@ -2788,6 +2801,16 @@ function repositories(
     revisions,
     iamPolicy,
     repositorySessions,
+    temporaryEnvironments: memoryTemporaryEnvironments({
+      quotas: snapshot.temporaryEnvironmentQuotas,
+      reservations: snapshot.temporaryEnvironmentReservations,
+      namespace: (id) => snapshot.namespaces.get(id),
+      agent: (namespaceId, agentId) => snapshot.agents.get(agentKey(namespaceId, agentId)),
+      revision: (namespaceId, agentId, revisionId) =>
+        snapshot.revisions
+          .get(agentKey(namespaceId, agentId))
+          ?.find((revision) => revision.id === revisionId),
+    }),
     provisioning: {
       findByWorkId: provisioningAbsent,
       findWithWork: provisioningAbsent,
@@ -2977,6 +3000,14 @@ function finalizeAgentDeletion(
   ) {
     return false;
   }
+  if (
+    [...snapshot.temporaryEnvironmentReservations.values()].some(
+      (row) => row.namespaceId === namespaceId && row.agentId === agentId,
+    )
+  ) {
+    // PostgreSQL RESTRICT foreign keys retain owners while cleanup is unfinished.
+    return false;
+  }
   const installation = snapshot.installation;
   if (installation === undefined) {
     throw new ScopeViolationError("The server-owned Installation has not been initialized.");
@@ -3052,6 +3083,8 @@ function finalizeAgentDeletion(
 /** Process-local, single-writer state. No restart or multi-process durability. */
 export class InMemoryPlatformState implements PlatformStateStore {
   private snapshot: PlatformSnapshot = {
+    temporaryEnvironmentQuotas: new Map(),
+    temporaryEnvironmentReservations: new Map(),
     installation: undefined,
     namespaces: new Map(),
     configurations: new Map(),

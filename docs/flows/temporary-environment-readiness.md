@@ -37,6 +37,15 @@ graph TD
   E -->|Denied or stopped| F
   E -->|Allowed| G["Return lifecycle not implemented"]
   G --> H["Adapter returns protocol error"]
+  U["Internal UOW reservation call"] --> L["Lock Namespace and Agent"]
+  L -->|Current owner| R{"Existing request?"}
+  L -->|Unavailable owner| X
+  R -->|Identical| S["Return original reservation"]
+  R -->|Changed| X["Reject and roll back"]
+  R -->|New| Q["Atomically reserve count, CPU, memory"]
+  Q -->|Unavailable or full| X
+  Q -->|Admitted| P["Insert immutable reservation"]
+  P --> T["Commit with owning transaction"]
 ```
 
 This diagram describes source wiring, not completed live-runtime proof.
@@ -81,9 +90,32 @@ with 16 concurrent and 600/minute overall per API instance.
 ### 4. Report the unfinished lifecycle
 
 `packages/occ/src/index.ts:getTemporaryEnvironmentReadiness` returns `supported: false` and
-`TEMPORARY_ENVIRONMENT_LIFECYCLE_NOT_IMPLEMENTED`. There is no lease row,
+`TEMPORARY_ENVIRONMENT_LIFECYCLE_NOT_IMPLEMENTED`. The probe creates no lease row,
 quota reservation, provider allocation or queued cleanup. The adapter converts
 this into a protocol error, not a usable lease or successful release.
+
+### 5. Draft persistence admission (not connected to the probe)
+
+The `packages/occ/src/ports/temporary-environments.ts` contract is bound by the existing
+`packages/occ/src/ports/platform-unit-of-work.ts` and read-view factories. It is an internal persistence path;
+the readiness request above never reserves capacity.
+
+`packages/occ/src/state/postgres-temporary-environments.ts:postgresTemporaryEnvironments` calls
+`occ.reserve_temporary_environment` in
+[`0052_temporary_environment_reservations.sql`](../../migrations/0052_temporary_environment_reservations.sql)
+from the caller's transaction. The SQL locks Namespace
+then Agent, checks current lifecycle ownership, and resolves the owner-scoped
+request ID. An identical retry returns the immutable original. Otherwise one
+quota-row update reserves count, CPU and memory before inserting the record with
+server time and a hard deadline. Any subsequent transaction failure rolls back
+both. The reservation retains its Agent/revision/principal through restrictive
+foreign keys and cannot be rewritten or deleted by the application role.
+
+`packages/occ/src/state/memory-temporary-environments.ts:memoryTemporaryEnvironments` mirrors this inside
+`InMemoryPlatformState`'s single-writer snapshot. Both implementations expose only
+reads through read views; escaped handles follow the existing transaction
+lifetime rules. Expiry does not free capacity. Provider cleanup, worker dispatch,
+profile approval, HTTP acquisition and adapter allocation remain disconnected.
 
 ## Debugging and Verification
 
@@ -99,7 +131,12 @@ fixture-only Pod success does not prove it. See
 
 Still unverified: that real-runtime extension, runtime-image build, unmodified
 Crabbox invocation inside the Agent, and all environment allocation/cleanup.
-Missing prerequisites are not an integration-test waiver.
+Missing prerequisites are not an integration-test waiver. The new
+`tests/integration/postgres-temporary-environments.test.mjs` exercises the real
+UOW adapters, independent quota dimensions, retry/rollback and owner retention.
+Its PostgreSQL case needs the existing migrated disposable application-role
+connection described in [PostgreSQL testing](../testing/postgresql.md); memory
+success is not SQL, lock-contention or durability proof.
 
 ## Related docs
 
@@ -113,4 +150,5 @@ Missing prerequisites are not an integration-test waiver.
 
 ## Changelog
 
+- 2026-10-30 11:33: Trace internal reservation/UOW admission and retained quota; no public acquisition is connected. (authoring-run/3f41f626-a22b-4df0-a178-4ddc9bd4eeca - b72b39771708547e35bd1dc8c2492d90f4ce3820)
 - 2026-10-30 02:42: Trace the draft probe added beside baseline 51c19ed91; allocation remains absent. (authoring-run/3f41f626-a22b-4df0-a178-4ddc9bd4eeca - 51c19ed9131d8a7e10aae1c6939e8cbdb2561832)
