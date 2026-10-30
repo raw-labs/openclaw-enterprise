@@ -182,23 +182,27 @@ OCC keeps its existing installation-level routes for sign-in, provider services 
 - **OpenShell Sandbox Driver** manages the revision's proxy Pod, Service, policy files and network rules.
 - **Channel Drivers** contribute the destinations required by the Agent's enabled Channels.
 
-The Driver extensions are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts). Compute passes the revision and its destinations to those interfaces. Sandbox and Credential Proxy use the existing [paired Driver registration](../../docs/reference/drivers/selection.md#select-a-protected-sender). Gateway-only registration requires the paired destination admission and proxy lifecycle capabilities, but no OpenShell management Backend, endpoint or management credentials. Selecting OpenShell management-dependent Harness or credential operations also requires their capabilities and an authenticated management Backend. Dependencies follow the selected use; Gateway-only registration must not expose management-dependent operations as usable.
+Using OpenShell to proxy Gateway traffic does not require an OpenShell management service or its credentials. The selected Drivers must validate the destination policy and create and remove the proxy. Harness or credential operations that require the management service must remain unavailable unless their required Drivers and an authenticated management Backend are configured.
 
-Selecting the paired Driver capabilities for the Gateway proxy does not select
-that Driver to provision the Harness or change repository credential delivery.
-The revision identifies the Gateway proxy pair separately from its Harness
-Sandbox selection. Gateway destination permission grants no authority to release
-Harness or repository credentials. Reuse the standalone proxy and its Kubernetes attachment without constructing unused management clients or supplying placeholder endpoint and token-file settings.
+Each deployment records which Drivers provide the Gateway proxy separately from those that run the Harness. Selecting OpenShell for Gateway traffic does not change how the Harness runs or receives repository credentials. Permission to reach an external destination does not grant access to Harness or repository credentials. Gateway-only use must not require unused management clients or placeholder service addresses and credentials.
+
+The Driver interfaces are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts). Compute supplies the Agent revision and its destinations. See [paired Driver registration](../../docs/reference/drivers/selection.md#select-a-protected-sender) for how these Drivers are configured together.
 
 ## Network enforcement and failure
 
-OpenShell authorizes destinations; Kubernetes prevents bypass. Gateway egress reaches only its revision's proxy and required internal services. Proxy ingress selects only that revision's Gateway. The Gateway's external HTTPS route is exclusively through OpenShell, including Slack. Compute refuses deployment when the selected capability or policy is unavailable. Proxy failure blocks external traffic.
+OpenShell checks external destinations; Kubernetes prevents connections that bypass those checks. The Gateway can connect only to its own proxy and required internal services. The proxy accepts connections only from the Gateway it was created for. Compute must refuse deployment if the selected Drivers cannot enforce the destination policy. If the proxy fails, external connections must fail rather than connect directly.
 
 Proxy network rules and OpenShell's DNS/address checks exclude private, loopback, link-local, metadata and infrastructure addresses. An approved DNS name must resolve to an allowed external address. Native TLS certificate and hostname verification remain enabled.
 
-Enforcement requires a Kubernetes network plugin that enforces NetworkPolicies and trusted writers of Pod labels and network rules. Kubernetes allow rules are additive. Remove the Gateway's old Channel egress grant and its access to the bundled Slack proxy, and ensure other rules cannot admit an alternate external route. Direct connections remain blocked when proxy environment variables are absent.
+The cluster must enforce Kubernetes NetworkPolicies. Only trusted administrators and platform components may change the Pod labels and network rules used by these restrictions. An additional rule can allow traffic that this design intends to block, so the rules must be checked together.
 
-Before starting a Gateway, verify resource ownership, immutable policy, pinned images and readiness of OpenShell itself. Refuse changed or missing dependencies. Stop or replacement first stops the old Gateway, then removes its proxy and waits for its Pods and established connections to disappear. Delete only that revision's resources. Service removal alone cannot close established tunnels. Changes to current admission settings must not prevent shutdown of an existing revision. Cleanup uses its saved resource identities and verifies ownership; it must not require permission to start that revision again. Report incomplete cleanup for retry without skipping shutdown of other owned workloads or deleting foreign resources.
+The Gateway must use the new proxy for all external HTTPS requests, including Slack. Remove existing Channel network rules that permit direct Internet connections, and prevent the Gateway from using the existing Slack-only proxy. Otherwise, it could avoid the new proxy's destination restrictions. The control plane continues to use the Slack-only proxy for its own operations. Direct Internet connections must remain blocked even when the Gateway's proxy environment variables are absent.
+
+Before starting the Gateway, check that its proxy resources belong to the correct Agent revision, use its saved destination policy without changes, run the pinned software images and include a ready OpenShell proxy. Do not start the Gateway if any of these checks fail.
+
+When stopping or replacing a deployment, stop its Gateway first. Then remove its proxy and wait for the proxy Pods and established connections to disappear. Deleting the Kubernetes Service alone does not close existing connections. Delete only resources belonging to that Agent revision.
+
+Stopping an existing deployment must remain possible even if configuration changes would now prevent it from starting. Use the deployment's saved records to identify its proxy resources, and verify that they belong to that deployment before deleting them. If some resources cannot be removed, report what remains so cleanup can be retried. Continue stopping the deployment's other workloads, but never delete resources belonging to another deployment.
 
 <a id="required-evidence-and-current-status"></a>
 
@@ -215,7 +219,7 @@ Exercise the regular Agent authoring, deploy, activation, replacement and stop p
 - Refusal of denied hosts and ports, forbidden addresses, wrong policies, changed resources and proxy or forwarder outages.
 - Denial of direct TCP, raw-IP, HTTP, UDP/QUIC, bundled Slack-proxy and alternate-proxy bypass attempts, including without proxy variables.
 - Complete cleanup and closure of established connections after stop or replacement, including after admission configuration changes, preserving other Agents and the successor revision.
-- The regular dedicated Agent workflow with Gateway-only registration and no management Backend; management-dependent selections still reject missing authentication.
+- Verify through the regular dedicated Agent workflow that its Gateway can use the proxy without an OpenShell management service. Separately, verify that operations which require that service cannot start without its credentials.
 - The same enforcement with local and remote Harnesses, with proxy resources in the Gateway cluster. Remote Harness transport cannot bypass destination controls or reach another Agent's Harness; execution-cluster outages do not change external permissions.
 - Rejection of nonempty destination settings when enforcement is unavailable.
 
