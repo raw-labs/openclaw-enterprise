@@ -85,10 +85,8 @@ allowed image, CPU, memory, placement, network access and maximum lifetime.
 Admission snapshots those settings so later configuration changes cannot
 silently broaden an existing environment's authority.
 
-Extend existing platform ownership, persistence, IAM, audit and controller work
-rather than adding a second scheduler. The selected infrastructure Driver
-creates, observes and deletes the resource. It reports an authorized SSH route
-and readiness only after isolation is applied.
+Reuse existing persistence, IAM, audit and controller work. The Driver reports
+readiness and an authorized SSH route only after applying isolation.
 
 Extend the [ComputeDriver](../../docs/reference/drivers/compute.md) with a
 temporary-environment contract and implement it in Kubernetes first. Keep these
@@ -130,11 +128,9 @@ lifecycle; Crabbox retains only the client state needed for its workflow.
 
 ## Authorization and isolation
 
-The first caller is the Agent, not an impersonation of the human who sent a
-chat message. Add a scoped, revocable workload authentication path tied to the
-Agent and its admitted runtime identity. OCC derives ownership from that identity
-and authorizes each exact operation through IAM. Existing non-Agent service keys
-are not a substitute for this binding.
+Authenticate the Agent through a scoped, revocable workload identity. Derive
+ownership from it and authorize every operation through IAM. Do not impersonate
+the human requester or substitute a non-Agent service key.
 
 The operator permits selected Agents to request selected profiles. Creation and
 quota reservation must be atomic. Knowledge of a lease ID grants no authority.
@@ -153,10 +149,9 @@ socket or cluster-admin credentials. Whether that profile needs a VM-backed
 runtime is an implementation question; a passing ordinary test in a Pod does
 not establish that nested k3d is safely supported.
 
-The backend must enforce the approved network destinations and prevent access
-to other tenants and control-plane services except explicitly permitted routes.
-Kubernetes placement does not itself prove network enforcement or add capacity:
-placement and admission must preserve the Harness and controller resource budgets.
+Enforce approved network destinations and block unauthorized tenant/control-plane
+access. Kubernetes placement alone proves neither isolation nor spare capacity;
+preserve Harness and controller resource budgets.
 
 ## Lifecycle and failures
 
@@ -218,8 +213,7 @@ adapter test is not sufficient.
 
 ## Evidence and related work
 
-Source review used OCE `80725162a946f80652b939a32a57ee4e922eeb5c` and Crabbox
-`c41270ea7e6016b497095cb8f0260ed1a2816a06`. Crabbox's implemented
+Reviewed OCE `80725162a` and Crabbox `c41270ea7e`. The pinned Crabbox
 [external protocol](https://github.com/openclaw/crabbox/blob/c41270ea7e6016b497095cb8f0260ed1a2816a06/internal/providers/external/protocol.go),
 [backend](https://github.com/openclaw/crabbox/blob/c41270ea7e6016b497095cb8f0260ed1a2816a06/internal/providers/external/backend.go)
 and [Slurm adapter example](https://github.com/openclaw/crabbox/blob/c41270ea7e6016b497095cb8f0260ed1a2816a06/examples/slurm-external-provider/README.md)
