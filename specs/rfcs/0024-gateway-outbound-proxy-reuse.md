@@ -20,7 +20,7 @@ Give each dedicated Agent's Gateway its own outbound destination list and enforc
 
 The selected OpenShell Driver runs one proxy Pod per Agent revision, using OpenShell's existing proxy software and policy engine. Enabled Channels automatically contribute their required destinations. Each revision saves its Agent's approved destinations and Channel requirements.
 
-Every dedicated Gateway in a single-cluster Kubernetes deployment uses this route for external HTTPS. Gateway and Harness placement and the Harness's existing protections stay unchanged. Separate execution clusters retain their existing behavior. Reject a nonempty outbound destination list when the selected topology cannot enforce it.
+Every dedicated Kubernetes Gateway uses this route for external HTTPS, whether its Harness runs in the same cluster or a separate execution cluster. Gateway and Harness placement and the Harness's existing protections stay unchanged. Reject a nonempty outbound destination list when the selected Compute cannot enforce it.
 
 <a id="one-request-before-and-after"></a>
 
@@ -115,6 +115,55 @@ The pinned OpenShell standalone `network-proxy` listener binds to loopback. `soc
 
 The proxy uses a separate Pod so Kubernetes can give it external access while restricting the Gateway to the proxy and required internal services.
 
+### Separate execution cluster
+
+The proxy stays in the Gateway's cluster and managed namespace. Only the Harness is remote; Gateway traffic to external services does not cross the execution cluster. The same per-Agent destination policy and separate proxy Pod apply in both topologies.
+
+Dashed arrows show the proposed external route. The solid arrow shows the existing Gateway–Harness transport.
+
+```mermaid
+---
+config:
+  theme: base
+  htmlLabels: true
+  themeVariables:
+    fontSize: 14px
+  flowchart:
+    nodeSpacing: 28
+    rankSpacing: 32
+    padding: 14
+    subGraphTitleMargin:
+      top: 10
+      bottom: 14
+---
+flowchart TB
+  subgraph Control["Gateway cluster"]
+    G["<b>Gateway Pod</b><br/>Channels and plugins"]
+    P["<b>Revision proxy Pod</b><br/>OpenShell"]
+    G -.->|proxy connection| P
+  end
+  subgraph Execution["Execution cluster"]
+    H["<b>Harness Pod</b><br/>Agent execution"]
+  end
+  E["<b>Approved services</b><br/>External HTTPS"]
+  P -.->|permitted destination| E
+  G <-->|authenticated transport| H
+  classDef workload fill:#EBF3F0,stroke:#7F9D93,color:#2B4038,stroke-width:1px
+  classDef external fill:#F1EEF5,stroke:#A091AD,color:#3A3243,stroke-width:1px
+  class G,P,H workload
+  class E external
+  style Control fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
+  style Execution fill:#FAFBFC,stroke:#D8DEE6,stroke-width:1px
+```
+
+Compute creates, checks and removes proxy resources through the Gateway cluster's Kubernetes client. It restricts Gateway egress to that revision's proxy and required platform services. Infrastructure address exclusions cover both clusters where their networks are reachable from the proxy.
+
+The remote Harness uses a separate platform route, not an entry in the Agent's external destination list. Network rules restrict that route to the execution endpoint; the receiving service authenticates and authorizes access to the Agent's Harness. A shared ingress must not permit access to another Agent's Harness or arbitrary forwarding.
+
+For example, Agent A's permission for `api.example.com:443` has the same effect with a local or remote Harness. Agent B gains no permission, and neither Agent can bypass its proxy through the execution endpoint.
+
+Proxy failure blocks external traffic without a direct fallback. An execution-cluster outage interrupts Harness operations but does not change the Gateway's external route or permissions. Proxy cleanup remains in the Gateway cluster and follows the revision lifecycle below.
+
 ## Proxy lifecycle and cost
 
 One proxy per Agent revision keeps its policy and connections independent. A policy change creates a new revision and proxy. Stopping one revision closes its connections while other Agents continue running.
@@ -167,6 +216,7 @@ Exercise the regular Agent authoring, deploy, activation, replacement and stop p
 - Denial of direct TCP, raw-IP, HTTP, UDP/QUIC, bundled Slack-proxy and alternate-proxy bypass attempts, including without proxy variables.
 - Complete cleanup and closure of established connections after stop or replacement, including after admission configuration changes, preserving other Agents and the successor revision.
 - The regular dedicated Agent workflow with Gateway-only registration and no management Backend; management-dependent selections still reject missing authentication.
+- The same enforcement with local and remote Harnesses, with proxy resources in the Gateway cluster. Remote Harness transport cannot bypass destination controls or reach another Agent's Harness; execution-cluster outages do not change external permissions.
 - Rejection of nonempty destination settings when enforcement is unavailable.
 
 The [implementation plan](../plans/0024-gateway-outbound-proxy-reuse.md), [source flow](../../docs/flows/gateway-outbound-destinations.md) and [QA procedure](../../docs/testing/gateway-outbound-destinations.md) hold delivery and verification details. See the pinned OpenShell [standalone role](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-supervisor/src/lib.rs#L536-L629) and [policy rules](../../deploy/runtime/gateway-proxy/sandbox-policy.rego).
