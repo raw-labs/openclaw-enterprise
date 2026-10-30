@@ -73,11 +73,16 @@ rather than adding a second scheduler. The selected infrastructure Driver
 creates, observes and deletes the resource. It reports an authorized SSH route
 and readiness only after isolation is applied.
 
-The current [ComputeDriver](../../docs/reference/drivers/compute.md) owns Agent
-deployments. The [SandboxDriver](../../docs/reference/drivers/sandbox.md) owns
-Harness containment and explicitly excludes per-tool Sandbox creation. Neither
-is already the required temporary-environment contract. Maintainers must approve
-its resource and Driver ownership before product implementation.
+Extend the [ComputeDriver](../../docs/reference/drivers/compute.md) with a
+temporary-environment contract and implement it in Kubernetes first. Keep these
+operations separate from AgentRevision deployment. Other Compute Drivers can
+implement the same contract or explicitly report it unsupported; admission must
+reject unsupported requests before creating work. Crabbox calls the OCE API and
+does not need to know which Compute implementation the Installation selects.
+
+The [SandboxDriver](../../docs/reference/drivers/sandbox.md) remains responsible
+for Harness containment. This proposal does not turn its Harness provisioning
+operation into a per-task resource API.
 
 ### Reuse Crabbox without a fork
 
@@ -120,17 +125,21 @@ Caller flags, repository configuration and adapter configuration cannot broaden
 server-enforced limits. Denied requests and successful mutations produce audit
 evidence without credentials or test-output contents.
 
-Start with one operator-controlled execution backend, not arbitrary cloud
-providers. For cluster-creating tests, require a disposable VM with its own
-container runtime and bounded capacity. Never expose the OCE host's Docker
-socket or cluster-admin credentials. A container-only test lane cannot stand in
-for proof of this VM use case.
+Implement temporary environments through Kubernetes first, with private access,
+resource limits and disposable storage. The API describes an execution
+environment, not necessarily a literal VM. Do not make KubeVirt or another VM
+operator a requirement of the platform contract.
+
+Cluster-creating tests need a separately qualified execution profile with its own
+container runtime and adequate isolation. Never expose the OCE host's Docker
+socket or cluster-admin credentials. Whether that profile needs a VM-backed
+runtime is an implementation question; a passing ordinary test in a Pod does
+not establish that nested k3d is safely supported.
 
 The backend must enforce the approved network destinations and prevent access
 to other tenants and control-plane services except explicitly permitted routes.
-Running a VM under Kubernetes does not itself prove network enforcement. A new
-VM on an exhausted host also does not create capacity: placement and admission
-must preserve the Harness and controller resource budgets.
+Kubernetes placement does not itself prove network enforcement or add capacity:
+placement and admission must preserve the Harness and controller resource budgets.
 
 ## Lifecycle and failures
 
@@ -180,9 +189,11 @@ Maintainers must decide:
 1. Approve temporary environments and scoped Agent authentication as an explicit
    implementation milestone; the current repository boundary does not admit
    these new resource and deployment behaviors.
-2. Select the platform owner and Driver extension for temporary environments.
-3. Select the first VM backend, enforcing network topology and disposable test
-   infrastructure. Do not silently introduce a new cluster operator.
+2. Review the proposed ComputeDriver extension and Kubernetes-first implementation.
+   Non-Kubernetes implementations are not required for the initial delivery.
+3. Qualify the Kubernetes execution profile for cluster-creating tests. If it
+   requires another runtime or cluster operator, review that dependency before
+   adding it; it is not a prerequisite for defining the common API.
 
 Delivery requires a real Agent-to-Crabbox-to-OCC test with a dirty checkout,
 remote command output, denial checks, duplicate-request recovery, client loss,

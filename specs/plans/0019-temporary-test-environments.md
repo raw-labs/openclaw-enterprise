@@ -13,13 +13,13 @@ rfc: ../rfcs/0019-temporary-test-environments.md
 ## Outcome and current blocker
 
 An existing Agent uses the unmodified Crabbox skill and CLI to test a dirty
-checkout on an OCE-managed temporary Linux VM. OCC owns authorization and
+checkout in an OCE-managed temporary Linux environment on Kubernetes. OCC owns authorization and
 cleanup; the Agent's Harness stays in place.
 
 **Product implementation is blocked by the active workspace milestone boundary.**
 The RFC requests approval for a new temporary-environment resource and scoped
-Agent authentication. Approval of those additions, contract ownership and the
-first VM backend must precede deployment code. This document is a draft
+Agent authentication. Approval of those additions must precede deployment code.
+The proposed owner is ComputeDriver, with Kubernetes as its first implementation. This document is a draft
 implementation plan, not a draft implementation or an accepted RFC.
 
 No infrastructure, dependencies, permissions or admission rules are changed by
@@ -29,19 +29,24 @@ this proposal. No runtime proof has run.
 
 ### 1. Settle the platform contract
 
-Review the RFC's ownership and isolation requirements. Prefer extending the
-selected Compute capability where it can represent temporary resources without
-pretending they are AgentRevisions. Introduce a separate Driver capability only
-if that owner cannot meet the contract, with an explicit architecture decision.
+Extend ComputeDriver with temporary-environment creation, observation, connection
+and deletion operations, distinct from AgentRevision operations. Implement these
+in the bundled Kubernetes Driver. Other Drivers report the capability unsupported
+until they implement the same contract; admission rejects it before allocation.
 
-Select one VM backend and its private SSH route, network enforcement and resource
-accounting. Specify approved image and execution-profile configuration, including
-CPU, memory, concurrency, idle timeout and hard lifetime. Make this operator
-configuration, not arbitrary infrastructure specifications supplied by the Agent.
+Specify the Kubernetes workload, private SSH route, network enforcement, storage
+and capacity accounting. Specify approved image and execution-profile
+configuration, including CPU, memory, concurrency, idle timeout and hard lifetime.
+Make this operator configuration, not arbitrary manifests supplied by the Agent.
 
-Record the agreed scope and backend in this plan. Keep the capability disabled
-until composition can validate all prerequisites. Missing VM or network support
-must fail closed, not fall back to the Harness host.
+First connect ordinary remote tests through a constrained Kubernetes workload.
+Then qualify the cluster-creating profile against its stronger runtime needs.
+Do not claim ordinary Pod execution proves nested k3d isolation. Assess any
+VM-backed runtime dependency within the Kubernetes implementation, not as a new
+provider decision for the Crabbox client or common API.
+
+Keep unsupported profiles disabled. Missing isolation or capacity must fail
+closed, not fall back to the Harness host.
 
 ### 2. Implement admission, identity and durable lifecycle together
 
@@ -97,8 +102,8 @@ below exists, and record any approved scope changes explicitly.
 
 ## Required verification
 
-Use a disposable database and execution infrastructure, with an approved VM image
-and enforced networking. Do not start local k3d clusters as an incidental check.
+Use a disposable database and Kubernetes execution infrastructure, with an
+approved workload image and enforced networking. Do not start local k3d clusters as an incidental check.
 Infrastructure and credential setup need explicit scope and capacity.
 
 | Outcome                 | Required integration evidence                                                                                                                 | Status  |
@@ -109,8 +114,8 @@ Infrastructure and credential setup need explicit scope and capacity.
 | Capacity                | Concurrent requests cannot exceed reserved limits; failed cleanup keeps capacity accounted for.                                               | Not run |
 | Crash recovery          | Kill the client, restart the controller and verify deadline-driven deletion without another LLM call.                                         | Not run |
 | Deletion semantics      | Interrupt deletion; observe durable retries and no successful release until provider absence is confirmed.                                    | Not run |
-| Network boundary        | Exercise permitted SSH/test traffic and denied cross-tenant, control-plane and unapproved egress from the actual VM.                          | Not run |
-| k3d workload            | Run a disposable cluster inside the temporary VM; verify no host socket/cluster credential exposure and no residual VM/storage.               | Not run |
+| Network boundary        | Exercise permitted SSH/test traffic and denied cross-tenant, control-plane and unapproved egress from the actual execution environment.       | Not run |
+| k3d workload            | Run a disposable cluster in the qualified environment; verify no host socket/cluster credential exposure and no residual workload/storage.    | Not run |
 | Revision retirement     | Revoke the caller during a retained lease; reject further use and complete controller-owned cleanup.                                          | Not run |
 
 Mocks may isolate unrelated failure inputs, but cannot replace the controller,
@@ -121,7 +126,8 @@ provider, SSH transport or network enforcement being proved. Follow the
 
 RFC and plan drafted from source inspection only. No product code, live-machine
 proof or deployment approval is included. The requested code draft remains
-blocked on the milestone and backend decisions above.
+blocked on the milestone approval above. Kubernetes is selected as the first
+implementation; its cluster-creating profile still needs runtime qualification.
 
 ## Manual Notes
 
