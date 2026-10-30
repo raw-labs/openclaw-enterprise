@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
-import { InMemoryPlatformState, PostgresPlatformState } from "../../packages/occ/src/index.ts";
+import {
+  InMemoryPlatformState,
+  PostgresPlatformState,
+  PostgresWorkQueue,
+} from "../../packages/occ/src/index.ts";
 import { seedSessionRevision } from "../conformance/repository-sessions.contract.mjs";
 import { databaseUrl, requiresPostgres } from "../helpers/postgres-database.mjs";
 
@@ -33,11 +37,15 @@ function request(revision, overrides = {}) {
     agentId: revision.agentId,
     revisionId: revision.id,
     requestId: randomUUID(),
+    name: "lease-test",
+    slug: "test",
     profileId: "ordinary-tests",
     profileFingerprint: "a".repeat(64),
     cpuMillis: 500,
     memoryMiB: 512,
     lifetimeSeconds: 60,
+    idleTimeoutSeconds: 30,
+    sshPublicKey: "ssh-ed25519 " + Buffer.alloc(51, 7).toString("base64"),
     ...overrides,
   };
 }
@@ -90,6 +98,8 @@ async function exercise(store, reopened) {
     undefined,
   );
   for (const change of [
+    { name: "different" },
+    { slug: "different" },
     { profileFingerprint: "b".repeat(64) },
     { cpuMillis: 501 },
     { lifetimeSeconds: 2 },
@@ -140,12 +150,13 @@ async function exercise(store, reopened) {
   );
   assert.equal((await quota()).maxEnvironments, 2);
 
-  // Exact active revision and desired-running state are rechecked even on idempotent replay.
-  await assert.rejects(reserve({ ...input, revisionId: "rev_" + randomUUID() }), scopeError);
+  // An idempotency collision stays a conflict; closed retries never renew or reallocate.
+  await assert.rejects(reserve({ ...input, revisionId: "rev_" + randomUUID() }), conflictError);
   await store.transact((unit) =>
     unit.agents.transitionAgentDesiredRuntimeState(namespace.id, agent.id, "running", "stopped"),
   );
-  await assert.rejects(reserve(), scopeError);
+  assert.equal((await reserve()).state, "deleting");
+  await assert.rejects(reserve({ ...input, requestId: randomUUID() }), scopeError);
   assert.equal(
     (await quota()).reservedEnvironments,
     2,
@@ -376,6 +387,153 @@ test(
       (await reopened.read((view) => view.temporaryEnvironments.getQuota(fresh.namespace.id)))
         .reservedEnvironments,
       0,
+    );
+  },
+);
+
+async function touchAndRelease(store) {
+  const { namespace, agent, revision } = await owner(store);
+  await store.transact((unit) => unit.temporaryEnvironments.setQuota(namespace.id, limits));
+  const input = request(revision, { lifetimeSeconds: 10, idleTimeoutSeconds: 2 });
+  const saved = await store.transact((unit) => unit.temporaryEnvironments.reserve(input));
+  await delay(20);
+  const touched = await store.transact((unit) =>
+    unit.temporaryEnvironments.touch(namespace.id, agent.id, input.requestId),
+  );
+  assert.ok(Date.parse(touched.idleExpiresAt) > Date.parse(saved.idleExpiresAt));
+  assert.equal(touched.hardExpiresAt, saved.hardExpiresAt);
+  assert.equal(touched.allocationStarted, false);
+  const released = await store.transact((unit) =>
+    unit.temporaryEnvironments.requestDeletion(namespace.id, agent.id, input.requestId),
+  );
+  assert.equal(released.state, "deleting");
+  assert.equal(
+    await store.transact((unit) =>
+      unit.temporaryEnvironments.touch(namespace.id, agent.id, input.requestId),
+    ),
+    undefined,
+  );
+  assert.deepEqual(
+    await store.transact((unit) => unit.temporaryEnvironments.reserve(input)),
+    released,
+  );
+  assert.equal(
+    (await store.read((view) => view.temporaryEnvironments.getQuota(namespace.id)))
+      .reservedEnvironments,
+    1,
+    "caller release is an obligation, never evidence that a provider resource is absent",
+  );
+  return { saved, input, namespace, agent };
+}
+
+test("memory touch renews only idle deadline and release retains quota", async () => {
+  await touchAndRelease(new InMemoryPlatformState());
+});
+
+test(
+  "PostgreSQL touch, durable work, claim fencing and response-loss allocation recovery",
+  requiresPostgres,
+  async (context) => {
+    const pool = new pg.Pool({ connectionString: databaseUrl });
+    context.after(() => pool.end());
+    const state = new PostgresPlatformState(pool);
+    const { saved, namespace } = await touchAndRelease(state);
+    const key = "temporary_environment:" + saved.id;
+    const work = (
+      await pool.query("SELECT * FROM occ.controller_work WHERE idempotency_key=$1", [key])
+    ).rows[0];
+    assert.equal(work.work_kind, "temporary_environment");
+    assert.equal(work.state, "queued");
+    // A guessed/stale token cannot start an effect or release accounting, even with an exact ID.
+    assert.equal(
+      await state.transact((unit) =>
+        unit.temporaryEnvironments.reconcile(
+          { idempotencyKey: key, claimToken: randomUUID() },
+          saved.id,
+          "confirmAbsent",
+        ),
+      ),
+      undefined,
+    );
+    assert.equal(
+      (await state.read((view) => view.temporaryEnvironments.getQuota(namespace.id)))
+        .reservedEnvironments,
+      1,
+    );
+
+    const fresh = await owner(state);
+    await state.transact((unit) => unit.temporaryEnvironments.setQuota(fresh.namespace.id, limits));
+    const input = request(fresh.revision);
+    const record = await state.transact((unit) => unit.temporaryEnvironments.reserve(input));
+    const claim = {
+      idempotencyKey: "temporary_environment:" + record.id,
+      claimToken: randomUUID(),
+    };
+    // This is the actual persisted queue claim shape, not a provider-success fake. No external
+    // create runs: the crash point is after effect-start has committed but before any receipt.
+    await pool.query(
+      "UPDATE occ.controller_work SET state='claimed',claim_token=$2,lease_expires_at=clock_timestamp()+interval '30 seconds',attempt_count=1 WHERE idempotency_key=$1",
+      [claim.idempotencyKey, claim.claimToken],
+    );
+    const begun = await state.transact((unit) =>
+      unit.temporaryEnvironments.reconcile(claim, record.id, "beginAllocation"),
+    );
+    assert.equal(begun.state, "provisioning");
+    assert.equal(begun.allocationStarted, true);
+    assert.equal(
+      await state.transact((unit) =>
+        unit.temporaryEnvironments.reconcile(claim, record.id, "beginAllocation"),
+      ),
+      undefined,
+      "replaying the same live claim cannot authorize a second provider create",
+    );
+    const reopened = new PostgresPlatformState(pool);
+    assert.equal(
+      (
+        await reopened.read((view) =>
+          view.temporaryEnvironments.findByRequest(
+            input.namespaceId,
+            input.agentId,
+            input.requestId,
+          ),
+        )
+      ).allocationStarted,
+      true,
+    );
+    await pool.query(
+      "UPDATE occ.controller_work SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE idempotency_key=$1",
+      [claim.idempotencyKey],
+    );
+    assert.equal(
+      await reopened.transact((unit) =>
+        unit.temporaryEnvironments.reconcile(claim, record.id, "delete"),
+      ),
+      undefined,
+    );
+    assert.equal(
+      (await state.read((view) => view.temporaryEnvironments.getQuota(fresh.namespace.id)))
+        .reservedEnvironments,
+      1,
+    );
+    // Exhausted claims still recover: losing the receipt must not drop the only cleanup work.
+    await new PostgresWorkQueue(pool, { maxAttempts: 1 }).recoverStale();
+    const recovered = (
+      await pool.query("SELECT state FROM occ.controller_work WHERE idempotency_key=$1", [
+        claim.idempotencyKey,
+      ])
+    ).rows[0];
+    assert.equal(recovered.state, "queued");
+    assert.equal(
+      (
+        await reopened.read((view) =>
+          view.temporaryEnvironments.findByRequest(
+            input.namespaceId,
+            input.agentId,
+            input.requestId,
+          ),
+        )
+      ).allocationStarted,
+      true,
     );
   },
 );

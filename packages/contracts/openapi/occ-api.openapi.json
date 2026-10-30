@@ -1209,7 +1209,7 @@
     },
     "securitySchemes": {
       "agentWorkload": {
-        "description": "Draft: active Agent workload credential; accepted only by temporary-environment readiness.",
+        "description": "Active Agent workload credential; accepted only by temporary-environment operations.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -22029,6 +22029,554 @@
         ]
       }
     },
+    "/namespaces/{namespaceId}/agents/{agentId}/temporary-environments": {
+      "get": {
+        "description": "Requires operate permission on the requested Agent.",
+        "operationId": "listTemporaryEnvironments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "agentId": {
+                            "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                            "type": "string"
+                          },
+                          "cpuMillis": { "minimum": 1, "type": "integer" },
+                          "createdAt": {
+                            "format": "date-time",
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                            "type": "string"
+                          },
+                          "hardExpiresAt": {
+                            "format": "date-time",
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                            "type": "string"
+                          },
+                          "id": { "pattern": "^tenv_[0-9a-f-]{36}$", "type": "string" },
+                          "idleExpiresAt": {
+                            "format": "date-time",
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                            "type": "string"
+                          },
+                          "memoryMiB": { "minimum": 1, "type": "integer" },
+                          "name": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                            "type": "string"
+                          },
+                          "namespaceId": {
+                            "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                            "type": "string"
+                          },
+                          "profileId": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                            "type": "string"
+                          },
+                          "requestId": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                            "type": "string"
+                          },
+                          "revisionId": {
+                            "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                            "type": "string"
+                          },
+                          "slug": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                            "type": "string"
+                          },
+                          "ssh": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "host": { "maxLength": 253, "minLength": 1, "type": "string" },
+                              "port": { "maximum": 65535, "minimum": 1, "type": "integer" },
+                              "user": { "maxLength": 64, "minLength": 1, "type": "string" }
+                            },
+                            "required": ["host", "port", "user"],
+                            "type": "object"
+                          },
+                          "state": {
+                            "anyOf": [
+                              { "const": "reserved", "type": "string" },
+                              { "const": "provisioning", "type": "string" },
+                              { "const": "ready", "type": "string" },
+                              { "const": "deleting", "type": "string" },
+                              { "const": "deleted", "type": "string" }
+                            ]
+                          },
+                          "usable": { "type": "boolean" }
+                        },
+                        "required": [
+                          "id",
+                          "namespaceId",
+                          "agentId",
+                          "revisionId",
+                          "requestId",
+                          "name",
+                          "slug",
+                          "profileId",
+                          "state",
+                          "createdAt",
+                          "hardExpiresAt",
+                          "idleExpiresAt",
+                          "cpuMillis",
+                          "memoryMiB",
+                          "usable"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": { "requestId": { "type": "string" } },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [{ "agentWorkload": [] }],
+        "summary": "List temporary environments owned by the current Agent revision",
+        "tags": ["Agents"],
+        "x-openclaw-permissions": [
+          { "action": "operate", "resourceKind": "agent", "scope": "requested" }
+        ]
+      },
+      "post": {
+        "description": "Requires operate permission on the requested Agent.",
+        "operationId": "acquireTemporaryEnvironment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  "profileId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  "slug": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  "sshPublicKey": {
+                    "maxLength": 80,
+                    "minLength": 80,
+                    "pattern": "^ssh-ed25519 [A-Za-z0-9+/]{68}$",
+                    "type": "string"
+                  }
+                },
+                "required": ["requestId", "name", "slug", "profileId", "sshPublicKey"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "agentId": {
+                          "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "cpuMillis": { "minimum": 1, "type": "integer" },
+                        "createdAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "hardExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "id": { "pattern": "^tenv_[0-9a-f-]{36}$", "type": "string" },
+                        "idleExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "memoryMiB": { "minimum": 1, "type": "integer" },
+                        "name": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "profileId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "revisionId": {
+                          "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "slug": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "ssh": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "port": { "maximum": 65535, "minimum": 1, "type": "integer" },
+                            "user": { "maxLength": 64, "minLength": 1, "type": "string" }
+                          },
+                          "required": ["host", "port", "user"],
+                          "type": "object"
+                        },
+                        "state": {
+                          "anyOf": [
+                            { "const": "reserved", "type": "string" },
+                            { "const": "provisioning", "type": "string" },
+                            { "const": "ready", "type": "string" },
+                            { "const": "deleting", "type": "string" },
+                            { "const": "deleted", "type": "string" }
+                          ]
+                        },
+                        "usable": { "type": "boolean" }
+                      },
+                      "required": [
+                        "id",
+                        "namespaceId",
+                        "agentId",
+                        "revisionId",
+                        "requestId",
+                        "name",
+                        "slug",
+                        "profileId",
+                        "state",
+                        "createdAt",
+                        "hardExpiresAt",
+                        "idleExpiresAt",
+                        "cpuMillis",
+                        "memoryMiB",
+                        "usable"
+                      ],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": { "requestId": { "type": "string" } },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "agentId": {
+                          "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "cpuMillis": { "minimum": 1, "type": "integer" },
+                        "createdAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "hardExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "id": { "pattern": "^tenv_[0-9a-f-]{36}$", "type": "string" },
+                        "idleExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "memoryMiB": { "minimum": 1, "type": "integer" },
+                        "name": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "profileId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "revisionId": {
+                          "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "slug": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "ssh": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "port": { "maximum": 65535, "minimum": 1, "type": "integer" },
+                            "user": { "maxLength": 64, "minLength": 1, "type": "string" }
+                          },
+                          "required": ["host", "port", "user"],
+                          "type": "object"
+                        },
+                        "state": {
+                          "anyOf": [
+                            { "const": "reserved", "type": "string" },
+                            { "const": "provisioning", "type": "string" },
+                            { "const": "ready", "type": "string" },
+                            { "const": "deleting", "type": "string" },
+                            { "const": "deleted", "type": "string" }
+                          ]
+                        },
+                        "usable": { "type": "boolean" }
+                      },
+                      "required": [
+                        "id",
+                        "namespaceId",
+                        "agentId",
+                        "revisionId",
+                        "requestId",
+                        "name",
+                        "slug",
+                        "profileId",
+                        "state",
+                        "createdAt",
+                        "hardExpiresAt",
+                        "idleExpiresAt",
+                        "cpuMillis",
+                        "memoryMiB",
+                        "usable"
+                      ],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": { "requestId": { "type": "string" } },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "501": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [{ "agentWorkload": [] }],
+        "summary": "Reserve an approved temporary environment for the active Agent workload",
+        "tags": ["Agents"],
+        "x-openclaw-permissions": [
+          { "action": "operate", "resourceKind": "agent", "scope": "requested" }
+        ]
+      }
+    },
     "/namespaces/{namespaceId}/agents/{agentId}/temporary-environments/readiness": {
       "get": {
         "description": "Requires operate permission on the requested Agent.",
@@ -22063,13 +22611,43 @@
                     "data": {
                       "additionalProperties": false,
                       "properties": {
-                        "reason": {
-                          "const": "TEMPORARY_ENVIRONMENT_LIFECYCLE_NOT_IMPLEMENTED",
-                          "type": "string"
+                        "profiles": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "cpuMillis": { "minimum": 1, "type": "integer" },
+                              "id": {
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                                "type": "string"
+                              },
+                              "idleTimeoutSeconds": {
+                                "maximum": 86400,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "lifetimeSeconds": {
+                                "maximum": 86400,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "memoryMiB": { "minimum": 1, "type": "integer" }
+                            },
+                            "required": [
+                              "id",
+                              "cpuMillis",
+                              "memoryMiB",
+                              "lifetimeSeconds",
+                              "idleTimeoutSeconds"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
                         },
-                        "supported": { "const": false, "type": "boolean" }
+                        "supported": { "type": "boolean" }
                       },
-                      "required": ["supported", "reason"],
+                      "required": ["supported", "profiles"],
                       "type": "object"
                     },
                     "meta": {
@@ -22130,7 +22708,736 @@
           }
         },
         "security": [{ "agentWorkload": [] }],
-        "summary": "Draft: Check temporary-environment readiness with an active Agent workload identity",
+        "summary": "Check approved temporary environment profiles for the active Agent workload",
+        "tags": ["Agents"],
+        "x-openclaw-permissions": [
+          { "action": "operate", "resourceKind": "agent", "scope": "requested" }
+        ]
+      }
+    },
+    "/namespaces/{namespaceId}/agents/{agentId}/temporary-environments/{requestId}": {
+      "delete": {
+        "description": "Requires operate permission on the requested Agent.",
+        "operationId": "releaseTemporaryEnvironment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "agentId": {
+                          "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "cpuMillis": { "minimum": 1, "type": "integer" },
+                        "createdAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "hardExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "id": { "pattern": "^tenv_[0-9a-f-]{36}$", "type": "string" },
+                        "idleExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "memoryMiB": { "minimum": 1, "type": "integer" },
+                        "name": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "profileId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "revisionId": {
+                          "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "slug": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "ssh": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "port": { "maximum": 65535, "minimum": 1, "type": "integer" },
+                            "user": { "maxLength": 64, "minLength": 1, "type": "string" }
+                          },
+                          "required": ["host", "port", "user"],
+                          "type": "object"
+                        },
+                        "state": {
+                          "anyOf": [
+                            { "const": "reserved", "type": "string" },
+                            { "const": "provisioning", "type": "string" },
+                            { "const": "ready", "type": "string" },
+                            { "const": "deleting", "type": "string" },
+                            { "const": "deleted", "type": "string" }
+                          ]
+                        },
+                        "usable": { "type": "boolean" }
+                      },
+                      "required": [
+                        "id",
+                        "namespaceId",
+                        "agentId",
+                        "revisionId",
+                        "requestId",
+                        "name",
+                        "slug",
+                        "profileId",
+                        "state",
+                        "createdAt",
+                        "hardExpiresAt",
+                        "idleExpiresAt",
+                        "cpuMillis",
+                        "memoryMiB",
+                        "usable"
+                      ],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": { "requestId": { "type": "string" } },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "agentId": {
+                          "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "cpuMillis": { "minimum": 1, "type": "integer" },
+                        "createdAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "hardExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "id": { "pattern": "^tenv_[0-9a-f-]{36}$", "type": "string" },
+                        "idleExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "memoryMiB": { "minimum": 1, "type": "integer" },
+                        "name": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "profileId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "revisionId": {
+                          "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "slug": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "ssh": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "port": { "maximum": 65535, "minimum": 1, "type": "integer" },
+                            "user": { "maxLength": 64, "minLength": 1, "type": "string" }
+                          },
+                          "required": ["host", "port", "user"],
+                          "type": "object"
+                        },
+                        "state": {
+                          "anyOf": [
+                            { "const": "reserved", "type": "string" },
+                            { "const": "provisioning", "type": "string" },
+                            { "const": "ready", "type": "string" },
+                            { "const": "deleting", "type": "string" },
+                            { "const": "deleted", "type": "string" }
+                          ]
+                        },
+                        "usable": { "type": "boolean" }
+                      },
+                      "required": [
+                        "id",
+                        "namespaceId",
+                        "agentId",
+                        "revisionId",
+                        "requestId",
+                        "name",
+                        "slug",
+                        "profileId",
+                        "state",
+                        "createdAt",
+                        "hardExpiresAt",
+                        "idleExpiresAt",
+                        "cpuMillis",
+                        "memoryMiB",
+                        "usable"
+                      ],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": { "requestId": { "type": "string" } },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [{ "agentWorkload": [] }],
+        "summary": "Request cleanup; only deleted state confirms provider absence",
+        "tags": ["Agents"],
+        "x-openclaw-permissions": [
+          { "action": "operate", "resourceKind": "agent", "scope": "requested" }
+        ]
+      },
+      "get": {
+        "description": "Requires operate permission on the requested Agent.",
+        "operationId": "getTemporaryEnvironment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "agentId": {
+                          "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "cpuMillis": { "minimum": 1, "type": "integer" },
+                        "createdAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "hardExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "id": { "pattern": "^tenv_[0-9a-f-]{36}$", "type": "string" },
+                        "idleExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "memoryMiB": { "minimum": 1, "type": "integer" },
+                        "name": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "profileId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "revisionId": {
+                          "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "slug": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "ssh": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "port": { "maximum": 65535, "minimum": 1, "type": "integer" },
+                            "user": { "maxLength": 64, "minLength": 1, "type": "string" }
+                          },
+                          "required": ["host", "port", "user"],
+                          "type": "object"
+                        },
+                        "state": {
+                          "anyOf": [
+                            { "const": "reserved", "type": "string" },
+                            { "const": "provisioning", "type": "string" },
+                            { "const": "ready", "type": "string" },
+                            { "const": "deleting", "type": "string" },
+                            { "const": "deleted", "type": "string" }
+                          ]
+                        },
+                        "usable": { "type": "boolean" }
+                      },
+                      "required": [
+                        "id",
+                        "namespaceId",
+                        "agentId",
+                        "revisionId",
+                        "requestId",
+                        "name",
+                        "slug",
+                        "profileId",
+                        "state",
+                        "createdAt",
+                        "hardExpiresAt",
+                        "idleExpiresAt",
+                        "cpuMillis",
+                        "memoryMiB",
+                        "usable"
+                      ],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": { "requestId": { "type": "string" } },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [{ "agentWorkload": [] }],
+        "summary": "Read exact-request temporary environment state and usable SSH metadata",
+        "tags": ["Agents"],
+        "x-openclaw-permissions": [
+          { "action": "operate", "resourceKind": "agent", "scope": "requested" }
+        ]
+      }
+    },
+    "/namespaces/{namespaceId}/agents/{agentId}/temporary-environments/{requestId}/touch": {
+      "post": {
+        "description": "Requires operate permission on the requested Agent.",
+        "operationId": "touchTemporaryEnvironment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespaceId",
+            "required": true,
+            "schema": {
+              "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "additionalProperties": false, "properties": {}, "type": "object" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "agentId": {
+                          "pattern": "^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "cpuMillis": { "minimum": 1, "type": "integer" },
+                        "createdAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "hardExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "id": { "pattern": "^tenv_[0-9a-f-]{36}$", "type": "string" },
+                        "idleExpiresAt": {
+                          "format": "date-time",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$",
+                          "type": "string"
+                        },
+                        "memoryMiB": { "minimum": 1, "type": "integer" },
+                        "name": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "namespaceId": {
+                          "pattern": "^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "profileId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "revisionId": {
+                          "pattern": "^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                          "type": "string"
+                        },
+                        "slug": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "type": "string"
+                        },
+                        "ssh": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "host": { "maxLength": 253, "minLength": 1, "type": "string" },
+                            "port": { "maximum": 65535, "minimum": 1, "type": "integer" },
+                            "user": { "maxLength": 64, "minLength": 1, "type": "string" }
+                          },
+                          "required": ["host", "port", "user"],
+                          "type": "object"
+                        },
+                        "state": {
+                          "anyOf": [
+                            { "const": "reserved", "type": "string" },
+                            { "const": "provisioning", "type": "string" },
+                            { "const": "ready", "type": "string" },
+                            { "const": "deleting", "type": "string" },
+                            { "const": "deleted", "type": "string" }
+                          ]
+                        },
+                        "usable": { "type": "boolean" }
+                      },
+                      "required": [
+                        "id",
+                        "namespaceId",
+                        "agentId",
+                        "revisionId",
+                        "requestId",
+                        "name",
+                        "slug",
+                        "profileId",
+                        "state",
+                        "createdAt",
+                        "hardExpiresAt",
+                        "idleExpiresAt",
+                        "cpuMillis",
+                        "memoryMiB",
+                        "usable"
+                      ],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "additionalProperties": false,
+                      "properties": { "requestId": { "type": "string" } },
+                      "required": ["requestId"],
+                      "type": "object"
+                    }
+                  },
+                  "required": ["data", "meta"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "400": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "401": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/def-7" } }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [{ "agentWorkload": [] }],
+        "summary": "Renew idle lifetime without extending the immutable hard deadline",
         "tags": ["Agents"],
         "x-openclaw-permissions": [
           { "action": "operate", "resourceKind": "agent", "scope": "requested" }

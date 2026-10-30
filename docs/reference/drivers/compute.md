@@ -18,8 +18,7 @@ the [feature matrix](compute-matrix.md), and
 [Shared contracts](../../../packages/contracts/src/index.ts) require `id`,
 `implementation`, and `capability: "compute"`.
 
-Optional `verifyAgentWorkloadIdentity` supports the
-[draft workload probe](../authentication/agent-workload-probe.md), not allocation.
+See the optional, [unqualified temporary-environment contract](../authentication/agent-workload-probe.md).
 
 Optional `getRuntimeImages(revision)` returns
 `{workload, container, image, imageId, commit, openclawCommit}` entries for

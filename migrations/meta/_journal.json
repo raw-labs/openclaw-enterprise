@@ -365,6 +365,13 @@
       "when": 1787000000052,
       "tag": "0052_temporary_environment_reservations",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787000000053,
+      "tag": "0053_temporary_environment_lifecycle",
+      "breakpoints": true
     }
   ]
 }

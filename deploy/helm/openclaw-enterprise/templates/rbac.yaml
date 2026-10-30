@@ -1,3 +1,6 @@
+{{- if not (kindIs "bool" .Values.temporaryEnvironments.enabled) }}
+{{- fail "temporaryEnvironments.enabled must be an explicit boolean" }}
+{{- end }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -67,7 +70,7 @@ rules:
   # node setup or binding volume at once.
   - apiGroups: [""]
     resources: [pods]
-    verbs: [get, list, watch, patch]
+    verbs: [get, list, watch, patch{{ if .Values.temporaryEnvironments.enabled }}, create, delete{{ end }}]
   - apiGroups: [""]
     resources: [pods/proxy]
     verbs: [get]
@@ -149,3 +152,29 @@ rules:
     resources: [events]
     verbs: [get, list]
   {{- end }}
+
+{{- if .Values.temporaryEnvironments.enabled }}
+---
+# TokenReview is cluster-scoped, but grants no workload mutation authority.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-openclaw-workload-authentication
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-openclaw-workload-authentication
+subjects:
+  - kind: ServiceAccount
+    name: openclaw-enterprise-api
+    namespace: {{ .Release.Namespace | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-openclaw-workload-authentication
+{{- end }}

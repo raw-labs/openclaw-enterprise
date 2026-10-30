@@ -3800,3 +3800,89 @@ test(
     assert.equal(active.activeRevisionId, current.id);
   },
 );
+
+// This proves durable worker behavior when the selected Driver has no temporary cleanup
+// capability. It does not claim external provider allocation or confirmed-absence proof.
+test(
+  "temporary environment worker retains cleanup and quota when selected Compute lacks cleanup",
+  requiresPostgres,
+  async (context) => {
+    const fixture = await setup(context, { maxAttempts: 1 });
+    const { owner, candidate } = await fixture.admitInitialRevision(
+      "temporary-cleanup-unavailable",
+    );
+    await fixture.start(fixture.compute);
+    await fixture.work(candidate, "succeeded");
+    await fixture.stop();
+    await fixture.state.transact((unit) =>
+      unit.temporaryEnvironments.setQuota(fixture.namespace.id, {
+        maxEnvironments: 1,
+        maxCpuMillis: 500,
+        maxMemoryMiB: 512,
+      }),
+    );
+    const reserved = await fixture.state.transact((unit) =>
+      unit.temporaryEnvironments.reserve({
+        namespaceId: fixture.namespace.id,
+        agentId: owner.id,
+        revisionId: candidate.id,
+        requestId: randomUUID(),
+        name: "lease-test",
+        slug: "test",
+        profileId: "worker-failure-proof",
+        profileFingerprint: "a".repeat(64),
+        cpuMillis: 500,
+        memoryMiB: 512,
+        lifetimeSeconds: 60,
+        idleTimeoutSeconds: 30,
+        sshPublicKey: "ssh-ed25519 " + Buffer.alloc(51, 7).toString("base64"),
+      }),
+    );
+    await fixture.state.transact((unit) =>
+      unit.temporaryEnvironments.requestDeletion(
+        reserved.namespaceId,
+        reserved.agentId,
+        reserved.requestId,
+      ),
+    );
+    // Do not replace missing cleanup with a fake success: the existing Driver genuinely lacks it.
+    await fixture.start(fixture.compute);
+    const workId = "temporary_environment:" + reserved.id;
+    await waitFor("temporary cleanup to remain queued after Compute failure", async () => {
+      const row = (
+        await fixture.observerPool.query(
+          "SELECT state,available_at > clock_timestamp() AS attempted FROM occ.controller_work WHERE idempotency_key=$1",
+          [workId],
+        )
+      ).rows[0];
+      return row?.state === "queued" && row.attempted;
+    });
+    await fixture.stop();
+    const record = await fixture.state.read((view) =>
+      view.temporaryEnvironments.findByRequest(
+        reserved.namespaceId,
+        reserved.agentId,
+        reserved.requestId,
+      ),
+    );
+    assert.equal(record.state, "deleting");
+    assert.equal(record.allocationStarted, false);
+    assert.equal(
+      (
+        await fixture.state.read((view) =>
+          view.temporaryEnvironments.getQuota(reserved.namespaceId),
+        )
+      ).reservedEnvironments,
+      1,
+    );
+    assert.equal(
+      (
+        await fixture.observerPool.query(
+          "SELECT state FROM occ.controller_work WHERE idempotency_key=$1",
+          [workId],
+        )
+      ).rows[0].state,
+      "queued",
+    );
+  },
+);

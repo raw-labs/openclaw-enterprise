@@ -222,6 +222,19 @@ RUN --mount=type=bind,from=openclaw-source,source=/source/scripts,target=/verifi
     node /tmp/build-runtime-assets.mjs package /source /out \
     && node /verification/scripts/check-package-dist-imports.mjs /source
 
+# Compile the unmodified upstream CLI; its complete skill tree is copied below.
+FROM docker.io/library/golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS crabbox-build
+WORKDIR /source
+RUN --mount=type=secret,id=build-ca,required=false \
+    set -eu; \
+    if [ -f /run/secrets/build-ca ]; then export CURL_CA_BUNDLE=/run/secrets/build-ca; fi; \
+    curl --fail --location --silent --show-error \
+      https://codeload.github.com/openclaw/crabbox/tar.gz/c41270ea7e6016b497095cb8f0260ed1a2816a06 -o /tmp/crabbox.tar.gz; \
+    echo 'd49d2e8851249abad523b450721526592f5a0286f40f8d4e626642a0555c07d4  /tmp/crabbox.tar.gz' | sha256sum --check --strict; \
+    tar -xzf /tmp/crabbox.tar.gz --strip-components=1; \
+    rm /tmp/crabbox.tar.gz
+RUN CGO_ENABLED=0 GOTOOLCHAIN=local go build -trimpath -o /out/crabbox ./cmd/crabbox
+
 FROM node-runtime-base AS runtime
 
 ARG TARGETARCH
@@ -236,7 +249,7 @@ WORKDIR /app
 
 RUN node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major !== 24 || minor < 16) throw new Error(`OpenClaw Enterprise runtime images require Node.js 24.16+; found ${process.version}.`);'
 
-RUN apt-get update && apt-get install -y --no-install-recommends tini git ca-certificates curl openssh-client libstdc++6 libgomp1 python3 procps && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends tini git rsync ca-certificates curl openssh-client libstdc++6 libgomp1 python3 procps && rm -rf /var/lib/apt/lists/*
 # Version checks use throwaway state directories: gh writes a random device ID
 # and Codex a randomly named arg0 directory, which would otherwise ship.
 # --retry rides out GitHub's transient release-download errors (HTTP 408, 429,
@@ -304,8 +317,13 @@ RUN node -e 'const fs = require("node:fs"); const provenance = JSON.parse(fs.rea
 LABEL org.opencontainers.image.revision=${OCC_BUILD_REVISION}
 RUN node -e 'const fs = require("node:fs"); const revision = process.argv[1]; if (revision && !/^[a-f0-9]{40}$/.test(revision)) throw new Error("Invalid OCE build revision"); fs.writeFileSync("/opt/oce/runtime/build.json", JSON.stringify({commit: revision || null}));' "$OCC_BUILD_REVISION"
 
-# Draft workload-authentication probe; no allocation operations are enabled.
-COPY --chmod=0555 deploy/runtime/temporary-environments/provider.mjs /usr/local/bin/occ-crabbox-provider
+# External provider selection is opt-in in the Agent-local trusted Crabbox config.
+COPY --from=crabbox-build --chmod=0555 /out/crabbox /usr/local/bin/crabbox
+COPY --from=crabbox-build /source/skills/crabbox/ /app/skills/crabbox/
+COPY --from=crabbox-build /source/skills/crabbox-quickstart/ /app/skills/crabbox-quickstart/
+COPY --chmod=0555 deploy/runtime/temporary-environments/provider.mjs /opt/oce/temporary-environments/provider.mjs
+COPY --chmod=0444 deploy/runtime/temporary-environments/transport.mjs /opt/oce/temporary-environments/transport.mjs
+RUN ln -s /opt/oce/temporary-environments/provider.mjs /usr/local/bin/occ-crabbox-provider
 
 # Keep this last: a client change then rebuilds only this layer (see repository-client-build).
 COPY --from=repository-client-build /build/.build/runtime-client/ /

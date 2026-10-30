@@ -14,6 +14,9 @@ export function bindPlatformUnitOfWork(
       "listForAgent",
       "setQuota",
       "reserve",
+      "touch",
+      "requestDeletion",
+      "reconcile",
     ]),
     installations: bindRepository(repositories.installations, lifetime, [
       "findInstallation",

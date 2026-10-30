@@ -76,6 +76,10 @@ a later deployment must retain both earlier files and writes from the failed
 candidate. This proves serial replacement on local storage, not cloud CSI detach,
 node fencing, or data movement between nodes.
 
+### Temporary SSH lifecycle extension
+
+See [temporary environment verification](temporary-environments.md) for the optional SSH image, workload API and packaged Crabbox acceptance path. These require separate authorization and do not run as incidental checks.
+
 ### Fixture images and security controls
 
 The nonroot `tests/fixtures/kubernetes` image uses generated Namespace labels,
@@ -398,17 +402,7 @@ a substitute for model-backed acceptance.
 
 ## Temporary-environment workload probe
 
-`kubernetes-compute-real.test.mjs` adds workload-probe checks through API-deployed
-Agents, the normal worker, PostgreSQL and real TokenReview. Select its disposable
-cluster/database and `OCC_TEST_KUBERNETES_RUNTIME_IMAGE` with genuine model
-prerequisites; grant the controller TokenReview create permission. The fixture-only
-branch does not run these checks. Tokens remain private. Assertions cover exact
-IAM grants, revocation, cross-Namespace denial and stop.
-
-`temporary-environment-provider.test.mjs` proves local API credential precedence
-and adapter transport only. Live workload verification and image builds remain
-unverified; allocation, SSH, cleanup and nested k3d remain absent. See the
-[draft flow](../flows/temporary-environment-readiness.md).
+See [temporary environment verification](temporary-environments.md#temporary-environment-workload-probe) for workload authentication and lifecycle coverage.
 
 ## Production observability
 

@@ -971,6 +971,7 @@
               "testing/docker",
               "testing/ssh",
               "testing/kubernetes",
+              "testing/temporary-environments",
               "testing/production-network-access",
               "testing/two-cluster-local",
               "testing/gateway-routing",

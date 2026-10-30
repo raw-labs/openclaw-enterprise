@@ -1184,7 +1184,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
             type: "http",
             scheme: "bearer",
             description:
-              "Draft: active Agent workload credential; accepted only by temporary-environment readiness.",
+              "Active Agent workload credential; accepted only by temporary-environment operations.",
           },
         },
       },
@@ -1203,6 +1203,14 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
   const admissions = new WeakMap<FastifyRequest, AdmittedCaller>();
   const contexts = new WeakMap<FastifyRequest, RequestContext>();
   const requestStartedAt = new WeakMap<FastifyRequest, bigint>();
+  const workloadOnlyOperations: ReadonlySet<string> = new Set([
+    "getTemporaryEnvironmentReadiness",
+    "acquireTemporaryEnvironment",
+    "listTemporaryEnvironments",
+    "getTemporaryEnvironment",
+    "touchTemporaryEnvironment",
+    "releaseTemporaryEnvironment",
+  ]);
   const factory = options.auditEventFactory ?? new AuditEventFactory();
   const createAuthAccountOperation = {
     operationId: "createAuthAccount",
@@ -1744,7 +1752,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     }
 
     let admitted: AdmittedCaller;
-    if (operation.operationId === "getTemporaryEnvironmentReadiness") {
+    if (workloadOnlyOperations.has(operation.operationId)) {
       // This is a workload-only surface. Never fall back to a human session or service key.
       const authorization = request.headers.authorization;
       const token =
@@ -1945,18 +1953,57 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
       validateConfiguration(body);
     }
 
-    if (operation.operationId === "getTemporaryEnvironmentReadiness") {
+    if (workloadOnlyOperations.has(operation.operationId)) {
       const caller = admissions.get(request);
       if (caller?.method !== "workload") {
         throw failure(401, "UNAUTHENTICATED", "An Agent workload credential is required.");
       }
-      const data = await controller!.getTemporaryEnvironmentReadiness(
+      const scope = [
         context.actorId,
         params.namespaceId!,
         params.agentId!,
         caller.revisionId,
-      );
-      reply.send({ data, meta: { requestId: request.id } });
+      ] as const;
+      let data: unknown;
+      let status = 200;
+      switch (operation.operationId) {
+        case "getTemporaryEnvironmentReadiness":
+          data = await controller!.getTemporaryEnvironmentReadiness(...scope);
+          break;
+        case "acquireTemporaryEnvironment": {
+          const environment = await controller!.acquireTemporaryEnvironment(...scope, {
+            requestId: body!.requestId as string,
+            name: body!.name as string,
+            slug: body!.slug as string,
+            profileId: body!.profileId as string,
+            sshPublicKey: body!.sshPublicKey as string,
+          });
+          data = environment;
+          status = environment.state === "ready" ? 200 : 202;
+          break;
+        }
+        case "listTemporaryEnvironments":
+          data = await controller!.listTemporaryEnvironments(...scope);
+          break;
+        case "getTemporaryEnvironment":
+          data = await controller!.getTemporaryEnvironment(...scope, params.requestId!);
+          break;
+        case "touchTemporaryEnvironment":
+          data = await controller!.touchTemporaryEnvironment(...scope, params.requestId!);
+          break;
+        case "releaseTemporaryEnvironment": {
+          const environment = await controller!.releaseTemporaryEnvironment(
+            ...scope,
+            params.requestId!,
+          );
+          data = environment;
+          status = environment.state === "deleted" ? 200 : 202;
+          break;
+        }
+        default:
+          throw failure(404, "NOT_FOUND", "The workload operation is unavailable.");
+      }
+      reply.code(status).send({ data, meta: { requestId: request.id } });
       return;
     }
 
@@ -3900,7 +3947,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
         ...(operation.operationId === "bootstrapInstallation"
           ? { security: [{ sessionCookie: [] }] }
           : {}),
-        ...(operation.operationId === "getTemporaryEnvironmentReadiness"
+        ...(workloadOnlyOperations.has(operation.operationId)
           ? { security: [{ agentWorkload: [] }] }
           : {}),
       } as DocumentedFastifySchema;

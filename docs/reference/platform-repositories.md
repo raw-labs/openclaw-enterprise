@@ -38,9 +38,11 @@ The controller and worker still enforce the caller's exact resource authority.
 
 The `temporaryEnvironments` repository participates in the existing read/UOW
 boundary. Trusted admission code can set Namespace count/CPU/memory ceilings and
-reserve immutable Agent/revision-owned requests. This persistence slice is not
-connected to acquisition HTTP routes, the controller worker or Crabbox allocation.
-It does not authorize callers or validate operator profile approval.
+reserve immutable Agent/revision-owned requests. Workload-only HTTP acquisition
+now checks exact IAM authority and approved profiles, then commits reservation,
+quota, audit and existing controller work together. Persistence alone does not
+authorize a caller. The Crabbox adapter preserves the same immutable name, slug
+and request identity and waits for confirmed deletion.
 
 PostgreSQL admission locks the Namespace and Agent in lifecycle order, checks
 ready/running/current-revision state, then spends quota and inserts one record
@@ -50,12 +52,13 @@ quota fails closed. Lowering ceilings below reserved usage is refused. Count
 ceilings are 1–1000; CPU/memory values are positive 32-bit integers; hard lifetimes
 are 1–86400 seconds.
 
-Deadlines and stop never release capacity. The application role cannot delete or
-rewrite reservations or reset usage counters; foreign keys retain their revision
-and identity owners. Confirmed provider cleanup and capacity release remain the
-next lifecycle slice. Memory mirrors these constraints inside its existing
-single-writer transaction. See the
-[implementation trace](../flows/temporary-environment-readiness.md#5-draft-persistence-admission-not-connected-to-the-probe).
+Deadlines and stop request cleanup rather than releasing capacity. The regular
+worker retains a queued obligation through readiness, expiry and uncertain effects.
+Only claim-fenced, Driver-confirmed absence releases counters and detaches live
+revision/principal foreign keys; immutable owner snapshots remain. Arbitrary SQL
+cannot reset counters or discard cleanup work. Memory mirrors admission and queued
+release, but explicitly refuses to emulate durable worker claims. See the
+[implementation trace](../flows/temporary-environment-readiness.md#3-durable-admission-and-reconciliation).
 
 See [PostgreSQL testing](../testing/postgresql.md) for contributor setup and
 [controller reconciliation](controller.md) for worker behavior.

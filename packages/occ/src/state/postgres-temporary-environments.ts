@@ -28,12 +28,22 @@ function reservation(value: unknown): Readonly<TemporaryEnvironmentReservation> 
     revisionId: row.revision_id as string,
     servicePrincipalId: row.service_principal_id as string,
     requestId: row.request_id as string,
+    name: row.name as string,
+    slug: row.slug as string,
     profileId: row.profile_id as string,
     profileFingerprint: row.profile_fingerprint as string,
     cpuMillis: row.cpu_millis as number,
     memoryMiB: row.memory_mib as number,
     lifetimeSeconds: row.lifetime_seconds as number,
-    state: "reserved",
+    state: row.state as TemporaryEnvironmentReservation["state"],
+    allocationStarted: row.allocation_started as boolean,
+    idleTimeoutSeconds: row.idle_timeout_seconds as number,
+    sshPublicKey: row.ssh_public_key as string,
+    idleExpiresAt: new Date(row.idle_expires_at as string).toISOString(),
+    ...(row.provider_ref === null ? {} : { providerRef: row.provider_ref as string }),
+    ...(row.ssh === null
+      ? {}
+      : { ssh: row.ssh as NonNullable<TemporaryEnvironmentReservation["ssh"]> }),
     createdAt: new Date(row.created_at as string).toISOString(),
     hardExpiresAt: new Date(row.hard_expires_at as string).toISOString(),
   });
@@ -42,7 +52,39 @@ function reservation(value: unknown): Readonly<TemporaryEnvironmentReservation> 
 export function postgresTemporaryEnvironments(
   client: PostgresQueryClient,
 ): TemporaryEnvironmentRepository {
+  const mutate = async (
+    namespaceId: string,
+    agentId: string,
+    requestId: string,
+    action: string,
+  ) => {
+    const { rows } = await client.query(
+      "SELECT * FROM occ.request_temporary_environment($1,$2,$3,$4)",
+      [namespaceId, agentId, requestId, action],
+    );
+    return rows[0] === undefined || (rows[0] as { id?: string }).id == null
+      ? undefined
+      : reservation(rows[0]);
+  };
   return {
+    touch: (namespaceId, agentId, requestId) => mutate(namespaceId, agentId, requestId, "touch"),
+    requestDeletion: (namespaceId, agentId, requestId) =>
+      mutate(namespaceId, agentId, requestId, "delete"),
+    reconcile: async (claim, id, action, observation) => {
+      const { rows } = await client.query(
+        "SELECT * FROM occ.reconcile_temporary_environment($1,$2,$3,$4,$5)",
+        [
+          claim.idempotencyKey,
+          claim.claimToken,
+          id,
+          action,
+          observation === undefined ? null : JSON.stringify(observation),
+        ],
+      );
+      return rows[0] === undefined || (rows[0] as { id?: string }).id == null
+        ? undefined
+        : reservation(rows[0]);
+    },
     getQuota: async (namespaceId) => {
       const { rows } = await client.query(
         "SELECT * FROM occ.temporary_environment_quotas WHERE namespace_id = $1",
@@ -51,6 +93,8 @@ export function postgresTemporaryEnvironments(
       return rows[0] === undefined ? undefined : quota(rows[0]);
     },
     setQuota: async (namespaceId, limits) => {
+      // Admission often sets policy and reserves in one UOW: lock Namespace before quota.
+      await client.query("SELECT id FROM occ.namespaces WHERE id = $1 FOR UPDATE", [namespaceId]);
       const { rows } = await client.query(
         `INSERT INTO occ.temporary_environment_quotas (namespace_id, max_environments, max_cpu_millis, max_memory_mib)
          VALUES ($1,$2,$3,$4) ON CONFLICT (namespace_id) DO UPDATE SET
@@ -76,7 +120,7 @@ export function postgresTemporaryEnvironments(
     },
     reserve: async (input) => {
       const { rows } = await client.query(
-        "SELECT * FROM occ.reserve_temporary_environment($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        "SELECT * FROM occ.reserve_temporary_environment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
         [
           input.namespaceId,
           input.agentId,
@@ -87,6 +131,10 @@ export function postgresTemporaryEnvironments(
           input.cpuMillis,
           input.memoryMiB,
           input.lifetimeSeconds,
+          input.sshPublicKey,
+          input.idleTimeoutSeconds,
+          input.name,
+          input.slug,
         ],
       );
       return reservation(rows[0]!);

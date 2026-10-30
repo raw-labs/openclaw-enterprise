@@ -23,8 +23,8 @@ controller cleanup and Crabbox adapter. It does not approve deployment, another
 cluster operator, weaker isolation or omission of integration tests. The RFC
 remains Proposed. This document is the implementation plan, not product code.
 
-No infrastructure, dependencies, permissions or admission rules are changed by
-this proposal. No runtime proof has run.
+The draft changes source, packaging and opt-in permissions only. No deployment
+or live-runtime acceptance has run.
 
 ## Ordered implementation
 
@@ -128,7 +128,7 @@ provider, SSH transport or network enforcement being proved. Follow the
 The first code draft implements only workload authentication and the external
 provider readiness probe. Compute verifies provider evidence; OCC checks current
 Agent/revision state and IAM grants; the adapter calls the actual API and is
-packaged in the runtime image recipe. Every lifecycle operation remains refused.
+packaged in the runtime image recipe. At that first checkpoint, every lifecycle operation remained refused.
 See the [probe contract](../../docs/reference/authentication/agent-workload-probe.md)
 and [source flow](../../docs/flows/temporary-environment-readiness.md).
 
@@ -139,10 +139,13 @@ deadlines, rollback and retained cleanup ownership. The PostgreSQL application
 role cannot reset usage or erase reservations. This is an internal storage
 capability, not a new public acquisition route.
 
-Controller admission/audit/work enqueueing, provider allocation, confirmed cleanup,
-SSH, renewal and expiry reconciliation remain disconnected. Crabbox CLI/skill
-packaging and genuine in-Agent execution remain unfinished. This partial code
-draft must not be presented as the requested remote-testing outcome.
+A later source checkpoint connects workload API admission and audit to durable
+work, selected Compute allocation/observation/cleanup, idle renewal, expiry and
+owner teardown. Runtime recipes package the pinned unmodified Crabbox CLI/skills,
+external-provider adapter and a nonroot SSH image. The adapter polls exact
+deleted receipts before acknowledging release. The production Agent workflow
+contains a dirty-checkout Crabbox acceptance extension, authored but not run.
+This is still a draft, not demonstrated remote test execution.
 
 Local API credential-precedence and adapter transport tests are authored. The
 existing Kubernetes API/worker suite is extended to exercise real Pod-bound
@@ -166,9 +169,23 @@ and Agents competing for one budget, duplicate replay, rollback, SQL permissions
 and a real lifecycle-lock race. No database, cluster or deployment was created.
 This does not waive the required live SQL and eventual Agent-workflow proof.
 
+Current connected-draft verification: TypeScript build, whole-repository lint,
+formatting, generated OpenAPI, workspace isolation, CI suite ownership and
+documentation links/length checks pass. The focused core/adapter/Driver/storage
+selection reports 19 passed and two PostgreSQL cases skipped. A broader local
+selection reports 392 passed, one process-group fixture failure and 58 skipped
+Helm/image cases. The unchanged process-group helper reported a surviving
+descendant; this is not a clean regression run. Helm/yq, native image builds,
+real SQL and full Agent/SSH acceptance remain unverified. The prior published
+commit also has a First Agent Smoke initialization failure; its logs show
+BackoffLimitExceeded and cluster startup/network errors, not a resolved cause.
+No cluster, database or deployment was created or used for these checks.
+
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-30: Connect API, durable worker, selected Compute lifecycle and Crabbox adapter/runtime recipes; retain draft status pending live SQL, image and Agent-workflow proof.
 
 - 2026-10-30: Add the bounded reservation/UOW and atomic-quota checkpoint; public lifecycle remains disabled.
 - 2026-10-30: Add the partial workload-readiness code draft and explicit remaining lifecycle work against baseline `51c19ed91`.

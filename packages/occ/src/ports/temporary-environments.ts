@@ -1,21 +1,36 @@
+import type {
+  TemporaryEnvironmentSSH,
+  TemporaryEnvironmentState,
+  TemporaryEnvironmentObservation,
+} from "@openclaw-enterprise/contracts";
+import type { WorkClaim } from "../state/controller-work.ts";
+
 /** Trusted admission inputs, after workload identity, IAM and profile policy resolution. */
 export interface TemporaryEnvironmentRequest {
   readonly namespaceId: string;
   readonly agentId: string;
   readonly revisionId: string;
   readonly requestId: string;
+  readonly name: string;
+  readonly slug: string;
   readonly profileId: string;
   /** Digest of the operator-approved immutable profile; never credentials or a caller manifest. */
   readonly profileFingerprint: string;
   readonly cpuMillis: number;
   readonly memoryMiB: number;
   readonly lifetimeSeconds: number;
+  readonly idleTimeoutSeconds: number;
+  readonly sshPublicKey: string;
 }
 
 export interface TemporaryEnvironmentReservation extends TemporaryEnvironmentRequest {
   readonly id: string;
   readonly servicePrincipalId: string;
-  readonly state: "reserved";
+  readonly state: TemporaryEnvironmentState;
+  readonly allocationStarted: boolean;
+  readonly providerRef?: string;
+  readonly ssh?: TemporaryEnvironmentSSH;
+  readonly idleExpiresAt: string;
   readonly createdAt: string;
   readonly hardExpiresAt: string;
 }
@@ -58,6 +73,21 @@ export interface TemporaryEnvironmentRepository extends TemporaryEnvironmentRead
    * These persistence checks do not replace workload authentication or IAM authorization.
    */
   reserve(input: TemporaryEnvironmentRequest): Promise<Readonly<TemporaryEnvironmentReservation>>;
-  // TODO(RFC-0019): Release capacity only through confirmed provider cleanup in durable worker
-  // reconciliation. No expiry, caller release, or row-delete operation frees capacity yet.
+  touch(
+    namespaceId: string,
+    agentId: string,
+    requestId: string,
+  ): Promise<Readonly<TemporaryEnvironmentReservation> | undefined>;
+  requestDeletion(
+    namespaceId: string,
+    agentId: string,
+    requestId: string,
+  ): Promise<Readonly<TemporaryEnvironmentReservation> | undefined>;
+  /** Claim-fenced reconciliation; only beginAllocation's winner may issue create. */
+  reconcile(
+    claim: WorkClaim,
+    id: string,
+    action: "inspect" | "beginAllocation" | "delete" | "confirmAbsent",
+    observation?: TemporaryEnvironmentObservation,
+  ): Promise<Readonly<TemporaryEnvironmentReservation> | undefined>;
 }

@@ -11,6 +11,7 @@ import type {
 interface TemporaryEnvironmentMemory {
   readonly quotas: Map<string, Readonly<TemporaryEnvironmentQuota>>;
   readonly reservations: Map<string, Readonly<TemporaryEnvironmentReservation>>;
+  enqueue(record: Readonly<TemporaryEnvironmentReservation>): void;
   namespace(id: string): Readonly<Namespace> | undefined;
   agent(namespaceId: string, agentId: string): Readonly<Agent> | undefined;
   revision(
@@ -39,6 +40,41 @@ export function memoryTemporaryEnvironments(
         row.namespaceId === namespaceId && row.agentId === agentId && row.requestId === requestId,
     );
   return {
+    // Memory state has no durable worker/claims: never emulate a fenced provider confirmation.
+    reconcile: async () => {
+      throw new ScopeViolationError(
+        "Temporary environment reconciliation requires PostgreSQL claims.",
+      );
+    },
+    touch: async (namespaceId, agentId, requestId) => {
+      const row = find(namespaceId, agentId, requestId);
+      if (
+        row === undefined ||
+        row.state === "deleting" ||
+        row.state === "deleted" ||
+        Date.parse(row.idleExpiresAt) <= Date.now() ||
+        Date.parse(row.hardExpiresAt) <= Date.now()
+      ) {
+        return undefined;
+      }
+      const saved = immutableCopy({
+        ...row,
+        idleExpiresAt: new Date(
+          Math.min(Date.parse(row.hardExpiresAt), Date.now() + row.idleTimeoutSeconds * 1000),
+        ).toISOString(),
+      });
+      state.reservations.set(saved.id, saved);
+      return saved;
+    },
+    requestDeletion: async (namespaceId, agentId, requestId) => {
+      const row = find(namespaceId, agentId, requestId);
+      if (row === undefined || row.state === "deleted") {
+        return row;
+      }
+      const saved = immutableCopy({ ...row, state: "deleting" as const });
+      state.reservations.set(saved.id, saved);
+      return saved;
+    },
     getQuota: async (namespaceId) => {
       const saved = state.quotas.get(namespaceId);
       return saved === undefined ? undefined : immutableCopy(saved);
@@ -84,6 +120,24 @@ export function memoryTemporaryEnvironments(
           .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
       ),
     reserve: async (input) => {
+      const existing = find(input.namespaceId, input.agentId, input.requestId);
+      if (existing !== undefined) {
+        if (
+          existing.name !== input.name ||
+          existing.slug !== input.slug ||
+          existing.revisionId !== input.revisionId ||
+          existing.profileId !== input.profileId ||
+          existing.profileFingerprint !== input.profileFingerprint ||
+          existing.cpuMillis !== input.cpuMillis ||
+          existing.memoryMiB !== input.memoryMiB ||
+          existing.lifetimeSeconds !== input.lifetimeSeconds ||
+          existing.idleTimeoutSeconds !== input.idleTimeoutSeconds ||
+          existing.sshPublicKey !== input.sshPublicKey
+        ) {
+          throw new ResourceConflictError("Temporary environment request identity conflicts.");
+        }
+        return immutableCopy(existing);
+      }
       const owner = state.agent(input.namespaceId, input.agentId);
       if (
         state.namespace(input.namespaceId)?.status !== "ready" ||
@@ -94,21 +148,9 @@ export function memoryTemporaryEnvironments(
       ) {
         throw new ScopeViolationError("Temporary environment Agent revision is unavailable.");
       }
-      const existing = find(input.namespaceId, input.agentId, input.requestId);
-      if (existing !== undefined) {
-        if (
-          existing.revisionId !== input.revisionId ||
-          existing.profileId !== input.profileId ||
-          existing.profileFingerprint !== input.profileFingerprint ||
-          existing.cpuMillis !== input.cpuMillis ||
-          existing.memoryMiB !== input.memoryMiB ||
-          existing.lifetimeSeconds !== input.lifetimeSeconds
-        ) {
-          throw new ResourceConflictError("Temporary environment request identity conflicts.");
-        }
-        return immutableCopy(existing);
-      }
       if (
+        !token(input.name) ||
+        !token(input.slug) ||
         !token(input.requestId) ||
         !token(input.profileId) ||
         typeof input.profileFingerprint !== "string" ||
@@ -116,7 +158,12 @@ export function memoryTemporaryEnvironments(
         /[^a-f0-9]/u.test(input.profileFingerprint) ||
         !positiveInteger(input.cpuMillis) ||
         !positiveInteger(input.memoryMiB) ||
-        !positiveInteger(input.lifetimeSeconds, 86400)
+        !positiveInteger(input.lifetimeSeconds, 86400) ||
+        !positiveInteger(input.idleTimeoutSeconds, 86400) ||
+        typeof input.sshPublicKey !== "string" ||
+        input.sshPublicKey.length < 20 ||
+        input.sshPublicKey.length > 16384 ||
+        /[\r\n]/u.test(input.sshPublicKey)
       ) {
         throw new ScopeViolationError("Temporary environment reservation input is invalid.");
       }
@@ -135,11 +182,19 @@ export function memoryTemporaryEnvironments(
         agentId: input.agentId,
         revisionId: input.revisionId,
         requestId: input.requestId,
+        name: input.name,
+        slug: input.slug,
         profileId: input.profileId,
         profileFingerprint: input.profileFingerprint,
         cpuMillis: input.cpuMillis,
         memoryMiB: input.memoryMiB,
         lifetimeSeconds: input.lifetimeSeconds,
+        idleTimeoutSeconds: input.idleTimeoutSeconds,
+        sshPublicKey: input.sshPublicKey,
+        allocationStarted: false,
+        idleExpiresAt: new Date(
+          now + Math.min(input.idleTimeoutSeconds, input.lifetimeSeconds) * 1000,
+        ).toISOString(),
         id: "tenv_" + randomUUID(),
         servicePrincipalId: owner.servicePrincipalId,
         state: "reserved" as const,
@@ -156,6 +211,7 @@ export function memoryTemporaryEnvironments(
         }),
       );
       state.reservations.set(saved.id, saved);
+      state.enqueue(saved);
       return immutableCopy(saved);
     },
   };

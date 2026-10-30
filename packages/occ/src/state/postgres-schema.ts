@@ -1081,7 +1081,10 @@ export const controllerWork = occSchema.table(
     })
       .onUpdate("restrict")
       .onDelete("no action"),
-    check("controller_work_kind_valid", sql`${table.workKind} IN ('lifecycle', 'provisioning')`),
+    check(
+      "controller_work_kind_valid",
+      sql`${table.workKind} IN ('lifecycle', 'provisioning', 'temporary_environment')`,
+    ),
     check(
       "controller_work_idempotency_key_length",
       sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 512`,
@@ -1098,7 +1101,8 @@ export const controllerWork = occSchema.table(
     check(
       "controller_work_namespace_target_valid",
       sql`(
-        (${table.workKind} = 'lifecycle' AND ${table.agentId} IS NULL AND ${table.revisionId} IS NULL
+        (${table.workKind} = 'temporary_environment' AND ${table.agentId} IS NULL AND ${table.revisionId} IS NULL AND ${table.namespaceTarget} IS NULL AND ${table.agentTarget} IS NULL AND ${table.idempotencyKey} ~ '^temporary_environment:tenv_[0-9a-f-]{36}$')
+        OR (${table.workKind} = 'lifecycle' AND ${table.agentId} IS NULL AND ${table.revisionId} IS NULL
           AND ${table.namespaceTarget} IS NOT NULL
           AND ${table.namespaceTarget} IN ('ready', 'deleted')
           AND ${table.agentTarget} IS NULL)
@@ -1617,7 +1621,17 @@ export const temporaryEnvironments = occSchema.table(
     agentId: text("agent_id").notNull(),
     revisionId: text("revision_id").notNull(),
     servicePrincipalId: text("service_principal_id").notNull(),
+    liveRevisionId: text("live_revision_id"),
+    livePrincipalId: text("live_principal_id"),
+    sshPublicKey: text("ssh_public_key").notNull(),
+    idleTimeoutSeconds: integer("idle_timeout_seconds").notNull(),
+    idleExpiresAt: timestamp("idle_expires_at", { withTimezone: true }).notNull(),
+    allocationStarted: boolean("allocation_started").notNull().default(false),
+    providerRef: text("provider_ref"),
+    ssh: jsonb("ssh"),
     requestId: text("request_id").notNull(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
     profileId: text("profile_id").notNull(),
     profileFingerprint: text("profile_fingerprint").notNull(),
     cpuMillis: integer("cpu_millis").notNull(),
@@ -1635,18 +1649,26 @@ export const temporaryEnvironments = occSchema.table(
     ),
     foreignKey({
       name: "temporary_environments_revision_owner",
-      columns: [table.namespaceId, table.agentId, table.revisionId],
+      columns: [table.namespaceId, table.agentId, table.liveRevisionId],
       foreignColumns: [agentRevisions.namespaceId, agentRevisions.agentId, agentRevisions.id],
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
     foreignKey({
       name: "temporary_environments_principal_owner",
-      columns: [table.namespaceId, table.agentId, table.servicePrincipalId],
+      columns: [table.namespaceId, table.agentId, table.livePrincipalId],
       foreignColumns: [iamIdentities.namespaceId, iamIdentities.agentId, iamIdentities.id],
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
+    check(
+      "temporary_environments_name_check",
+      sql`char_length(${table.name}) BETWEEN 1 AND 128 AND ${table.name} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'`,
+    ),
+    check(
+      "temporary_environments_slug_check",
+      sql`char_length(${table.slug}) BETWEEN 1 AND 128 AND ${table.slug} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'`,
+    ),
     check(
       "temporary_environments_request_id_check",
       sql`char_length(${table.requestId}) BETWEEN 1 AND 128 AND ${table.requestId} ~ '^[A-Za-z0-9]' AND ${table.requestId} !~ '[^A-Za-z0-9._:-]'`,
@@ -1665,7 +1687,42 @@ export const temporaryEnvironments = occSchema.table(
       "temporary_environments_lifetime_seconds_check",
       sql`${table.lifetimeSeconds} BETWEEN 1 AND 86400`,
     ),
-    check("temporary_environments_state_check", sql`${table.state} = 'reserved'`),
+    check(
+      "temporary_environments_state_check",
+      sql`${table.state} IN ('reserved','provisioning','ready','deleting','deleted')`,
+    ),
+    check(
+      "temporary_environments_idle_timeout_seconds_check",
+      sql`${table.idleTimeoutSeconds} BETWEEN 1 AND 86400`,
+    ),
+    check(
+      "temporary_environments_idle_valid",
+      sql`${table.idleExpiresAt} <= ${table.hardExpiresAt} AND ${table.idleExpiresAt} > ${table.createdAt}`,
+    ),
+    check(
+      "temporary_environments_key_valid",
+      sql`length(${table.sshPublicKey}) BETWEEN 20 AND 16384 AND ${table.sshPublicKey} !~ E'[\\r\\n]'`,
+    ),
+    check(
+      "temporary_environments_live_owner",
+      sql`(${table.state} = 'deleted' AND ${table.liveRevisionId} IS NULL AND ${table.livePrincipalId} IS NULL) OR (${table.state} <> 'deleted' AND ${table.liveRevisionId} = ${table.revisionId} AND ${table.liveRevisionId} IS NOT NULL AND ${table.livePrincipalId} = ${table.servicePrincipalId} AND ${table.livePrincipalId} IS NOT NULL)`,
+    ),
+    check(
+      "temporary_environments_ready",
+      sql`${table.state} <> 'ready' OR (${table.allocationStarted} AND ${table.providerRef} IS NOT NULL AND ${table.ssh} IS NOT NULL)`,
+    ),
+    check(
+      "temporary_environments_allocation_state",
+      sql`(${table.state} <> 'reserved' OR NOT ${table.allocationStarted}) AND (${table.state} NOT IN ('provisioning','ready') OR ${table.allocationStarted})`,
+    ),
+    check(
+      "temporary_environments_receipt_valid",
+      sql`${table.providerRef} IS NULL OR length(${table.providerRef}) BETWEEN 1 AND 16384`,
+    ),
+    check(
+      "temporary_environments_ssh_valid",
+      sql`${table.ssh} IS NULL OR (jsonb_typeof(${table.ssh})='object' AND ${table.ssh} ?& ARRAY['host','port','user'] AND (${table.ssh} - 'host' - 'port' - 'user')='{}'::jsonb AND jsonb_typeof(${table.ssh}->'host')='string' AND length(${table.ssh}->>'host') BETWEEN 1 AND 253 AND jsonb_typeof(${table.ssh}->'user')='string' AND length(${table.ssh}->>'user') BETWEEN 1 AND 64 AND jsonb_typeof(${table.ssh}->'port')='number' AND (${table.ssh}->>'port') ~ '^[0-9]{1,5}$' AND (${table.ssh}->>'port')::integer BETWEEN 1 AND 65535)`,
+    ),
     check(
       "temporary_environments_deadline_valid",
       sql`${table.hardExpiresAt} = ${table.createdAt} + ${table.lifetimeSeconds} * interval '1 second'`,

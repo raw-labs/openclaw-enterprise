@@ -1737,7 +1737,32 @@ export interface AgentWorkloadIdentity {
   readonly servicePrincipalId: string;
 }
 
+export type {
+  TemporaryEnvironmentProfile,
+  TemporaryEnvironmentPolicy,
+  TemporaryEnvironmentSSH,
+  TemporaryEnvironmentComputeRequest,
+  TemporaryEnvironmentObservation,
+  TemporaryEnvironmentDeletion,
+  TemporaryEnvironmentState,
+} from "./temporary-environments.ts";
+
 export interface ComputeDriver extends Driver {
+  getTemporaryEnvironmentPolicy?():
+    import("./temporary-environments.ts").TemporaryEnvironmentPolicy | undefined;
+  /** Called only after a durable, single-winner allocation-start transition. */
+  createTemporaryEnvironment?(
+    input: import("./temporary-environments.ts").TemporaryEnvironmentComputeRequest,
+    signal?: AbortSignal,
+  ): Promise<import("./temporary-environments.ts").TemporaryEnvironmentObservation>;
+  observeTemporaryEnvironment?(
+    input: import("./temporary-environments.ts").TemporaryEnvironmentComputeRequest,
+    signal?: AbortSignal,
+  ): Promise<import("./temporary-environments.ts").TemporaryEnvironmentObservation>;
+  deleteTemporaryEnvironment?(
+    input: import("./temporary-environments.ts").TemporaryEnvironmentComputeRequest,
+    signal?: AbortSignal,
+  ): Promise<import("./temporary-environments.ts").TemporaryEnvironmentDeletion>;
   /** Fail closed when unsupported. Provider token verification belongs to the Driver. */
   verifyAgentWorkloadIdentity?(input: {
     readonly token: string;

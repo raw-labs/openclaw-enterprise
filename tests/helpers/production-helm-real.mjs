@@ -19,6 +19,7 @@ export async function installProductionHelmControlPlane({
   controlPlane,
   executionCluster,
   metrics,
+  temporaryEnvironments,
   databaseName = "openclaw_enterprise",
   run,
   kubernetes,
@@ -210,6 +211,9 @@ export async function installProductionHelmControlPlane({
   }
   if (metrics !== undefined) {
     values.metrics = metrics;
+  }
+  if (temporaryEnvironments !== undefined) {
+    values.temporaryEnvironments = temporaryEnvironments;
   }
   await writeFile(join(directory, "values.json"), JSON.stringify(values), { mode: 0o600 });
   await run(

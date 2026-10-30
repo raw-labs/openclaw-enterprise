@@ -1,3 +1,13 @@
+import {
+  temporaryEnvironmentView,
+  validateTemporaryEnvironmentInput,
+  validateTemporaryEnvironmentPolicy,
+  type AcquireTemporaryEnvironmentInput,
+} from "./temporary-environments.ts";
+import type { TemporaryEnvironmentReservation } from "./ports/temporary-environments.ts";
+
+export type { AcquireTemporaryEnvironmentInput } from "./temporary-environments.ts";
+
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -2161,25 +2171,298 @@ export class OpenClawController {
     });
   }
 
+  private temporaryEnvironmentPolicy() {
+    const compute = this.selectedDriver("compute");
+    if (
+      !compute.getTemporaryEnvironmentPolicy ||
+      !compute.createTemporaryEnvironment ||
+      !compute.observeTemporaryEnvironment ||
+      !compute.deleteTemporaryEnvironment
+    ) {
+      return undefined;
+    }
+    let policy;
+    try {
+      policy = compute.getTemporaryEnvironmentPolicy();
+    } catch {
+      throw new DependencyUnavailableError("Temporary environment policy is unavailable.");
+    }
+    if (policy !== undefined) {
+      validateTemporaryEnvironmentPolicy(policy);
+    }
+    return policy;
+  }
+
+  private async withTemporaryEnvironmentAuthority<T>(
+    identity: AgentWorkloadIdentity,
+    work: (state: PlatformUnitOfWork) => Promise<T>,
+  ): Promise<T> {
+    const target = {
+      kind: "agent" as const,
+      id: identity.agentId,
+      namespaceId: identity.namespaceId,
+    };
+    await this.authorize(identity.servicePrincipalId, "operate", target);
+    return this.mutate(async (state) => {
+      // IAM policy writes and lifecycle changes share this lock order. Recheck under the lock.
+      await this.lockNamespace(state, identity.namespaceId);
+      await state.agents.lockAgent(identity.namespaceId, identity.agentId);
+      await this.authorize(identity.servicePrincipalId, "operate", target);
+      await this.requireActiveAgentWorkload(identity);
+      return work(state);
+    });
+  }
+
+  private temporaryEnvironmentIdentity(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+  ): AgentWorkloadIdentity {
+    return { servicePrincipalId: principalId, namespaceId, agentId, revisionId };
+  }
+
+  private temporaryEnvironmentConnectionAllowed(record: Readonly<TemporaryEnvironmentReservation>) {
+    return (
+      this.temporaryEnvironmentPolicy()?.profiles.some(
+        (profile) =>
+          profile.id === record.profileId &&
+          profile.fingerprint === record.profileFingerprint &&
+          profile.namespaceIds.includes(record.namespaceId),
+      ) === true
+    );
+  }
+
+  private async ownedTemporaryEnvironment(
+    state: PlatformReadView,
+    identity: AgentWorkloadIdentity,
+    requestId: string,
+  ) {
+    const record = await state.temporaryEnvironments.findByRequest(
+      identity.namespaceId,
+      identity.agentId,
+      requestId,
+    );
+    if (!record) {
+      throw new ScopeViolationError("The temporary environment does not belong to this Agent.");
+    }
+    if (
+      record.revisionId !== identity.revisionId ||
+      record.servicePrincipalId !== identity.servicePrincipalId
+    ) {
+      throw new AuthorizationDeniedError(
+        "The temporary environment belongs to a retired workload identity.",
+      );
+    }
+    return record;
+  }
+
+  private async auditTemporaryEnvironment(
+    state: PlatformUnitOfWork,
+    identity: AgentWorkloadIdentity,
+    operation: "acquire" | "touch" | "release",
+    record: Readonly<TemporaryEnvironmentReservation>,
+  ) {
+    await state.audit.append({
+      id: "aud_" + crypto.randomUUID(),
+      installationId: this.installation.id,
+      namespaceId: identity.namespaceId,
+      occurredAt: this.timestamp(),
+      kind: "mutation",
+      actorId: identity.servicePrincipalId,
+      source: "occ",
+      action: "openclaw.agents.temporary_environments." + operation,
+      resource: { kind: "agent", id: identity.agentId, namespaceId: identity.namespaceId },
+      iamDriverId: this.selectedDriver("iam").id,
+      outcome: "success",
+      details: {
+        environmentId: record.id,
+        requestId: record.requestId,
+        profileId: record.profileId,
+        state: record.state,
+      },
+    });
+  }
+
   async getTemporaryEnvironmentReadiness(
     principalId: string,
     namespaceId: string,
     agentId: string,
     revisionId: string,
   ) {
-    await this.authorize(principalId, "operate", { kind: "agent", id: agentId, namespaceId });
-    await this.requireActiveAgentWorkload({
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
       namespaceId,
       agentId,
       revisionId,
-      servicePrincipalId: principalId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async () => {
+      const profiles =
+        this.temporaryEnvironmentPolicy()
+          ?.profiles.filter((profile) => profile.namespaceIds.includes(namespaceId))
+          .map((profile) => ({
+            id: profile.id,
+            cpuMillis: profile.cpuMillis,
+            memoryMiB: profile.memoryMiB,
+            lifetimeSeconds: profile.lifetimeSeconds,
+            idleTimeoutSeconds: profile.idleTimeoutSeconds,
+          })) ?? [];
+      return { supported: profiles.length > 0, profiles };
     });
-    // TODO(RFC-0019): Enable allocation only with durable leases, atomic capacity reservations,
-    // expiry reconciliation, and confirmed Kubernetes deletion through the normal worker.
-    return {
-      supported: false as const,
-      reason: "TEMPORARY_ENVIRONMENT_LIFECYCLE_NOT_IMPLEMENTED" as const,
-    };
+  }
+
+  async acquireTemporaryEnvironment(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+    input: AcquireTemporaryEnvironmentInput,
+  ) {
+    validateTemporaryEnvironmentInput(input);
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const policy = this.temporaryEnvironmentPolicy();
+      const profile = policy?.profiles.find(
+        (candidate) =>
+          candidate.id === input.profileId && candidate.namespaceIds.includes(namespaceId),
+      );
+      if (!policy || !profile) {
+        throw new AuthorizationDeniedError(
+          "The requested temporary environment profile is not approved for this Namespace.",
+        );
+      }
+      const existing = await state.temporaryEnvironments.findByRequest(
+        namespaceId,
+        agentId,
+        input.requestId,
+      );
+      if (existing === undefined) {
+        await state.temporaryEnvironments.setQuota(namespaceId, policy.quota);
+      }
+      const record = await state.temporaryEnvironments.reserve({
+        namespaceId,
+        agentId,
+        revisionId,
+        requestId: input.requestId,
+        name: input.name,
+        slug: input.slug,
+        profileId: profile.id,
+        profileFingerprint: profile.fingerprint,
+        cpuMillis: profile.cpuMillis,
+        memoryMiB: profile.memoryMiB,
+        lifetimeSeconds: profile.lifetimeSeconds,
+        idleTimeoutSeconds: profile.idleTimeoutSeconds,
+        sshPublicKey: input.sshPublicKey,
+      });
+      await this.auditTemporaryEnvironment(state, identity, "acquire", record);
+      return temporaryEnvironmentView(record, this.temporaryEnvironmentConnectionAllowed(record));
+    });
+  }
+
+  async getTemporaryEnvironment(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+    requestId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const record = await this.ownedTemporaryEnvironment(state, identity, requestId);
+      return temporaryEnvironmentView(record, this.temporaryEnvironmentConnectionAllowed(record));
+    });
+  }
+
+  async listTemporaryEnvironments(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const records = await state.temporaryEnvironments.listForAgent(namespaceId, agentId);
+      return records
+        .filter(
+          (record) => record.revisionId === revisionId && record.servicePrincipalId === principalId,
+        )
+        .map((record) =>
+          temporaryEnvironmentView(record, this.temporaryEnvironmentConnectionAllowed(record)),
+        );
+    });
+  }
+
+  async touchTemporaryEnvironment(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+    requestId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const existing = await this.ownedTemporaryEnvironment(state, identity, requestId);
+      if (!this.temporaryEnvironmentConnectionAllowed(existing)) {
+        throw new AuthorizationDeniedError(
+          "The temporary environment profile is no longer approved.",
+        );
+      }
+      const record = await state.temporaryEnvironments.touch(namespaceId, agentId, requestId);
+      if (!record) {
+        throw new ResourceStateConflictError("The temporary environment can no longer be renewed.");
+      }
+      await this.auditTemporaryEnvironment(state, identity, "touch", record);
+      return temporaryEnvironmentView(record);
+    });
+  }
+
+  async releaseTemporaryEnvironment(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+    requestId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      await this.ownedTemporaryEnvironment(state, identity, requestId);
+      const record = await state.temporaryEnvironments.requestDeletion(
+        namespaceId,
+        agentId,
+        requestId,
+      );
+      if (!record) {
+        throw new ResourceStateConflictError("The temporary environment changed during release.");
+      }
+      await this.auditTemporaryEnvironment(state, identity, "release", record);
+      // A queued deletion is NOT confirmation. The adapter must poll for the terminal record.
+      return temporaryEnvironmentView(record, false);
+    });
   }
 
   async getAgentRuntimeImages(principalId: string, namespaceId: string, agentId: string) {

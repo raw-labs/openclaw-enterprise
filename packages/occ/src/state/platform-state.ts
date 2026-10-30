@@ -781,6 +781,7 @@ interface PlatformOperationBase {
 }
 
 export type PlatformOperation =
+  | (PlatformOperationBase & { readonly kind: "temporary_environment"; readonly target?: never })
   | (PlatformOperationBase & {
       readonly kind: "namespace";
       readonly target: "ready" | "deleted";
@@ -969,6 +970,9 @@ export function assertSameCredentialSourceFields(
 }
 
 function operationIdempotencyKey(operation: Readonly<PlatformOperation>): string {
+  if (operation.kind === "temporary_environment") {
+    return "temporary_environment:" + operation.resourceId;
+  }
   if (operation.kind === "agent") {
     return `agent:${operation.resourceId}:${operation.action}:${operation.target}:${operation.operationId}`;
   }
@@ -1369,6 +1373,7 @@ function repositories(
       }
       const saved = immutableCopy({ ...namespace, status: next });
       snapshot.namespaces.set(key, saved);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(saved);
     },
     markNamespaceDeleted: async (namespaceId, deletedAt) => {
@@ -2288,6 +2293,7 @@ function repositories(
         status: "active" as const,
       });
       snapshot.agents.set(key, saved);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(saved);
     },
     lockAgent: async (namespaceId, agentId) => agents.findAgent(namespaceId, agentId),
@@ -2304,6 +2310,7 @@ function repositories(
       }
       const saved = immutableCopy({ ...agent, desiredRuntimeState: next });
       snapshot.agents.set(key, saved);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(saved);
     },
     transitionAgentStatus: async (namespaceId, agentId, expected, next) => {
@@ -2327,6 +2334,7 @@ function repositories(
       }
       const saved = immutableCopy({ ...agent, status: next });
       snapshot.agents.set(key, saved);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(saved);
     },
     updateConfiguration: async (
@@ -2420,6 +2428,7 @@ function repositories(
         ...(repositoryAccess === undefined ? {} : { repositoryAccess }),
       });
       snapshot.agents.set(agentKey(namespaceId, agentId), updated);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(updated);
     },
     compareAndClearActiveRevision: async (namespaceId, agentId, expectedRevisionId) => {
@@ -2430,6 +2439,7 @@ function repositories(
       const { activeRevisionId: _activeRevisionId, ...stopped } = current;
       const updated = immutableCopy(stopped);
       snapshot.agents.set(agentKey(namespaceId, agentId), updated);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(updated);
     },
     compareAndSetActiveRevision: async (
@@ -2448,6 +2458,7 @@ function repositories(
       }
       const updated = immutableCopy({ ...current, activeRevisionId: candidateRevisionId });
       snapshot.agents.set(agentKey(namespaceId, agentId), updated);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(updated);
     },
   };
@@ -2802,6 +2813,17 @@ function repositories(
     iamPolicy,
     repositorySessions,
     temporaryEnvironments: memoryTemporaryEnvironments({
+      enqueue: (record) => {
+        snapshot.operations.push(
+          immutableCopy({
+            kind: "temporary_environment",
+            action: "reconcile",
+            namespaceId: record.namespaceId,
+            resourceId: record.id,
+            actorId: record.servicePrincipalId,
+          }),
+        );
+      },
       quotas: snapshot.temporaryEnvironmentQuotas,
       reservations: snapshot.temporaryEnvironmentReservations,
       namespace: (id) => snapshot.namespaces.get(id),
@@ -2945,7 +2967,7 @@ function repositories(
                 )?.agentId
             : undefined;
         return immutableCopy({
-          kind: "lifecycle",
+          kind: operation.kind === "temporary_environment" ? "temporary_environment" : "lifecycle",
           idempotencyKey,
           namespaceId: operation.namespaceId,
           ...(operation.kind === "agent" ? { agentId: operation.resourceId } : {}),
@@ -2970,6 +2992,25 @@ function repositories(
       },
     },
   };
+}
+
+function markTemporaryEnvironmentCleanup(snapshot: PlatformSnapshot): void {
+  for (const [id, row] of snapshot.temporaryEnvironmentReservations) {
+    const owner = snapshot.agents.get(agentKey(row.namespaceId, row.agentId));
+    if (
+      row.state !== "deleted" &&
+      row.state !== "deleting" &&
+      (snapshot.namespaces.get(row.namespaceId)?.status !== "ready" ||
+        owner?.status !== "active" ||
+        owner.desiredRuntimeState !== "running" ||
+        owner.activeRevisionId !== row.revisionId)
+    ) {
+      snapshot.temporaryEnvironmentReservations.set(
+        id,
+        immutableCopy({ ...row, state: "deleting" }),
+      );
+    }
+  }
 }
 
 /**
@@ -3002,7 +3043,8 @@ function finalizeAgentDeletion(
   }
   if (
     [...snapshot.temporaryEnvironmentReservations.values()].some(
-      (row) => row.namespaceId === namespaceId && row.agentId === agentId,
+      (row) =>
+        row.namespaceId === namespaceId && row.agentId === agentId && row.state !== "deleted",
     )
   ) {
     // PostgreSQL RESTRICT foreign keys retain owners while cleanup is unfinished.

@@ -4617,10 +4617,10 @@ export class PostgresPlatformState implements PlatformStateStore {
           const found = rows(
             (
               await client.query(
-                `SELECT idempotency_key, namespace_id, agent_id, revision_id, actor_id,
+                `SELECT work_kind, idempotency_key, namespace_id, agent_id, revision_id, actor_id,
                         namespace_target, agent_target
                  FROM occ.controller_work
-                 WHERE work_kind = 'lifecycle'
+                 WHERE work_kind IN ('lifecycle', 'temporary_environment')
                  ORDER BY created_at, idempotency_key`,
               )
             ).rows,
@@ -4636,6 +4636,13 @@ export class PostgresPlatformState implements PlatformStateStore {
                 resourceId: revisionId ?? agentId ?? namespaceId,
                 actorId: text(row, "actor_id"),
               };
+              if (text(row, "work_kind") === "temporary_environment") {
+                return immutableCopy({
+                  ...base,
+                  kind: "temporary_environment",
+                  resourceId: text(row, "idempotency_key").slice("temporary_environment:".length),
+                });
+              }
               // The three shapes are distinguished by which owner columns are
               // populated: a revision names one, Agent teardown names only its
               // Agent, and Namespace work names neither and carries a target.

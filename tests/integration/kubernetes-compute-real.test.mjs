@@ -44,6 +44,13 @@ test(
   "authenticated PostgreSQL OCC API and worker deploy real Agent-owned gateways, Secret bindings, and revisions",
   { ...requiresKubernetesAndPostgres, timeout: runtimeImage === undefined ? 360_000 : 600_000 },
   async (context) => {
+    const temporarySSHImage = process.env.OCC_TEST_KUBERNETES_TEMPORARY_SSH_IMAGE;
+    if (temporarySSHImage !== undefined) {
+      assert.ok(
+        runtimeImage,
+        "temporary environment workflow proof requires the genuine Agent runtime selection",
+      );
+    }
     await assertKubernetesFixtureAvailable();
     const database = new URL(databaseUrl);
     assert.ok(
@@ -132,6 +139,11 @@ test(
     );
     configuration.drivers.compute.configuration.temporaryEnvironmentApiUrl =
       "https://occ.example.invalid";
+    // This file exercises the API directly; the production TUI workflow owns real Agent HTTPS/Crabbox proof.
+    configuration.drivers.compute.configuration.temporaryEnvironmentApiEgress = {
+      cidr: "192.0.2.1/32",
+      port: 443,
+    };
     const proxyCidrs = process.env.OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS?.split(",")
       .map((cidr) => cidr.trim())
       .filter(Boolean);
@@ -893,10 +905,141 @@ test(
       assert.equal(grant.status, 201);
       const readiness = await workloadRequest();
       assert.equal(readiness.status, 200, JSON.stringify(readiness.error));
-      assert.deepEqual(readiness.data, {
-        supported: false,
-        reason: "TEMPORARY_ENVIRONMENT_LIFECYCLE_NOT_IMPLEMENTED",
-      });
+      assert.deepEqual(readiness.data, { supported: false, profiles: [] });
+      if (temporarySSHImage !== undefined) {
+        // Authored real dependency path: restart supported composition with operator approval,
+        // then exercise workload API -> durable queue -> actual Kubernetes -> confirmed deletion.
+        // This does not substitute for the subsequent unmodified Crabbox acceptance scenario.
+        await worker.stop();
+        await app.close();
+        configuration.drivers.compute.configuration.temporaryEnvironments = {
+          profiles: [
+            {
+              id: "temporary-tests",
+              namespaceIds: [adopted.data.id],
+              image: temporarySSHImage,
+              cpuMillis: 100,
+              memoryMiB: 128,
+              lifetimeSeconds: 300,
+              idleTimeoutSeconds: 120,
+              egress: [],
+            },
+          ],
+          quota: { maxEnvironments: 2, maxCpuMillis: 200, maxMemoryMiB: 256 },
+        };
+        const temporaryDrivers = await loadInstallationConfiguration({
+          mode: "development",
+          environment: {},
+          startupConfiguration: { configuration, logging: { level: "info" } },
+        });
+        app = await composePostgresDevelopment(developmentConfig, temporaryDrivers);
+        await startWorker();
+        const generated = (
+          await kubectlRead(
+            "exec",
+            pod.metadata.name,
+            "--namespace",
+            existingName,
+            "--",
+            "sh",
+            "-c",
+            'umask 077; directory=$(mktemp -d /tmp/oce-temporary-ssh.XXXXXX); ssh-keygen -q -t ed25519 -N "" -f "$directory/key"; printf "%s\n" "$directory"; cat "$directory/key.pub"',
+          )
+        )
+          .trim()
+          .split("\n");
+        const keyDirectory = generated[0];
+        assert.match(keyDirectory, /^\/tmp\/oce-temporary-ssh\.[A-Za-z0-9]+$/u);
+        const sshPublicKey = generated[1].split(" ").slice(0, 2).join(" ");
+        const base = path.slice(0, -"/readiness".length);
+        const workloadOptions = {
+          session: false,
+          headers: { authorization: "Bearer " + retainedWorkloadCredential },
+        };
+        const input = {
+          requestId: randomUUID(),
+          name: "temporary-tests",
+          slug: "temporary-tests",
+          profileId: "temporary-tests",
+          sshPublicKey,
+        };
+        const created = await request("POST", base, input, workloadOptions);
+        assert.equal(created.status, 202, JSON.stringify(created.error));
+        assert.equal(created.data.usable, false);
+        const replay = await request("POST", base, input, workloadOptions);
+        assert.equal(replay.data.id, created.data.id);
+        assert.equal(replay.data.hardExpiresAt, created.data.hardExpiresAt);
+        const endpoint = base + "/" + input.requestId;
+        const available = await waitFor("workload API temporary environment ready", async () => {
+          const current = await request("GET", endpoint, undefined, workloadOptions);
+          assert.equal(current.status, 200, JSON.stringify(current.error));
+          return current.data.state === "ready" && current.data.usable ? current.data : undefined;
+        });
+        assert.equal(
+          available.providerRef,
+          undefined,
+          "provider ownership receipts are never public connection metadata",
+        );
+        const output = await kubectlRead(
+          "exec",
+          pod.metadata.name,
+          "--namespace",
+          existingName,
+          "--",
+          "ssh",
+          "-i",
+          keyDirectory + "/key",
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "StrictHostKeyChecking=accept-new",
+          "-o",
+          "UserKnownHostsFile=" + keyDirectory + "/known_hosts",
+          "-o",
+          "ConnectTimeout=10",
+          "-p",
+          String(available.ssh.port),
+          available.ssh.user + "@" + available.ssh.host,
+          "printf temporary-environment-proof",
+        );
+        assert.match(output, /temporary-environment-proof/u);
+        const touched = await request("POST", endpoint + "/touch", {}, workloadOptions);
+        assert.equal(touched.status, 200);
+        assert.equal(touched.data.hardExpiresAt, created.data.hardExpiresAt);
+        const released = await request("DELETE", endpoint, undefined, workloadOptions);
+        assert.equal(released.status, 202);
+        assert.equal(released.data.state, "deleting");
+        await waitFor("provider-confirmed temporary environment deletion", async () => {
+          const current = await request("GET", endpoint, undefined, workloadOptions);
+          assert.equal(current.status, 200);
+          return current.data.state === "deleted" ? current.data : undefined;
+        });
+        assert.equal(
+          (await state.read((view) => view.temporaryEnvironments.getQuota(adopted.data.id)))
+            .reservedEnvironments,
+          0,
+        );
+        const evidence = await state.transact((unit) => unit.audit.list());
+        assert.ok(
+          evidence.some(
+            (event) =>
+              event.action === "openclaw.agents.temporary_environments.deleted" &&
+              event.details?.environmentId === created.data.id,
+          ),
+        );
+        await kubectl(
+          "exec",
+          pod.metadata.name,
+          "--namespace",
+          existingName,
+          "--",
+          "sh",
+          "-c",
+          'rm -f "$1/key" "$1/key.pub" "$1/known_hosts"; rmdir "$1"',
+          "cleanup",
+          keyDirectory,
+        );
+      }
       assert.equal(
         (
           await workloadRequest(

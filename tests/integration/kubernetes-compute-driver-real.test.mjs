@@ -451,6 +451,124 @@ test(
       "a stale previous revision cannot replace the newer live owner gateway",
     );
 
+    await context.test(
+      "temporary SSH allocation through the bundled Compute lifecycle",
+      async (temporaryContext) => {
+        const image = process.env.OCC_TEST_KUBERNETES_TEMPORARY_SSH_IMAGE;
+        if (!image) {
+          temporaryContext.skip(
+            "Requires an approved digest-pinned temporary SSH image; HTTP fixture is not an SSH runtime.",
+          );
+          return;
+        }
+        // Use the same tenant-scoped identity as the regular Agent workflow. Pod create/delete
+        // is an additional explicit fixture permission, not a cluster-admin fallback.
+        await kubectl(
+          "patch",
+          "clusterrole",
+          controller.tenantRole,
+          "--type=json",
+          "--patch",
+          JSON.stringify([
+            {
+              op: "add",
+              path: "/rules/-",
+              value: { apiGroups: [""], resources: ["pods"], verbs: ["create", "delete"] },
+            },
+          ]),
+        );
+        const { driver: temporaryDriver } = await createDriver({
+          authentication: controller.authentication,
+          temporaryEnvironments: {
+            profiles: [
+              {
+                id: "ssh-test",
+                namespaceIds: [first.id],
+                image,
+                cpuMillis: 100,
+                memoryMiB: 128,
+                lifetimeSeconds: 300,
+                idleTimeoutSeconds: 120,
+                egress: [],
+              },
+            ],
+            quota: { maxEnvironments: 1, maxCpuMillis: 100, maxMemoryMiB: 128 },
+          },
+        });
+        const input = {
+          id: "tenv_" + randomUUID(),
+          namespaceId: first.id,
+          agentId: primaryAgent,
+          revisionId: secondRevision.id,
+          servicePrincipalId: secondRevision.servicePrincipalId,
+          profileId: "ssh-test",
+          profileFingerprint:
+            temporaryDriver.getTemporaryEnvironmentPolicy().profiles[0].fingerprint,
+          cpuMillis: 100,
+          memoryMiB: 128,
+          lifetimeSeconds: 300,
+          hardExpiresAt: new Date(Date.now() + 295000).toISOString(),
+          sshPublicKey:
+            "ssh-ed25519 " +
+            Buffer.concat([
+              Buffer.from([0, 0, 0, 11]),
+              Buffer.from("ssh-ed25519"),
+              Buffer.from([0, 0, 0, 32]),
+              Buffer.alloc(32, 1),
+            ]).toString("base64"),
+          allocationStarted: true,
+        };
+        const allocation = await temporaryDriver.createTemporaryEnvironment(input);
+        assert.ok(
+          allocation.providerRef,
+          "complete allocation yields a resource-UID receipt before readiness",
+        );
+        const tracked = { ...input, providerRef: allocation.providerRef };
+        temporaryContext.after(async () => {
+          await waitFor("temporary resources to be absent", async () =>
+            (await temporaryDriver.deleteTemporaryEnvironment(tracked)).state === "absent"
+              ? true
+              : undefined,
+          );
+        });
+        const ready = await waitFor(
+          "temporary SSH Pod and exact Service endpoints to be ready",
+          async () => {
+            const observation = await temporaryDriver.observeTemporaryEnvironment(tracked);
+            return observation.state === "ready" ? observation : undefined;
+          },
+        );
+        assert.deepEqual(Object.keys(ready.ssh).sort(), ["host", "port", "user"]);
+        const receipt = JSON.parse(ready.providerRef);
+        const temporaryPods = await resources("pods", owned[0]);
+        const pod = temporaryPods.find((entry) => entry.metadata.uid === receipt.resources.Pod);
+        assert.ok(pod);
+        assert.equal(pod.spec.automountServiceAccountToken, false);
+        assert.equal(pod.spec.containers[0].securityContext.allowPrivilegeEscalation, false);
+        assert.ok(pod.spec.volumes.every((volume) => !volume.hostPath && !volume.projected));
+        // A sibling Agent must not inherit the owner's SSH ingress permission.
+        const siblingPod = await workloadPod(
+          owned[0],
+          "openclaw.dev/agent=" + secondaryAgent + ",openclaw.dev/workload-role=gateway",
+        );
+        assert.ok(siblingPod);
+        await assertDeniedTraffic(
+          "temporary SSH denies sibling Agent",
+          owned[0],
+          siblingPod.metadata.name,
+          "tcp",
+          ready.ssh.host,
+          ready.ssh.port,
+        );
+        const ownerPod = await workloadPod(
+          owned[0],
+          "openclaw.dev/agent=" + primaryAgent + ",openclaw.dev/workload-role=gateway",
+        );
+        assert.ok(ownerPod);
+        await probe(owned[0], ownerPod.metadata.name, "tcp", ready.ssh.host, ready.ssh.port);
+      },
+    );
+
     const scaledRevision = revision(driver, first, primaryAgent, 3);
     await kubectl(
       "scale",
