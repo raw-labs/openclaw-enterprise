@@ -941,6 +941,8 @@
               "flows/secret-storage-and-delivery",
               "flows/service-account-driver-credential-delivery",
               "flows/service-api-keys",
+              "flows/temporary-environment-readiness",
+              "reference/authentication/agent-workload-probe",
               "flows/harness-execution-topology",
               "flows/compute-driver-lifecycle-hooks",
               "flows/openshell-sandbox-provisioning",

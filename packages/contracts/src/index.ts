@@ -1729,7 +1729,21 @@ export interface HarnessDeviceAuthorization {
 export type HarnessDeviceAuthorizationResult =
   { readonly status: "pending" } | { readonly status: "ready"; readonly credential: string };
 
+/** Verified by the selected Compute Driver; never accepted from request headers or decoded claims. */
+export interface AgentWorkloadIdentity {
+  readonly namespaceId: string;
+  readonly agentId: string;
+  readonly revisionId: string;
+  readonly servicePrincipalId: string;
+}
+
 export interface ComputeDriver extends Driver {
+  /** Fail closed when unsupported. Provider token verification belongs to the Driver. */
+  verifyAgentWorkloadIdentity?(input: {
+    readonly token: string;
+    readonly namespaceId: string;
+    readonly agentId: string;
+  }): Promise<AgentWorkloadIdentity | undefined>;
   readonly supportsWorkspaceSetup?: true;
   readonly capability: "compute";
   /** Deployment must observe and provision Agent-owned runtime credentials before revision admission. */

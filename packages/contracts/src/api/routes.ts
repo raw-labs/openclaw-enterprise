@@ -144,6 +144,38 @@ const runtimeReadErrors = {
 
 export const occApiRoutes = [
   {
+    operationId: "getTemporaryEnvironmentReadiness",
+    method: "GET",
+    path: "/namespaces/:namespaceId/agents/:agentId/temporary-environments/readiness",
+    action: "openclaw.agents.temporary_environments.readiness",
+    iamAction: "operate",
+    resourceKind: "agent",
+    authorizationTarget: "agent",
+    summary: "Draft: Check temporary-environment readiness with an active Agent workload identity",
+    tags: ["Agents"],
+    schema: {
+      querystring: EmptyQuery,
+      params: AgentParams,
+      response: {
+        200: Type.Object(
+          {
+            data: Type.Object(
+              {
+                supported: Type.Literal(false),
+                reason: Type.Literal("TEMPORARY_ENVIRONMENT_LIFECYCLE_NOT_IMPLEMENTED"),
+              },
+              { additionalProperties: false },
+            ),
+            meta: Type.Object({ requestId: Type.String() }, { additionalProperties: false }),
+          },
+          { additionalProperties: false },
+        ),
+        501: ErrorResponseRef,
+        ...readErrors,
+      },
+    },
+  },
+  {
     operationId: "startAgentDeviceAuthorization",
     method: "POST",
     path: "/namespaces/:namespaceId/agents/device-authorizations",

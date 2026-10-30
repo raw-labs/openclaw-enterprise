@@ -396,6 +396,20 @@ separate reviewed node pools. Tests must still pass with the actual supported
 gateway/Codex images and authenticated node reconnect; fixture readiness is not
 a substitute for model-backed acceptance.
 
+## Temporary-environment workload probe
+
+`kubernetes-compute-real.test.mjs` adds workload-probe checks through API-deployed
+Agents, the normal worker, PostgreSQL and real TokenReview. Select its disposable
+cluster/database and `OCC_TEST_KUBERNETES_RUNTIME_IMAGE` with genuine model
+prerequisites; grant the controller TokenReview create permission. The fixture-only
+branch does not run these checks. Tokens remain private. Assertions cover exact
+IAM grants, revocation, cross-Namespace denial and stop.
+
+`temporary-environment-provider.test.mjs` proves local API credential precedence
+and adapter transport only. Live workload verification and image builds remain
+unverified; allocation, SSH, cleanup and nested k3d remain absent. See the
+[draft flow](../flows/temporary-environment-readiness.md).
+
 ## Production observability
 
 See [smoke tests and model-log validation](metrics.md#kubernetes-observability-acceptance).

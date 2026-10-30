@@ -41,6 +41,11 @@ export interface AdmittedSession {
 
 export type AdmittedCaller =
   | (AdmittedCallerBase & {
+      readonly method: "workload";
+      readonly agentId: string;
+      readonly revisionId: string;
+    })
+  | (AdmittedCallerBase & {
       readonly method: "session";
       readonly session: AdmittedSession;
     })

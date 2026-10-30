@@ -121,6 +121,11 @@ the standalone service/client images do not include the controller dependency
 graph. The full `deploy/runtime/Dockerfile` uses the repository root as its build
 context to include the emitted client router in the Agent image.
 
+`deploy/runtime/temporary-environments/provider.mjs` owns the draft dependency-free
+Crabbox external-provider executable packaged as `occ-crabbox-provider`. Its
+current scope is the [workload probe](reference/authentication/agent-workload-probe.md),
+not environment allocation.
+
 Select checks using the [testing guide](testing/README.md). Follow AGENTS.md's
 integration requirements for runtime changes. For documentation-only changes,
 use formatting, builds, and link checks; do not add or run tests solely for prose.

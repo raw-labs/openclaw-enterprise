@@ -130,6 +130,8 @@ test(
             },
           },
     );
+    configuration.drivers.compute.configuration.temporaryEnvironmentApiUrl =
+      "https://occ.example.invalid";
     const proxyCidrs = process.env.OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS?.split(",")
       .map((cidr) => cidr.trim())
       .filter(Boolean);
@@ -841,6 +843,107 @@ test(
       }),
     );
 
+    let retainedWorkloadCredential;
+    if (runtimeImage !== undefined) {
+      // This credential comes from the actual API-deployed Harness, not a forged claim or
+      // fixture verifier. The existing real-runtime selection is mandatory for activation.
+      const pod = await waitFor("adopted Agent Harness for workload admission", () =>
+        workloadPod(existingName, `app.kubernetes.io/name=${revisionName(admitted[4])}`),
+      );
+      retainedWorkloadCredential = (
+        await kubectlRead(
+          "exec",
+          pod.metadata.name,
+          "--namespace",
+          existingName,
+          "--",
+          "node",
+          "-e",
+          'process.stdout.write(require("node:fs").readFileSync("/var/run/secrets/openclaw/service-principal/token","utf8"))',
+        )
+      ).trim();
+      const path = `/namespaces/${adopted.data.id}/agents/${adoptedTenant.id}/temporary-environments/readiness`;
+      const workloadRequest = (url = path) =>
+        request("GET", url, undefined, {
+          session: false,
+          headers: { authorization: "Bearer " + retainedWorkloadCredential },
+        });
+      assert.equal(
+        (await request("GET", path)).status,
+        401,
+        "human authority cannot replace workload identity",
+      );
+      assert.equal(
+        (await workloadRequest()).status,
+        403,
+        "a valid workload still needs an exact Agent grant",
+      );
+      const role = await request("POST", `/namespaces/${adopted.data.id}/iam/roles`, {
+        name: "Temporary environment probe",
+        permissions: [{ action: "operate", resourceKind: "agent" }],
+      });
+      assert.equal(role.status, 201);
+      const grant = await request("POST", `/namespaces/${adopted.data.id}/iam/access-bindings`, {
+        subjectKind: "identity",
+        subjectId: adoptedTenant.servicePrincipalId,
+        roleId: role.data.id,
+        resourceKind: "agent",
+        resourceId: adoptedTenant.id,
+      });
+      assert.equal(grant.status, 201);
+      const readiness = await workloadRequest();
+      assert.equal(readiness.status, 200, JSON.stringify(readiness.error));
+      assert.deepEqual(readiness.data, {
+        supported: false,
+        reason: "TEMPORARY_ENVIRONMENT_LIFECYCLE_NOT_IMPLEMENTED",
+      });
+      assert.equal(
+        (
+          await workloadRequest(
+            `/namespaces/${namespaceIds[0]}/agents/${first.id}/temporary-environments/readiness`,
+          )
+        ).status,
+        403,
+        "Pod-bound identity cannot cross Namespace ownership",
+      );
+      assert.equal(
+        (
+          await request(
+            "GET",
+            `/namespaces/${adopted.data.id}/agents/${adoptedTenant.id}`,
+            undefined,
+            { session: false, headers: { authorization: "Bearer " + retainedWorkloadCredential } },
+          )
+        ).status,
+        401,
+        "workload admission is not a new general-purpose bearer API",
+      );
+      // Revoking the actual IAM binding is visible on the next request; no verifier cache grants authority.
+      assert.equal(
+        (
+          await request(
+            "DELETE",
+            `/namespaces/${adopted.data.id}/iam/access-bindings/${grant.data.id}`,
+          )
+        ).status,
+        204,
+      );
+      assert.equal((await workloadRequest()).status, 403);
+      const restored = await request("POST", `/namespaces/${adopted.data.id}/iam/access-bindings`, {
+        subjectKind: "identity",
+        subjectId: adoptedTenant.servicePrincipalId,
+        roleId: role.data.id,
+        resourceKind: "agent",
+        resourceId: adoptedTenant.id,
+      });
+      assert.equal(restored.status, 201);
+      assert.equal(
+        (await workloadRequest()).status,
+        200,
+        "restore the grant so later stop proves lifecycle revocation, not missing IAM authority",
+      );
+    }
+
     // Use the API-deployed embedded runtime, dedicated Harness, and dedicated Gateway.
     // Reachable CoreDNS listeners outside the peer/port grant distinguish CNI denial from an absent server.
     const dns = await createDnsTrafficFixture(
@@ -1197,6 +1300,23 @@ test(
     );
     assert.equal(stopped.status, 202, JSON.stringify(stopped.error));
     assert.equal(stopped.data.desiredRuntimeState, "stopped");
+    if (retainedWorkloadCredential !== undefined) {
+      const refused = await request(
+        "GET",
+        `/namespaces/${adopted.data.id}/agents/${adoptedTenant.id}/temporary-environments/readiness`,
+        undefined,
+        {
+          session: false,
+          headers: { authorization: "Bearer " + retainedWorkloadCredential },
+        },
+      );
+      assert.equal(
+        refused.status,
+        403,
+        "stop revokes workload admission before Pod cleanup finishes",
+      );
+      retainedWorkloadCredential = undefined;
+    }
     await waitFor("the stopped Agent pointer and real runtime to be cleared", async () => {
       const current = await request(
         "GET",

@@ -19,6 +19,10 @@ override grants, and one action never implies another. See
 | `administer` | Run Installation administration, access the exact Agent’s native admin UI, or read its runtime log text. It does not imply `read`, `deploy`, or other actions. |
 | `read_logs`  | Read the exact Agent’s runtime log text without `administer`. Not granted by bootstrap; grant it through a Namespace Role.                                     |
 
+The [draft workload probe](../authentication/agent-workload-probe.md) requires
+`operate` on the exact Agent, granted to its own ServicePrincipal. It accepts no
+human session or service API key and grants no temporary-environment allocation.
+
 ## Resources and scopes
 
 This is the set checked by current public operations. Fresh native IAM bootstrap

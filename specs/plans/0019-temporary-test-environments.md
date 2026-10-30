@@ -5,7 +5,7 @@ rfc: ../rfcs/0019-temporary-test-environments.md
 # Implementation plan: temporary test environments through Crabbox
 
 - **ID:** RFC-0019
-- **Delivery status:** Planned
+- **Delivery status:** In progress
 - **Owner:** OCE maintainers
 - **Authority:** [Proposed RFC](../rfcs/0019-temporary-test-environments.md)
 - **Source baseline:** OCE `80725162a946f80652b939a32a57ee4e922eeb5c`; Crabbox `c41270ea7e6016b497095cb8f0260ed1a2816a06`
@@ -125,13 +125,37 @@ provider, SSH transport or network enforcement being proved. Follow the
 
 ## Delivery record
 
-RFC and plan drafted from source inspection. The Kubernetes-first code draft
-was requested on 2026-10-30 and is being developed separately. This RFC PR includes
-no product code or live-machine proof. The cluster-creating profile still needs
-runtime qualification; deployment has not been authorized.
+The first code draft implements only workload authentication and the external
+provider readiness probe. Compute verifies provider evidence; OCC checks current
+Agent/revision state and IAM grants; the adapter calls the actual API and is
+packaged in the runtime image recipe. Every lifecycle operation remains refused.
+See the [probe contract](../../docs/reference/authentication/agent-workload-probe.md)
+and [source flow](../../docs/flows/temporary-environment-readiness.md).
+
+No temporary-environment resource, persistent lease, quota reservation, controller
+work, Kubernetes allocation/cleanup, SSH or renewal is implemented. These remain
+required work, not unsupported features accepted as complete. Crabbox CLI/skill
+packaging and genuine in-Agent execution also remain unfinished. This partial
+code draft must not be presented as the requested remote-testing outcome.
+
+Local API credential-precedence and adapter transport tests are authored. The
+existing Kubernetes API/worker suite is extended to exercise real Pod-bound
+TokenReview, PostgreSQL lifecycle checks, IAM revocation and stop, with genuine
+runtime selection. The live extension has not run: no authorized disposable
+cluster/database/runtime image was supplied. No integration-test waiver or
+runtime acceptance is claimed. The cluster-creating profile remains disabled;
+deployment has not been authorized.
+
+Draft validation on 2026-10-30: adapter/API boundary suite 4 passed; existing
+Kubernetes Compute/runtime credential conformance 326 passed. API security plus
+adapter plus real-cluster selection reported 40 passed and one explicitly skipped
+cluster case. TypeScript build, lint, formatting, generated OpenAPI, workspace
+boundary, CI suite ownership, docs links/length and flow structure checks passed.
+These are source/local checks, not live-runtime acceptance.
 
 ## Manual Notes
 
 ## Changelog
 
+- 2026-10-30: Add the partial workload-readiness code draft and explicit remaining lifecycle work against baseline `51c19ed91`.
 - 2026-10-30: Drafted the plan against OCE `80725162a`; no implementation or runtime verification claimed.

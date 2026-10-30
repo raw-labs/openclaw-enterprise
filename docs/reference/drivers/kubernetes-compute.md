@@ -26,6 +26,8 @@ SandboxDriver provisions the Harness and declares networking, filesystem, and
 process containment. Stock OpenShell cannot provide required credential and
 workload-identity projections; Agent deployment with OpenShell remains unsupported.
 
+Draft `temporaryEnvironmentApiUrl` enables [workload probes](../authentication/agent-workload-probe.md), not allocation.
+
 Detailed operator contracts:
 
 - [Storage and credentials](kubernetes-compute/storage-and-credentials.md): separate gateway state, Harness workspaces, and runtime Secrets.

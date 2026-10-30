@@ -15,6 +15,7 @@ import {
 import type {
   Agent,
   AgentCredentialSourceBinding,
+  AgentWorkloadIdentity,
   AgentRead,
   AgentRevisionRead,
   InitialWorkspaceFiles,
@@ -2100,6 +2101,77 @@ export class OpenClawController {
       }
       return agent;
     });
+  }
+
+  /** Verify provider evidence; the readiness operation checks live state after IAM identity lookup. */
+  async verifyTemporaryEnvironmentCaller(token: string, namespaceId: string, agentId: string) {
+    const driver = this.selectedDriver("compute");
+    if (!driver.verifyAgentWorkloadIdentity) {
+      throw new NotImplementedError(
+        "verifyAgentWorkloadIdentity",
+        "Workload authentication is unsupported.",
+      );
+    }
+    let identity;
+    try {
+      identity = await driver.verifyAgentWorkloadIdentity({ token, namespaceId, agentId });
+    } catch {
+      // Provider errors may contain the submitted credential. Never propagate their text.
+      throw new DependencyUnavailableError("Workload verification is unavailable.");
+    }
+    if (!identity || identity.namespaceId !== namespaceId || identity.agentId !== agentId) {
+      throw new AuthorizationDeniedError("The Agent workload identity was refused.");
+    }
+    return identity;
+  }
+
+  private async requireActiveAgentWorkload(identity: AgentWorkloadIdentity) {
+    const { namespaceId, agentId } = identity;
+    const driver = this.selectedDriver("compute");
+    await this.read(async (state) => {
+      const namespace = await state.namespaces.findNamespace(namespaceId);
+      const agent = await state.agents.findAgent(namespaceId, agentId);
+      const revision = await state.revisions.findRevision(
+        namespaceId,
+        agentId,
+        identity.revisionId,
+      );
+      if (
+        !namespace ||
+        namespace.status !== "ready" ||
+        !agent ||
+        agent.status !== "active" ||
+        agent.desiredRuntimeState !== "running" ||
+        agent.activeRevisionId !== identity.revisionId ||
+        agent.servicePrincipalId !== identity.servicePrincipalId ||
+        !revision ||
+        revision.compute.id !== driver.id ||
+        revision.compute.implementation !== driver.implementation
+      ) {
+        throw new AuthorizationDeniedError("The Agent workload is no longer active.");
+      }
+    });
+  }
+
+  async getTemporaryEnvironmentReadiness(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+  ) {
+    await this.authorize(principalId, "operate", { kind: "agent", id: agentId, namespaceId });
+    await this.requireActiveAgentWorkload({
+      namespaceId,
+      agentId,
+      revisionId,
+      servicePrincipalId: principalId,
+    });
+    // TODO(RFC-0019): Enable allocation only with durable leases, atomic capacity reservations,
+    // expiry reconciliation, and confirmed Kubernetes deletion through the normal worker.
+    return {
+      supported: false as const,
+      reason: "TEMPORARY_ENVIRONMENT_LIFECYCLE_NOT_IMPLEMENTED" as const,
+    };
   }
 
   async getAgentRuntimeImages(principalId: string, namespaceId: string, agentId: string) {

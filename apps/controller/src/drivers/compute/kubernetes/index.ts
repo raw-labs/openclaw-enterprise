@@ -15,6 +15,7 @@ import { isDeepStrictEqual } from "node:util";
 import type {
   AppsV1Api,
   AuthorizationV1Api,
+  AuthenticationV1Api,
   CoreV1Api,
   DiscoveryV1Api,
   KubernetesObject,
@@ -252,6 +253,7 @@ export type {
 interface KubernetesApiClients {
   readonly version: VersionApi;
   readonly core: CoreV1Api;
+  readonly authentication: AuthenticationV1Api;
   readonly apps: AppsV1Api;
   readonly authorization: AuthorizationV1Api;
   readonly discovery: DiscoveryV1Api;
@@ -392,6 +394,8 @@ export interface KubernetesComputeDriverOptions {
       readonly port: number;
     };
   };
+  /** Draft RFC-0019 workload probe. Allocation remains disabled. */
+  readonly temporaryEnvironmentApiUrl?: string;
   readonly servicePrincipalCredentials:
     | { readonly mode: "disabled" }
     | {
@@ -2338,6 +2342,90 @@ export class KubernetesComputeDriver implements ComputeDriver {
   readonly startHarnessDeviceAuthorization = startHarnessDeviceAuthorization;
   readonly pollHarnessDeviceAuthorization = pollHarnessDeviceAuthorization;
 
+  async verifyAgentWorkloadIdentity(input: {
+    readonly token: string;
+    readonly namespaceId: string;
+    readonly agentId: string;
+  }) {
+    const credentials = this.options.servicePrincipalCredentials;
+    if (
+      this.options.temporaryEnvironmentApiUrl === undefined ||
+      credentials.mode !== "projectedServiceAccountToken"
+    ) {
+      return undefined;
+    }
+    const { name: placement } = await this.resolveNamespace(input.namespaceId);
+    // Only the execution plane can vouch for the Harness. Never retry against another cluster.
+    const clients = await this.clients(placement.plane);
+    const review = await this.request(
+      () =>
+        clients.authentication.createTokenReview({
+          body: {
+            apiVersion: "authentication.k8s.io/v1",
+            kind: "TokenReview",
+            spec: { token: input.token, audiences: [credentials.audience] },
+          },
+        }),
+      { mutating: false },
+    );
+    const status = review.status;
+    const names = status?.user?.extra?.["authentication.kubernetes.io/pod-name"];
+    const uids = status?.user?.extra?.["authentication.kubernetes.io/pod-uid"];
+    if (
+      status?.authenticated !== true ||
+      !status.audiences?.includes(credentials.audience) ||
+      names?.length !== 1 ||
+      uids?.length !== 1 ||
+      !names[0] ||
+      !uids[0]
+    ) {
+      return undefined;
+    }
+    let pod;
+    try {
+      pod = await this.request(
+        () => clients.core.readNamespacedPod({ namespace: placement.name, name: names[0]! }),
+        { mutating: false },
+      );
+    } catch (error) {
+      if (numericErrorStatus(error) === 404) {
+        return undefined;
+      }
+      throw error;
+    }
+    const annotations = pod.metadata?.annotations;
+    const revisionId =
+      annotations?.["openclaw.dev/revision-id"] ?? annotations?.[AGENT_REVISION_ID_ANNOTATION];
+    const servicePrincipalId = annotations?.["openclaw.dev/service-principal-id"];
+    const projected = pod.spec?.volumes?.some(
+      (volume) =>
+        volume.name === "openclaw-service-principal" &&
+        volume.projected?.sources?.some(
+          (source) => source.serviceAccountToken?.audience === credentials.audience,
+        ),
+    );
+    if (
+      pod.metadata?.uid !== uids[0] ||
+      pod.metadata?.deletionTimestamp ||
+      pod.metadata?.labels?.["app.kubernetes.io/managed-by"] !== MANAGER ||
+      annotations?.["openclaw.dev/namespace-id"] !== input.namespaceId ||
+      annotations?.["openclaw.dev/agent-id"] !== input.agentId ||
+      !revisionId ||
+      !servicePrincipalId ||
+      !projected ||
+      status.user?.username !==
+        `system:serviceaccount:${placement.name}:${pod.spec?.serviceAccountName}`
+    ) {
+      return undefined;
+    }
+    return {
+      namespaceId: input.namespaceId,
+      agentId: input.agentId,
+      revisionId,
+      servicePrincipalId,
+    };
+  }
+
   requiresStoppedPredecessors(revision: AgentRevision): boolean {
     return revision.harness.mode === "dedicated";
   }
@@ -2466,6 +2554,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
           },
         },
       },
+      temporaryEnvironmentApiUrl: { type: "string", minLength: 1 },
       servicePrincipalCredentials: {
         type: "object",
         required: ["mode"],
@@ -2696,6 +2785,21 @@ export class KubernetesComputeDriver implements ComputeDriver {
       throw new ConfigurationFailure(
         "Gateway routing derives the Envoy gateway client peer; do not configure network.gatewayClients.",
       );
+    }
+    if (options.temporaryEnvironmentApiUrl !== undefined) {
+      const endpoint = new URL(options.temporaryEnvironmentApiUrl);
+      if (
+        endpoint.protocol !== "https:" ||
+        endpoint.username ||
+        endpoint.password ||
+        endpoint.search ||
+        endpoint.hash ||
+        options.servicePrincipalCredentials.mode !== "projectedServiceAccountToken"
+      ) {
+        throw new ConfigurationFailure(
+          "Temporary environment probes require an HTTPS OCC URL and projected workload credentials.",
+        );
+      }
     }
     const credentials = options.servicePrincipalCredentials;
     if (asRecord(credentials) === undefined) {
@@ -7828,6 +7932,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     return {
       version: new sdk.VersionApi(clientConfiguration),
       core: new sdk.CoreV1Api(clientConfiguration),
+      authentication: new sdk.AuthenticationV1Api(clientConfiguration),
       apps: new sdk.AppsV1Api(clientConfiguration),
       authorization: new sdk.AuthorizationV1Api(clientConfiguration),
       discovery: new sdk.DiscoveryV1Api(clientConfiguration),
@@ -13125,6 +13230,17 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       }
     }
     if (projected !== undefined) {
+      if (this.options.temporaryEnvironmentApiUrl !== undefined) {
+        variables.push(
+          { name: "OCC_WORKLOAD_URL", value: this.options.temporaryEnvironmentApiUrl },
+          { name: "OCC_WORKLOAD_NAMESPACE_ID", value: ownership.namespaceId },
+          {
+            name: "OCC_WORKLOAD_AGENT_ID",
+            value: required(ownership.agentId, "Workload Agent identity"),
+          },
+          { name: "OCC_WORKLOAD_TOKEN_FILE", value: TOKEN_PATH + "/token" },
+        );
+      }
       volumes.push({
         name: "openclaw-service-principal",
         projected: {
