@@ -1,7 +1,7 @@
 ---
 created: "2026-10-28"
 updated: "2026-10-30"
-last_updated_session: "agent:main:subagent:55a5f328-95d6-403d-99c4-22449d12bf3f"
+last_updated_session: "agent:main:subagent:22189706-f7ab-4df4-a29b-1bf049ae824a"
 ---
 
 # Gateway outbound destination flow
@@ -116,16 +116,26 @@ owner chain. It grants no ReplicaSet mutation or cluster-wide binding.
 Startup constructs these capabilities before Agent deployment. Registration does
 not admit a revision or perform its network operations.
 
-The development launcher explicitly selects the experiment with
-`OCC_DEVELOPMENT_GATEWAY_DESTINATIONS=1`.
-`internal/occdev/gateway_destinations_k3d.go:checkGatewayDestinationSelection`
-requires Kubernetes/OpenShell and unchanged stock rules before cluster creation.
-The option enables native TLS and mTLS independently of protected inference.
-Protected execution retains its separate candidate and capability checks. `prepareGatewayDestinationInfrastructure` combines the
+The normal Kubernetes-only development launcher registers a Gateway-only pair
+with `SandboxDriver=none`, independently of native Harness selection.
+`internal/occdev/gateway_destinations_k3d.go:configureGatewayOnlyPair` reuses the
+Sandbox configuration helper, selects `usage: gateway`, and omits credential
+authority and Credential Gateway membership. Its unused authenticated Backend
+endpoint is loopback port 9; no management service or token file is provisioned.
+The pair does not install an OpenShell Harness or change native presets, plugins,
+or projected ServiceAccount credentials.
+
+`OCC_DEVELOPMENT_GATEWAY_DESTINATIONS=1` retains the execution-capable OpenShell
+profile and enables its native TLS and mTLS independently of protected inference.
+`checkGatewayDestinationSelection` validates the explicit selector.
+`internal/occdev/openshell_k3d.go:upK3d` checks unchanged stock rules before
+cluster creation, including the normal profile without that selector. Protected execution
+retains its separate candidate and capability checks. `prepareGatewayDestinationInfrastructure` combines the
 fixed Pod and Service ranges, complete owned node subnet, and metadata range.
 `internal/occdev/kubernetes.go:writeInstallation` supplies those ranges to Compute.
 `internal/occdev/egress_k3d.go:developmentEgressConfiguration` adds destination
-configuration to the existing execution authority, not a gateway-only capability.
+configuration to the existing execution authority for an OpenShell Harness.
+The normal profile reuses the destination settings without that authority.
 The controller image includes the rules at its selected absolute path.
 `importGatewayDestinationImages` pulls each pinned stock proxy manifest directly
 into containerd before installation. It does not relabel transformed Docker
@@ -301,6 +311,8 @@ qualify the stock binary or CNI boundary.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-30 12:11: Trace normal k3d Gateway-only registration, unchanged native Harness selection, and shared infrastructure discovery and proxy imports. (agent:main:subagent:22189706-f7ab-4df4-a29b-1bf049ae824a - 7f3a04a152065342b682d2830e3125abb6359b31)
 
 - 2026-10-30 00:25: Trace secure development opt-in, discovered infrastructure exclusions and stock image imports in the accompanying fix. (agent:main:subagent:55a5f328-95d6-403d-99c4-22449d12bf3f - 34538096f2d4b30448ce0c53e923978cc85e97f0)
 

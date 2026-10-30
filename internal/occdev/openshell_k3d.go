@@ -121,7 +121,7 @@ func upK3d(ctx context.Context, opts Options, sandboxDriver string, networkPolic
 		SandboxNetworkPolicyCeiling: ceiling,
 		Version:                     3,
 		ProtectedEgress:             protectedEgress,
-		GatewayDestinations:         r.env["OCC_DEVELOPMENT_GATEWAY_DESTINATIONS"] == "1",
+		GatewayDestinations:         sandboxDriver == "none" || r.env["OCC_DEVELOPMENT_GATEWAY_DESTINATIONS"] == "1",
 		DatabaseName:                databaseName,
 		OpenShellHostGatewayIP:      r.env["OCC_DEVELOPMENT_OPENSHELL_HOST_GATEWAY_IP"],
 		Repository:                  opts.Repository,
@@ -181,6 +181,11 @@ func upK3d(ctx context.Context, opts Options, sandboxDriver string, networkPolic
 	}
 	if err := r.checkLegacyNATTable(ctx); err != nil {
 		return err
+	}
+	if state.GatewayDestinations {
+		if err := r.checkGatewayDestinationRules(); err != nil {
+			return err
+		}
 	}
 	// The revision checks read images the local engine lacks from the registry.
 	if err := r.selectDevelopmentImageRegistry(ctx); err != nil {

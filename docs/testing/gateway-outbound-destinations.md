@@ -205,8 +205,6 @@ acceptance conditions open until evidence exists for the final implementation:
   loopback, link-local, metadata, Service, Pod, node, or control-plane addresses.
 - Direct HTTP, UDP/QUIC, IPv6 where enabled, alternate proxy and raw-IP attempts
   from the actual Gateway, with independent reachable positive controls.
-- Long-lived CONNECT/WebSocket termination during replacement and stop, measured
-  after fencing; no old or foreign revision can retain or regain access.
 - Required Harness/model/workspace transport before and after replacement,
   exact reciprocal selectors, and every additive network grant in the real cluster.
 
@@ -225,11 +223,20 @@ the new destination, refused the removed destination, and passed another model
 turn. These observations do not qualify the separate OpenShell Harness scenario
 or the deferred acceptance cases above.
 
-The normal dedicated lifecycle stops predecessors before preparing replacements.
-Resource withdrawal does not prove simultaneous cross-revision CNI isolation or
-the exact termination time of an established CONNECT/WebSocket. Record the tested
-commit, actual image identities, run commands and cleanup receipts in the change
-review; a manual run is not automatic QA-matrix coverage.
+A subsequent normal dedicated run used the launcher-generated Gateway pair,
+without an Installation amendment. Two API-created Agents reached their own
+approved hosts and were denied each other's hosts and proxy frontends. An external
+TLS client held CONNECT/WebSocket tunnels through each actual Gateway network
+namespace and revision proxy, with unique upstream echoes before lifecycle actions.
+Replacing and stopping one Agent closed its existing tunnels while the other
+Agent continued exchanging echoes and reaching its approved host. This measures
+client-observed connection closure, not authenticated Slack behavior. The
+observer did not add network grants or replace the policy engine.
+
+The normal dedicated lifecycle stops predecessors before preparing replacements;
+it does not create simultaneous same-Agent revision workloads. Record source,
+image identities, commands, connection timings and cleanup in the PR. These
+manual observations do not make the separate OpenShell Harness QA scenario pass.
 
 ## Clean up and diagnose failures
 

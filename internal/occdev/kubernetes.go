@@ -415,6 +415,16 @@ func writeInstallation(s *developmentState, reference string, openShell *openShe
 			"id": "codex-plugin", "configuration": map[string]any{"catalogSource": "openai-curated"},
 		}
 	}
+	if s.GatewayDestinations {
+		if len(s.InfrastructureCIDRs) == 0 {
+			return fmt.Errorf("Gateway destinations require discovered infrastructure CIDRs")
+		}
+		compute := config["drivers"].(map[string]any)["compute"].(map[string]any)["configuration"].(map[string]any)
+		compute["network"].(map[string]any)["infrastructureCidrs"] = s.InfrastructureCIDRs
+		if s.SandboxDriver == "none" {
+			configureGatewayOnlyPair(s, config)
+		}
+	}
 	if s.SandboxDriver == "openshell" {
 		if openShell == nil {
 			return fmt.Errorf("OpenShell development assets are required")
@@ -442,12 +452,6 @@ func writeInstallation(s *developmentState, reference string, openShell *openShe
 			"id": openShellCredentialGatewayID,
 			// Native OpenClaw uses Node; retain both architecture-specific Codex allowances.
 			"configuration": map[string]any{"binaries": append(openShellCodexBinaries(), "/usr/local/bin/node")},
-		}
-		if s.GatewayDestinations {
-			if len(s.InfrastructureCIDRs) == 0 {
-				return fmt.Errorf("Gateway destinations require discovered infrastructure CIDRs")
-			}
-			compute["network"].(map[string]any)["infrastructureCidrs"] = s.InfrastructureCIDRs
 		}
 		if s.secureOpenShell() {
 			if s.egressKeyID == "" {

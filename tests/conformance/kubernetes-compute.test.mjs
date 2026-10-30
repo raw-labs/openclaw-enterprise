@@ -22570,8 +22570,9 @@ test("Gateway destination profile keeps internal transports without ordinary pub
   }
   assert.equal(env.NODE_USE_ENV_PROXY, "1");
   assert.equal(env.NO_PROXY, env.no_proxy);
-  assert.ok(!env.NO_PROXY.includes(".svc,"));
-  assert.ok(!env.NO_PROXY.includes("api.example.com"));
+  const noProxy = env.NO_PROXY.split(",");
+  assert.equal(noProxy.includes(".svc"), false);
+  assert.equal(noProxy.includes("api.example.com"), false);
   const channels = driver.channelNetworkPolicy(revision, [{ egress: "https-proxy" }], namespace);
   assert.deepEqual(channels.spec.egress, []);
   assert.equal(selectorMatches(channels.spec.podSelector, labels), false);

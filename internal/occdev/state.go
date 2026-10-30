@@ -61,9 +61,10 @@ type developmentState struct {
 	directory              string
 }
 
-// Native OpenShell TLS is required for both protected execution and Gateway policy.
+// An execution-capable OpenShell pair needs native TLS for protected execution
+// or Gateway policy. A registration-only Gateway pair has no management service.
 func (s *developmentState) secureOpenShell() bool {
-	return s.ProtectedEgress || s.GatewayDestinations
+	return s.ProtectedEgress || (s.SandboxDriver == "openshell" && s.GatewayDestinations)
 }
 
 func (s *developmentState) composeCommand() []string {

@@ -117,6 +117,7 @@ func TestK3dCodexPreflightOrdering(t *testing.T) {
 	for _, scenario := range []string{"refused", "invalid result", "cleanup failure", "cancelled", "accepted", "API failure", "OpenShell routing", "controller import failure", "network check failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
+			copyGatewayDestinationRules(t, root)
 			state := filepath.Join(root, "state")
 			runtimeImage := "example.invalid/runtime@" + profileTestDigest
 			controllerImage := "example.invalid/controller@" + profileTestDigest
@@ -209,6 +210,8 @@ func TestK3dCodexPreflightOrdering(t *testing.T) {
 				"git": `"rev-parse --verify HEAD") echo 0123456789abcdef0123456789abcdef01234567 ;;`,
 				"docker": `"version --format {{json .Server}}") echo '{"Platform":{"Name":"Docker"}}' ;;
 "info") ;;
+"inspect --format {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}} k3d-occ-dev-order-server-0") echo 172.30.42.2 ;;
+"network inspect k3d-occ-dev-order") echo '[{"IPAM":{"Config":[{"Subnet":"172.30.42.0/24"}]}}]' ;;
 "image inspect --format {{ index .Config.Labels "*) echo 0123456789abcdef0123456789abcdef01234567 ;;
 "exec k3d-occ-dev-order-server-0 nslookup registry-1.docker.io") ;;
 "image inspect ` + runtimeImage + `") ;;

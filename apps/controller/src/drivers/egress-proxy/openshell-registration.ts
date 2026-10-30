@@ -53,7 +53,6 @@ export function createOpenShellCapabilities(input: {
   };
 }) {
   const destinationOptions = input.proxy?.configuration.gatewayDestinations;
-  const protectedProxy = input.proxy;
   const configuration = input.repository?.configuration;
   const resolveDelivery = input.repository?.resolveDelivery;
   if (configuration && !resolveDelivery) {
@@ -63,13 +62,13 @@ export function createOpenShellCapabilities(input: {
     configuration &&
     resolveDelivery &&
     new OpenShellGitRuntime(
-      { ...configuration, ...(protectedProxy && { protectedExecution: true }) },
+      { ...configuration, ...(input.proxy && { protectedExecution: true }) },
       resolveDelivery,
     );
   const sandbox = input.createSandbox(
     {
       ...input.sandbox.configuration,
-      ...(protectedProxy && { egress: protectedProxy.configuration }),
+      ...(input.proxy && { egress: input.proxy.configuration }),
     },
     {
       id: input.sandbox.id,

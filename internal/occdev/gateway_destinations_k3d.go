@@ -16,8 +16,8 @@ const (
 	developmentGatewayRulesHash   = "f60349dcfe8f42ff6c6957fd860cbfc1aef536c6f22740025c6771745f637c38"
 )
 
-// The experiment retains the execution-capable pair. Native TLS and PKI do
-// not claim that the supplier implements protected supervisor middleware.
+// Normal k3d Gateways require their own pair regardless of Harness selection.
+// OpenShell Harness selection retains its separate native TLS opt-in.
 func (r *runner) checkGatewayDestinationSelection(controlPlane, sandbox string) error {
 	value := r.env["OCC_DEVELOPMENT_GATEWAY_DESTINATIONS"]
 	if value != "" && value != "0" && value != "1" {
@@ -26,9 +26,13 @@ func (r *runner) checkGatewayDestinationSelection(controlPlane, sandbox string) 
 	if value != "1" {
 		return nil
 	}
-	if controlPlane != "kubernetes" || sandbox != "openshell" {
-		return fmt.Errorf("Gateway destinations require Kubernetes control plane and OpenShell Sandbox")
+	if controlPlane != "kubernetes" {
+		return fmt.Errorf("Gateway destinations require Kubernetes control plane")
 	}
+	return r.checkGatewayDestinationRules()
+}
+
+func (r *runner) checkGatewayDestinationRules() error {
 	rules, err := os.ReadFile(filepath.Join(r.opts.Repository, "deploy/runtime/gateway-proxy/sandbox-policy.rego"))
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(rules)) != developmentGatewayRulesHash {
 		return fmt.Errorf("Gateway destinations require the unchanged pinned stock policy rules in this checkout")
@@ -71,4 +75,30 @@ func (r *runner) importGatewayDestinationImages(ctx context.Context, state *deve
 		}
 	}
 	return nil
+}
+
+// Register only Gateway attachment capabilities. The unused management endpoint
+// fails closed; no OpenShell service, Harness, or credential authority is installed.
+func configureGatewayOnlyPair(state *developmentState, installation map[string]any) {
+	drivers := installation["drivers"].(map[string]any)
+	sandbox := openShellInstallationConfiguration(state, nil, nil)
+	configuration := sandbox["configuration"].(map[string]any)
+	// Execution-only workspace resources, callback policies, and startup delays
+	// do not belong to registration-only Gateway attachments.
+	configuration["gateway"] = map[string]any{"workspaceMode": "operator"}
+	delete(configuration, "startupDelayMs")
+	delete(configuration["kubernetes"].(map[string]any), "agentResources")
+	drivers["sandbox"] = sandbox
+	proxy := developmentEgressConfiguration(state)
+	proxy["usage"] = "gateway"
+	delete(proxy["configuration"].(map[string]any), "authority")
+	drivers["credential_proxy"] = proxy
+	installation["backend"] = []any{map[string]any{
+		"id": "openshell", "type": "openshell",
+		"configuration": map[string]any{
+			"endpoint": "https://127.0.0.1:9",
+			"auth":     map[string]string{"mode": "bearerTokenFile", "path": "/etc/openclaw/gateway-pair-unused-token"},
+		},
+		"drivers": map[string]string{"sandbox": openShellSandboxID, "credential_proxy": developmentEgressDriver},
+	}}
 }

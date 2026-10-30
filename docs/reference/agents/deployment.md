@@ -60,9 +60,9 @@ with the specific reason, such as "The configured Agent model requires an
 explicit supported Harness runtime." A selected SandboxDriver currently requires
 `dedicated` Codex execution; it does not support embedded OpenClaw.
 
-An Agent update may include `executionMode`, `harnessAuth`, and `backendId`
-alongside `configurationId`. An update must include `configurationId`,
-`gatewayManagedMode`, or `gatewayOutbound`. Omission preserves the current value;
+An update requires `configurationId`, `gatewayManagedMode`, or `gatewayOutbound`
+and may include `executionMode`, `harnessAuth`, and `backendId`.
+Omission preserves the current value;
 `harnessAuth: null` clears authentication and `backendId: null` clears the
 Backend. Existing versions retain their immutable placement, auth binding, and
 Backend association. For the current `harnessAuth` source, an update checks only
@@ -80,15 +80,15 @@ Updating that Configuration, or naming another one, resolves it. See the
 runtime selection, identity boundaries, and activation.
 
 See [additional Gateway destinations](../agents.md#additional-gateway-destinations)
-for the separate Agent-owned host list and its permissions.
+for host permissions.
 
 <a id="revisions-and-deployment" class="anchor-alias"></a>
 
 ## Versions and deployment
 
-An Agent revision (`AgentRevision`) records one Agent deployment's saved
-configuration and execution settings. It cannot change. The Agent keeps an
-ordered version history and at most one selected version, identified by
+An immutable Agent revision (`AgentRevision`) saves deployment configuration
+and execution settings. The Agent keeps an ordered history and at most one
+selected version, identified by
 `activeRevisionId`. Saving a version does not select it or prove workload
 readiness. See [Agent revisions](../../guides/topics/agent-revisions.md).
 
