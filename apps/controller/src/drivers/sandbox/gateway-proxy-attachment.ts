@@ -9,7 +9,7 @@ import type {
   GatewayProxyAttachment,
   GatewayProxyAttachmentContext,
 } from "@openclaw-enterprise/contracts";
-import { asRecord } from "@openclaw-enterprise/utils";
+import { asRecord, sha256Hex } from "@openclaw-enterprise/utils";
 import { isDeepStrictEqual } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -240,6 +240,56 @@ export function openShellGatewayProxyAttachment(
           internalTrafficPolicy: "Cluster",
         },
       } as KubernetesObject,
+    ];
+  }
+
+  /** Removal verifies saved authority, not today's assets, DNS rules or start admission. */
+  function cleanupResources(
+    context: GatewayProxyAttachmentContext,
+    plan: GatewayDestinationPlan,
+  ): KubernetesObject[] {
+    const labels = {
+      "openclaw.dev/namespace": context.revision.namespaceId,
+      "openclaw.dev/agent": context.revision.agentId,
+      "openclaw.dev/revision": context.revision.id,
+      "openclaw.dev/network-profile": "destination-proxy-v1",
+    };
+    if (
+      !(context.kubernetes instanceof KubernetesObjectApi) ||
+      plan.version !== 1 ||
+      plan.driverId !== driverId ||
+      plan.sandboxDriverId !== sandboxDriverId ||
+      plan.namespaceId !== context.revision.namespaceId ||
+      plan.agentId !== context.revision.agentId ||
+      plan.revisionId !== context.revision.id ||
+      context.namespace.id !== plan.namespaceId ||
+      context.namespace.name !== context.namespaceName ||
+      !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(context.namespaceName) ||
+      plan.endpoint.serviceName !== "gateway-proxy-" + sha256Hex(plan.revisionId, 20) ||
+      plan.endpoint.port !== 3129 ||
+      !isDeepStrictEqual(plan.endpoint.podLabels, labels) ||
+      typeof plan.policy !== "string" ||
+      plan.policyHash !== sha256Hex(plan.policy) ||
+      !/^[a-f0-9]{64}$/.test(plan.attachmentDigest)
+    ) {
+      throw new Error("Gateway proxy frozen cleanup identity is invalid.");
+    }
+    const metadata = {
+      name: plan.endpoint.serviceName,
+      namespace: context.namespaceName,
+      labels,
+      annotations: {
+        "openclaw.dev/gateway-policy-hash": plan.policyHash,
+        "openclaw.dev/gateway-attachment-digest": plan.attachmentDigest,
+        "openclaw.dev/driver-id": driverId,
+        "openclaw.dev/sandbox-driver-id": sandboxDriverId,
+      },
+    };
+    return [
+      { apiVersion: "v1", kind: "Service", metadata },
+      { apiVersion: "apps/v1", kind: "Deployment", metadata },
+      { apiVersion: "v1", kind: "ConfigMap", metadata },
+      { apiVersion: "networking.k8s.io/v1", kind: "NetworkPolicy", metadata },
     ];
   }
 
@@ -546,7 +596,7 @@ export function openShellGatewayProxyAttachment(
       );
     },
     async remove(context, plan) {
-      const expected = resources(context, plan);
+      const expected = cleanupResources(context, plan);
       const api = context.kubernetes as KubernetesObjectApi;
       async function remove(resource: KubernetesObject) {
         context.signal.throwIfAborted();
@@ -554,7 +604,8 @@ export function openShellGatewayProxyAttachment(
         if (!actual) {
           return;
         }
-        assertResource(actual, resource);
+        // Spec changes revoke start permission, not authority to stop this owned object.
+        owned(actual, resource);
         if (!actual.metadata?.uid || !actual.metadata.resourceVersion) {
           throw new Error("Missing Gateway proxy deletion precondition.");
         }

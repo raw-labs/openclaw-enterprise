@@ -80,9 +80,9 @@ then rerender with `repository.enabled: true`.
 
 ### Dedicated Gateway proxy inputs
 
-The dedicated profile requires experimental `gatewayProxy` input with `backend`,
-`sandbox`, `credentialProxy` and complete `infrastructureCidrs`. Use existing
-operator-owned Backend and Driver configurations. The proxy configuration includes
+The dedicated profile requires experimental `gatewayProxy` input with
+`sandbox`, `credentialProxy` and complete `infrastructureCidrs`. Do not supply
+a management Backend, endpoint, or token file for this Gateway-only pair. The proxy configuration includes
 stock `gatewayDestinations` assets and exclusions, without credential authority
 or provider custody. This path is not production-qualified. See the
 [selection and exclusion flow](../../flows/gateway-outbound-destinations.md).

@@ -10,6 +10,8 @@ rfc: ../rfcs/0024-gateway-outbound-proxy-reuse.md
 - **PR:** [24](https://github.com/raw-labs/openclaw-enterprise/pull/24), retained as a draft until required verification is complete
 - **RFC clarification:** `72fa7ce820fe53ad3cd5aee248a8aaea9d4da72b`; SHA-256 `f803e741835ae7b1af4ade63678e04f1d36646171ba4f2d6200fafb6d00300ac`. The author authorized the ownership clarification on 2026-10-29; requirements and acceptance criteria are unchanged.
 
+- **Follow-up amendment:** `c671cb4ed363130342d98db6b28fe3671213092a`, submitted to the fork on 2026-10-30: dependencies follow Gateway-only versus management-dependent use; cleanup remains possible after admission changes; unsupported destination settings fail explicitly. The Backend-free normal dedicated workflow and changed-configuration lifecycle passed fresh verification; independent review and final-head CI remain pending.
+
 ## Outcome and scope
 
 Implement the RFC through the regular Agent authoring, deployment, activation,
@@ -111,8 +113,9 @@ and the existing Compute and installation composition paths.
       prerequisites and skipped checks explicitly.
 - [ ] Update current references, the source-backed flow and QA instructions from
       the final implementation. Complete independent review and final-head CI.
-- [ ] Publish only task-owned changes to the existing PR branch. Verify that the
-      RFC's bytes are unchanged. Keep the PR unmerged unless separately authorized.
+- [ ] Publish only task-owned changes to the existing fork PR branch. Keep the
+      RFC consistent with the authorized narrow amendment. Leave upstream untouched
+      and keep the PR unmerged unless separately authorized.
 
 ## Verification evidence
 
@@ -120,23 +123,53 @@ Required proof follows the [RFC acceptance criteria](../rfcs/0024-gateway-outbou
 A source change, unit test, fixture or skipped integration is not live enforcement
 proof. Keep each result tied to the tested revision and environment.
 
-| Requirement                                                  | Supported verification path                                                                     | Current result                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agent permissions and immutable revisions                    | Production API, native IAM and real PostgreSQL through the Agent workflow                       | API: 1 passed; PostgreSQL: 1 passed, no skips, on the working implementation based on `fae0c334f`                                                                                                                                                     |
-| Console and CLI authoring                                    | Browser interaction, rebuilt Storybook, CLI requests and uploaded screenshots/video             | Browser: 3 passed, no skips; complete Go CLI package passed. Rebuilt preview captures reviewed and [uploaded](https://gist.github.com/miguelbranco80/dcd6de78c1d0d226d7961a71009cb97a). Full Storybook manager build blocked by missing dependencies. |
-| Distinct Agent policies and Channel grants                   | Real Agent admission and worker deployment with two destination lists                           | Pending                                                                                                                                                                                                                                               |
-| Gateway and protected Harness coexistence                    | Selected paired OpenShell Drivers and actual protected requests                                 | Pending                                                                                                                                                                                                                                               |
-| HTTPS, Slack API and Socket Mode                             | Actual Gateway clients and authorized upstream credentials                                      | Docker native-client transport passed; authenticated Slack events and Kubernetes routing remain unrun                                                                                                                                                 |
-| Network bypass, address exclusions and cross-Agent isolation | Disposable Kubernetes cluster with enforcing NetworkPolicies and positive connectivity controls | Pending                                                                                                                                                                                                                                               |
-| Outages, tamper, replacement and connection closure          | Regular stop/replacement workflow and measured established tunnels                              | Pending                                                                                                                                                                                                                                               |
-| Control-plane networking                                     | Slack validation/directory before and alongside Agent deployment                                | Pending                                                                                                                                                                                                                                               |
-| Static and documentation checks                              | Typecheck, lint, formatting, workspace, OpenAPI, local links and flow validation                | Pending                                                                                                                                                                                                                                               |
+| Requirement                                                  | Supported verification path                                                                     | Current result                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent permissions and immutable revisions                    | Production API, native IAM and real PostgreSQL through the Agent workflow                       | API: 1 passed; PostgreSQL: 1 passed, no skips, on the working implementation based on `fae0c334f`                                                                                                                                                                                   |
+| Console and CLI authoring                                    | Browser interaction, rebuilt Storybook, CLI requests and uploaded screenshots/video             | Browser: 3 passed, no skips; complete Go CLI package passed. Rebuilt preview captures reviewed and [uploaded](https://gist.github.com/miguelbranco80/dcd6de78c1d0d226d7961a71009cb97a). Full Storybook build subsequently passed on 2026-10-30; no new UI change in this follow-up. |
+| Distinct Agent policies and Channel grants                   | Real Agent admission and worker deployment with two destination lists                           | Maintained normal dedicated two-Agent isolation passed after the fixes; authenticated Channel cases remain pending.                                                                                                                                                                 |
+| Gateway and protected Harness coexistence                    | Selected paired OpenShell Drivers and actual protected requests                                 | Pending                                                                                                                                                                                                                                                                             |
+| HTTPS, Slack API and Socket Mode                             | Actual Gateway clients and authorized upstream credentials                                      | Earlier native-client and normal dedicated HTTPS/WebSocket checks passed; authenticated Slack remains unrun.                                                                                                                                                                        |
+| Network bypass, address exclusions and cross-Agent isolation | Disposable Kubernetes cluster with enforcing NetworkPolicies and positive connectivity controls | Earlier real attachment and normal dedicated isolation/direct TCP checks passed with positive controls; complete bypass matrix remains pending.                                                                                                                                     |
+| Outages, tamper, replacement and connection closure          | Regular stop/replacement workflow and measured established tunnels                              | Fresh maintained replacement/stop after changed installation exclusions passed, including established-tunnel closure and peer preservation. Foreign-owner and retry cases passed with simulated Kubernetes API.                                                                     |
+| Control-plane networking                                     | Slack validation/directory before and alongside Agent deployment                                | Pending                                                                                                                                                                                                                                                                             |
+| Static and documentation checks                              | Typecheck, lint, formatting, workspace, OpenAPI, local links and flow validation                | Combined follow-up lint, typecheck, formatting, workspace, OpenAPI, docs and flow checks passed; 623 focused regressions passed with no skips, plus the complete Go launcher package.                                                                                               |
 
 The [source flow](../../docs/flows/gateway-outbound-destinations.md) owns the runtime
 trace. The [QA procedure](../../docs/testing/gateway-outbound-destinations.md) owns
 infrastructure, credentials, commands and cleanup. Record results here as each
 required proof completes; missing infrastructure or credentials keeps that item
 incomplete.
+
+### Fresh follow-up verification
+
+On 2026-10-30, the maintained `gateway-destinations-dedicated` scenario passed
+with **3 reported tests, no failures or skips** on `c671cb4ed` plus the accompanying
+implementation. Both images were rebuilt from that source. Two API/worker-created
+Agents used Gateway-only registration without a management Backend. Installation
+blocked CIDRs changed before replacement and again before stop. Established
+TLS/WebSocket tunnels closed after 2,949 ms and 2,296 ms; the peer retained its
+Pod and connection with 58 upstream echoes. Three nonce model turns used
+`gpt-6.1-sol` with low reasoning and Harness-only model credentials. Owned cluster,
+database, state and image references were removed; inventories matched the
+pre-run state. Deletion conflicts and foreign ownership are simulated-API proof,
+not injected live failures. See the [QA guide](../../docs/testing/gateway-outbound-destinations.md)
+for the maintained command and remaining acceptance limits.
+
+### Normal dedicated verification before the follow-up fixes
+
+On 2026-10-30, the normal launcher and API/worker workflow tested the runtime
+changes recorded in `2e74eb5aed5c7a4aac1553187eae37f7b8c3e097`. Two Agents reached
+their own hosts and could not reach the other host or proxy frontend. Real model
+turns used Harness-only credentials. Replacement closed an established verified
+TLS/WebSocket tunnel after 2,086 ms; stop closed it after 2,157 ms. The peer
+continued exchanging messages. These results do not cover the new Backend-free
+configuration or changed-admission cleanup. The fresh follow-up result above supersedes this run for the corrected paths;
+protected Harness and authenticated Slack acceptance remain pending.
+
+Full Storybook, documentation build, lint, types, formatting, workspace, OpenAPI
+and flow checks passed for that earlier source. Historical prerequisite failures
+below describe their original runs, not current blockers.
 
 ### Local checks on the working implementation
 
@@ -209,12 +242,12 @@ Execution selection remains the default and keeps its existing custody checks.
 Gateway-only selection refuses credential authority, provider custody, Credential
 Gateway/Refresh selection and protected repository transport configuration.
 
-The dedicated profile requires an explicit `gatewayProxy` input with Backend,
-Sandbox and Credential Proxy configurations and infrastructure CIDRs. It does not
-invent endpoints, RuntimeClasses or workspace settings. The Backend can own the
-Gateway pair without a Credential Gateway. API and worker register that owner
-without selecting its execution capabilities. The renderer keeps native Git
-delivery and control-plane Slack unchanged.
+The dedicated profile requires an explicit `gatewayProxy` input with Sandbox
+and Credential Proxy configurations and infrastructure CIDRs. Gateway-only
+registration omits the management Backend and refuses unused management settings.
+Management-dependent execution still requires its authenticated Backend. API and
+worker register the Gateway pair independently of Harness execution. The renderer
+keeps native Git delivery and control-plane Slack unchanged.
 
 These source paths still require complete final regression and deployment proof.
 Existing OpenShell Harness production qualification retains its documented

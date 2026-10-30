@@ -2838,8 +2838,6 @@ test("Gateway-only paired selection preserves native repository delivery and Com
   const { STOCK_GATEWAY_PROXY } =
     await import("../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts");
   const { fileURLToPath } = await import("node:url");
-  delete pair.backend[0].drivers.credential_gateway;
-  configuration.backend.push(pair.backend[0]);
   configuration.drivers.sandbox = pair.drivers.sandbox;
   configuration.drivers.credential_proxy = {
     id: pair.drivers.credential_proxy.id,
@@ -2858,6 +2856,13 @@ test("Gateway-only paired selection preserves native repository delivery and Com
     },
   };
   const loaded = await loadInstallationConfiguration({
+    // Existing composition factories are tripwires, not replacements for exercised behavior.
+    createOpenShellBackend() {
+      assert.fail("Gateway-only composition constructed a management Backend");
+    },
+    createSandboxDriver() {
+      assert.fail("Gateway-only composition constructed a management Sandbox");
+    },
     mode: "production",
     environment: { OCC_CONFIG_PATH: await fixture(t, configuration) },
   });
@@ -2868,6 +2873,77 @@ test("Gateway-only paired selection preserves native repository delivery and Com
   assert.equal(loaded.protectedDriver, undefined);
   assert.equal(loaded.proxyDriver, undefined);
   assert.equal(loaded.repositoryGitDriver, undefined);
+  assert.equal(
+    loaded.installation.backend.some((backend) => backend.type === "openshell"),
+    false,
+  );
+  const gatewaySandbox = loaded.gatewayProxyDriver.require("sandbox");
+  const gatewayProxy = loaded.gatewayProxyDriver.require("credential_proxy");
+  assert.equal(gatewaySandbox.provisionHarness, undefined);
+  assert.equal(gatewaySandbox.harnessResource, undefined);
+  assert.equal(gatewayProxy.bindExchange, undefined);
+  assert.equal(gatewayProxy.bindRepositoryGit, undefined);
+  assert.deepEqual(gatewayProxy.sourceControl.providers, []);
+  for (const identity of ["backend", "sender", "resolver"]) {
+    assert.throws(
+      () => gatewayProxy.sourceControl[identity],
+      /does not provide OpenShell management or execution/,
+    );
+  }
+  for (const operation of [
+    () => gatewaySandbox.cleanup({}),
+    () => gatewayProxy.sourceControl.assertAvailable(new AbortController().signal),
+    () => gatewayProxy.configureRevision({}),
+    () => gatewayProxy.wiringStatus({}, {}),
+    () => gatewayProxy.verifyInstallation({}, {}),
+    () => gatewayProxy.removeRevision({}),
+  ]) {
+    await assert.rejects(operation, /does not provide OpenShell management or execution/);
+  }
+  // A management Backend cannot silently turn attachment-only registration into execution.
+  const withBackend = structuredClone(configuration);
+  delete pair.backend[0].drivers.credential_gateway;
+  withBackend.backend.push(pair.backend[0]);
+  await assert.rejects(
+    loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: await fixture(t, withBackend) },
+    }),
+    /must omit the unused OpenShell management Backend/,
+  );
+
+  const missingPair = structuredClone(configuration);
+  delete missingPair.drivers.sandbox;
+  await assert.rejects(
+    loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: await fixture(t, missingPair) },
+    }),
+    /requires a paired Sandbox/,
+  );
+  // Switching the same pair back to protected execution restores management dependencies.
+  const execution = structuredClone(configuration);
+  delete execution.repository;
+  execution.backend = [];
+  delete execution.drivers.compute.configuration.network.repositoryCredentials;
+  execution.drivers.credential_proxy = pair.drivers.credential_proxy;
+  await assert.rejects(
+    loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: await fixture(t, execution) },
+    }),
+    /requires a backend entry with type openshell/,
+  );
+  const unauthenticated = structuredClone(pair.backend[0]);
+  unauthenticated.configuration = { endpoint: "https://openshell.example.invalid:8443" };
+  execution.backend.push(unauthenticated);
+  await assert.rejects(
+    loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: await fixture(t, execution) },
+    }),
+    /requires TLS with bearerTokenFile or mtls authentication/,
+  );
   // Gateway networking must not be mistaken for a selected Harness Sandbox.
   // Construct the real worker: startup composition alone missed this refusal.
   const pool = new pg.Pool({ connectionString: "postgresql://127.0.0.1:1/occ" });

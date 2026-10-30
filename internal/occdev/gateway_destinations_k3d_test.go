@@ -130,12 +130,9 @@ func TestNormalK3dInstallationIncludesGatewayOnlyPair(t *testing.T) {
 	if network["providerHarness"] != nil || compute["servicePrincipalCredentials"].(map[string]any)["mode"] != "projectedServiceAccountToken" || installation["presets"].(map[string]any)["includeDefaults"] != true || drivers["plugin"].(map[string]any)["id"] != "codex-plugin" {
 		t.Fatal("Gateway registration changed native Harness selection")
 	}
-	backend := installation["backend"].([]any)[0].(map[string]any)
-	members := backend["drivers"].(map[string]any)
-	if len(members) != 2 || members["sandbox"] != drivers["sandbox"].(map[string]any)["id"] || members["credential_proxy"] != proxy["id"] {
-		t.Fatalf("Backend does not own exactly the Gateway pair: %v", members)
-	}
-	if backend["configuration"].(map[string]any)["endpoint"] != "https://127.0.0.1:9" {
-		t.Fatal("registration-only Backend must fail closed for management RPC")
+	for _, value := range installation["backend"].([]any) {
+		if value.(map[string]any)["type"] == "openshell" {
+			t.Fatal("Gateway-only registration must not create an unused management Backend")
+		}
 	}
 }

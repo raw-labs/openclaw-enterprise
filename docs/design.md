@@ -85,7 +85,8 @@ namespace with separate Pods, identities and storage. External access-gateway ad
 token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental.
 The separate [Gateway destination proxy experiment](flows/gateway-outbound-destinations.md)
-is draft-only and **UNVERIFIED**. It adds no supported production egress mode.
+is draft-only and partially verified in the normal dedicated workflow. Complete
+RFC acceptance remains pending; it adds no supported production egress mode.
 
 <a id="current-limitations"></a>
 <a id="near-term-future-work"></a>

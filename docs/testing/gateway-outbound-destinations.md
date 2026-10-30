@@ -21,6 +21,70 @@ not to normal dedicated execution with a Gateway-only proxy. Do not use a passin
 Gateway-only run as proof of protected OpenShell Harness execution. Neither path
 is qualified by installation readiness alone.
 
+## Run normal dedicated execution
+
+Select `gateway-destinations-dedicated` for the maintained normal Agent
+workflow. It creates its own launcher-managed Kubernetes installation and two
+API-authored dedicated Codex Agents. It does not use an OpenShell management
+Backend, protected execution sources, or the OpenShell Sandbox environment file.
+This scenario is excluded from `all` and automatic advisory coverage.
+On October 30, 2026, the maintained case passed
+with zero skips: three model turns, changed blocked CIDRs before replacement
+and stop, tunnel closure in 2.949 and 2.296 seconds, and 58 peer echoes. The
+owned cluster and PostgreSQL were removed; unrelated containers were unchanged.
+
+Prepare Node.js 24+, the installed workspace dependencies, the built CLI
+(`pnpm cli:build`), Docker, k3d, kubectl, and Helm. Supply approved controller
+and runtime images built from the source under test through
+`OCC_TEST_QA_CONTROLLER_IMAGE` and `OCC_TEST_QA_RUNTIME_IMAGE`. Select immutable
+digests with matching `org.opencontainers.image.revision` labels; record the dirty
+source diff separately. The launcher creates disposable PostgreSQL roles and
+migrations, a loopback cluster with enforcing NetworkPolicies, and imports the
+pinned proxy images. It does not reuse a shared cluster or database.
+
+Set `OCC_TEST_QA_OPENAI_KEY_FILE` to a private regular file containing an
+existing authorized API key. The API stores it as an Agent Secret; only the
+dedicated Harness receives it. Set `OCC_TEST_QA_CODEX_MODEL` explicitly. The
+scenario uses low reasoning. It makes three explicit nonce model turns in
+addition to deployment startup probes.
+
+Set `OCC_TEST_QA_DEDICATED_DESTINATIONS_CONFIG` to a JSON file outside the
+checkout with these fields:
+
+- `first`, `peer`, and `replacement`: each has an HTTPS `url` and an
+  independent response `marker` of 8–120 ASCII letters, digits, underscores, or
+  hyphens. Use three different public DNS hosts on TCP/443. Each URL must return
+  HTTP 200 without redirects and include its marker in the first 65,536 characters.
+- `websocketUrl`: a fourth public DNS host with a certificate-valid WSS echo
+  endpoint on TCP/443. It must echo text frames unchanged and allow a connection
+  to remain open throughout deployment and model calls.
+
+Authorize requests to these endpoints. Do not put credentials, fragments, IP
+literals, or wildcard hostnames in the URLs. The TLS/WebSocket observer copies
+bytes through each actual Gateway network namespace and its revision proxy;
+it adds no network grants and does not emulate policy enforcement.
+
+```sh
+OCC_TEST_QA_MATRIX=1 OCC_TEST_QA_INSTALLATION=kubernetes \
+OCC_TEST_QA_PRESET=Codex OCC_TEST_QA_SCENARIOS=gateway-destinations-dedicated \
+  node --test tests/integration/qa-matrix-real.test.mjs
+```
+
+Require zero skips and failures, including cleanup. The scenario checks own-host
+access, mutual host and proxy-frontend refusal, Harness-only model credentials,
+unchanged running policy after a desired edit, changed grants after replacement,
+old proxy removal after changed Installation blocked CIDRs, connection closure
+on replacement and stop, and an unchanged peer Pod with a surviving upstream
+connection. A reachable own proxy frontend provides the cross-Agent refusal
+control. This does not qualify Slack, direct-IP bypass, proxy outage, or
+protected OpenShell Harness execution.
+
+The resource scope closes observers, stops Agents, and runs `scripts/dev-down`
+for its own installation. If cleanup fails, it reports the private state directory
+for recovery; do not delete unrelated resources. Record source and image identities,
+the matrix report, `kubernetes-dedicated-gateway-destinations.json`, and cleanup
+outcome. Review private output before publication.
+
 ## Prepare authorized infrastructure and inputs
 
 Run from the repository root in an isolated, disposable environment. Follow
@@ -73,7 +137,7 @@ Create a private JSON file outside the checkout. Set
 | `peerResponseMarker`                                                | Second upstream's independent response marker, 8–120 ASCII letters, digits, underscores, or hyphens.                                                         |
 | `responseMarker`                                                    | Expected independent upstream marker, 8–120 ASCII letters, digits, underscores, or hyphens.                                                                  |
 
-The same JSON must also include these prepared Installation fields:
+The JSON also needs these Installation fields:
 
 - `openShellBackend`: the Backend's configuration object, with its real HTTPS
   endpoint, `mtls` or `bearerTokenFile` identity, and public root certificate path.

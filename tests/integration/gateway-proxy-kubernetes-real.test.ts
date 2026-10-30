@@ -110,6 +110,30 @@ test(
       signal: AbortSignal.timeout(240_000),
     };
     const attachment = openShellGatewayProxyAttachment(options, "proxy", "sandbox");
+    const cleanupAttachment = openShellGatewayProxyAttachment(
+      { ...options, blockedCidrs: [...options.blockedCidrs, "203.0.113.0/24"] },
+      "proxy",
+      "sandbox",
+    );
+    const removeFrozenAttachment = async () => {
+      // Current start admission has changed; saved ownership still authorizes shutdown.
+      await assert.rejects(
+        cleanupAttachment.prepare(context, plan),
+        /ownership or admission changed/,
+      );
+      let removed = false;
+      for (let attempt = 0; attempt < 90 && !removed; attempt++) {
+        removed = await cleanupAttachment.remove(context, plan);
+        if (!removed) {
+          await delay(500);
+        }
+      }
+      assert.equal(
+        removed,
+        true,
+        "frozen attachment cleanup must finish after configuration changes",
+      );
+    };
     // Exercise the real create response and a subsequent read: the SDK must not erase ingress.from.
     // Attachment readiness is deliberately not required by this API regression; traffic is separate proof.
     await attachment.prepare(context, plan);
@@ -159,8 +183,11 @@ test(
 
     const runtimeImage = process.env.OCC_TEST_KUBERNETES_GATEWAY_IMAGE;
     if (runtimeImage === undefined) {
+      // The changed NetworkPolicy still has the exact ownership; cleanup must remove it,
+      // not require that it is safe to start again.
+      await removeFrozenAttachment();
       t.diagnostic(
-        "API round-trip and tamper proof only; select the cached Gateway image for live traffic.",
+        "API round-trip, tamper and changed-configuration cleanup proof only; select the cached Gateway image for live traffic.",
       );
       return;
     }
@@ -292,14 +319,7 @@ test(
       ),
       (error: unknown) => error instanceof Error && "code" in error && error.code === 1,
     );
-    let removed = false;
-    for (let attempt = 0; attempt < 90 && !removed; attempt++) {
-      removed = await attachment.remove(context, plan);
-      if (!removed) {
-        await delay(500);
-      }
-    }
-    assert.equal(removed, true);
+    await removeFrozenAttachment();
     assert.ok((await request("client", "https://clawhub.ai", true)).error);
     t.diagnostic(
       "Live stock attachment ready; allowed HTTPS, denied host, foreign peer, private egress and removal passed. No Agent/worker or Gateway direct-egress proof.",

@@ -112,6 +112,7 @@ import type {
   ComputeRevisionContext,
   ProxyRevisionContext,
   SelectedDriverRegistration,
+  DriverRegistrationRef,
   ConfigurationValidationOptions,
   CredentialAttachmentStatus,
   CredentialGatewayDriver,
@@ -8263,7 +8264,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         "openclaw.dev/workload-role": "agent",
       };
       if (
-        !this.hasPublicGithubReadAdmission(revision) ||
+        !this.hasFrozenPublicGithubReadAdmission(revision) ||
         revision.harness.id !== "codex" ||
         revision.harness.mode !== "dedicated" ||
         Object.entries(expected).some(([key, value]) => labels?.[key] !== value)
@@ -8525,6 +8526,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     if (existingNamespace === undefined) {
       await this.lifecycle.beforeWorkloadStop(revision);
       await this.removeStoppedGateway(revision, namespace);
+      await this.removeGatewayProxy(revision, namespace);
       return;
     }
     this.verifyNamespaceOwnership(
@@ -8549,7 +8551,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
       await this.removeStoppedGateway(revision, namespace, { waitForPods: false });
       await this.shutdownRevisionRuntime(revision, namespace);
       await this.waitForRevisionPodsToTerminate(revision, gatewayNamespace, "gateway");
-      await this.removeGatewayProxy(revision, namespace);
     } else {
       // The Gateway drains into the running Harness. An Agent stop's drain wait may yield
       // (withYieldingGatewayDrain): the Harness then keeps running until a retry sees the
@@ -8557,12 +8558,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
       await this.removeStoppedGateway(revision, namespace);
       await this.shutdownRevisionRuntime(revision, namespace);
     }
-    // Its Pods are gone, so drop the revision's credential copies and snapshots.
-    // Preparing the revision again re-projects them from the canonical sources.
-    await this.deleteRetiredRevisionArtifacts(revision, namespace);
-    if (this.projectsRepositoryMaterial(revision)) {
-      await this.removeRepositoryMaterial(revision, namespace);
-    }
+    await this.finishRevisionCleanup(revision, namespace, async () => {
+      // Its Pods are gone, so drop the revision's credential copies and snapshots.
+      // Preparing the revision again re-projects them from the canonical sources.
+      await this.deleteRetiredRevisionArtifacts(revision, namespace);
+      if (this.projectsRepositoryMaterial(revision)) {
+        await this.removeRepositoryMaterial(revision, namespace);
+      }
+    });
   }
 
   async retireRevision(revision: AgentRevision): Promise<void> {
@@ -8608,16 +8611,34 @@ export class KubernetesComputeDriver implements ComputeDriver {
       await this.removeStoppedGateway(revision, namespace);
     }
     await this.shutdownRevisionRuntime(revision, namespace);
-    await this.retireLegacyWorkspaceNode(revision, namespace);
-    await this.removeRetiredGateway(revision, namespace);
-    if (this.projectsRepositoryMaterial(revision)) {
-      await this.waitForRevisionPodsToTerminate(
-        revision,
-        namespace,
-        this.repositoryConsumer(revision).role,
-      );
-      await this.removeRepositoryMaterial(revision, namespace);
+    await this.finishRevisionCleanup(revision, namespace, async () => {
+      await this.retireLegacyWorkspaceNode(revision, namespace);
+      await this.removeRetiredGateway(revision, namespace);
+      if (this.projectsRepositoryMaterial(revision)) {
+        await this.waitForRevisionPodsToTerminate(
+          revision,
+          namespace,
+          this.repositoryConsumer(revision).role,
+        );
+        await this.removeRepositoryMaterial(revision, namespace);
+      }
+    });
+  }
+
+  /** Report incomplete proxy cleanup after removing the stopped Harness's credentials. */
+  private async finishRevisionCleanup(
+    revision: AgentRevision,
+    namespace: KubernetesNamespaceAddress,
+    cleanup: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await this.removeGatewayProxy(revision, namespace);
+    } catch (error) {
+      throw await failureAfterCleanup(error, "Gateway proxy cleanup remains incomplete.", [
+        cleanup,
+      ]);
     }
+    await cleanup();
   }
 
   private async shutdownRevisionRuntime(
@@ -8627,7 +8648,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     if (revision.harness.mode === "embedded") {
       return;
     }
-    const admittedReader = this.hasPublicGithubReadAdmission(revision);
+    const admittedReader = this.hasFrozenPublicGithubReadAdmission(revision);
     if (admittedReader) {
       const owner = "admitted-public-reader" as const;
       await this.deleteRevisionAgentDeployment(revision, namespace, {
@@ -8685,7 +8706,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
     await this.deleteNamedRuntimeResources(name, ownership, namespace, revision.id);
     if (waitForPods) {
       await this.waitForRevisionPodsToTerminate(revision, namespace, "gateway");
-      await this.removeGatewayProxy(revision, namespace);
     }
   }
 
@@ -8911,7 +8931,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     unknownPredecessor = false,
   ): Promise<void> {
     const gatewayNamespace = this.gatewayNamespace(revision, namespace);
-    if (unknownPredecessor || this.hasPublicGithubReadAdmission(revision)) {
+    if (unknownPredecessor || this.hasFrozenPublicGithubReadAdmission(revision)) {
       await this.deleteOwnedNamespacedResource(
         "NetworkPolicy",
         this.publicGithubReadNetworkPolicyName(revision),
@@ -14172,6 +14192,55 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     );
   }
 
+  /** Cleanup consumes immutable ownership, never permission to start under today's policy. */
+  private frozenComputeAdmissionFacts(revision: Readonly<AgentRevision>):
+    | {
+        readonly driver: DriverRegistrationRef;
+        readonly gatewayDestinations: GatewayDestinationPlan;
+        readonly execution?: string;
+      }
+    | undefined {
+    const admission = revision.compute.admission;
+    if (!admission?.startsWith(GATEWAY_DESTINATIONS_ADMISSION)) {
+      return undefined;
+    }
+    try {
+      const facts = asRecord(JSON.parse(admission.slice(GATEWAY_DESTINATIONS_ADMISSION.length)));
+      const plan = asRecord(facts?.gatewayDestinations);
+      const driver = asRecord(facts?.driver);
+      if (
+        !facts ||
+        !driver ||
+        !isNonEmptyString(driver.id) ||
+        !isNonEmptyString(driver.implementation) ||
+        !isNonEmptyString(driver.configurationId) ||
+        !plan ||
+        plan.version !== 1 ||
+        plan.namespaceId !== revision.namespaceId ||
+        plan.agentId !== revision.agentId ||
+        plan.revisionId !== revision.id ||
+        !isNonEmptyString(plan.driverId) ||
+        !isNonEmptyString(plan.sandboxDriverId) ||
+        (facts.execution !== undefined && typeof facts.execution !== "string")
+      ) {
+        throw new Error("Invalid frozen Gateway cleanup identity.");
+      }
+      return facts as unknown as {
+        readonly driver: DriverRegistrationRef;
+        readonly gatewayDestinations: GatewayDestinationPlan;
+        readonly execution?: string;
+      };
+    } catch {
+      throw new ConfigurationFailure("The frozen Gateway proxy cleanup identity is invalid.");
+    }
+  }
+
+  private hasFrozenPublicGithubReadAdmission(revision: AgentRevision): boolean {
+    const facts = this.frozenComputeAdmissionFacts(revision);
+    const execution = facts === undefined ? revision.compute.admission : facts.execution;
+    return /^public-github-read:v1:[a-f0-9]{64}$/.test(execution ?? "");
+  }
+
   private computeAdmissionFacts(revision: Readonly<AgentRevision>):
     | {
         readonly gatewayDestinations: GatewayDestinationPlan;
@@ -14378,16 +14447,25 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     revision: AgentRevision,
     namespace: KubernetesNamespaceAddress,
   ): Promise<void> {
-    const plan = this.gatewayDestinationPlan(revision);
+    const facts = this.frozenComputeAdmissionFacts(revision);
+    const plan = facts?.gatewayDestinations;
     if (plan === undefined) {
       return;
     }
+    const owner = this.gatewayProxyDriver;
     if (
-      !(await this.gatewayProxyDriver!.require("sandbox").gatewayProxy!.remove(
-        await this.gatewayProxyContext(revision, namespace),
-        plan,
-      ))
+      !owner ||
+      facts?.driver.id !== owner.ref.id ||
+      facts.driver.implementation !== owner.ref.implementation
     ) {
+      throw new ConfigurationFailure("The frozen Gateway proxy cleanup owner is unavailable.");
+    }
+    const sandbox = owner.require("sandbox");
+    const attachment = sandbox.gatewayProxy;
+    if (!attachment || sandbox.id !== plan.sandboxDriverId) {
+      throw new ConfigurationFailure("The frozen Gateway proxy cleanup capability is unavailable.");
+    }
+    if (!(await attachment.remove(await this.gatewayProxyContext(revision, namespace), plan))) {
       throw new DependencyUnavailableError(
         "The exact revision Gateway proxy has not finished terminating.",
       );
@@ -14415,6 +14493,14 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
 
   admitRevision(revision: Readonly<AgentRevision>): string | undefined {
     this.validateGatewayManagedMode(revision);
+    if (
+      !this.requiresGatewayDestinations(revision) &&
+      normalizeGatewayOutbound(revision.gatewayOutbound).destinations.length > 0
+    ) {
+      throw new ConfigurationFailure(
+        "Gateway outbound destinations require dedicated single-cluster enforcement.",
+      );
+    }
     let execution: string | undefined;
     if (this.protectedCodexInference(revision)) {
       execution = PROTECTED_CODEX_NO_CONNECTION_RETRY;

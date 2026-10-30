@@ -194,8 +194,8 @@ Its closed `configuration` accepts:
 
 Either `endpoint` or `serviceName` is required. Execution selection requires
 `drivers.sandbox` and `drivers.credential_gateway`. Gateway-only selection
-instead registers the Sandbox/Credential Proxy pair without selecting Harness
-credential delivery; see the [experimental flow](../flows/gateway-outbound-destinations.md).
+instead registers the Sandbox/Credential Proxy pair without a management Backend,
+endpoint, or management credentials. It does not select Harness credential delivery; see the [experimental flow](../flows/gateway-outbound-destinations.md).
 Optional `drivers.credential_refresh` requires the selected
 [Credential Gateway](drivers/openshell-credential-gateway.md) and
 [Credential Refresh Driver](drivers/credential-refresh.md) on this Backend.

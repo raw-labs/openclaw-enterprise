@@ -17,6 +17,7 @@
     "../packages/contracts/prepack.ts",
     "../packages/utils/prepack.ts",
     "helpers/credential-source-owner-upgrade.ts",
+    "helpers/qa-gateway-destinations.ts",
     "fixtures/repository-credentials/module-guard.ts",
     "fixtures/repository-credentials/planning.ts"
   ],

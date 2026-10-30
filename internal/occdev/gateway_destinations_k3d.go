@@ -77,8 +77,8 @@ func (r *runner) importGatewayDestinationImages(ctx context.Context, state *deve
 	return nil
 }
 
-// Register only Gateway attachment capabilities. The unused management endpoint
-// fails closed; no OpenShell service, Harness, or credential authority is installed.
+// Register only Gateway attachment capabilities, with no management Backend,
+// OpenShell service, Harness, or credential authority.
 func configureGatewayOnlyPair(state *developmentState, installation map[string]any) {
 	drivers := installation["drivers"].(map[string]any)
 	sandbox := openShellInstallationConfiguration(state, nil, nil)
@@ -93,12 +93,4 @@ func configureGatewayOnlyPair(state *developmentState, installation map[string]a
 	proxy["usage"] = "gateway"
 	delete(proxy["configuration"].(map[string]any), "authority")
 	drivers["credential_proxy"] = proxy
-	installation["backend"] = []any{map[string]any{
-		"id": "openshell", "type": "openshell",
-		"configuration": map[string]any{
-			"endpoint": "https://127.0.0.1:9",
-			"auth":     map[string]string{"mode": "bearerTokenFile", "path": "/etc/openclaw/gateway-pair-unused-token"},
-		},
-		"drivers": map[string]string{"sandbox": openShellSandboxID, "credential_proxy": developmentEgressDriver},
-	}}
 }

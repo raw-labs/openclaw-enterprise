@@ -1,14 +1,14 @@
 ---
 created: "2026-10-28"
 updated: "2026-10-30"
-last_updated_session: "agent:main:subagent:22189706-f7ab-4df4-a29b-1bf049ae824a"
+last_updated_session: "agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3"
 ---
 
 # Gateway outbound destination flow
 
 ## Overview
 
-**Experimental — UNVERIFIED. Not supported for production.** This trace describes
+**Experimental — partially verified. Not supported for production.** This trace describes
 the draft source for [RFC-0024](../../specs/rfcs/0024-gateway-outbound-proxy-reuse.md),
 not an accepted or qualified deployment. The experiment must remain a draft and
 must not be merged. The [implementation plan](../../specs/plans/0024-gateway-outbound-proxy-reuse.md)
@@ -28,9 +28,10 @@ revision stops. The [RFC](../../specs/rfcs/0024-gateway-outbound-proxy-reuse.md)
 explains the request path and why the existing platform interfaces own this work.
 Here, “proxy attachment” means the proxy Pod, Service, policy files and network rules;
 “paired” means the policy and resource-management implementations selected together.
-Neither term means that the Gateway runs inside an OpenShell sandbox. The selected OpenShell Credential Proxy retains its protected Harness operations
-and also admits Gateway destination policies. The Sandbox creates separate proxy
-instances for these paths; Gateway permission grants no protected credential authority.
+Neither term means that the Gateway runs inside an OpenShell sandbox. Gateway-only
+registration provides destination admission and proxy lifecycle without management
+clients. Execution-capable registration retains its separate protected operations
+and proxy instances; Gateway permission grants no protected credential authority.
 
 Every dedicated single-cluster Gateway uses the new route instead of the bundled
 Slack proxy. Compute clears the old Channel grant and projects the revision proxy
@@ -39,15 +40,15 @@ validation and directory lookup; separate execution clusters retain their existi
 remain refused in embedded mode. See the
 [Slack consumer paths](../guides/integrations/slack.md#configure-both-slack-proxies).
 
-The stock OpenShell/relay Docker test and scoped real attachment checks pass.
-Full Gateway integration traffic, Channel behavior, Compute network enforcement
-and the complete Agent workflow remain unverified. The
-[QA procedure](../testing/gateway-outbound-destinations.md) defines each proof boundary.
-The real development installation reaches readiness, but its stock OpenShell
-counterpart refuses OpenAI API-key source registration: the selected
-execution-capable Credential Proxy requires negotiated protected middleware.
-A configured authority is not evidence of that supplier capability. The complete
-API-key Agent workflow remains blocked until a reviewed candidate provides it.
+Prior normal dedicated API/worker runs exercised two-Agent destination isolation,
+real model turns, replacement and stop with measured established-tunnel closure.
+The maintained `gateway-destinations-dedicated` scenario also passed on the
+follow-up implementation without an OpenShell management Backend, including
+replacement and stop after installation exclusion changes. Protected
+OpenShell Harness execution has separate supplier-capability prerequisites; those
+are not prerequisites for native dedicated execution. Authenticated Slack and
+complete RFC acceptance remain unverified. The
+[QA procedure](../testing/gateway-outbound-destinations.md) defines the boundaries.
 
 ## Entry Points
 
@@ -55,11 +56,12 @@ API-key Agent workflow remains blocked until a reviewed candidate provides it.
   and worker reconciliation. Destination writes require exact-Agent `update` and
   `administer`; deployment uses existing deployment permissions.
 - Admission: `apps/controller/src/drivers/compute/kubernetes/index.ts:admitRevision`.
-- Registration: `apps/controller/src/drivers/egress-proxy/openshell-registration.ts:createOpenShellCapabilities`.
+- Registration: `apps/controller/src/drivers/egress-proxy/openshell-registration.ts:createOpenShellGatewayCapabilities`.
 - Attachment: `apps/controller/src/drivers/sandbox/gateway-proxy-attachment.ts:openShellGatewayProxyAttachment`.
 - Scope: dedicated, single-cluster execution with the exact selected Sandbox and
   Credential Proxy. Protected Harness and repository admission facts coexist with
-  the Gateway policy. Embedded execution and separate execution clusters are unchanged.
+  the Gateway policy. Unsupported topologies reject nonempty destination lists;
+  their empty/default networking is unchanged.
 
 ## Flow
 
@@ -120,8 +122,8 @@ The normal Kubernetes-only development launcher registers a Gateway-only pair
 with `SandboxDriver=none`, independently of native Harness selection.
 `internal/occdev/gateway_destinations_k3d.go:configureGatewayOnlyPair` reuses the
 Sandbox configuration helper, selects `usage: gateway`, and omits credential
-authority and Credential Gateway membership. Its unused authenticated Backend
-endpoint is loopback port 9; no management service or token file is provisioned.
+authority and the OpenShell management Backend. No management endpoint, client,
+service, or token file is required.
 The pair does not install an OpenShell Harness or change native presets, plugins,
 or projected ServiceAccount credentials.
 
@@ -145,13 +147,17 @@ builds. This order does not guarantee sufficient compiler memory. These packagin
 paths do not establish live enforcement.
 
 `apps/controller/src/drivers/egress-proxy/openshell-registration.ts:createOpenShellCapabilities`
-creates the paired views, passes attachment options to the Sandbox, and constructs
+creates execution-capable paired views, passes attachment options to the Sandbox, and constructs
 `OpenShellCredentialProxyDriver`. Its `gatewayDestinations` capability admits
 nonsecret Gateway policy while existing credential and repository methods retain
 their own authority checks and proxy instances.
 
 `apps/controller/src/composition/installation-config.ts:loadInstallationConfiguration`
 interprets `drivers.credential_proxy.usage: gateway` as attachment-only selection.
+It calls `createOpenShellGatewayCapabilities` instead of constructing management
+Drivers. These views expose destination admission and attachment lifecycle only.
+Required execution methods refuse; no providers or exchange binding exist.
+Startup rejects an OpenShell management Backend in this mode.
 API and worker register the pair without selecting its Sandbox or Credential Proxy
 for execution. Compute receives `gatewayProxyDriver` separately from its protected
 execution owner. The revision's Harness `sandboxDriverId` is not a Gateway proxy
@@ -240,8 +246,8 @@ the container runtime's reported image name to retain the input spelling. A fals
 keeps preparation pending. Unexpected ownership or configuration throws.
 
 The attachment authors DNS and public IPv4 TCP/443 egress using exactly the
-exclusions saved in `plan.egress.excludedCidrs`. It rechecks that plan against
-the selected assets and configuration before applying or deleting resources. These rules require an
+exclusions saved in `plan.egress.excludedCidrs`. Preparation rechecks that plan against
+the selected assets and configuration. Removal validates frozen ownership instead. These rules require an
 enforcing CNI and accurate cluster ranges. Stock OpenShell remains responsible
 for CONNECT/DNS decisions. No TLS interception or credential injection is added;
 the Gateway retains upstream certificate verification.
@@ -269,17 +275,27 @@ host/port, not encrypted HTTP actions or response contents.
 ### 5. Fence and retire the revision
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:removeStoppedGateway`
-removes serving routes and Gateway resources, waits for its Pods, and calls
-`removeGatewayProxy`. Yielding stop and retirement paths also call cleanup.
-The Sandbox removes the revision Service before the Deployment, waits for
-proxy Pods to disappear, then removes the policy files and NetworkPolicy.
-Deletion checks ownership and UID/resource-version preconditions. Incomplete
-removal returns false; Compute reports a dependency failure rather than cleanup
-success. Replacement uses a distinct revision attachment.
+removes serving routes and Gateway resources and waits for its Pods. Stop then
+shuts down the Harness before `finishRevisionCleanup` removes the proxy and
+credential artifacts. Proxy failure does not skip credential cleanup; Compute
+reports incomplete removal for retry. Yielding stop and retirement retain the
+same Gateway-before-proxy boundary and preserve the successor revision.
 
-Pod disappearance is not yet measured proof that established connections close
-at the required boundary. Do not infer immediate withdrawal from a policy-file
-edit, Service removal, or deletion of one additive NetworkPolicy.
+`frozenComputeAdmissionFacts` reads saved identities without repeating start
+admission against current configuration. `removeGatewayProxy` requires the same
+registered implementation and capability owner, but not the old configuration
+generation. Attachment `cleanupResources` verifies revision, namespace, Driver
+identities, endpoint, policy hash and attachment digest. Removal checks observed
+ownership and UID/resource-version preconditions, not current resource specs.
+The Sandbox removes Service before Deployment, waits for proxy Pods, then removes
+policy files and NetworkPolicy. Foreign ownership fails; incomplete removal
+remains retryable. Changed admission can refuse new execution without blocking
+shutdown of existing owned workloads.
+
+The maintained normal dedicated run measured established-tunnel closure after
+replacement and stop with changed installation exclusions, while the peer survived. Do not infer
+immediate withdrawal from a policy-file edit, Service removal, or deletion of
+one additive NetworkPolicy.
 
 ## Debugging and Verification
 
@@ -311,6 +327,10 @@ qualify the stock binary or CNI boundary.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-30 15:36: Trace frozen-identity cleanup and record maintained normal dedicated verification for the accompanying fixes. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - c671cb4ed363130342d98db6b28fe3671213092a)
+
+- 2026-10-30 15:19: Remove unused management dependencies from Gateway-only registration in the accompanying implementation. (agent:main:subagent:a26a9c00-2801-441b-b5ff-229f082fab69 - c671cb4ed363130342d98db6b28fe3671213092a)
 
 - 2026-10-30 12:11: Trace normal k3d Gateway-only registration, unchanged native Harness selection, and shared infrastructure discovery and proxy imports. (agent:main:subagent:22189706-f7ab-4df4-a29b-1bf049ae824a - 7f3a04a152065342b682d2830e3125abb6359b31)
 

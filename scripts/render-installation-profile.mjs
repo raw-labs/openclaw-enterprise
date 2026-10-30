@@ -1483,12 +1483,7 @@ function renderGatewayProxy(profile, parsed, installation, diagnostics) {
     return;
   }
   const input = record(parsed.gatewayProxy, "gatewayProxy", diagnostics);
-  closed(
-    input,
-    "gatewayProxy",
-    ["backend", "sandbox", "credentialProxy", "infrastructureCidrs"],
-    diagnostics,
-  );
+  closed(input, "gatewayProxy", ["sandbox", "credentialProxy", "infrastructureCidrs"], diagnostics);
   const sandbox = record(input.sandbox, "gatewayProxy.sandbox", diagnostics);
   const proxy = record(input.credentialProxy, "gatewayProxy.credentialProxy", diagnostics);
   closed(sandbox, "gatewayProxy.sandbox", ["id", "configuration"], diagnostics);
@@ -1502,42 +1497,6 @@ function renderGatewayProxy(profile, parsed, installation, diagnostics) {
   try {
     // Profiles remain usable from an uninstalled checkout. Driver-owned configuration
     // and asset files are validated by API/worker startup, not reconstructed here.
-    const backend = record(input.backend, "gatewayProxy.backend", diagnostics);
-    closed(
-      backend,
-      "gatewayProxy.backend",
-      ["id", "type", "configuration", "drivers"],
-      diagnostics,
-    );
-    asString(backend, ["gatewayProxy", "backend", "id"], diagnostics, {
-      validate: isBackendId,
-      description: "a Backend ID",
-    });
-    const members = record(backend.drivers, "gatewayProxy.backend.drivers", diagnostics);
-    closed(members, "gatewayProxy.backend.drivers", ["sandbox", "credential_proxy"], diagnostics);
-    if (
-      backend.type !== "openshell" ||
-      members.sandbox !== sandboxId ||
-      members.credential_proxy !== proxyId
-    ) {
-      throw new Error(
-        "Backend membership must identify only this Gateway pair, not Harness credential delivery.",
-      );
-    }
-    const backendConfiguration = record(
-      backend.configuration,
-      "gatewayProxy.backend.configuration",
-      diagnostics,
-    );
-    const endpoint = new URL(backendConfiguration.endpoint);
-    if (
-      endpoint.protocol !== "https:" ||
-      endpoint.username ||
-      endpoint.password ||
-      !["bearerTokenFile", "mtls"].includes(backendConfiguration.auth?.mode)
-    ) {
-      throw new Error("The selected Backend requires an authenticated HTTPS endpoint.");
-    }
     const sandboxConfiguration = record(
       sandbox.configuration,
       "gatewayProxy.sandbox.configuration",
@@ -1576,7 +1535,6 @@ function renderGatewayProxy(profile, parsed, installation, diagnostics) {
         "Proxy exclusions must cover infrastructureCidrs and the configured cluster and database addresses.",
       );
     }
-    installation.backend.push(backend);
     installation.drivers.sandbox = { id: sandboxId, configuration: sandboxConfiguration };
     installation.drivers.credential_proxy = {
       id: proxyId,

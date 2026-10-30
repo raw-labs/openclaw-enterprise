@@ -8,6 +8,7 @@ import {
 } from "../drivers/repo/github/installation.ts";
 import {
   createOpenShellCapabilities,
+  createOpenShellGatewayCapabilities,
   type OpenShellRepositoryTransport,
 } from "../drivers/egress-proxy/openshell-registration.ts";
 import type { OpenShellSandboxDriverSelection } from "../drivers/sandbox/openshell.ts";
@@ -834,6 +835,9 @@ export async function loadInstallationConfiguration(options: {
     (backend): backend is OpenShellBackendDefinition => backend.type === "openshell",
   );
 
+  if (gatewayProxyOnly && openShellBackend !== undefined) {
+    throw new Error("Gateway-only registration must omit the unused OpenShell management Backend.");
+  }
   const configurationSelection = object(drivers.configuration, "drivers.configuration");
   const iamSelection = object(drivers.iam, "drivers.iam");
   const computeSelection = object(drivers.compute, "drivers.compute");
@@ -1043,10 +1047,18 @@ export async function loadInstallationConfiguration(options: {
       },
     };
   }
+  if (gatewayProxyOnly && sandbox === undefined) {
+    throw new Error("Gateway-only registration requires a paired Sandbox.");
+  }
   if (sandbox !== undefined && computePackage !== undefined) {
     throw new Error("drivers.sandbox requires the bundled Kubernetes Compute Driver.");
   }
-  if (sandbox !== undefined && sandboxPackage === undefined && openShellBackend === undefined) {
+  if (
+    !gatewayProxyOnly &&
+    sandbox !== undefined &&
+    sandboxPackage === undefined &&
+    openShellBackend === undefined
+  ) {
     throw new Error(
       "The bundled OpenShell drivers.sandbox requires a backend entry with type openshell.",
     );
@@ -1172,6 +1184,7 @@ export async function loadInstallationConfiguration(options: {
           },
         );
   if (
+    !gatewayProxyOnly &&
     proxySelection !== undefined &&
     sandboxPackage === undefined &&
     (!openShell ||
@@ -1207,7 +1220,31 @@ export async function loadInstallationConfiguration(options: {
   let gatewayProxyDriver: InstalledDriver | undefined;
   let sandboxDriver: SandboxDriver | undefined;
   if (sandbox !== undefined && proxySelection !== undefined) {
-    if (sandboxPackage !== undefined) {
+    if (gatewayProxyOnly && sandboxPackage === undefined) {
+      if (!kubernetesCompute) {
+        throw new Error(
+          "Gateway-only registration requires the bundled Kubernetes Compute Driver.",
+        );
+      }
+      const capabilities = createOpenShellGatewayCapabilities({
+        sandboxId: sandbox.id,
+        proxyId: proxySelection.id,
+        options: (proxySelection.configuration as unknown as OpenShellProxyOptions)
+          .gatewayDestinations!,
+      });
+      protectedDriver = new InstalledDriver(
+        {
+          ...sandbox,
+          configuration: {
+            sandbox: sandbox.configuration,
+            proxy: drivers.credential_proxy,
+            namespaceBinding,
+          },
+        },
+        { capabilities: { sandbox: capabilities.sandbox, credential_proxy: capabilities.proxy } },
+        { sandbox: sandbox.id, credential_proxy: proxySelection.id },
+      );
+    } else if (sandboxPackage !== undefined) {
       protectedDriver = createExternalProtectedDriver(
         sandboxPackage.module,
         sandbox,

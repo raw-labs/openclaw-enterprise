@@ -147,7 +147,7 @@ The generic Driver contract has no Backend identity field. Declared execution
 members must match the selected registry `(capability, id)`: ChatGPT requires
 ServiceAccount, GitHub requires Repo, and OpenShell requires Sandbox and Credential
 Gateway. Gateway-only OpenShell instead requires its registered Sandbox/Proxy
-pair; `drivers.credential_proxy.usage: gateway` does not select those views for
+pair and rejects an unused OpenShell management Backend; `drivers.credential_proxy.usage: gateway` does not select those views for
 Harness or repository execution. See the [experimental flow](../../flows/gateway-outbound-destinations.md).
 Credential Refresh requires its selected Credential Gateway on the same Backend.
 There is no per-Agent Driver selection.

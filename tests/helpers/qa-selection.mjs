@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 
-const standaloneScenarios = ["sandbox-policy", "gateway-destinations"];
+const standaloneScenarios = [
+  "sandbox-policy",
+  "gateway-destinations",
+  "gateway-destinations-dedicated",
+];
 
 const scenarioPresets = {
   "sandbox-policy": ["Codex"],
   "gateway-destinations": ["Codex"],
+  "gateway-destinations-dedicated": ["Codex"],
   "model-ui": ["OpenClaw", "Codex"],
   "console-secrets": ["OpenClaw", "Codex"],
   calendar: ["Codex"],
@@ -73,6 +78,19 @@ export function selectQaMatrix(env = process.env) {
   );
   const sandboxPolicy = scenarios.includes("sandbox-policy");
   const gatewayDestinations = scenarios.includes("gateway-destinations");
+  const gatewayDestinationsDedicated = scenarios.includes("gateway-destinations-dedicated");
+  if (gatewayDestinationsDedicated) {
+    assert.equal(
+      installation,
+      "kubernetes",
+      "gateway-destinations-dedicated requires explicit Kubernetes selection",
+    );
+    requiredEnv.push(
+      "OCC_TEST_QA_OPENAI_KEY_FILE",
+      "OCC_TEST_QA_CODEX_MODEL",
+      "OCC_TEST_QA_DEDICATED_DESTINATIONS_CONFIG",
+    );
+  }
   if (gatewayDestinations) {
     assert.notEqual(
       installation,
@@ -114,6 +132,7 @@ export function selectQaMatrix(env = process.env) {
     installations,
     sandboxPolicy,
     gatewayDestinations,
+    gatewayDestinationsDedicated,
     cells,
     scenarios,
     requiredEnv,

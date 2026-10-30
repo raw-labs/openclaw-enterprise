@@ -306,6 +306,35 @@ test("experimental Gateway destination QA requires explicit selection and prepar
   );
 });
 
+test("normal dedicated destination QA does not require protected OpenShell inputs", async () => {
+  const { selectQaMatrix, validateQaInputs } = await import("../helpers/qa-selection.mjs");
+  assert.equal(selectQaMatrix({}).gatewayDestinationsDedicated, false);
+  const env = {
+    OCC_TEST_QA_SCENARIOS: "gateway-destinations-dedicated",
+    OCC_TEST_QA_INSTALLATION: "kubernetes",
+    OCC_TEST_QA_PRESET: "Codex",
+  };
+  const selected = selectQaMatrix(env);
+  assert.equal(selected.gatewayDestinationsDedicated, true);
+  assert.equal(selected.gatewayDestinations, false);
+  assert.equal(selected.requiredEnv.includes("OCC_TEST_QA_SANDBOX_ENV"), false);
+  assert.equal(selected.requiredEnv.includes("OCC_TEST_QA_CODEX_TOKEN_FILE"), false);
+  const inputs = {
+    OCC_TEST_QA_OPENAI_KEY_FILE: "/private/model-key",
+    OCC_TEST_QA_CODEX_MODEL: "explicit-authorized-model",
+    OCC_TEST_QA_DEDICATED_DESTINATIONS_CONFIG: "/private/endpoints.json",
+  };
+  validateQaInputs(selected, inputs);
+  for (const name of Object.keys(inputs)) {
+    assert.throws(() => validateQaInputs(selected, { ...inputs, [name]: "" }), /is required/);
+  }
+  assert.throws(
+    () => selectQaMatrix({ ...env, OCC_TEST_QA_INSTALLATION: "compose" }),
+    /explicit Kubernetes/,
+  );
+  assert.throws(() => selectQaMatrix({ ...env, OCC_TEST_QA_PRESET: "OpenClaw" }), /not applicable/);
+});
+
 test("hosted QA materializes only selected credentials and rejects missing selected inputs", async (t) => {
   const { spawnSync } = await import("node:child_process");
   const script = new URL("../../scripts/ci/qa-matrix-credentials.mjs", import.meta.url);

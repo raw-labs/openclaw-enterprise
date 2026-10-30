@@ -102,9 +102,7 @@ function baseInput(overrides = {}) {
 
 function gatewayProxyInput() {
   const selected = createCredentialProxyInstallationConfiguration();
-  delete selected.backend[0].drivers.credential_gateway;
   return {
-    backend: selected.backend[0],
     sandbox: selected.drivers.sandbox,
     credentialProxy: {
       id: selected.drivers.credential_proxy.id,
@@ -3050,7 +3048,10 @@ test("dedicated Gateway profile requires explicit independent pair and preserves
   const rendered = loadYaml(output.installation);
   assert.equal(rendered.drivers.credential_proxy.usage, "gateway");
   assert.deepEqual(rendered.drivers.sandbox, input.gatewayProxy.sandbox);
-  assert.deepEqual(rendered.backend.at(-1), input.gatewayProxy.backend);
+  assert.equal(
+    rendered.backend.some((backend) => backend.type === "openshell"),
+    false,
+  );
   assert.equal(rendered.drivers.compute.configuration.runtime.channels, undefined);
   assert.equal(
     loadYaml(output.values).slackProxy.enabled,
@@ -3086,6 +3087,9 @@ test("dedicated Gateway profile requires explicit independent pair and preserves
     codexInput({ channels: { runtimeProxyUrl: "http://192.0.2.15:3128" } }),
     /runtimeProxyUrl is not used by the dedicated profile/,
   );
+  const unusedBackend = codexInput();
+  unusedBackend.gatewayProxy.backend = createCredentialProxyInstallationConfiguration().backend[0];
+  await assertPreflightFailure("codex", unusedBackend, /gatewayProxy.backend/);
   const insufficient = codexInput();
   insufficient.gatewayProxy.infrastructureCidrs = ["8.8.8.8/32"];
   await assertPreflightFailure("codex", insufficient, /exclusions must cover/);

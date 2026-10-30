@@ -54,6 +54,19 @@ test(
     });
     await save();
     context.diagnostic(`QA evidence: ${artifacts}`);
+    if (selection.gatewayDestinationsDedicated) {
+      await context.test("normal dedicated Gateway destinations", async (dedicatedContext) => {
+        const { verifyDedicatedGatewayDestinations } =
+          await import("../helpers/qa-gateway-destinations.ts");
+        await stage(
+          dedicatedContext,
+          "kubernetes/Codex",
+          "Gateway-only API/worker isolation and lifecycle",
+          () => verifyDedicatedGatewayDestinations(dedicatedContext, artifacts),
+          "gateway-destinations-dedicated",
+        );
+      });
+    }
     if (selection.sandboxPolicy) {
       const { verifyQaSandboxPolicy } = await import("../helpers/qa-sandbox-policy.mjs");
       await stage(

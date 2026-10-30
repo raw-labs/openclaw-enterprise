@@ -16205,8 +16205,9 @@ function stopOrderFixture(id, selectedDriver) {
         }
         throw notFound();
       },
-      async deleteNamespacedDeployment({ name }) {
+      async deleteNamespacedDeployment({ name, body }) {
         assert.equal(name, deploymentName);
+        assert.equal(body.preconditions.uid, deployment.metadata.uid);
         fixture.events.push("delete Agent Deployment");
         fixture.deploymentPresent = false;
       },
@@ -22630,14 +22631,242 @@ test("Gateway destination stop waits for Gateway termination and refuses incompl
   assert.deepEqual(state.events, [
     "list gateway Pods",
     "list gateway Pods",
+    "sandbox cleanup",
+    "list agent Pods",
     "remove proxy " + revision.id,
   ]);
-  assert.ok(!state.events.includes("sandbox cleanup"));
+  assert.ok(state.events.includes("sandbox cleanup"));
   state.removed = true;
   await driver.stopRevision(revision);
   assert.ok(
-    state.events.indexOf("sandbox cleanup") > state.events.indexOf("remove proxy " + revision.id),
+    state.events.indexOf("sandbox cleanup") < state.events.indexOf("remove proxy " + revision.id),
   );
+});
+
+// Current start permission is not cleanup authority. Exercise the public stop/retire
+// paths with real frozen admission and simulated Kubernetes observations, not live CNI proof.
+for (const operation of ["stopRevision", "retireRevision"]) {
+  for (const change of ["policy", "missing-owner", "yielding-policy"]) {
+    test(
+      "Gateway destination " + operation + " cleans the Harness after " + change + " changes",
+      async () => {
+        const selected = gatewayDestinationComputeFixture();
+        const { driver, state } = selected;
+        const fixture = stopOrderFixture("revision-cleanup-" + operation + "-" + change, driver);
+        const { revision } = fixture;
+        // No revision Sandbox selection: this is an ordinary Compute-owned Harness.
+        revision.compute.admission = driver.admitRevision(revision);
+        const clients = await driver.apiClients;
+        clients.networking = {
+          async readNamespacedNetworkPolicy() {
+            throw Object.assign(new Error("Not found"), { code: 404 });
+          },
+        };
+        const credentialReads = [];
+        clients.core.readNamespacedSecret = async ({ name }) => {
+          credentialReads.push(name);
+          throw Object.assign(new Error("Not found"), { code: 404 });
+        };
+        state.events = fixture.events;
+        if (change !== "missing-owner") {
+          state.attachment = "b".repeat(64);
+        } else {
+          driver.gatewayProxyDriver = undefined;
+        }
+        // The same revision cannot start under changed admission.
+        await assert.rejects(driver.prepareRevision(revision), /Gateway destination admission/);
+        if (change === "missing-owner") {
+          await assert.rejects(driver[operation](revision), /cleanup owner is unavailable/);
+        } else if (change === "yielding-policy") {
+          await withYieldingComputeStop(() => driver[operation](revision));
+        } else {
+          await driver[operation](revision);
+        }
+        assert.equal(fixture.deploymentPresent, false);
+        assert.ok(fixture.events.includes("delete Agent Deployment"));
+        assert.ok(
+          credentialReads.includes(driver.harnessSecretsName(revision.agentId, revision.id)),
+        );
+        assert.ok(
+          credentialReads.includes(driver.gatewaySecretsName(revision.agentId, revision.id)),
+        );
+        // Restore the exact owner and retry incomplete cleanup without recreating the Harness.
+        driver.gatewayProxyDriver = selected.owner;
+        await driver[operation](revision);
+        assert.equal(
+          fixture.events.filter((event) => event === "delete Agent Deployment").length,
+          1,
+        );
+        assert.ok(fixture.events.includes("remove proxy " + revision.id));
+      },
+    );
+  }
+}
+
+// Real Compute and OpenShell attachment implementations share the existing simulated
+// Kubernetes API. This proves lifecycle composition, not SDK HTTP or live tunnel closure.
+for (const operation of ["stopRevision", "retireRevision"]) {
+  test(
+    "Gateway attachment " + operation + " removes frozen resources after configuration changes",
+    async () => {
+      const original = selectedOpenShellGatewayDriver();
+      const configuration = options({
+        runtime: {
+          transportSecretPrefix: "transport",
+          gatewayStorageClassName: "local-path",
+        },
+      });
+      const driver = createRoutedKubernetesComputeDriver(configuration, {
+        gatewayProxyDriver: original.owner,
+      });
+      const fixture = stopOrderFixture("attachment-" + operation, driver);
+      const { revision } = fixture;
+      const plan = driver.gatewayDestinationPlan(revision);
+      const api = gatewayProxyApiFixture();
+      const clients = await driver.apiClients;
+      clients.objects = api;
+      clients.networking = {
+        async readNamespacedNetworkPolicy() {
+          throw Object.assign(new Error("Not found"), { code: 404 });
+        },
+      };
+      const context = {
+        kubernetes: api,
+        namespace: { ...tenant, name: kubernetesNamespaceName(revision.namespaceId) },
+        namespaceName: kubernetesNamespaceName(revision.namespaceId),
+        revision,
+        dnsPeer: configuration.network.dns,
+        signal: AbortSignal.timeout(15_000),
+      };
+      assert.equal(
+        await original.owner.require("sandbox").gatewayProxy.prepare(context, plan),
+        true,
+      );
+      const changed = selectedOpenShellGatewayDriver(["10.0.0.0/8", "203.0.113.0/24"]);
+      driver.gatewayProxyDriver = changed.owner;
+      const successor = routedRevision(driver, { id: revision.id + "-next", revision: 2 });
+      const successorPlan = driver.gatewayDestinationPlan(successor);
+      const successorContext = { ...context, revision: successor };
+      assert.equal(
+        await changed.owner
+          .require("sandbox")
+          .gatewayProxy.prepare(successorContext, successorPlan),
+        true,
+      );
+      await assert.rejects(driver.prepareRevision(revision), /Gateway destination admission/);
+      await driver[operation](revision);
+      assert.equal(fixture.deploymentPresent, false);
+      const remainingPods = (await api.list("v1", "Pod", context.namespaceName)).items;
+      assert.equal(remainingPods.length, 1);
+      assert.equal(remainingPods[0].metadata.labels["openclaw.dev/revision"], successor.id);
+      for (const kind of ["Service", "Deployment", "ConfigMap", "NetworkPolicy"]) {
+        await assert.rejects(
+          api.read({
+            kind,
+            metadata: { name: plan.endpoint.serviceName, namespace: context.namespaceName },
+          }),
+          /not found/,
+        );
+      }
+      // Repeated worker cleanup is harmless after every owned attachment object is gone.
+      await driver[operation](revision);
+      assert.equal(
+        await changed.owner
+          .require("sandbox")
+          .gatewayProxy.prepare(successorContext, successorPlan),
+        true,
+      );
+    },
+  );
+}
+
+test("Gateway attachment cleanup refuses foreign ownership and preserves incomplete resources for retry", async () => {
+  const selected = selectedOpenShellGatewayDriver();
+  const driver = createRoutedKubernetesComputeDriver(
+    options({
+      runtime: {
+        transportSecretPrefix: "transport",
+        gatewayStorageClassName: "local-path",
+      },
+    }),
+    { gatewayProxyDriver: selected.owner },
+  );
+  const revision = routedRevision(driver);
+  const plan = driver.gatewayDestinationPlan(revision);
+  const api = gatewayProxyApiFixture();
+  const context = {
+    kubernetes: api,
+    revision,
+    namespace: { ...tenant, name: "attachment-cleanup" },
+    namespaceName: "attachment-cleanup",
+    dnsPeer: driver.options.network.dns,
+    signal: AbortSignal.timeout(15_000),
+  };
+  const attachment = selected.owner.require("sandbox").gatewayProxy;
+  assert.equal(await attachment.prepare(context, plan), true);
+  const service = {
+    kind: "Service",
+    metadata: { name: plan.endpoint.serviceName, namespace: context.namespaceName },
+  };
+  const read = api.read.bind(api);
+  const remove = api.delete.bind(api);
+  let foreign = true;
+  let deleting = false;
+  api.read = async (object) => {
+    const actual = await read(object);
+    if (object.kind === "Service" && foreign) {
+      actual.metadata.annotations["openclaw.dev/driver-id"] = "foreign-owner";
+    }
+    return actual;
+  };
+  api.delete = async (...args) => {
+    deleting = true;
+    return remove(...args);
+  };
+  // A saved plan cannot be replayed for another revision, endpoint or selected owner.
+  for (const changedPlan of [
+    { ...plan, revisionId: "foreign-revision" },
+    { ...plan, driverId: "foreign-driver" },
+    { ...plan, endpoint: { ...plan.endpoint, serviceName: "foreign-service" } },
+  ]) {
+    await assert.rejects(attachment.remove(context, changedPlan), /frozen cleanup identity/);
+  }
+  assert.equal(deleting, false);
+  await assert.rejects(attachment.remove(context, plan), /foreign or changed/);
+  assert.equal(deleting, false, "ownership refusal must precede every delete");
+  foreign = false;
+  // A Kubernetes UID conflict must preserve the surviving objects and surface for retry.
+  api.delete = async (...args) => {
+    if (args[0].kind === "Deployment") {
+      throw Object.assign(new Error("UID conflict"), { statusCode: 409 });
+    }
+    return remove(...args);
+  };
+  await assert.rejects(attachment.remove(context, plan), /UID conflict/);
+  assert.ok(await read({ ...service, kind: "ConfigMap" }));
+  assert.ok(await read({ ...service, kind: "Deployment" }));
+  api.delete = remove;
+  assert.equal(await attachment.remove(context, plan), true);
+});
+
+test("Gateway outbound rejects unenforced topology while retaining empty defaults", () => {
+  for (const configuration of [options(), twoClusterOptions()]) {
+    const driver = createRoutedKubernetesComputeDriver(configuration);
+    const revision = routedRevision(driver);
+    assert.equal(driver.admitRevision(revision), undefined);
+    assert.equal(
+      driver.admitRevision({ ...revision, gatewayOutbound: { destinations: [] } }),
+      undefined,
+    );
+    assert.throws(
+      () =>
+        driver.admitRevision({
+          ...revision,
+          gatewayOutbound: { destinations: [{ host: "example.com", port: 443 }] },
+        }),
+      /dedicated single-cluster enforcement/,
+    );
+  }
 });
 
 test("Gateway destination preparation and activation cannot release a Gateway before attachment readiness", async () => {
