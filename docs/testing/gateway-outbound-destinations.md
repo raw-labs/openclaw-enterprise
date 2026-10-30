@@ -1,10 +1,25 @@
 # Verify the experimental Gateway destination proxy
 
-**Experimental — UNVERIFIED. Not supported for production.** This is a
+**Experimental — partially verified. Not supported for production.** This is a
 contributor procedure for the draft [Gateway destination flow](../flows/gateway-outbound-destinations.md),
 not an operator setup guide or passing result. Keep the experiment in draft;
 do not merge it. [RFC-0024 acceptance](../../specs/rfcs/0024-gateway-outbound-proxy-reuse.md#required-evidence-and-current-status)
 remains incomplete.
+
+## Choose the execution scope
+
+Normal dedicated Codex execution does not require an OpenShell Harness. For
+Gateway networking, `drivers.credential_proxy.usage: gateway` selects the paired
+proxy capabilities without selecting OpenShell for Harness execution or model
+credentials. Kubernetes Compute keeps the Harness and its Agent-owned credential
+Secret. The installation profile renderer accepts this pair through `gatewayProxy`;
+see the [source flow](../flows/gateway-outbound-destinations.md#execution-trace).
+
+The explicit scenario below currently selects an OpenShell Harness as well as
+Gateway networking. Its protected-source prerequisites apply to that combination,
+not to normal dedicated execution with a Gateway-only proxy. Do not use a passing
+Gateway-only run as proof of protected OpenShell Harness execution. Neither path
+is qualified by installation readiness alone.
 
 ## Prepare authorized infrastructure and inputs
 
@@ -23,6 +38,24 @@ credentials. Use an enforcing container
 network interface (CNI), trusted label/policy writers, and a prepared cluster whose
 Service, Pod, node, control-plane, and metadata ranges are known.
 
+Prepare an authenticated TLS OpenShell Backend and an execution-authority
+configuration before selecting this scenario. The scenario uses the bundled
+Backend and Sandbox implementations directly. It does not install the legacy
+fixture's unauthenticated HTTP gateways or inject replacement management clients.
+The Backend must be reachable from the test process and its advertised Harness
+endpoint must be reachable from the Agent Gateway. Supply certificate and key
+**paths**, never PEM private keys or tokens in JSON. Keep the authority listener's
+certificate, issuer, and bind address consistent with this test process. If the
+run selects protected sources, the prepared supplier must also reach that listener.
+The required execution-capable Credential Proxy routes OpenAI API-key sources
+through protected source admission. Those sources need negotiated protected
+execution middleware; configured authority and Backend TLS do not establish that
+capability. Stock OpenShell refuses source registration in this execution-capable profile,
+so this scenario requires a reviewed candidate pair. Do not disable capability
+negotiation or report a Gateway-only run as proof of this profile. A Gateway-only
+run instead uses normal dedicated Harness authentication and tests a different
+execution scope.
+
 Create a private JSON file outside the checkout. Set
 `OCC_TEST_QA_GATEWAY_DESTINATIONS_CONFIG` to its absolute path. Its fields are:
 
@@ -39,6 +72,22 @@ Create a private JSON file outside the checkout. Set
 | `forbiddenPort`                                                     | Integer from 1 to 65535, other than 443, that must be refused for the allowed host.                                                                          |
 | `peerResponseMarker`                                                | Second upstream's independent response marker, 8–120 ASCII letters, digits, underscores, or hyphens.                                                         |
 | `responseMarker`                                                    | Expected independent upstream marker, 8–120 ASCII letters, digits, underscores, or hyphens.                                                                  |
+
+The same JSON must also include these prepared Installation fields:
+
+- `openShellBackend`: the Backend's configuration object, with its real HTTPS
+  endpoint, `mtls` or `bearerTokenFile` identity, and public root certificate path.
+- `sandboxConfiguration`: the paired Sandbox's configuration object, including
+  operator Workspace resources, tenant networking and actual Harness mount paths.
+  Use the maintained launcher's token-free `openshell-sandbox` workload
+  ServiceAccount. Omit local `gateway.readiness` and fixed
+  `kubernetes.sandboxDataMount.claimName` values: the real health RPC checks the
+  shared Backend, and Compute selects each Agent's workspace PVC.
+- `providerHarness`: Compute's endpoint object with the OpenShell gateway's
+  `namespace`, exact `podLabels`, Service IPv4 `address` and listener `port`.
+- `thinkingDefault`: optional explicit reasoning level for the real model turn.
+  For a low-reasoning run, set it to `low` and select the model with
+  `OCC_TEST_OPENAI_MODEL`.
 
 Read the exact image values from
 [the selected implementation](../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts),
@@ -165,11 +214,22 @@ The stock supervisor/relay Docker test passes. Agent API and real PostgreSQL
 authoring tests also pass. The [plan](../../specs/plans/0024-gateway-outbound-proxy-reuse.md#verification-evidence)
 records current results. The attachment regression provides only the CNI checks
 named above; it does not qualify full Agent credential placement or cleanup.
-Real Agent execution is **not run**. Local cluster tools are available, but the
-required enforcing lane, approved image provenance, authorized model and Slack
-credentials, and independent public probe endpoints are not prepared. The normal dedicated
-lifecycle stops predecessors before preparing replacements; the scenario proves
-stale-endpoint withdrawal, not simultaneous cross-revision CNI isolation.
+A manual real-cluster run on October 30, 2026 exercised normal dedicated Codex
+with Gateway-only proxy selection through the Agent API and worker. It passed a
+`gpt-6.1-sol` model turn with low reasoning, Harness-only model credential
+projection, native ClawHub search/detail/catalog calls, allowed HTTPS, denied
+host and port, and direct-IP denial with a reachable same-address/port control
+from the proxy Pod. Proxy outage refused traffic without direct fallback;
+recovery restored traffic. Replacement withdrew the old proxy resources, allowed
+the new destination, refused the removed destination, and passed another model
+turn. These observations do not qualify the separate OpenShell Harness scenario
+or the deferred acceptance cases above.
+
+The normal dedicated lifecycle stops predecessors before preparing replacements.
+Resource withdrawal does not prove simultaneous cross-revision CNI isolation or
+the exact termination time of an established CONNECT/WebSocket. Record the tested
+commit, actual image identities, run commands and cleanup receipts in the change
+review; a manual run is not automatic QA-matrix coverage.
 
 ## Clean up and diagnose failures
 

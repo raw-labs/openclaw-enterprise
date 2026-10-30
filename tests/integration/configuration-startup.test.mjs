@@ -153,6 +153,14 @@ test("Credential Proxy startup preserves the selection and refuses retired keys"
   assert.equal(loaded.installation.backend[0].drivers.credential_proxy, loaded.proxyDriver.id);
   assert.equal(loaded.protectedDriver.require("credential_proxy"), loaded.proxyDriver);
   assert.equal(typeof loaded.proxyDriver.bindExchange, "function");
+  // An execution-capable pair still needs its selected Sandbox view. The
+  // registration-only Gateway exception must not mask a broken execution owner.
+  const pool = new pg.Pool({ connectionString: "postgresql://127.0.0.1:1/occ" });
+  t.after(async () => pool.end());
+  assert.throws(
+    () => createControllerWorker({ pool, drivers: { ...loaded, sandboxDriver: undefined } }),
+    /selected Sandbox Driver requires shared startup configuration/,
+  );
 
   for (const [member, selected] of [
     [true, false],
@@ -2860,6 +2868,11 @@ test("Gateway-only paired selection preserves native repository delivery and Com
   assert.equal(loaded.protectedDriver, undefined);
   assert.equal(loaded.proxyDriver, undefined);
   assert.equal(loaded.repositoryGitDriver, undefined);
+  // Gateway networking must not be mistaken for a selected Harness Sandbox.
+  // Construct the real worker: startup composition alone missed this refusal.
+  const pool = new pg.Pool({ connectionString: "postgresql://127.0.0.1:1/occ" });
+  t.after(async () => pool.end());
+  assert.doesNotThrow(() => createControllerWorker({ pool, mode: "production", drivers: loaded }));
   assert.deepEqual(loaded.installation.repository, native.installation.repository);
   const selection = { namespaceId: "ns_repository", bindings: [{ repositoryRef: "application" }] };
   assert.deepEqual(

@@ -363,6 +363,7 @@ import {
 } from "./backends.ts";
 import {
   InMemoryPlatformState,
+  validComputeAdmission,
   type PlatformReadView,
   type PlatformOperation,
   type PlatformStateStore,
@@ -10536,6 +10537,11 @@ export class OpenClawController {
         throw new ConfigurationHarnessError(GATEWAY_MANAGED_MODE_UNSUPPORTED);
       }
       const computeAdmission = compute.admitRevision?.(freezeAgentRevision(revisionDraft));
+      if (computeAdmission !== undefined && !validComputeAdmission(computeAdmission)) {
+        throw new ResourceStateConflictError(
+          "Compute admission evidence must be printable ASCII within the 256 KiB persisted budget.",
+        );
+      }
       const revision = await state.revisions.createRevision(
         freezeAgentRevision({
           ...revisionDraft,

@@ -27,28 +27,30 @@ func validateClusterName(name string) error {
 }
 
 type developmentState struct {
-	Version                     int    `json:"version"`
-	Repository                  string `json:"repository"`
-	ComputeDriver               string `json:"computeDriver"`
-	SandboxDriver               string `json:"sandboxDriver"`
-	DeploymentMode              string `json:"deploymentMode,omitempty"`
-	PlatformNamespace           string `json:"platformNamespace,omitempty"`
-	APIPort                     int    `json:"apiPort,omitzero"`
-	BrowserPort                 int    `json:"browserPort,omitzero"`
-	BrowserOrigin               string `json:"browserOrigin,omitempty"`
-	NativeAdminDomain           string `json:"nativeAdminDomain,omitempty"`
-	ContainerEngine             string `json:"containerEngine"`
-	ComposeProject              string `json:"composeProject"`
-	Cluster                     string `json:"cluster"`
-	DockerHost                  string `json:"dockerHost"`
-	KeyPath                     string `json:"keyPath"`
-	KeyOwned                    bool   `json:"keyOwned"`
-	SignIn                      string `json:"signIn,omitempty"`
-	ProtectedEgress             bool   `json:"protectedEgress,omitempty"`
-	DatabaseName                string `json:"databaseName,omitempty"`
-	OpenShellHostGatewayIP      string `json:"openShellHostGatewayIP,omitempty"`
-	SandboxNetworkPolicies      []any  `json:"sandboxNetworkPolicies,omitempty"`
-	SandboxNetworkPolicyCeiling []any  `json:"sandboxNetworkPolicyCeiling,omitempty"`
+	Version                     int      `json:"version"`
+	Repository                  string   `json:"repository"`
+	ComputeDriver               string   `json:"computeDriver"`
+	SandboxDriver               string   `json:"sandboxDriver"`
+	DeploymentMode              string   `json:"deploymentMode,omitempty"`
+	PlatformNamespace           string   `json:"platformNamespace,omitempty"`
+	APIPort                     int      `json:"apiPort,omitzero"`
+	BrowserPort                 int      `json:"browserPort,omitzero"`
+	BrowserOrigin               string   `json:"browserOrigin,omitempty"`
+	NativeAdminDomain           string   `json:"nativeAdminDomain,omitempty"`
+	ContainerEngine             string   `json:"containerEngine"`
+	ComposeProject              string   `json:"composeProject"`
+	Cluster                     string   `json:"cluster"`
+	DockerHost                  string   `json:"dockerHost"`
+	KeyPath                     string   `json:"keyPath"`
+	KeyOwned                    bool     `json:"keyOwned"`
+	SignIn                      string   `json:"signIn,omitempty"`
+	GatewayDestinations         bool     `json:"gatewayDestinations,omitempty"`
+	InfrastructureCIDRs         []string `json:"infrastructureCidrs,omitempty"`
+	ProtectedEgress             bool     `json:"protectedEgress,omitempty"`
+	DatabaseName                string   `json:"databaseName,omitempty"`
+	OpenShellHostGatewayIP      string   `json:"openShellHostGatewayIP,omitempty"`
+	SandboxNetworkPolicies      []any    `json:"sandboxNetworkPolicies,omitempty"`
+	SandboxNetworkPolicyCeiling []any    `json:"sandboxNetworkPolicyCeiling,omitempty"`
 	// ImageRegistryContainer and ImageRegistryNetwork record a development
 	// image registry attached to the cluster network, from just before the
 	// connect until the disconnect, so occ dev down can detach it after a start
@@ -57,6 +59,11 @@ type developmentState struct {
 	ImageRegistryNetwork   string `json:"imageRegistryNetwork,omitempty"`
 	egressKeyID            string
 	directory              string
+}
+
+// Native OpenShell TLS is required for both protected execution and Gateway policy.
+func (s *developmentState) secureOpenShell() bool {
+	return s.ProtectedEgress || s.GatewayDestinations
 }
 
 func (s *developmentState) composeCommand() []string {

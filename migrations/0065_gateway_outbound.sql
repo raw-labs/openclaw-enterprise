@@ -46,5 +46,8 @@ BEGIN
     WHERE conrelid = 'occ.agent_revisions'::regclass AND conname = 'agent_revisions_admitted_snapshot';
   ALTER TABLE occ.agent_revisions DROP CONSTRAINT agent_revisions_admitted_snapshot;
   EXECUTE 'ALTER TABLE occ.agent_revisions ADD CONSTRAINT agent_revisions_admitted_snapshot '
-    || replace(definition, '- ''execution_admission''::text', '- ''execution_admission''::text - ''gateway_outbound''::text');
+    || replace(
+      replace(definition, '- ''execution_admission''::text', '- ''execution_admission''::text - ''gateway_outbound''::text'),
+      '1024', '262144'
+    );
 END $$;

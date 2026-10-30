@@ -1310,8 +1310,14 @@ export class ControllerWorker {
       throw new Error("The selected Credential Gateway Driver requires a paired Sandbox Driver.");
     }
     if (
+      !(
+        this.gatewayProxyDriver !== undefined &&
+        this.protectedDriver === undefined &&
+        this.sandbox === undefined &&
+        this.gatewayProxyDriver.require("sandbox").id === drivers?.installation.drivers.sandbox?.id
+      ) &&
       (drivers?.installation.drivers.sandbox === undefined) !==
-      (drivers?.sandboxDriver === undefined)
+        (drivers?.sandboxDriver === undefined)
     ) {
       throw new Error("The selected Sandbox Driver requires shared startup configuration.");
     }

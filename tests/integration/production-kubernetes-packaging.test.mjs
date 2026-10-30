@@ -3086,6 +3086,11 @@ test(
     assert.ok(!bindings.has(tenant.metadata.name));
     assert.ok(!bindings.has(tenantApiRole.metadata.name));
     assert.ok(tenant.rules.some(({ resources }) => resources.includes("configmaps")));
+    // Proxy readiness must verify the Pod owner chain, but may not change ReplicaSets.
+    assert.deepEqual(
+      tenant.rules.filter(({ resources }) => resources.includes("replicasets")),
+      [{ apiGroups: ["apps"], resources: ["replicasets"], verbs: ["get"] }],
+    );
     assert.deepEqual(tenantApiRole.rules, tenantApiRules());
     // Only the unbound tenant-worker role can reconcile and remove an Agent-owned claim.
     assert.deepEqual(

@@ -785,7 +785,7 @@ export const agentRevisions = occSchema.table(
         AND (
           NOT ((${table.admittedSpec}->'compute') ? 'admission')
           OR (jsonb_typeof(${table.admittedSpec} #> '{compute,admission}') = 'string'
-              AND char_length(${table.admittedSpec} #>> '{compute,admission}') BETWEEN 1 AND 1024
+              AND char_length(${table.admittedSpec} #>> '{compute,admission}') BETWEEN 1 AND 262144
               AND (${table.admittedSpec} #>> '{compute,admission}') ~ '^[ -~]+$')
         )
         AND (

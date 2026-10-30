@@ -50,6 +50,9 @@ func CheckDevelopmentProfile() error {
 
 func (r *runner) protectedEgressSelection(controlPlane, sandbox string) (bool, error) {
 	value := r.env["OCC_DEVELOPMENT_PROTECTED_EGRESS"]
+	if err := r.checkGatewayDestinationSelection(controlPlane, sandbox); err != nil {
+		return false, err
+	}
 	if value != "" && value != "0" && value != "1" {
 		return false, fmt.Errorf("OCC_DEVELOPMENT_PROTECTED_EGRESS must be 0 or 1")
 	}
@@ -136,6 +139,10 @@ func developmentProtectedOpenShellValues(state *developmentState) map[string]any
 			"maxPayloadBytes": developmentEgressPayload, "timeout": developmentEgressTimeout,
 		}}},
 	}
+	if !state.ProtectedEgress {
+		// Stock OpenShell supports native TLS, not the protected middleware contract.
+		delete(values, "supervisor")
+	}
 	if state.OpenShellHostGatewayIP != "" {
 		values["server"].(map[string]any)["hostGatewayIP"] = state.OpenShellHostGatewayIP
 	}
@@ -170,7 +177,7 @@ func (r *runner) readDevelopmentEgressKeyID(ctx context.Context, state *developm
 }
 
 func developmentEgressConfiguration(state *developmentState) map[string]any {
-	return map[string]any{"id": developmentEgressDriver, "configuration": map[string]any{
+	configuration := map[string]any{"id": developmentEgressDriver, "configuration": map[string]any{
 		"middlewareName": developmentEgressMiddleware, "authorityScope": "execution",
 		"authority": map[string]any{
 			"host": "0.0.0.0", "port": developmentEgressPort,
@@ -180,6 +187,15 @@ func developmentEgressConfiguration(state *developmentState) map[string]any {
 			"issuer":              "openshell-gateway:" + openShellGatewayService, "audience": developmentEgressAudience, "keyId": state.egressKeyID,
 		},
 	}}
+	if state.GatewayDestinations {
+		configuration["configuration"].(map[string]any)["gatewayDestinations"] = map[string]any{
+			"policyRulesPath": "/app/deploy/runtime/gateway-proxy/sandbox-policy.rego",
+			"supervisorImage": openShellSupervisorImage,
+			"relayImage":      developmentGatewayRelayImage,
+			"blockedCidrs":    state.InfrastructureCIDRs,
+		}
+	}
+	return configuration
 }
 
 func developmentEgressChartValues(state *developmentState) map[string]any {

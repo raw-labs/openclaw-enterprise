@@ -1,7 +1,7 @@
 ---
 created: "2026-10-28"
-updated: "2026-10-29"
-last_updated_session: "agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3"
+updated: "2026-10-30"
+last_updated_session: "agent:main:subagent:55a5f328-95d6-403d-99c4-22449d12bf3f"
 ---
 
 # Gateway outbound destination flow
@@ -43,6 +43,11 @@ The stock OpenShell/relay Docker test and scoped real attachment checks pass.
 Full Gateway integration traffic, Channel behavior, Compute network enforcement
 and the complete Agent workflow remain unverified. The
 [QA procedure](../testing/gateway-outbound-destinations.md) defines each proof boundary.
+The real development installation reaches readiness, but its stock OpenShell
+counterpart refuses OpenAI API-key source registration: the selected
+execution-capable Credential Proxy requires negotiated protected middleware.
+A configured authority is not evidence of that supplier capability. The complete
+API-key Agent workflow remains blocked until a reviewed candidate provides it.
 
 ## Entry Points
 
@@ -81,10 +86,53 @@ graph TD
 
 ## Execution Trace
 
+The PostgreSQL migration runner verifies the complete catalog and effective
+application grants before it accepts an existing database.
+`scripts/migration-history.mjs:catalogAtMigrationCount` recognizes the catalog
+before Gateway destinations separately from the completed catalog.
+`migrations/meta/_canonical-history.json` records both measured completed forms:
+native PostgreSQL creation and a logical restore. Adding the migration receipt
+without updating these measurements makes the next initialization refuse the
+database; the runner does not weaken this check for development startup.
+
+The platform stores Compute admission evidence as printable ASCII, with a
+256 KiB budget per Agent revision. The Gateway plan includes policy, destination
+identities, and infrastructure exclusions, so the earlier 1,024-character budget
+cannot hold even a normal plan. This is a storage budget, not a destination-count
+guarantee. `packages/occ/src/index.ts:deployAgentWithAuthorization` refuses evidence
+above the budget before insertion. The PostgreSQL snapshot constraint and
+`packages/occ/src/state/platform-state.ts:validComputeAdmission` enforce the same
+budget without removing the other snapshot checks.
+
+Gateway-only registration does not select an execution Sandbox. The worker
+accepts this absence only when the registered Gateway pair matches the configured
+Sandbox identity and no protected execution owner is selected. Execution-capable
+registrations still require their selected Sandbox view. The tenant worker Role
+grants `get` on ReplicaSets to verify the proxy Pod → ReplicaSet → Deployment
+owner chain. It grants no ReplicaSet mutation or cluster-wide binding.
+
 ### 1. Select policy validation and proxy resource management
 
 Startup constructs these capabilities before Agent deployment. Registration does
 not admit a revision or perform its network operations.
+
+The development launcher explicitly selects the experiment with
+`OCC_DEVELOPMENT_GATEWAY_DESTINATIONS=1`.
+`internal/occdev/gateway_destinations_k3d.go:checkGatewayDestinationSelection`
+requires Kubernetes/OpenShell and unchanged stock rules before cluster creation.
+The option enables native TLS and mTLS independently of protected inference.
+Protected execution retains its separate candidate and capability checks. `prepareGatewayDestinationInfrastructure` combines the
+fixed Pod and Service ranges, complete owned node subnet, and metadata range.
+`internal/occdev/kubernetes.go:writeInstallation` supplies those ranges to Compute.
+`internal/occdev/egress_k3d.go:developmentEgressConfiguration` adds destination
+configuration to the existing execution authority, not a gateway-only capability.
+The controller image includes the rules at its selected absolute path.
+`importGatewayDestinationImages` pulls each pinned stock proxy manifest directly
+into containerd before installation. It does not relabel transformed Docker
+archives with stock digests. `kubernetes.go:importRuntime` builds the compiler
+stage before the final runtime graph to avoid concurrent compiler and bridge-test
+builds. This order does not guarantee sufficient compiler memory. These packaging
+paths do not establish live enforcement.
 
 `apps/controller/src/drivers/egress-proxy/openshell-registration.ts:createOpenShellCapabilities`
 creates the paired views, passes attachment options to the Sandbox, and constructs
@@ -233,8 +281,12 @@ readiness denial is expected; it is not a successful upstream request.
 
 The draft real scenario exercises Agent admission, proxy forwarding, direct
 TCP/443 denial, revision isolation, replacement, outage, and cleanup when run.
-Its presence is not a passing result. Documentation structural checks and
-syntax-only checks cannot qualify the stock binary or CNI boundary.
+Its presence is not a passing result. A separate manual normal-dedicated run
+through the API and worker has exercised Gateway-only forwarding, model turns,
+policy replacement and outage recovery; the testing guide records its scope.
+That run does not qualify protected OpenShell Harness execution or all RFC
+acceptance cases. Documentation structural checks and syntax-only checks cannot
+qualify the stock binary or CNI boundary.
 
 ## Related docs
 
@@ -249,6 +301,8 @@ syntax-only checks cannot qualify the stock binary or CNI boundary.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-30 00:25: Trace secure development opt-in, discovered infrastructure exclusions and stock image imports in the accompanying fix. (agent:main:subagent:55a5f328-95d6-403d-99c4-22449d12bf3f - 34538096f2d4b30448ce0c53e923978cc85e97f0)
 
 - 2026-10-29 23:01: Correct SDK NetworkPolicy creation, API default comparisons and non-root proxy TLS storage in the accompanying fix. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - e69e52e999ba61a4718c603e9e00b1a860e57ce0)
 - 2026-10-29 16:36: Trace independent Gateway selection, exclusions and portable profile validation in the accompanying implementation. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - 72fa7ce820fe53ad3cd5aee248a8aaea9d4da72b)

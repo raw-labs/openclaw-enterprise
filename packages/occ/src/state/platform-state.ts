@@ -795,6 +795,16 @@ function agentCredentialSourceReference(
   return (bindings ?? []).some(({ sourceId }) => sourceId === credentialSourceId);
 }
 
+/** Persisted opaque Compute evidence has a 256 KiB printable-ASCII budget. */
+export function validComputeAdmission(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 262_144 &&
+    /^[\x20-\x7e]+$/.test(value)
+  );
+}
+
 /** A revision freezes exactly the owner's non-model sources, in order. */
 export function credentialSourcesMatch(
   bindings: readonly AgentCredentialSourceBinding[] | undefined,
@@ -866,8 +876,7 @@ function assertAdmittedAgentRevision(revision: AgentRevision): void {
     !isNonEmptyString(revision.compute.id) ||
     !isNonEmptyString(revision.compute.implementation) ||
     (revision.compute.admission !== undefined &&
-      (typeof revision.compute.admission !== "string" ||
-        !/^[\x20-\x7e]{1,1024}$/.test(revision.compute.admission))) ||
+      !validComputeAdmission(revision.compute.admission)) ||
     (revision.sandboxDriverId !== undefined && !isNonEmptyString(revision.sandboxDriverId)) ||
     (revision.secretDriverId !== undefined && !isNonEmptyString(revision.secretDriverId)) ||
     Object.hasOwn(revision, "serviceAccount") ||

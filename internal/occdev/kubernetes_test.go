@@ -46,9 +46,30 @@ build*) printf '%s\n' "$@" > build-args; exit 17 ;;
 		"--build-arg", "OPENCLAW_COMMIT=" + source["commit"],
 		"--build-arg", "OPENCLAW_SOURCE_SHA256=" + source["sourceArchiveSha256"],
 		"--build-arg", "OPENCLAW_BUILD_TIMESTAMP=" + source["buildTimestamp"],
-		"--tag", "openclaw-enterprise-runtime:kubernetes-quickstart", "."}
+		"--target", "openclaw-build", "."}
 	if got := strings.Split(strings.TrimSpace(string(arguments)), "\n"); !slices.Equal(got, want) {
 		t.Fatalf("runtime build arguments = %q, want %q", got, want)
+	}
+	// Once warm-up succeeds, preserve the same source identity in the final build.
+	// A failed final build must stop before image import.
+	fakeEngine(t, "docker", `
+build*)
+  printf '%s\n' "$@" >> ordered-build-args
+  case "$*" in
+    *"--target openclaw-build .") exit 0 ;;
+    *) exit 17 ;;
+  esac ;;
+`)
+	if _, err := r.importRuntime(context.Background(), &developmentState{}); err == nil {
+		t.Fatal("the failed final build was reported as success")
+	}
+	ordered, err := os.ReadFile(filepath.Join(repository, "ordered-build-args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	final := append(slices.Clone(want[:len(want)-3]), "--tag", "openclaw-enterprise-runtime:kubernetes-quickstart", ".")
+	if got := strings.Split(strings.TrimSpace(string(ordered)), "\n"); !slices.Equal(got, append(want, final...)) {
+		t.Fatalf("compiler warm-up and final build order or source identity changed: %q", got)
 	}
 }
 

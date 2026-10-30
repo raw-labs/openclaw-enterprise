@@ -2321,7 +2321,14 @@ async function prepareProductionInstallation(
   if (gatewayDestinations !== undefined) {
     // The API and worker consume the selected operator configuration unchanged.
     configuration.drivers.credential_proxy = structuredClone(gatewayDestinations.credentialProxy);
+    configuration.backend[0].configuration = structuredClone(gatewayDestinations.openShellBackend);
     configuration.backend[0].drivers.credential_proxy = gatewayDestinations.credentialProxy.id;
+    configuration.drivers.sandbox.configuration = structuredClone(
+      gatewayDestinations.sandboxConfiguration,
+    );
+    configuration.drivers.compute.configuration.network.providerHarness = structuredClone(
+      gatewayDestinations.providerHarness,
+    );
     configuration.drivers.compute.configuration.network.infrastructureCidrs = structuredClone(
       gatewayDestinations.infrastructureCidrs,
     );
@@ -2370,10 +2377,15 @@ async function prepareProductionInstallation(
   // carry a non-model source's credential to it. It verifies Keycloak's signatures, so a
   // delivered OAuth2 token is proved genuine without the token reaching test output.
   const tokenEcho =
-    harnessId === "codex" ? await startTokenEcho(context, keycloak?.jwks) : undefined;
+    harnessId === "codex" && gatewayDestinations === undefined
+      ? await startTokenEcho(context, keycloak?.jwks)
+      : undefined;
   // An HTTPS upstream signed by a CA nothing trusts. A tool source bound to it, and later the
   // model route, must refuse it before a request or credential reaches it.
-  const untrustedTls = harnessId === "codex" ? await startUntrustedTlsObserver(context) : undefined;
+  const untrustedTls =
+    harnessId === "codex" && gatewayDestinations === undefined
+      ? await startUntrustedTlsObserver(context)
+      : undefined;
   if (tokenEcho !== undefined) {
     // Startup defaults allow the control port; the adjacent port needs an Agent-owned addition.
     configuration.sandboxNetworkPolicyCeiling = [
@@ -2421,21 +2433,29 @@ async function prepareProductionInstallation(
   apiConfiguration.drivers.secret.configuration.authentication =
     controller.apiIdentity.authentication;
   await writeFile(startupPath, JSON.stringify(apiConfiguration), { mode: 0o600 });
-  const createSandboxDriver = createIntegrationSandboxDriverFactory(
-    OpenShellSandboxDriver,
-    GrpcOpenShellGatewayClient,
-    OpenShellGateway,
-    operatorKubernetes,
-    {
-      enableCompatibilityBridges,
-      ...(keycloak === undefined ? {} : { gatewayTrustPem: keycloak.caPem }),
-    },
-  );
+  // The destination scenario uses the real Backend and bundled Sandbox. The legacy
+  // fixture installs HTTP gateways and injects management clients; it cannot qualify TLS.
+  const createSandboxDriver =
+    gatewayDestinations === undefined
+      ? createIntegrationSandboxDriverFactory(
+          OpenShellSandboxDriver,
+          GrpcOpenShellGatewayClient,
+          OpenShellGateway,
+          operatorKubernetes,
+          {
+            enableCompatibilityBridges,
+            ...(keycloak === undefined ? {} : { gatewayTrustPem: keycloak.caPem }),
+          },
+        )
+      : undefined;
+  const sandboxFactories =
+    createSandboxDriver === undefined
+      ? {}
+      : { createOpenShellBackend: createSandboxDriver.createBackend, createSandboxDriver };
   const drivers = await loadInstallationConfiguration({
     mode: "production",
     environment: { ...driverEnvironment, OCC_CONFIG_PATH: startupPath },
-    createOpenShellBackend: createSandboxDriver.createBackend,
-    createSandboxDriver,
+    ...sandboxFactories,
   });
   // Names and kinds only: no credential value reaches the log.
   const tokenSources = () => ({
@@ -2452,8 +2472,7 @@ async function prepareProductionInstallation(
     const loaded = await loadInstallationConfiguration({
       mode: "production",
       environment: { ...driverEnvironment, OCC_CONFIG_PATH: workerStartupPath },
-      createOpenShellBackend: createSandboxDriver.createBackend,
-      createSandboxDriver,
+      ...sandboxFactories,
     });
     // A worker retry intentionally exposes only DEPENDENCY_UNAVAILABLE. Preserve the first
     // underlying Compute failure so a real-runtime regression is actionable rather than a timeout.
@@ -2468,6 +2487,13 @@ async function prepareProductionInstallation(
       },
     };
   };
+  const preparedGateway =
+    gatewayDestinations === undefined
+      ? undefined
+      : new OpenShellGateway(gatewayDestinations.openShellBackend);
+  if (preparedGateway !== undefined) {
+    context.after(() => preparedGateway.close());
+  }
   const initialWorkerDrivers = await loadWorkerDrivers();
   const { workerDrivers } = initialWorkerDrivers;
   let { diagnosticWorkerDrivers } = initialWorkerDrivers;
@@ -2514,7 +2540,7 @@ async function prepareProductionInstallation(
         await workerPool.end();
       }
     },
-    portForwards: () => createSandboxDriver.disposeGatewayForwards(),
+    portForwards: () => createSandboxDriver?.disposeGatewayForwards(),
     productionApp: async () => {
       if (productionApp !== undefined) {
         await productionApp.close();
@@ -2619,9 +2645,11 @@ async function prepareProductionInstallation(
     assert.equal(observed.status, 200, JSON.stringify(observed.error));
     return observed.data.status === "ready" ? observed.data : undefined;
   });
-  await waitForOpenShellGateway(placement);
-  await assertGatewayBootstrapPolicies(placement);
-  if (harnessId === "codex") {
+  if (gatewayDestinations === undefined) {
+    await waitForOpenShellGateway(placement);
+    await assertGatewayBootstrapPolicies(placement);
+  }
+  if (harnessId === "codex" && gatewayDestinations === undefined) {
     // Each test Namespace runs its own OpenShell gateway, so its address is known only now. An
     // operator configures the dedicated Agent Gateway's route to the gateway that exposes Codex
     // and restarts the worker; Compute then admits only that Pod selector, address, and port.
@@ -2716,6 +2744,9 @@ async function prepareProductionInstallation(
       : nativeCodexConfiguration(workspaceGateway.nativeOptions.gatewayAuth);
   if (controlUiOrigin !== undefined) {
     nativeConfiguration.gateway.controlUi = { enabled: true, allowedOrigins: [controlUiOrigin] };
+  }
+  if (gatewayDestinations?.thinkingDefault !== undefined) {
+    nativeConfiguration.agents.defaults.thinkingDefault = gatewayDestinations.thinkingDefault;
   }
   const agentConfiguration = await request("POST", `/namespaces/${namespaceId}/configurations`, {
     kind: "agent",
@@ -2873,7 +2904,7 @@ async function prepareProductionInstallation(
         `OpenShell startup Pod diagnostics timed out after ${diagnosticDeadlineMs / 1_000} s\n`,
       );
     }
-    const provisioningFailure = createSandboxDriver.provisioningFailures.get(deployed.data.id);
+    const provisioningFailure = createSandboxDriver?.provisioningFailures.get(deployed.data.id);
     if (provisioningFailure !== undefined) {
       assert.fail(
         `${error.message}\nFirst OpenShell provisioning failure: ${provisioningFailure.message}`,
@@ -2925,7 +2956,13 @@ async function prepareProductionInstallation(
   process.stderr.write(
     "OpenShell integration: provider Harness ready; checking ownership and mounts.\n",
   );
-  await assertProviderOwnedHarness(placement, deployed.data, sandbox, harnessPod);
+  await assertProviderOwnedHarness(
+    placement,
+    deployed.data,
+    sandbox,
+    harnessPod,
+    gatewayDestinations === undefined ? "perAgent" : "maintainedLauncher",
+  );
   const harnessContainer = harnessPod.spec.containers.find(({ name }) => name === "agent");
   assert.ok(harnessContainer, "the OpenShell Sandbox must provide its Agent container.");
   assert.deepEqual(
@@ -3093,7 +3130,7 @@ async function prepareProductionInstallation(
     sandbox,
     gatewayPlacement,
     gatewayPod: gatewayPods[0],
-    harnessServiceUrl: createSandboxDriver.harnessServiceUrls.get(deployed.data.id),
+    harnessServiceUrl: createSandboxDriver?.harnessServiceUrls.get(deployed.data.id),
     appServerToken: transport.appServerToken,
     modelSecretId: modelSecret.data.id,
     sourceRoleId: sourceRole.data.id,
@@ -3106,17 +3143,23 @@ async function prepareProductionInstallation(
     ...(toolSources === undefined ? {} : { toolSources, tokenEcho }),
     ...(untrustedTls === undefined ? {} : { untrustedTls, untrustedTlsSource }),
     ...(refreshSources === undefined ? {} : { refreshSources, keycloak }),
-    policyWrites: createSandboxDriver.policyWrites,
-    setPolicyWriteBarrier: createSandboxDriver.setPolicyWriteBarrier,
-    gatewayClient: (auth) => createSandboxDriver.gatewayClientForNamespace(placement, auth),
-    restartGatewayForward: () => createSandboxDriver.restartGatewayForward(placement),
-    closeGatewayForward: () => createSandboxDriver.closeGatewayForward(placement),
+    policyWrites: createSandboxDriver?.policyWrites,
+    setPolicyWriteBarrier: createSandboxDriver?.setPolicyWriteBarrier,
+    gatewayClient: (auth) => {
+      if (createSandboxDriver !== undefined) {
+        return createSandboxDriver.gatewayClientForNamespace(placement, auth);
+      }
+      assert.equal(auth, undefined, "destination proof uses the prepared Backend identity");
+      return preparedGateway.clientForNamespace(placement);
+    },
+    restartGatewayForward: () => createSandboxDriver?.restartGatewayForward(placement),
+    closeGatewayForward: () => createSandboxDriver?.closeGatewayForward(placement),
     observerPool,
     policyFixturePool,
     pauseWorker,
     resumeWorker: startWorker,
     workerEvents: events,
-    provisioningFailure: (revisionId) => createSandboxDriver.provisioningFailures.get(revisionId),
+    provisioningFailure: (revisionId) => createSandboxDriver?.provisioningFailures.get(revisionId),
     diagnoseAgentRevision: (agentId, revisionId) =>
       writeWorkerCompletionDiagnostics({
         pool: observerPool,
@@ -5244,6 +5287,55 @@ async function readGatewayDestinationInputs() {
   const path = process.env.OCC_TEST_OPENSHELL_GATEWAY_DESTINATIONS_CONFIG;
   assert.ok(path, "gateway-destinations requires OCC_TEST_OPENSHELL_GATEWAY_DESTINATIONS_CONFIG");
   const input = JSON.parse(await readFile(path, "utf8"));
+  if (input.thinkingDefault !== undefined) {
+    assert.ok(
+      ["off", "minimal", "low", "medium", "high", "xhigh"].includes(input.thinkingDefault),
+      "thinkingDefault must name an explicit supported reasoning level",
+    );
+  }
+  assert.equal(
+    input.credentialProxy?.usage ?? "execution",
+    "execution",
+    "the ordinary OpenShell workflow requires execution authority, not gateway-only usage",
+  );
+  assert.equal(input.credentialProxy?.configuration?.authorityScope, "execution");
+  assert.ok(
+    input.credentialProxy?.configuration?.authority,
+    "supply the prepared execution authority and its protected certificate paths",
+  );
+  const backend = input.openShellBackend;
+  assert.equal(
+    new URL(backend?.endpoint).protocol,
+    "https:",
+    "destination control requires the actual authenticated TLS Backend",
+  );
+  assert.ok(
+    ["mtls", "bearerTokenFile"].includes(backend.auth?.mode),
+    "supply the prepared Backend identity; unauthenticated HTTP is not a qualification",
+  );
+  assert.equal(backend.insecureTransport, undefined);
+  assert.equal(
+    input.sandboxConfiguration?.gateway?.workspaceMode,
+    "operator",
+    "supply the prepared Sandbox configuration for operator-owned Workspaces",
+  );
+  assert.equal(
+    input.sandboxConfiguration.gateway.readiness,
+    undefined,
+    "the prepared shared Backend is checked through its real health RPC, not a tenant-local Service",
+  );
+  assert.equal(
+    input.sandboxConfiguration.kubernetes?.sandboxDataMount?.claimName,
+    undefined,
+    "Compute selects each Agent workspace PVC; a fixed fixture claim is not valid",
+  );
+  assert.ok(
+    input.providerHarness?.namespace &&
+      input.providerHarness?.address &&
+      input.providerHarness?.podLabels &&
+      input.providerHarness?.port,
+    "supply the real OpenShell Harness endpoint and exact provider Pod selectors",
+  );
   assert.ok(
     input.credentialProxy?.id && input.credentialProxy?.configuration?.gatewayDestinations,
     "supply the selected credential_proxy registration with gatewayDestinations configuration",
@@ -5496,6 +5588,7 @@ console.log(JSON.stringify({ fetch: fetchResult, https: requestResult }));
       topology.revision,
       topology.sandbox,
       topology.harnessPod,
+      "maintainedLauncher",
     );
     assertWorkspaceMounts(topology.harnessPod);
     await assertModelKeyIsPlaceholderOnly(topology.placement, topology.harnessPod, modelCredential);
@@ -8825,10 +8918,17 @@ test(
             }),
         ...(demoStatePath === undefined ? {} : { controllerPort: demoConsolePort }),
       });
-      assert.equal(
-        topology.harnessPod.spec.serviceAccountName,
-        openShellAgentName(topology.agent.id),
-      );
+      if (gatewayDestinations === undefined) {
+        assert.equal(
+          topology.harnessPod.spec.serviceAccountName,
+          openShellAgentName(topology.agent.id),
+        );
+      } else {
+        // No projected identity is requested in this ordinary API-key workflow.
+        // The real gateway owns its configured Sandbox account; the legacy fixture
+        // rewrites it per Agent. Both paths must keep API tokens out of the Harness.
+        assertNoProjectedAgentIdentity(topology.harnessPod);
+      }
       assert.ok(topology.sandbox.metadata.name);
       if (gatewayDestinations !== undefined) {
         await requestGatewayTurns(context, topology, "codex");

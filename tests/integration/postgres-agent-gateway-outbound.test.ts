@@ -2,6 +2,12 @@ import { OpenShellSandboxDriver } from "../../apps/controller/src/drivers/sandbo
 import { OpenShellGateway } from "../../apps/controller/src/backends/openshell.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
+import type { AgentRevision } from "../../packages/contracts/src/index.ts";
+import {
+  createRoutedKubernetesComputeDriver,
+  routedOptions,
+} from "../helpers/kubernetes-routed-scenarios.mjs";
 
 import { PostgresPlatformState } from "../../packages/occ/src/index.ts";
 import { createPostgresAgentApp } from "../helpers/postgres-agent-app.mjs";
@@ -83,6 +89,53 @@ test(
     assert.equal(deployed.statusCode, 202, deployed.body);
     const candidate = deployed.json().data;
     assert.deepEqual(candidate.gatewayOutbound, approved);
+    // Persist the actual Kubernetes/stock-proxy admission, not a string that a
+    // fixture invents. This protects schema and decoder behavior; live workflow
+    // tests separately prove the API/worker consumes the same admission.
+    const compute = createRoutedKubernetesComputeDriver(
+      routedOptions({
+        runtime: { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" },
+      }),
+    );
+    const persistedState = new PostgresPlatformState(pool);
+    const storedCandidate = await persistedState.read((view) =>
+      view.revisions.findRevision(namespace.id, agent.id, candidate.id),
+    );
+    assert.ok(storedCandidate);
+    const draft: AgentRevision = {
+      ...storedCandidate,
+      id: "rev_" + randomUUID(),
+      revision: candidate.revision + 1,
+      gatewayManagedMode: true,
+      compute: { id: compute.id, implementation: compute.implementation },
+    };
+    const admission = compute.admitRevision(draft);
+    assert.ok(admission && admission.length > 1024);
+    const admitted: AgentRevision = {
+      ...draft,
+      compute: { ...draft.compute, admission },
+    };
+    await persistedState.transact((unit) => unit.revisions.createRevision(admitted));
+    const loaded = await persistedState.read((view) =>
+      view.revisions.findRevision(namespace.id, agent.id, admitted.id),
+    );
+    assert.equal(loaded?.compute.admission, admitted.compute.admission);
+
+    // Even a direct limited-role writer cannot exceed the persisted budget or
+    // inject nonprintable evidence. Use INSERT because admitted rows are immutable.
+    for (const evidence of ["x".repeat(262_145), "invalid\ncontrol"]) {
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO occ.agent_revisions
+          (id, namespace_id, agent_id, revision_number, backend_id, admitted_spec, gateway_managed_mode, admitted_at)
+         SELECT $1, namespace_id, agent_id, $2, backend_id,
+           jsonb_set(admitted_spec, '{compute,admission}', to_jsonb($3::text)), gateway_managed_mode, clock_timestamp()
+         FROM occ.agent_revisions WHERE id = $4`,
+          ["rev_" + randomUUID(), admitted.revision + 1, evidence, admitted.id],
+        ),
+        { code: "23514" },
+      );
+    }
     const clear = await inject("PATCH", path, { gatewayOutbound: { destinations: [] } });
     assert.equal(clear.statusCode, 200, clear.body);
     const frozen = await inject("GET", path + "/revisions/" + candidate.id);

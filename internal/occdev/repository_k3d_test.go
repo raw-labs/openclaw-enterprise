@@ -288,6 +288,11 @@ func parseGeneratedRepositoryStartup(t *testing.T, realNode string, state *devel
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Go test directories inherit umask. Match the private volume ancestor that
+	// the production loader requires instead of weakening its file checks.
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	// The broker derives its prepared-material socket beside the control socket,
 	// and a Unix socket path must stay short.
 	sockets, err := os.MkdirTemp("/tmp", "rc-")
