@@ -10,17 +10,18 @@ rfc: ../rfcs/0019-temporary-test-environments.md
 - **Authority:** [Proposed RFC](../rfcs/0019-temporary-test-environments.md)
 - **Source baseline:** OCE `80725162a946f80652b939a32a57ee4e922eeb5c`; Crabbox `c41270ea7e6016b497095cb8f0260ed1a2816a06`
 
-## Outcome and current blocker
+## Outcome and authorization
 
 An existing Agent uses the unmodified Crabbox skill and CLI to test a dirty
 checkout in an OCE-managed temporary Linux environment on Kubernetes. OCC owns authorization and
 cleanup; the Agent's Harness stays in place.
 
-**Product implementation is blocked by the active workspace milestone boundary.**
-The RFC requests approval for a new temporary-environment resource and scoped
-Agent authentication. Approval of those additions must precede deployment code.
-The proposed owner is ComputeDriver, with Kubernetes as its first implementation. This document is a draft
-implementation plan, not a draft implementation or an accepted RFC.
+The user explicitly requested the Kubernetes-first draft implementation on
+2026-10-30 after confirming the ComputeDriver extension and lifecycle ownership.
+This scope includes the temporary-environment resource, scoped Agent access,
+controller cleanup and Crabbox adapter. It does not approve deployment, another
+cluster operator, weaker isolation or omission of integration tests. The RFC
+remains Proposed. This document is the implementation plan, not product code.
 
 No infrastructure, dependencies, permissions or admission rules are changed by
 this proposal. No runtime proof has run.
@@ -124,10 +125,10 @@ provider, SSH transport or network enforcement being proved. Follow the
 
 ## Delivery record
 
-RFC and plan drafted from source inspection only. No product code, live-machine
-proof or deployment approval is included. The requested code draft remains
-blocked on the milestone approval above. Kubernetes is selected as the first
-implementation; its cluster-creating profile still needs runtime qualification.
+RFC and plan drafted from source inspection. The Kubernetes-first code draft
+was requested on 2026-10-30 and is being developed separately. This RFC PR includes
+no product code or live-machine proof. The cluster-creating profile still needs
+runtime qualification; deployment has not been authorized.
 
 ## Manual Notes
 

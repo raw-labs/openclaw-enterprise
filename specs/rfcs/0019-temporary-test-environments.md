@@ -43,6 +43,23 @@ A skill guides the Agent; it is not an authorization or resource-limit boundary.
 
 ## What changes
 
+OCE would do the lifecycle-management job that a Crabbox coordinator normally
+does: keep track of environments, enforce their lifetime and clean them up.
+We do not implement Crabbox's server API. Instead, its existing external-provider
+protocol connects to a small adapter that calls OCE's own API.
+
+| Part                  | Responsibility                                                                           |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| Crabbox skill and CLI | Choose the remote-test workflow, copy code, run commands and collect results.            |
+| OCE adapter           | Translate Crabbox's external-provider requests into OCE API calls.                       |
+| OCE core/controller   | Authorize requests, record ownership and deadlines, and retry cleanup until it finishes. |
+| ComputeDriver         | Create, inspect, connect to and delete the actual infrastructure; Kubernetes is first.   |
+
+The Driver is not a second lease server. OCE decides when cleanup is due; the
+Driver removes the resources and reports whether they are gone. Neither relies
+on the LLM remembering a final tool call. The common OCE contract stays independent
+of Crabbox, so other callers could use the same capability.
+
 All OCE connections below are proposed:
 
     the Agent's existing Harness
@@ -184,16 +201,15 @@ The [plan](../plans/0019-temporary-test-environments.md) specifies the connected
 implementation and real proof. Source review found a compatible Crabbox extension
 point; no OCE integration or live-machine test has run.
 
-Maintainers must decide:
+Draft implementation of this Kubernetes-first scope was requested on 2026-10-30.
+That permits development of the proposal; it does not mark the RFC accepted or
+approve deployment. Review must settle the exact ComputeDriver and workload
+identity contracts before merge. Non-Kubernetes implementations are not required
+for the initial delivery.
 
-1. Approve temporary environments and scoped Agent authentication as an explicit
-   implementation milestone; the current repository boundary does not admit
-   these new resource and deployment behaviors.
-2. Review the proposed ComputeDriver extension and Kubernetes-first implementation.
-   Non-Kubernetes implementations are not required for the initial delivery.
-3. Qualify the Kubernetes execution profile for cluster-creating tests. If it
-   requires another runtime or cluster operator, review that dependency before
-   adding it; it is not a prerequisite for defining the common API.
+Cluster-creating tests still need a qualified Kubernetes execution profile. If
+that requires another runtime or cluster operator, review the dependency before
+adding it; it is not a prerequisite for defining the common API.
 
 Delivery requires a real Agent-to-Crabbox-to-OCC test with a dirty checkout,
 remote command output, denial checks, duplicate-request recovery, client loss,
