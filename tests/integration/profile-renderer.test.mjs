@@ -40,6 +40,9 @@ import {
   renderInstallationProfile,
 } from "../../scripts/render-installation-profile.mjs";
 
+import { createCredentialProxyInstallationConfiguration } from "../helpers/installation-driver-configuration.mjs";
+import { STOCK_GATEWAY_PROXY } from "../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts";
+
 const digestA = "a".repeat(64);
 const digestB = "b".repeat(64);
 const digestC = "c".repeat(64);
@@ -97,10 +100,34 @@ function baseInput(overrides = {}) {
   };
 }
 
+function gatewayProxyInput() {
+  const selected = createCredentialProxyInstallationConfiguration();
+  return {
+    sandbox: selected.drivers.sandbox,
+    credentialProxy: {
+      id: selected.drivers.credential_proxy.id,
+      configuration: {
+        middlewareName: "oce-gateway",
+        authorityScope: "execution",
+        gatewayDestinations: {
+          policyRulesPath: fileURLToPath(
+            new URL("../../deploy/runtime/gateway-proxy/sandbox-policy.rego", import.meta.url),
+          ),
+          supervisorImage: STOCK_GATEWAY_PROXY.supervisorImage,
+          relayImage: STOCK_GATEWAY_PROXY.relayImage,
+          blockedCidrs: ["10.0.0.0/8"],
+        },
+      },
+    },
+    infrastructureCidrs: ["10.0.0.0/8"],
+  };
+}
+
 function codexInput(overrides = {}) {
   const input = baseInput();
   return {
     ...input,
+    gatewayProxy: gatewayProxyInput(),
     ...overrides,
     runtime: {
       ...input.runtime,
@@ -386,9 +413,9 @@ test("renderer supports exactly the openclaw and codex profiles", () => {
   assert.match(codex.installation, /catalogSource: hosted/);
   assert.doesNotMatch(codex.installation, /service_account: chatgpt-service-accounts/);
   assert.match(codex.values, /slackProxy:\n {2}enabled: true/);
-  assert.match(
-    codex.installation,
-    /channels:\n\s+proxyUrl: http:\/\/openclaw-enterprise-slack-proxy\.openclaw-system\.svc:3128/,
+  assert.equal(
+    loadYaml(codex.installation).drivers.compute.configuration.runtime.channels,
+    undefined,
   );
   assert.match(codex.preflight.prerequisites.join("\n"), /Slack consumers remain inactive/);
   assert.match(codex.preflight.warnings.join("\n"), /existing codex_pat token/);
@@ -2528,13 +2555,20 @@ for (const profile of ["openclaw", "codex"]) {
   for (const proxyUrl of ["http://192.0.2.10:80", "https://192.0.2.10:443"]) {
     test(`${profile} preserves explicit default channel proxy port in ${proxyUrl}`, async (t) => {
       const input = profile === "codex" ? codexInput() : baseInput();
-      input.channels = { directoryProxyUrl: proxyUrl, runtimeProxyUrl: proxyUrl };
+      input.channels =
+        profile === "codex"
+          ? { directoryProxyUrl: proxyUrl }
+          : { directoryProxyUrl: proxyUrl, runtimeProxyUrl: proxyUrl };
       const output = await render(profile, input);
       t.after(() => rmSync(output.directory, { recursive: true, force: true }));
       assert.equal(output.preflight.ok, true);
       assert.equal(loadYaml(output.values).api.channelDirectoryProxyUrl, proxyUrl);
       const compute = loadYaml(output.installation).drivers.compute.configuration;
-      assert.equal(compute.runtime.channels.proxyUrl, proxyUrl);
+      if (profile === "codex") {
+        assert.equal(compute.runtime.channels, undefined);
+      } else {
+        assert.equal(compute.runtime.channels.proxyUrl, proxyUrl);
+      }
       // Installation validation runs even before an Agent enables a channel.
       assert.doesNotThrow(() => requireConfiguration(KubernetesComputeDriver, compute));
     });
@@ -3006,4 +3040,95 @@ test("profile transport Secret prefixes agree with controller startup admission"
       );
     }
   }
+});
+
+test("dedicated Gateway profile requires explicit independent pair and preserves native repository selection", async () => {
+  const input = codexInput();
+  const output = await render("codex", input);
+  const rendered = loadYaml(output.installation);
+  assert.equal(rendered.drivers.credential_proxy.usage, "gateway");
+  assert.deepEqual(rendered.drivers.sandbox, input.gatewayProxy.sandbox);
+  assert.equal(
+    rendered.backend.some((backend) => backend.type === "openshell"),
+    false,
+  );
+  assert.equal(rendered.drivers.compute.configuration.runtime.channels, undefined);
+  assert.equal(
+    loadYaml(output.values).slackProxy.enabled,
+    true,
+    "control-plane Slack remains independent",
+  );
+  const loaded = await loadInstallationConfiguration({
+    mode: "production",
+    environment: { OCC_CONFIG_PATH: join(output.directory, "installation.yaml") },
+  });
+  try {
+    assert.equal(loaded.sandboxDriver, undefined);
+    assert.equal(loaded.protectedDriver, undefined);
+    assert.ok(loaded.gatewayProxyDriver.require("sandbox").gatewayProxy);
+    // The experimental two-cluster procedure adds the execution target to this
+    // rendered Installation. That must retain the mandatory Gateway-only pair.
+    const remote = structuredClone(rendered);
+    const compute = remote.drivers.compute.configuration;
+    compute.gatewayRouting.hostname = "gateway.example.test";
+    compute.executionCluster = {
+      authentication: {
+        mode: "kubeconfig",
+        kubeconfigPath: "/fixture/execution",
+        context: "execution",
+      },
+      harnessRouting: {
+        hostname: "harness.example.test",
+        gatewayName: "oce-harnesses",
+        gatewayNamespace: "openclaw-system",
+        envoyNamespace: "envoy-gateway-system",
+      },
+      network: {
+        dns: compute.network.dns,
+        harnessEndpointCidrs: ["192.0.2.2/32"],
+        gatewayEndpointCidrs: ["192.0.2.1/32"],
+        pluginStatusProxySourceCidrs: ["192.0.2.2/32"],
+      },
+    };
+    const remotePath = join(output.directory, "remote-installation.json");
+    writeFileSync(remotePath, JSON.stringify(remote));
+    const remoteLoaded = await loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: remotePath },
+    });
+    try {
+      assert.equal(remoteLoaded.sandboxDriver, undefined);
+      const { routedRevision } = await import("../helpers/kubernetes-routed-scenarios.mjs");
+      const revision = routedRevision(remoteLoaded.computeDriver);
+      assert.ok(remoteLoaded.computeDriver.admitRevision(revision).startsWith("kubernetes:v1:"));
+    } finally {
+      await remoteLoaded.gatewayProxyDriver.close();
+    }
+  } finally {
+    await loaded.gatewayProxyDriver.close();
+  }
+  const repositoryOutput = await render(
+    "codex",
+    codexInput({ repository: repositoryConfiguration() }),
+  );
+  const repository = loadYaml(repositoryOutput.installation).repository;
+  assert.ok(repository.nativeSender);
+  assert.equal(repository.openShell, undefined);
+  assert.equal(loadYaml(repositoryOutput.values).repositoryCredentials.enabled, true);
+  await assertPreflightFailure(
+    "codex",
+    codexInput({ gatewayProxy: undefined }),
+    /gatewayProxy is required/,
+  );
+  await assertPreflightFailure(
+    "codex",
+    codexInput({ channels: { runtimeProxyUrl: "http://192.0.2.15:3128" } }),
+    /runtimeProxyUrl is not used by the dedicated profile/,
+  );
+  const unusedBackend = codexInput();
+  unusedBackend.gatewayProxy.backend = createCredentialProxyInstallationConfiguration().backend[0];
+  await assertPreflightFailure("codex", unusedBackend, /gatewayProxy.backend/);
+  const insufficient = codexInput();
+  insufficient.gatewayProxy.infrastructureCidrs = ["8.8.8.8/32"];
+  await assertPreflightFailure("codex", insufficient, /exclusions must cover/);
 });

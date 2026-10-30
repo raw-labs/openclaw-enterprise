@@ -175,6 +175,21 @@ explains these jobs; the PR-controlled workflow is not independent trusted enfor
 
 ### QA matrix
 
+The explicit `gateway-destinations-dedicated` selector exercises normal dedicated
+Codex through the launcher, API, worker, and real revision proxies without an
+OpenShell management Backend. It requires Kubernetes selection, an authorized
+API-key file, an explicit model, and independently controlled HTTPS/WSS endpoints.
+It is excluded from `all` and automatic advisory coverage; see the
+[dedicated scenario procedure](gateway-outbound-destinations.md#run-normal-dedicated-execution).
+
+The explicit `gateway-destinations` selector is an **experimental, UNVERIFIED**
+Kubernetes/Codex journey through real Agent admission and worker lifecycle. It
+requires prepared OpenShell infrastructure,
+`OCC_TEST_QA_GATEWAY_DESTINATIONS_CONFIG`, `OCC_TEST_QA_SANDBOX_ENV`, and
+`OCC_TEST_QA_CODEX_TOKEN_FILE`. It is excluded from `all` and automatic advisory
+coverage. See the [QA procedure](gateway-outbound-destinations.md) for the command,
+expected results, cleanup, and acceptance gaps.
+
 The explicit `sandbox-policy` selector exercises shared configuration discovery,
 preview, and the real OpenShell network-policy lifecycle. It requires a prepared
 OpenShell file environment; see [policy proof setup](openshell-coverage.md#qa-matrix-selector).

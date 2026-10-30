@@ -46,6 +46,7 @@ from each trace; for commands to run locally, see [Testing](../testing/README.md
 
 - [Installation Driver package loading](../flows/driver-plugin-loading.md)
 - [Compute Driver lifecycle hooks](../flows/compute-driver-lifecycle-hooks.md)
+- [Gateway outbound destinations](../flows/gateway-outbound-destinations.md): experimental draft; runtime enforcement is UNVERIFIED
 - [Existing Kubernetes namespace placement](../flows/kubernetes-existing-namespace-placement.md)
 - [SSH Compute lifecycle](../flows/pr-24-ssh-compute.md)
 

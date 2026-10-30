@@ -121,6 +121,7 @@ func upK3d(ctx context.Context, opts Options, sandboxDriver string, networkPolic
 		SandboxNetworkPolicyCeiling: ceiling,
 		Version:                     3,
 		ProtectedEgress:             protectedEgress,
+		GatewayDestinations:         sandboxDriver == "none" || r.env["OCC_DEVELOPMENT_GATEWAY_DESTINATIONS"] == "1",
 		DatabaseName:                databaseName,
 		OpenShellHostGatewayIP:      r.env["OCC_DEVELOPMENT_OPENSHELL_HOST_GATEWAY_IP"],
 		Repository:                  opts.Repository,
@@ -180,6 +181,11 @@ func upK3d(ctx context.Context, opts Options, sandboxDriver string, networkPolic
 	}
 	if err := r.checkLegacyNATTable(ctx); err != nil {
 		return err
+	}
+	if state.GatewayDestinations {
+		if err := r.checkGatewayDestinationRules(); err != nil {
+			return err
+		}
 	}
 	// The revision checks read images the local engine lacks from the registry.
 	if err := r.selectDevelopmentImageRegistry(ctx); err != nil {
@@ -264,6 +270,9 @@ func upK3d(ctx context.Context, opts Options, sandboxDriver string, networkPolic
 	clusterAttempted = true
 	if err := r.createK3dCluster(ctx, clusterArgs...); err != nil {
 		clusterCreationFailed = true
+		return err
+	}
+	if err := r.prepareGatewayDestinationInfrastructure(ctx, state); err != nil {
 		return err
 	}
 	if err := r.checkDevelopmentNodeDNS(ctx, state); err != nil {
@@ -456,7 +465,7 @@ func (r *runner) installDevelopmentPlatform(ctx context.Context, state *developm
 	if err := r.ensureKubernetesNamespace(ctx, state.PlatformNamespace); err != nil {
 		return err
 	}
-	if state.ProtectedEgress {
+	if state.secureOpenShell() {
 		if err := r.prepareDevelopmentEgress(ctx, state); err != nil {
 			return err
 		}
@@ -469,7 +478,7 @@ func (r *runner) installDevelopmentPlatform(ctx context.Context, state *developm
 	} else {
 		fmt.Fprintf(r.opts.Out, "Installing OCE in Namespace %s...\n", state.PlatformNamespace)
 	}
-	if state.ProtectedEgress {
+	if state.secureOpenShell() {
 		if err := r.readDevelopmentEgressKeyID(ctx, state); err != nil {
 			return err
 		}
@@ -484,6 +493,9 @@ func (r *runner) installDevelopmentPlatform(ctx context.Context, state *developm
 		if err != nil {
 			return err
 		}
+	}
+	if err := r.importGatewayDestinationImages(ctx, state); err != nil {
+		return err
 	}
 	if err := writeInstallation(state, inputs.runtimeImage, inputs.openShell, openShellGatewayAddress, inputs.codexSeccompProfile, statusProxySource); err != nil {
 		return err
@@ -516,6 +528,9 @@ func kubernetesOnlyClusterArgs(state *developmentState, timeoutSeconds, kubernet
 		"--k3s-arg", "--kubelet-arg=image-gc-high-threshold=100@server:*",
 		"--k3s-arg", "--kubelet-arg=image-gc-low-threshold=99@server:*",
 		"--kubeconfig-update-default=false", "--kubeconfig-switch-context=false",
+	}
+	if state.GatewayDestinations {
+		args = append(args, "--k3s-arg", "--cluster-cidr="+developmentGatewayPodCIDR+"@server:*", "--k3s-arg", "--service-cidr="+developmentGatewayServiceCIDR+"@server:*")
 	}
 	if state.BrowserPort != 0 {
 		args = append(args, "--port", fmt.Sprintf("127.0.0.1:%d:30081@loadbalancer", state.BrowserPort))
@@ -809,7 +824,7 @@ func (r *runner) installKubernetesControlPlane(ctx context.Context, state *devel
 		"api":          map[string]any{"clients": []any{map[string]any{"namespace": namespace, "podLabels": map[string]string{"app.kubernetes.io/name": "occ-kubernetes-dev-client"}}}},
 		"resources":    resources,
 	}
-	if state.ProtectedEgress {
+	if state.secureOpenShell() {
 		values["backend"] = map[string]any{"openshell": map[string]string{"clientSecretName": "openshell-client-tls"}}
 		values["egressAuthority"] = developmentEgressChartValues(state)
 	}
@@ -864,7 +879,7 @@ func (r *runner) installKubernetesControlPlane(ctx context.Context, state *devel
 	// the worker from claiming bootstrap work until its access and Gateway are
 	// in place. Override only this release, not the saved steady-state values.
 	install := []string{"--install"}
-	if state.ProtectedEgress {
+	if state.secureOpenShell() {
 		install = append(install, "--set", "worker.replicaCount=0")
 	}
 	if err := r.helmUpgrade(ctx, state, valuesPath, timeout, install...); err != nil {
@@ -873,7 +888,7 @@ func (r *runner) installKubernetesControlPlane(ctx context.Context, state *devel
 	if err := r.installDevelopmentAPIProxy(ctx, state, controllerImage, timeout); err != nil {
 		return err
 	}
-	if !state.ProtectedEgress {
+	if !state.secureOpenShell() {
 		return nil
 	}
 	if err := r.waitProtectedOpenShell(ctx, state, timeout); err != nil {

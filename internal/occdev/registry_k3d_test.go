@@ -364,6 +364,7 @@ func TestDevelopmentImageImportKeepsTheArchivePathForOtherImages(t *testing.T) {
 // rollback deletes the cluster (and with it the network).
 func TestK3dRegistryAttachmentOrdering(t *testing.T) {
 	root := t.TempDir()
+	copyGatewayDestinationRules(t, root)
 	state := filepath.Join(root, "state")
 	cluster := "occ-dev-registry"
 	controllerImage := "127.0.0.1:15001/oce-smoke/controller@" + profileTestDigest
@@ -412,6 +413,8 @@ func TestK3dRegistryAttachmentOrdering(t *testing.T) {
 "info") ;;
 "image inspect --format {{ index .Config.Labels "*) echo 0123456789abcdef0123456789abcdef01234567 ;;
 "exec k3d-` + cluster + `-server-0 nslookup registry-1.docker.io") ;;
+"inspect --format {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}} k3d-` + cluster + `-server-0") echo 172.30.42.2 ;;
+"network inspect k3d-` + cluster + `") echo '[{"IPAM":{"Config":[{"Subnet":"172.30.42.0/24"}]}}]' ;;
 "image inspect ` + registryTestRuntime + `") ;;
 "image inspect ` + controllerImage + `") ;;
 "image inspect ` + developmentPostgres + `") ;;

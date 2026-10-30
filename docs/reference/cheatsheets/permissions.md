@@ -100,6 +100,10 @@ operation was not authorized.`
   for each source in `credentialSources`. At
   deployment the Agent’s own service principal also needs `secret:operate` on each
   bound Secret and `credential_source:operate` on each source.
+- Setting or clearing `gatewayOutbound.destinations` requires both `agent:update`
+  and `agent:administer` on the exact Agent. Create or provision the Agent with an
+  empty list, then update its destinations. Deployment uses the existing `deploy`
+  permission and saves the list in a new revision.
 - Creating an Agent with [Gateway managed mode](../agent-native-admin.md#gateway-managed-mode)
   off or changing the setting also requires `installation:administer`.
 - [Registering](../api.md#post-namespacesnamespaceidcredentialsources) or

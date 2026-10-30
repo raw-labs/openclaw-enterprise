@@ -105,6 +105,45 @@ the verified owned private host IPv4 through
 `OCC_DEVELOPMENT_OPENSHELL_HOST_GATEWAY_IP`; reachability and server-certificate
 checks remain prerequisites.
 
+## Select experimental Gateway destinations
+
+For the draft [Gateway destination experiment](../../testing/gateway-outbound-destinations.md),
+set `OCC_DEVELOPMENT_GATEWAY_DESTINATIONS=1` before starting a fresh Kubernetes
+control plane with the OpenShell Sandbox. Values other than `0`, `1`, or unset
+fail preflight. The option enables native TLS and mTLS with the bundled stock
+OpenShell images and PKI chart, and checks unchanged stock proxy policy rules.
+It does not select protected inference or claim supervisor middleware support.
+If `OCC_DEVELOPMENT_PROTECTED_EGRESS=1` is also selected, its separate candidate
+image, chart and capability checks still apply.
+
+The launcher fixes the disposable cluster Pod and Service ranges, discovers
+the complete owned node subnet, and gives Compute and the destination proxy
+the same infrastructure exclusions, including metadata addresses. It pulls
+the exact stock supervisor and relay manifest references directly into containerd,
+without converting them through a platform-only Docker archive, and selects the policy rules
+already included in the controller image. TLS, execution authority, and the
+Credential Gateway remain selected; Gateway destination permission does not
+authorize Harness credentials. With the execution-capable Credential Proxy
+selected, OpenAI API-key sources still require negotiated protected execution.
+The stock OpenShell release does not advertise that middleware and refuses source
+registration in this execution-capable profile. To test that OpenShell Harness
+workflow, also select the reviewed candidate pair through the protected profile
+above. Normal dedicated execution is separate: `drivers.credential_proxy.usage:
+gateway` keeps the Kubernetes Harness and its existing model credential delivery
+while selecting only the Gateway proxy capabilities. The installation profile
+renderer supports that selection; this launcher opt-in still selects the
+OpenShell Harness profile. No per-Agent destinations are added automatically.
+
+Without this opt-in, the current experiment refuses dedicated single-cluster
+Agent deployment because the destination capability is missing. Successful
+launcher startup does not prove Agent deployment, model execution, or network
+enforcement. Run the linked experiment procedure before claiming those outcomes.
+
+When no runtime image is selected, the launcher builds the compiler stage before
+the final runtime graph. This reduces concurrent memory use; it does not limit
+the compiler’s own peak memory. An 8 GiB builder is not qualified for the current
+source. Use a builder with sufficient memory or select a verified runtime image.
+
 ## Verify imported identities
 
 Keep the launcher's three `OpenShell <component> image: source=… containerd=…`

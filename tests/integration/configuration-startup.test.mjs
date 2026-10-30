@@ -153,6 +153,14 @@ test("Credential Proxy startup preserves the selection and refuses retired keys"
   assert.equal(loaded.installation.backend[0].drivers.credential_proxy, loaded.proxyDriver.id);
   assert.equal(loaded.protectedDriver.require("credential_proxy"), loaded.proxyDriver);
   assert.equal(typeof loaded.proxyDriver.bindExchange, "function");
+  // An execution-capable pair still needs its selected Sandbox view. The
+  // registration-only Gateway exception must not mask a broken execution owner.
+  const pool = new pg.Pool({ connectionString: "postgresql://127.0.0.1:1/occ" });
+  t.after(async () => pool.end());
+  assert.throws(
+    () => createControllerWorker({ pool, drivers: { ...loaded, sandboxDriver: undefined } }),
+    /selected Sandbox Driver requires shared startup configuration/,
+  );
 
   for (const [member, selected] of [
     [true, false],
@@ -2811,4 +2819,237 @@ test("closed Installation observes only its operator-bound Namespace, including 
     message: /Kubernetes Secret namespace verification/,
   });
   assert.deepEqual(writes, []);
+});
+
+test("Gateway-only paired selection preserves native repository delivery and Compute-owned Harness admission", async (t) => {
+  // Load both configurations through production startup. The added pair may own
+  // Gateway networking, but must not become an OCC credential or Harness owner.
+  const { configuration } = await repositoryInstallation(t);
+  const { gatewayRouting } = await import("../helpers/kubernetes-routed-scenarios.mjs");
+  configuration.drivers.compute.configuration.gatewayRouting = gatewayRouting;
+  delete configuration.drivers.compute.configuration.network.gatewayClients;
+  const native = await loadInstallationConfiguration({
+    mode: "production",
+    environment: { OCC_CONFIG_PATH: await fixture(t, configuration) },
+  });
+  const { createCredentialProxyInstallationConfiguration } =
+    await import("../helpers/installation-driver-configuration.mjs");
+  const pair = createCredentialProxyInstallationConfiguration();
+  const { STOCK_GATEWAY_PROXY } =
+    await import("../../apps/controller/src/drivers/egress-proxy/gateway-destinations.ts");
+  const { fileURLToPath } = await import("node:url");
+  configuration.drivers.sandbox = pair.drivers.sandbox;
+  configuration.drivers.credential_proxy = {
+    id: pair.drivers.credential_proxy.id,
+    usage: "gateway",
+    configuration: {
+      middlewareName: "oce-gateway",
+      authorityScope: "execution",
+      gatewayDestinations: {
+        policyRulesPath: fileURLToPath(
+          new URL("../../deploy/runtime/gateway-proxy/sandbox-policy.rego", import.meta.url),
+        ),
+        supervisorImage: STOCK_GATEWAY_PROXY.supervisorImage,
+        relayImage: STOCK_GATEWAY_PROXY.relayImage,
+        blockedCidrs: ["10.0.0.0/8"],
+      },
+    },
+  };
+  const loaded = await loadInstallationConfiguration({
+    // Existing composition factories are tripwires, not replacements for exercised behavior.
+    createOpenShellBackend() {
+      assert.fail("Gateway-only composition constructed a management Backend");
+    },
+    createSandboxDriver() {
+      assert.fail("Gateway-only composition constructed a management Sandbox");
+    },
+    mode: "production",
+    environment: { OCC_CONFIG_PATH: await fixture(t, configuration) },
+  });
+  t.after(async () => {
+    await loaded.gatewayProxyDriver?.close();
+  });
+  assert.equal(loaded.sandboxDriver, undefined);
+  assert.equal(loaded.protectedDriver, undefined);
+  assert.equal(loaded.proxyDriver, undefined);
+  assert.equal(loaded.repositoryGitDriver, undefined);
+  assert.equal(
+    loaded.installation.backend.some((backend) => backend.type === "openshell"),
+    false,
+  );
+  const gatewaySandbox = loaded.gatewayProxyDriver.require("sandbox");
+  const gatewayProxy = loaded.gatewayProxyDriver.require("credential_proxy");
+  assert.equal(gatewaySandbox.provisionHarness, undefined);
+  assert.equal(gatewaySandbox.harnessResource, undefined);
+  assert.equal(gatewayProxy.bindExchange, undefined);
+  assert.equal(gatewayProxy.bindRepositoryGit, undefined);
+  assert.deepEqual(gatewayProxy.sourceControl.providers, []);
+  for (const identity of ["backend", "sender", "resolver"]) {
+    assert.throws(
+      () => gatewayProxy.sourceControl[identity],
+      /does not provide OpenShell management or execution/,
+    );
+  }
+  for (const operation of [
+    () => gatewaySandbox.cleanup({}),
+    () => gatewayProxy.sourceControl.assertAvailable(new AbortController().signal),
+    () => gatewayProxy.configureRevision({}),
+    () => gatewayProxy.wiringStatus({}, {}),
+    () => gatewayProxy.verifyInstallation({}, {}),
+    () => gatewayProxy.removeRevision({}),
+  ]) {
+    await assert.rejects(operation, /does not provide OpenShell management or execution/);
+  }
+  // A management Backend cannot silently turn attachment-only registration into execution.
+  const withBackend = structuredClone(configuration);
+  delete pair.backend[0].drivers.credential_gateway;
+  withBackend.backend.push(pair.backend[0]);
+  await assert.rejects(
+    loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: await fixture(t, withBackend) },
+    }),
+    /must omit the unused OpenShell management Backend/,
+  );
+
+  const missingPair = structuredClone(configuration);
+  delete missingPair.drivers.sandbox;
+  await assert.rejects(
+    loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: await fixture(t, missingPair) },
+    }),
+    /requires a paired Sandbox/,
+  );
+  // Switching the same pair back to protected execution restores management dependencies.
+  const execution = structuredClone(configuration);
+  delete execution.repository;
+  execution.backend = [];
+  delete execution.drivers.compute.configuration.network.repositoryCredentials;
+  execution.drivers.credential_proxy = pair.drivers.credential_proxy;
+  await assert.rejects(
+    loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: await fixture(t, execution) },
+    }),
+    /requires a backend entry with type openshell/,
+  );
+  const unauthenticated = structuredClone(pair.backend[0]);
+  unauthenticated.configuration = { endpoint: "https://openshell.example.invalid:8443" };
+  execution.backend.push(unauthenticated);
+  await assert.rejects(
+    loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: await fixture(t, execution) },
+    }),
+    /requires TLS with bearerTokenFile or mtls authentication/,
+  );
+  // Gateway networking must not be mistaken for a selected Harness Sandbox.
+  // Construct the real worker: startup composition alone missed this refusal.
+  const pool = new pg.Pool({ connectionString: "postgresql://127.0.0.1:1/occ" });
+  t.after(async () => pool.end());
+  assert.doesNotThrow(() => createControllerWorker({ pool, mode: "production", drivers: loaded }));
+  assert.deepEqual(loaded.installation.repository, native.installation.repository);
+  const selection = { namespaceId: "ns_repository", bindings: [{ repositoryRef: "application" }] };
+  assert.deepEqual(
+    loaded.repositoryPolicy.resolve(selection),
+    native.repositoryPolicy.resolve(selection),
+  );
+  loaded.computeDriver.validateRepositoryCredentialSupport();
+  const { routedRevision } = await import("../helpers/kubernetes-routed-scenarios.mjs");
+  const revision = routedRevision(loaded.computeDriver);
+  const admission = loaded.computeDriver.admitRevision(revision);
+  const facts = JSON.parse(admission.slice("kubernetes:v1:".length));
+  assert.equal(revision.sandboxDriverId, undefined);
+  assert.equal(loaded.computeDriver.sandboxDriverForRevision(revision), undefined);
+  assert.equal(
+    facts.gatewayDestinations.driverId,
+    loaded.gatewayProxyDriver.require("credential_proxy").id,
+  );
+  assert.equal(facts.execution, undefined);
+  loaded.computeDriver.validateExecutionAdmission(revision);
+
+  // Remote placement still uses attachment-only registration, without constructing a
+  // management Backend or granting the pair ownership of Harness credentials.
+  const remoteConfiguration = structuredClone(configuration);
+  delete remoteConfiguration.repository;
+  remoteConfiguration.backend = [];
+  delete remoteConfiguration.drivers.compute.configuration.network.repositoryCredentials;
+  remoteConfiguration.drivers.compute.configuration.executionCluster = {
+    authentication: {
+      mode: "kubeconfig",
+      kubeconfigPath: "/fixture/execution",
+      context: "execution",
+    },
+    harnessRouting: { ...gatewayRouting, hostname: "harness.example.test" },
+    network: {
+      dns: remoteConfiguration.drivers.compute.configuration.network.dns,
+      harnessEndpointCidrs: ["192.0.2.2/32"],
+      gatewayEndpointCidrs: ["192.0.2.1/32"],
+      pluginStatusProxySourceCidrs: ["192.0.2.2/32"],
+    },
+  };
+  const remote = await loadInstallationConfiguration({
+    mode: "production",
+    environment: { OCC_CONFIG_PATH: await fixture(t, remoteConfiguration) },
+    createOpenShellBackend() {
+      assert.fail("Remote Gateway constructed a management Backend");
+    },
+    createSandboxDriver() {
+      assert.fail("Remote Gateway selected a Harness Sandbox");
+    },
+  });
+  t.after(async () => remote.gatewayProxyDriver?.close());
+  assert.equal(remote.sandboxDriver, undefined);
+  assert.equal(remote.protectedDriver, undefined);
+  assert.equal(remote.repositoryGitDriver, undefined);
+  const remoteRevision = routedRevision(remote.computeDriver);
+  const remoteAdmission = remote.computeDriver.admitRevision(remoteRevision);
+  remoteRevision.compute.admission = remoteAdmission;
+  assert.equal(
+    JSON.parse(remoteAdmission.slice("kubernetes:v1:".length)).gatewayDestinations.driverId,
+    remote.gatewayProxyDriver.require("credential_proxy").id,
+  );
+  remote.computeDriver.validateExecutionAdmission(remoteRevision);
+
+  const { createConsoleAppFixture } = await import("../helpers/console-app.mjs");
+  const { installationDriverConfigurations } =
+    await import("../../apps/controller/src/composition/installation-config.ts");
+  let state;
+  const f = await createConsoleAppFixture(t, {
+    wrapState(value) {
+      state = value;
+      return value;
+    },
+
+    computeDriver: loaded.computeDriver,
+    backends: loaded.installation.backend,
+    driverConfigurations: installationDriverConfigurations(loaded.installation),
+  });
+  await f.bootstrap();
+  f.controller.installDriver(loaded.gatewayProxyDriver, []);
+  f.controller.registerDriver(loaded.repositoryPolicy);
+  f.controller.selectDriver("repo", loaded.repositoryPolicy.id);
+  await f.controller.validateBackendConfiguration();
+  const namespace = await f.createNamespace("Independent Gateway owner");
+  // This API/admission proof starts with an already-provisioned tenant. It does
+  // not simulate Kubernetes provisioning or claim live workload execution.
+  await state.transact((unit) =>
+    unit.namespaces.transitionNamespaceStatus(namespace.id, namespace.status, "ready"),
+  );
+  const agent = await f.createAgent(
+    namespace.id,
+    "Independent Gateway owner",
+    createHarnessConfiguration("codex", "gpt-4.1"),
+    { executionMode: "dedicated" },
+  );
+  const path = "/namespaces/" + namespace.id + "/agents/" + agent.id;
+  const saved = await f.request("PATCH", path, {
+    body: { gatewayOutbound: { destinations: [{ host: "example.com", port: 443 }] } },
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.data.executionMode, "dedicated");
+  assert.deepEqual(saved.data.gatewayOutbound.destinations, [{ host: "example.com", port: 443 }]);
+  // Actual deployment also provisions Kubernetes runtime credentials. That proof
+  // belongs to the real cluster journey, not this in-memory authoring fixture.
 });

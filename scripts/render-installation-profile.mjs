@@ -25,6 +25,12 @@ import {
   preparedRepositoryInstallation,
 } from "./lib/prepared-repository-installation.mjs";
 
+import { gatewayDestinationsOptions } from "../apps/controller/src/drivers/egress-proxy/gateway-destinations-configuration.ts";
+import {
+  GATEWAY_PROXY_NONPUBLIC_CIDRS,
+  gatewayProxyExclusionsCover,
+} from "../apps/controller/src/drivers/kubernetes/gateway-proxy-network.ts";
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
 const profilesDir = resolve(repoRoot, "deploy/profiles");
@@ -1133,7 +1139,16 @@ function buildInput(rawInput, diagnostics) {
   closed(
     input,
     "input",
-    ["controlPlane", "runtime", "channels", "codex", "repository", "publicGithubRead", "presets"],
+    [
+      "controlPlane",
+      "runtime",
+      "channels",
+      "codex",
+      "repository",
+      "publicGithubRead",
+      "presets",
+      "gatewayProxy",
+    ],
     diagnostics,
   );
   const controlPlane = section(input, "controlPlane", diagnostics);
@@ -1288,6 +1303,7 @@ function buildInput(rawInput, diagnostics) {
   );
 
   return {
+    gatewayProxy: input.gatewayProxy,
     controlPlane,
     runtime,
     channels,
@@ -1449,6 +1465,96 @@ function collectorExporter(loggingCollector, enabled, diagnostics) {
     rendered.port = port;
   }
   return rendered;
+}
+
+function renderGatewayProxy(profile, parsed, installation, diagnostics) {
+  if (parsed.gatewayProxy === undefined) {
+    if (profile.agentHarness === "dedicated-codex") {
+      diagnostics.errors.push(
+        "gatewayProxy is required for the dedicated profile; supply its existing paired Driver configuration and infrastructure ranges.",
+      );
+    }
+    return;
+  }
+  if (profile.agentHarness === "dedicated-codex" && parsed.channels.runtimeProxyUrl !== undefined) {
+    diagnostics.errors.push(
+      "channels.runtimeProxyUrl is not used by the dedicated profile; use gatewayProxy for Gateway traffic and channels.directoryProxyUrl for control-plane Slack.",
+    );
+    return;
+  }
+  const input = record(parsed.gatewayProxy, "gatewayProxy", diagnostics);
+  closed(input, "gatewayProxy", ["sandbox", "credentialProxy", "infrastructureCidrs"], diagnostics);
+  const sandbox = record(input.sandbox, "gatewayProxy.sandbox", diagnostics);
+  const proxy = record(input.credentialProxy, "gatewayProxy.credentialProxy", diagnostics);
+  closed(sandbox, "gatewayProxy.sandbox", ["id", "configuration"], diagnostics);
+  closed(proxy, "gatewayProxy.credentialProxy", ["id", "configuration"], diagnostics);
+  const sandboxId = asString(sandbox, ["gatewayProxy", "sandbox", "id"], diagnostics);
+  const proxyId = asString(proxy, ["gatewayProxy", "credentialProxy", "id"], diagnostics);
+  const infrastructure = stringArray(input, ["gatewayProxy", "infrastructureCidrs"], diagnostics, {
+    validate: isIpv4Cidr,
+    description: "an IPv4 infrastructure CIDR",
+  });
+  try {
+    // Profiles remain usable from an uninstalled checkout. Driver-owned configuration
+    // and asset files are validated by API/worker startup, not reconstructed here.
+    const sandboxConfiguration = record(
+      sandbox.configuration,
+      "gatewayProxy.sandbox.configuration",
+      diagnostics,
+    );
+    const rawPolicy = record(
+      proxy.configuration,
+      "gatewayProxy.credentialProxy.configuration",
+      diagnostics,
+    );
+    closed(
+      rawPolicy,
+      "gatewayProxy.credentialProxy.configuration",
+      ["middlewareName", "authorityScope", "gatewayDestinations"],
+      diagnostics,
+    );
+    const policy = {
+      ...rawPolicy,
+      gatewayDestinations: gatewayDestinationsOptions(rawPolicy.gatewayDestinations),
+    };
+    const required = [
+      ...new Set([
+        ...infrastructure,
+        ...(installation.drivers.compute.configuration.network.infrastructureCidrs ?? []),
+        ...(parsed.controlPlane.clusterCidrs ?? []),
+        ...(parsed.controlPlane.databaseCidrs ?? []),
+      ]),
+    ];
+    if (
+      !gatewayProxyExclusionsCover(
+        [...GATEWAY_PROXY_NONPUBLIC_CIDRS, ...policy.gatewayDestinations.blockedCidrs],
+        required,
+      )
+    ) {
+      throw new Error(
+        "Proxy exclusions must cover infrastructureCidrs and the configured cluster and database addresses.",
+      );
+    }
+    installation.drivers.sandbox = { id: sandboxId, configuration: sandboxConfiguration };
+    installation.drivers.credential_proxy = {
+      id: proxyId,
+      usage: "gateway",
+      configuration: policy,
+    };
+    installation.drivers.compute.configuration.network.infrastructureCidrs = required;
+    if (profile.agentHarness === "dedicated-codex") {
+      delete installation.drivers.compute.configuration.runtime.channels;
+    }
+    diagnostics.prerequisites.push(
+      "Gateway proxy networking requires an enforcing CNI and complete infrastructure CIDRs. Its pair does not select Harness or repository credential delivery.",
+      "API and worker startup validate the selected Driver configurations and stock asset files.",
+    );
+    diagnostics.warnings.push(
+      "Gateway destination control remains experimental and unqualified for production until the required real-runtime acceptance passes.",
+    );
+  } catch (error) {
+    diagnostics.errors.push("gatewayProxy: " + error.message);
+  }
 }
 
 function buildRendered(profile, parsed, diagnostics) {
@@ -2234,6 +2340,7 @@ function buildRendered(profile, parsed, diagnostics) {
     "Retrieve the bootstrap service key from the protected bootstrap PVC and verify authenticated OCC access.",
   );
 
+  renderGatewayProxy(profile, parsed, installation, diagnostics);
   return { values, installation };
 }
 

@@ -220,6 +220,33 @@ done
 		assertDevelopmentReleaseReplicas(t, state.directory, "upgrade.yaml", 1)
 	}
 
+	// Re-render the same production Installation with the explicit destination
+	// opt-in. The real parser must retain TLS and execution authority while
+	// assembling the paired destination capability and independent Compute ranges.
+	state.GatewayDestinations = true
+	state.ProtectedEgress = false
+	values := developmentProtectedOpenShellValues(state)
+	if values["supervisor"] != nil {
+		t.Fatal("stock TLS path must not request protected middleware")
+	}
+	state.InfrastructureCIDRs = []string{"10.42.0.0/16", "10.43.0.0/16", "172.30.42.0/24", "169.254.0.0/16"}
+	if err := os.Remove(filepath.Join(state.directory, "installation.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeInstallation(state, "registry.example/runtime@"+profileTestDigest, assets, "10.43.0.50", "", "172.30.42.2/32"); err != nil {
+		t.Fatal(err)
+	}
+	// Local composition reads the same stock asset that the image includes at /app.
+	installationPath := filepath.Join(state.directory, "installation.yaml")
+	data, err := os.ReadFile(installationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.ReplaceAll(data, []byte("/app/deploy/runtime/gateway-proxy/sandbox-policy.rego"), []byte(filepath.Join(state.Repository, "deploy/runtime/gateway-proxy/sandbox-policy.rego")))
+	if err := os.WriteFile(installationPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
 	// Use the actual startup parser/Driver composition, without provider or cluster I/O.
 	if nodeErr != nil {
 		t.Log("node not found; skipping the real startup parse of the generated Installation")
@@ -365,6 +392,9 @@ assert.equal(backend.drivers.credential_proxy, proxyDriver.id);
 assert.ok(protectedDriver.require('sandbox') === sandboxDriver, 'expected the installed Sandbox');
 assert.ok(protectedDriver.require('credential_proxy') === proxyDriver, 'expected the installed Credential Proxy');
 assert.equal(typeof proxyDriver.bindExchange, 'function');
+assert.equal(typeof proxyDriver.gatewayDestinations.admit, 'function');
+assert.equal(typeof sandboxDriver.gatewayProxy.prepare, 'function');
+assert.deepEqual(startupConfiguration.configuration.drivers.compute.configuration.network.infrastructureCidrs, ['10.42.0.0/16', '10.43.0.0/16', '172.30.42.0/24', '169.254.0.0/16']);
 `
 	parse := exec.Command(realNode, "--input-type=module", "-e", program, filepath.Join(state.directory, "installation.yaml"))
 	parse.Dir = state.Repository

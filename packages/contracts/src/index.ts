@@ -1,3 +1,13 @@
+export { normalizeGatewayOutbound, isGatewayDestinationHost } from "./gateway-destinations.ts";
+export type {
+  GatewayOutbound,
+  GatewayDestination,
+  GatewayDestinationPlan,
+  GatewayDestinationControl,
+  GatewayProxyAttachmentContext,
+  GatewayProxyAttachment,
+} from "./gateway-destinations.ts";
+
 import type {
   CredentialPolicyWithdrawalOptions,
   ExecutionAdmission,
@@ -317,7 +327,8 @@ export interface OpenShellBackendDefinition {
   readonly configuration: OpenShellBackendConfiguration;
   readonly drivers: {
     readonly sandbox: string;
-    readonly credential_gateway: string;
+    /** Optional when the Backend owns only the Gateway proxy pair. */
+    readonly credential_gateway?: string;
     readonly credential_proxy?: string;
     /** Refreshes the gateway's refresh-type sources; absent when none are offered. */
     readonly credential_refresh?: string;
@@ -1055,6 +1066,7 @@ export interface Agent extends Scope {
   readonly executionMode: HarnessExecutionMode;
   /** Desired Gateway administration mode; each deployment snapshots the selected value. */
   readonly gatewayManagedMode: boolean;
+  readonly gatewayOutbound: import("./gateway-destinations.ts").GatewayOutbound;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingSelection[];
@@ -1068,6 +1080,7 @@ export interface Agent extends Scope {
 export interface ConfigurationReadError {
   readonly code: "SAVED_CONFIGURATION_UNREADABLE";
   readonly field:
+    | "gatewayOutbound"
     | "plugins"
     | "pluginApprovers"
     | "repositoryBindings"
@@ -1081,6 +1094,7 @@ export interface ConfigurationReadError {
 
 export type AgentMetadata = Omit<
   Agent,
+  | "gatewayOutbound"
   | "plugins"
   | "pluginApprovers"
   | "repositoryBindings"
@@ -1134,6 +1148,7 @@ export interface AgentRevision extends Scope {
   readonly configurationGeneration: number;
   readonly configuration: OpenClawConfigurationDocument;
   readonly gatewayManagedMode: boolean;
+  readonly gatewayOutbound?: import("./gateway-destinations.ts").GatewayOutbound;
   readonly harness: RevisionHarnessDescriptor;
   readonly compute: {
     readonly id: string;
@@ -1184,6 +1199,7 @@ export function freezeAgentRevision(revision: AgentRevision): Readonly<AgentRevi
     ...(revision.egressPlan === undefined
       ? {}
       : { egressPlan: immutableCopy(revision.egressPlan) }),
+    gatewayOutbound: immutableCopy(revision.gatewayOutbound ?? { destinations: [] }),
     configuration: immutableCopy(revision.configuration),
     ...(revision.secretBindings === undefined
       ? {}
@@ -1932,6 +1948,8 @@ export interface SandboxRepositoryAccess {
 }
 
 export interface SandboxDriver extends Driver {
+  /** Optional proxy-only network attachment. Does not contain or relocate the Gateway. */
+  readonly gatewayProxy?: import("./gateway-destinations.ts").GatewayProxyAttachment;
   readonly repositoryAccess?: SandboxRepositoryAccess;
   /** Explicit support; a networking facet alone never grants editable policy. */
   readonly networkPolicy?: {
@@ -2153,6 +2171,12 @@ export type ChannelCredentialReader = (
 
 export interface ChannelDriver extends Driver {
   readonly capability: "channel";
+  /** Providers whose Gateway-side network requirements this selected Driver owns. */
+  readonly gatewayProviders?: readonly string[];
+  /** Nonsecret requirements for enabled revision configuration, separate from API lookup egress. */
+  gatewayDestinations?(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly import("./gateway-destinations.ts").GatewayDestination[];
   validateCredentials?(
     values: Readonly<Record<string, unknown>>,
     withSecret: ChannelCredentialReader,

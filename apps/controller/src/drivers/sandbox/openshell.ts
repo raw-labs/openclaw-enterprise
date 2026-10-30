@@ -1,3 +1,5 @@
+import { openShellGatewayProxyAttachment } from "./gateway-proxy-attachment.ts";
+import type { OpenShellGatewayDestinationsOptions } from "../egress-proxy/gateway-destinations.ts";
 import {
   openShellRepositoryAccess,
   type OpenShellGitPolicyOverlap,
@@ -201,6 +203,10 @@ export interface OpenShellSandboxDriverOptions {
 }
 
 export interface OpenShellSandboxDriverSelection {
+  readonly gatewayDestinations?: {
+    readonly options: OpenShellGatewayDestinationsOptions;
+    readonly driverId: string;
+  };
   readonly openShellGit?: OpenShellGitRuntime;
   readonly operatorOwnedKubernetesResources?: boolean;
   readonly id?: string;
@@ -2866,6 +2872,7 @@ export class OpenShellSandboxDriver implements SandboxDriver {
   private readonly operatorOwnedKubernetesResources: boolean;
   private readonly openShellGit: OpenShellGitRuntime | undefined;
   readonly repositoryAccess?: NonNullable<SandboxDriver["repositoryAccess"]>;
+  readonly gatewayProxy?: NonNullable<SandboxDriver["gatewayProxy"]>;
 
   static validateConfiguration(
     configuration: Readonly<OpenShellSandboxDriverOptions>,
@@ -2891,6 +2898,13 @@ export class OpenShellSandboxDriver implements SandboxDriver {
       );
     }
     this.options = options;
+    if (selection.gatewayDestinations) {
+      this.gatewayProxy = openShellGatewayProxyAttachment(
+        selection.gatewayDestinations.options,
+        selection.gatewayDestinations.driverId,
+        this.id,
+      );
+    }
     const git = selection.openShellGit;
     this.openShellGit = git;
     if (git) {

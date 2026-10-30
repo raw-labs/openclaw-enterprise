@@ -62,6 +62,10 @@ do not create an Agent or make a model call. They default to Docker; set
 
 ## OpenShell Sandbox
 
+The separate [Gateway destination proxy scenario](gateway-outbound-destinations.md)
+is an explicit experimental selection. It is UNVERIFIED and is not covered by
+merely running the default lane.
+
 The real Sandbox suite tests a dedicated Codex Agent, including authenticated
 Gateway access, real model and tool turns, credential delivery, restricted
 filesystem and network access, replacement, and cleanup. Local fixture tests

@@ -19,6 +19,7 @@ import {
   button,
   describeDisabled,
   element,
+  field,
   fieldError,
   focusSaveOutcome,
   jsonObjectProblem,
@@ -728,6 +729,9 @@ export async function renderAgentDetail(
   if (selected === "draft") {
     tabLabels.push(["repositories", "Repositories"], ["credentials", "Credentials"]);
   }
+  if (selected === "draft" && agent.executionMode === "dedicated") {
+    tabLabels.push(["gateway-outbound", "Gateway outbound"]);
+  }
   tabLabels.push(["workspace", "Workspace files"], ["policy", "Policy denials"]);
   tabLabels.push(["deployment", "Deployment"]);
   if (selected !== "draft") {
@@ -1360,7 +1364,9 @@ export async function renderAgentDetail(
         refreshingDraft ||
         authenticationSaveState === "saving" ||
         activeCredentials?.isSaving() ||
-        (["configuration", "plugins", "repositories", "channels"].includes(selectedTab) &&
+        (["configuration", "plugins", "repositories", "channels", "gateway-outbound"].includes(
+          selectedTab,
+        ) &&
           draftEditorNavigationBlock))
     );
   }
@@ -1374,7 +1380,9 @@ export async function renderAgentDetail(
         (rereads && refreshingDraft) ||
         authenticationSaveState === "saving" ||
         activeCredentials?.isSaving() ||
-        (["configuration", "plugins", "repositories", "channels"].includes(selectedTab) &&
+        (["configuration", "plugins", "repositories", "channels", "gateway-outbound"].includes(
+          selectedTab,
+        ) &&
           draftEditorSaving))
     );
   }
@@ -3003,6 +3011,9 @@ export async function renderAgentDetail(
       );
     }
     function editedSubject() {
+      if (selectedTab === "gateway-outbound") {
+        return "Gateway outbound hosts";
+      }
       if (selectedTab === "repositories") {
         return "repository access";
       }
@@ -3542,7 +3553,7 @@ export async function renderAgentDetail(
             ? "Reload this draft before leaving the editor."
             : draftEditorState.saving
               ? `Wait for ${editedSubject()} save to finish before leaving the editor.`
-              : draftEditorState.dirty && selectedTab === "repositories"
+              : draftEditorState.dirty && ["repositories", "gateway-outbound"].includes(selectedTab)
                 ? `Save or cancel ${editedSubject()} edits before leaving this tab.`
                 : null;
         updateNavigationControls();
@@ -4148,7 +4159,9 @@ export async function renderAgentDetail(
     content.append(
       statusBlock("info", null, versionNotice(), [], { className: "version-selection-notice" }),
     );
-    if (selectedTab === "repositories" && draft) {
+    if (selectedTab === "gateway-outbound" && draft && executionMode === "dedicated") {
+      content.append(renderGatewayOutboundEditor(context, data));
+    } else if (selectedTab === "repositories" && draft) {
       content.append(renderRepositoryTab(context, data));
     } else if (selectedTab === "plugins") {
       const plugins = renderAgentPlugins(context, {
@@ -4978,6 +4991,199 @@ export async function renderAgentDetail(
         ),
       );
     }
+  }
+
+  function renderGatewayOutboundEditor(context: DetailContext, data: DraftDetails) {
+    const baseline = agent.gatewayOutbound ?? { destinations: [] };
+    const retained = context.drafts.get("gatewayOutbound") as
+      { text: string; baseline: typeof baseline; uncertain: boolean } | undefined;
+    const input = element("textarea", {
+      id: "gateway-outbound-hosts",
+      rows: "6",
+      spellcheck: "false",
+      disabled: true,
+    });
+    const initialText = baseline.destinations.map(({ host }) => host).join("\n");
+    input.value = retained?.text ?? initialText;
+    let pending = false;
+    let uncertain = retained?.uncertain ?? false;
+    let allowed = false;
+    let conflict = Boolean(retained && !sameValue(retained.baseline, baseline));
+    const permission = element(
+      "p",
+      { className: "hint", role: "status" },
+      "Checking Agent update and administer permissions…",
+    );
+    const feedback = element("p", { className: "hint", role: "status" }, savedNotice);
+    const empty = element("p", { className: "hint" }, "No additional hosts are approved.");
+    const error = fieldError(input);
+    const reload = button("Reload outbound settings", () => {
+      context.drafts.forget("gatewayOutbound");
+      data.setDraftEditorState({
+        dirty: false,
+        saving: false,
+        outcomeUnknown: false,
+        reloadRequired: false,
+      });
+      void reloadDraftInPlace(context, { saved: "Gateway outbound settings reloaded." });
+    });
+    const save = button("Save outbound hosts", () => void submit(), {
+      tone: "primary",
+      disabled: true,
+    });
+    const cancel = button("Cancel outbound edits", () => {
+      input.value = initialText;
+      uncertain = false;
+      conflict = false;
+      feedback.textContent = "";
+      error.clear();
+      update();
+    });
+    const section = element(
+      "section",
+      { className: "agent-card" },
+      element("h2", {}, "Gateway outbound hosts"),
+      element(
+        "p",
+        { className: "hint" },
+        "Approve additional HTTPS destinations for this dedicated Agent’s Gateway. Enabled Channels add their required hosts automatically. These Agent settings are separate from native Configuration. Save, then deploy a new version to apply changes; running versions keep their saved policy.",
+      ),
+      field({
+        label: "Additional HTTPS hosts",
+        control: input,
+        help: "One exact DNS host per line, for example api.example.com. TCP/443 only. Do not enter URLs, IP addresses, ports or wildcards. Leave empty to remove all additional hosts.",
+      }),
+      error.node,
+      empty,
+      permission,
+      element("div", { className: "form-actions" }, save, cancel, reload),
+      feedback,
+    );
+    const dirty = () => input.value !== initialText;
+    context.drafts.track("gatewayOutbound", () =>
+      dirty() || uncertain || conflict ? { text: input.value, baseline, uncertain } : undefined,
+    );
+    function update() {
+      const locked = pending || uncertain || conflict || !allowed;
+      input.disabled = locked;
+      save.disabled = locked || !dirty();
+      save.textContent = pending ? "Saving outbound hosts…" : "Save outbound hosts";
+      save.setAttribute("aria-busy", String(pending));
+      cancel.disabled = pending || uncertain || conflict || !dirty();
+      reload.hidden = !uncertain && !conflict;
+      reload.disabled = pending;
+      empty.hidden = input.value.trim() !== "";
+      describeDisabled(input, permission);
+      describeDisabled(save, permission);
+      data.setDraftEditorState({
+        dirty: dirty(),
+        saving: pending,
+        outcomeUnknown: uncertain,
+        reloadRequired: conflict,
+      });
+    }
+    input.addEventListener("input", () => {
+      error.clear();
+      feedback.textContent = "";
+      update();
+    });
+    showDraftEditorNavigationBlock = () =>
+      showLeaveNote(section, draftEditorNavigationBlock, "end");
+    void latestPermissionsRead.then(() => {
+      if (!context.isCurrent() || !section.isConnected) {
+        return;
+      }
+      allowed = callerPermissions?.update === true && callerPermissions?.administer === true;
+      permission.textContent = allowed
+        ? "Changes require update and administer on this Agent."
+        : "Editing requires update and administer on this Agent. Ask an administrator for both grants, then reload this page.";
+      update();
+    });
+    async function submit() {
+      if (save.disabled) {
+        return;
+      }
+      const hosts = input.value
+        .split(/\r?\n/)
+        .map((host) => host.trim())
+        .filter(Boolean);
+      const invalid = hosts.find(
+        (host) =>
+          !/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(
+            host,
+          ),
+      );
+      if (invalid !== undefined) {
+        error.show(
+          "Enter exact DNS hosts, one per line, without a URL, IP address, port or wildcard.",
+        );
+        input.focus();
+        return;
+      }
+      const gatewayOutbound = {
+        destinations: [...new Set(hosts.map((host) => host.toLowerCase()))]
+          .sort()
+          .map((host) => ({ host, port: 443 as const })),
+      };
+      pending = true;
+      update();
+      let submitted = false;
+      try {
+        const fresh = await readAgent();
+        if (!context.isCurrent()) {
+          return;
+        }
+        if (!sameValue(fresh.gatewayOutbound ?? { destinations: [] }, baseline)) {
+          conflict = true;
+          feedback.textContent =
+            "Gateway outbound settings changed while you were editing. Reload them before saving.";
+          setStatusTone(feedback, "danger");
+          return;
+        }
+        // TODO: use Agent optimistic concurrency when supported; this reread cannot exclude a later concurrent write.
+        submitted = true;
+        const saved = agentForPage(
+          await request(path, { method: "PATCH", body: { gatewayOutbound } }),
+        );
+        if (!sameValue(saved.gatewayOutbound, gatewayOutbound)) {
+          throw new Error("The response did not confirm the submitted outbound hosts.");
+        }
+        context.drafts.forget("gatewayOutbound");
+        data.setDraftEditorState({
+          dirty: false,
+          saving: false,
+          outcomeUnknown: false,
+          reloadRequired: false,
+        });
+        await refreshDraftInPlace({
+          agent: saved,
+          saved: "Gateway outbound hosts saved. Deploy a new version to apply them.",
+        });
+      } catch (failure) {
+        if (!context.isCurrent()) {
+          return;
+        }
+        if (requestFailure(failure).status === 401) {
+          context.onExpired();
+          return;
+        }
+        uncertain = submitted && !refusedWriteStatuses.includes(requestFailure(failure).status);
+        feedback.textContent = uncertain
+          ? "Outbound hosts may have been saved. Reload outbound settings to read the saved state before continuing. Do not repeat the save."
+          : rejectionMessage(refusedSave(failure, "agent", submitted), submitted);
+        setStatusTone(feedback, "danger");
+      } finally {
+        pending = false;
+        if (context.isCurrent() && section.isConnected) {
+          update();
+          if (feedback.textContent) {
+            focusSaveOutcome(section, [reload, save], feedback);
+          }
+        }
+      }
+    }
+    update();
+    return section;
   }
 
   // The repository choices read needs Agent update, so a caller whose permission answer denies it

@@ -57,7 +57,9 @@ export function driverHasCapabilityContract(driver: Driver): boolean {
   if (driver.capability === "credential_proxy") {
     const control = asRecord(candidate.sourceControl);
     const reduction = asRecord(candidate.policyReduction);
+    const destinations = asRecord(candidate.gatewayDestinations);
     return (
+      (candidate.gatewayDestinations === undefined || typeof destinations?.admit === "function") &&
       (candidate.bindExchange === undefined || typeof candidate.bindExchange === "function") &&
       (candidate.bindRepositoryGit === undefined ||
         typeof candidate.bindRepositoryGit === "function") &&
@@ -69,7 +71,9 @@ export function driverHasCapabilityContract(driver: Driver): boolean {
       control !== undefined &&
       typeof control.assertAvailable === "function" &&
       Array.isArray(control.providers) &&
-      (control.providers.length > 0 || typeof candidate.bindRepositoryGit === "function") &&
+      (control.providers.length > 0 ||
+        typeof candidate.bindRepositoryGit === "function" ||
+        typeof destinations?.admit === "function") &&
       control.providers.every((value) => {
         const provider = asRecord(value);
         return (
@@ -116,6 +120,10 @@ export function driverHasCapabilityContract(driver: Driver): boolean {
     return (
       sandboxFacets(candidate.facets) &&
       sandboxPolicyContract(candidate) &&
+      (candidate.gatewayProxy === undefined ||
+        ["prepare", "remove"].every(
+          (operation) => typeof asRecord(candidate.gatewayProxy)?.[operation] === "function",
+        )) &&
       (candidate.repositoryAccess === undefined ||
         [
           "verifyExecution",
@@ -144,6 +152,14 @@ export function driverHasCapabilityContract(driver: Driver): boolean {
   if (driver.capability === "channel") {
     return (
       typeof candidate.lookupDirectory === "function" &&
+      ((candidate.gatewayProviders === undefined && candidate.gatewayDestinations === undefined) ||
+        (Array.isArray(candidate.gatewayProviders) &&
+          candidate.gatewayProviders.length > 0 &&
+          new Set(candidate.gatewayProviders).size === candidate.gatewayProviders.length &&
+          candidate.gatewayProviders.every(
+            (provider) => typeof provider === "string" && provider.length > 0,
+          ) &&
+          typeof candidate.gatewayDestinations === "function")) &&
       (candidate.validateCredentials === undefined ||
         typeof candidate.validateCredentials === "function")
     );

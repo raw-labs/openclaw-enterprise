@@ -2,6 +2,8 @@ import type {
   ChannelCredentialReader,
   ChannelDirectoryResult,
   ChannelDriver,
+  GatewayDestination,
+  OpenClawConfigurationDocument,
 } from "@openclaw-enterprise/contracts";
 import {
   ChannelCredentialError,
@@ -118,6 +120,22 @@ export class SlackChannelDriver implements ChannelDriver {
   readonly capability = "channel" as const;
   readonly id = "slack-channel";
   readonly implementation = "occ/slack-channel";
+  readonly gatewayProviders = Object.freeze(["slack"]);
+
+  gatewayDestinations(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+  ): readonly GatewayDestination[] {
+    const slack = asRecord(configuration.channels)?.slack;
+    if (slack === undefined || asRecord(slack)?.enabled === false) {
+      return [];
+    }
+    // Socket Mode returns rotating WebSocket hosts. Preserve the provider suffixes
+    // admitted by the shipped Slack proxy, without reading any channel credentials.
+    return ["slack.com", "slack-edge.com", "slack-msgs.com"].flatMap((host) => [
+      { host, port: 443 as const },
+      { host: `*.${host}`, port: 443 as const },
+    ]);
+  }
   private readonly request: typeof fetch;
   private readonly proxy?: ProxyAgent;
   // Production sets expectProxy unless Helm reports open HTTPS egress: its default-deny API

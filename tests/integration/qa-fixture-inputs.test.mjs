@@ -255,6 +255,86 @@ test("QA selection keeps prerequisite credentials and reports omitted coverage",
   );
 });
 
+test("experimental Gateway destination QA requires explicit selection and prepared inputs", async () => {
+  const { selectQaMatrix, validateQaInputs } = await import("../helpers/qa-selection.mjs");
+  const normal = selectQaMatrix({});
+  assert.equal(normal.gatewayDestinations, false);
+  assert.equal(normal.scenarios.includes("gateway-destinations"), false);
+  assert.equal(normal.requiredEnv.includes("OCC_TEST_QA_GATEWAY_DESTINATIONS_CONFIG"), false);
+  const selected = selectQaMatrix({
+    OCC_TEST_QA_SCENARIOS: "gateway-destinations",
+    OCC_TEST_QA_INSTALLATION: "kubernetes",
+    OCC_TEST_QA_PRESET: "Codex",
+  });
+  assert.equal(selected.gatewayDestinations, true);
+  assert.equal(selected.scope, "partial:selected");
+  assert.equal(selected.browser, false);
+  assert.equal(selected.repository, false);
+  assert.ok(
+    selected.cells.every(({ scenarios }) => scenarios.length === 0),
+    "the prepared OpenShell scenario must not create Sandbox-free matrix Agents",
+  );
+  const inputs = {
+    OCC_TEST_QA_GATEWAY_DESTINATIONS_CONFIG: "/private/gateway-destinations.json",
+    OCC_TEST_QA_CODEX_TOKEN_FILE: "/private/codex",
+    OCC_TEST_QA_SANDBOX_ENV: "/private/openshell.env",
+  };
+  validateQaInputs(selected, inputs);
+  // Every selected prerequisite must fail closed independently, including when
+  // unrelated credentials are supplied. Default QA must not demand any of them.
+  for (const name of Object.keys(inputs)) {
+    assert.throws(
+      () => validateQaInputs(selected, { ...inputs, [name]: " ", OPENAI_API_KEY: "unrelated" }),
+      (error) => error.message.includes(`${name} is required`),
+    );
+  }
+  assert.throws(
+    () =>
+      selectQaMatrix({
+        OCC_TEST_QA_SCENARIOS: "gateway-destinations",
+        OCC_TEST_QA_PRESET: "OpenClaw",
+      }),
+    /not applicable/,
+  );
+  assert.throws(
+    () =>
+      selectQaMatrix({
+        OCC_TEST_QA_SCENARIOS: "gateway-destinations",
+        OCC_TEST_QA_INSTALLATION: "compose",
+      }),
+    /requires prepared Kubernetes/,
+  );
+});
+
+test("normal dedicated destination QA does not require protected OpenShell inputs", async () => {
+  const { selectQaMatrix, validateQaInputs } = await import("../helpers/qa-selection.mjs");
+  assert.equal(selectQaMatrix({}).gatewayDestinationsDedicated, false);
+  const env = {
+    OCC_TEST_QA_SCENARIOS: "gateway-destinations-dedicated",
+    OCC_TEST_QA_INSTALLATION: "kubernetes",
+    OCC_TEST_QA_PRESET: "Codex",
+  };
+  const selected = selectQaMatrix(env);
+  assert.equal(selected.gatewayDestinationsDedicated, true);
+  assert.equal(selected.gatewayDestinations, false);
+  assert.equal(selected.requiredEnv.includes("OCC_TEST_QA_SANDBOX_ENV"), false);
+  assert.equal(selected.requiredEnv.includes("OCC_TEST_QA_CODEX_TOKEN_FILE"), false);
+  const inputs = {
+    OCC_TEST_QA_OPENAI_KEY_FILE: "/private/model-key",
+    OCC_TEST_QA_CODEX_MODEL: "explicit-authorized-model",
+    OCC_TEST_QA_DEDICATED_DESTINATIONS_CONFIG: "/private/endpoints.json",
+  };
+  validateQaInputs(selected, inputs);
+  for (const name of Object.keys(inputs)) {
+    assert.throws(() => validateQaInputs(selected, { ...inputs, [name]: "" }), /is required/);
+  }
+  assert.throws(
+    () => selectQaMatrix({ ...env, OCC_TEST_QA_INSTALLATION: "compose" }),
+    /explicit Kubernetes/,
+  );
+  assert.throws(() => selectQaMatrix({ ...env, OCC_TEST_QA_PRESET: "OpenClaw" }), /not applicable/);
+});
+
 test("hosted QA materializes only selected credentials and rejects missing selected inputs", async (t) => {
   const { spawnSync } = await import("node:child_process");
   const script = new URL("../../scripts/ci/qa-matrix-credentials.mjs", import.meta.url);

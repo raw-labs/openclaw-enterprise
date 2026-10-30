@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 
+const standaloneScenarios = [
+  "sandbox-policy",
+  "gateway-destinations",
+  "gateway-destinations-dedicated",
+];
+
 const scenarioPresets = {
   "sandbox-policy": ["Codex"],
+  "gateway-destinations": ["Codex"],
+  "gateway-destinations-dedicated": ["Codex"],
   "model-ui": ["OpenClaw", "Codex"],
   "console-secrets": ["OpenClaw", "Codex"],
   calendar: ["Codex"],
@@ -24,7 +32,7 @@ export function selectQaMatrix(env = process.env) {
   const input = env.OCC_TEST_QA_SCENARIOS ?? "all";
   const scenarios =
     input === "all"
-      ? allScenarios.filter((name) => name !== "sandbox-policy")
+      ? allScenarios.filter((name) => !standaloneScenarios.includes(name))
       : input.split(",").map((name) => name.trim());
   assert.ok(
     scenarios.length > 0 && scenarios.every((name) => allScenarios.includes(name)),
@@ -45,16 +53,18 @@ export function selectQaMatrix(env = process.env) {
       installation: value,
       preset: name,
       scenarios: scenarios.filter(
-        (scenario) => scenario !== "sandbox-policy" && scenarioPresets[scenario].includes(name),
+        (scenario) =>
+          !standaloneScenarios.includes(scenario) && scenarioPresets[scenario].includes(name),
       ),
       unselected: allScenarios.filter(
         (scenario) =>
-          scenario !== "sandbox-policy" &&
+          !standaloneScenarios.includes(scenario) &&
           scenarioPresets[scenario].includes(name) &&
           !scenarios.includes(scenario),
       ),
       notApplicable: allScenarios.filter(
-        (scenario) => scenario !== "sandbox-policy" && !scenarioPresets[scenario].includes(name),
+        (scenario) =>
+          !standaloneScenarios.includes(scenario) && !scenarioPresets[scenario].includes(name),
       ),
     })),
   );
@@ -67,7 +77,29 @@ export function selectQaMatrix(env = process.env) {
     name === "Codex" ? "OCC_TEST_QA_CODEX_TOKEN_FILE" : "OCC_TEST_QA_OPENAI_KEY_FILE",
   );
   const sandboxPolicy = scenarios.includes("sandbox-policy");
-  if (sandboxPolicy) {
+  const gatewayDestinations = scenarios.includes("gateway-destinations");
+  const gatewayDestinationsDedicated = scenarios.includes("gateway-destinations-dedicated");
+  if (gatewayDestinationsDedicated) {
+    assert.equal(
+      installation,
+      "kubernetes",
+      "gateway-destinations-dedicated requires explicit Kubernetes selection",
+    );
+    requiredEnv.push(
+      "OCC_TEST_QA_OPENAI_KEY_FILE",
+      "OCC_TEST_QA_CODEX_MODEL",
+      "OCC_TEST_QA_DEDICATED_DESTINATIONS_CONFIG",
+    );
+  }
+  if (gatewayDestinations) {
+    assert.notEqual(
+      installation,
+      "compose",
+      "gateway-destinations requires prepared Kubernetes/OpenShell",
+    );
+    requiredEnv.push("OCC_TEST_QA_GATEWAY_DESTINATIONS_CONFIG");
+  }
+  if (sandboxPolicy || gatewayDestinations) {
     if (!requiredEnv.includes("OCC_TEST_QA_CODEX_TOKEN_FILE")) {
       requiredEnv.push("OCC_TEST_QA_CODEX_TOKEN_FILE");
     }
@@ -99,15 +131,15 @@ export function selectQaMatrix(env = process.env) {
   return {
     installations,
     sandboxPolicy,
+    gatewayDestinations,
+    gatewayDestinationsDedicated,
     cells,
     scenarios,
     requiredEnv,
     repository,
     browser: activeScenarios.some((name) => ["model-ui", "console-secrets"].includes(name)),
     scope:
-      installation === "all" && preset === "all" && scenarios.length === allScenarios.length - 1
-        ? "full"
-        : "partial:selected",
+      installation === "all" && preset === "all" && input === "all" ? "full" : "partial:selected",
   };
 }
 

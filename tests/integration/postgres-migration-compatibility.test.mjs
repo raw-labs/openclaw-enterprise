@@ -1726,10 +1726,15 @@ async function assertUpgradedAuthentication(db) {
 const legacyExecutionAdmission = { version: 2, mode: "unprotected" };
 
 // A revision admitted before 0060 carries no execution admission. The upgrade records
-// the unprotected decision it was admitted under; every other stored field stays identical.
+// the unprotected decision it was admitted under. Other stored fields stay identical,
+// apart from the empty Gateway destination list added to existing Agents.
 function upgradedCanonicalData(data) {
   return {
     ...data,
+    // Existing Agents gain no website access when the new column is backfilled.
+    agents: data.agents.map(({ value }) => ({
+      value: { ...value, gateway_outbound: value.gateway_outbound ?? { destinations: [] } },
+    })),
     agent_revisions: data.agent_revisions.map(({ value }) => ({
       value: Object.hasOwn(value.admitted_spec, "execution_admission")
         ? value
@@ -1990,6 +1995,7 @@ test(
       [59, "preCredentialProxy"],
       [62, "prePreparedAttemptSettlement"],
       [63, "preGatewayManagedMode"],
+      [64, "preGatewayOutbound"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });

@@ -264,6 +264,8 @@ export async function composePostgresDevelopment(
     controller.selectDriver("channel", channelDriver.id);
     if (protectedDriver !== undefined) {
       controller.installDriver(protectedDriver, ["sandbox", "credential_proxy"]);
+    } else if (drivers?.gatewayProxyDriver !== undefined) {
+      controller.installDriver(drivers.gatewayProxyDriver, []);
     } else if (sandboxDriver !== undefined) {
       controller.registerDriver(sandboxDriver);
       controller.selectDriver("sandbox", sandboxDriver.id);
@@ -375,12 +377,18 @@ export async function composePostgresDevelopment(
     app.addHook("onClose", async () => {
       await exchange?.close();
       await drivers?.protectedDriver?.close();
+      if (drivers?.gatewayProxyDriver !== drivers?.protectedDriver) {
+        await drivers?.gatewayProxyDriver?.close();
+      }
       await drivers?.preparedGitHub?.close();
       await state.close();
     });
     return app;
   } catch (error) {
     await drivers?.protectedDriver?.close();
+    if (drivers?.gatewayProxyDriver !== drivers?.protectedDriver) {
+      await drivers?.gatewayProxyDriver?.close();
+    }
     await drivers?.preparedGitHub?.close();
     await pool.end();
     throw error;

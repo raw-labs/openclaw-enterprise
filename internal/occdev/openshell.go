@@ -365,13 +365,13 @@ func (r *runner) installOpenShellGateway(ctx context.Context, state *development
 			return err
 		}
 	}
-	if !state.ProtectedEgress {
+	if !state.secureOpenShell() {
 		if err := r.ensureOpenShellJWTSecret(ctx, state, namespace); err != nil {
 			return err
 		}
 	}
 	var protectedValues string
-	if state.ProtectedEgress {
+	if state.secureOpenShell() {
 		var err error
 		protectedValues, err = r.writeProtectedOpenShellValues(state)
 		if err != nil {
@@ -381,7 +381,7 @@ func (r *runner) installOpenShellGateway(ctx context.Context, state *development
 	args := []string{"upgrade", "--install", openShellGatewayService, assets.gatewayChart, "--namespace", namespace, "--kubeconfig", filepath.Join(state.directory, "kubeconfig"), "--kube-context", "k3d-" + state.Cluster, "--timeout", timeout.String()}
 	// The registry contacts OCC at startup. Install both releases before waiting
 	// for the protected Gateway; native PKI hooks still complete synchronously.
-	if !state.ProtectedEgress {
+	if !state.secureOpenShell() {
 		args = append(args, "--wait")
 	}
 	args = append(args, openShellGatewayValues(state, assets, protectedValues)...)

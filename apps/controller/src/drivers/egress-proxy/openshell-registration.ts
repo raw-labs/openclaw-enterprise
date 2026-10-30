@@ -6,6 +6,12 @@ import type {
   SandboxDriver,
 } from "@openclaw-enterprise/contracts";
 import type { PostgresPool } from "@openclaw-enterprise/occ";
+import { DependencyUnavailableError } from "@openclaw-enterprise/occ";
+import { openShellGatewayProxyAttachment } from "../sandbox/gateway-proxy-attachment.ts";
+import {
+  openShellGatewayDestinations,
+  type OpenShellGatewayDestinationsOptions,
+} from "./gateway-destinations.ts";
 import type { OpenShellGateway } from "../../backends/openshell.ts";
 import type { startPreparedGitHubGitOwner } from "../../backends/repository-credentials/prepared-git-owner.ts";
 import type { EgressAuthorityConfiguration } from "../../composition/egress-authority.ts";
@@ -52,6 +58,7 @@ export function createOpenShellCapabilities(input: {
     readonly preparedProviders: readonly CredentialProviderDefinition[];
   };
 }) {
+  const destinationOptions = input.proxy?.configuration.gatewayDestinations;
   const configuration = input.repository?.configuration;
   const resolveDelivery = input.repository?.resolveDelivery;
   if (configuration && !resolveDelivery) {
@@ -65,13 +72,19 @@ export function createOpenShellCapabilities(input: {
       resolveDelivery,
     );
   const sandbox = input.createSandbox(
-    { ...input.sandbox.configuration, ...(input.proxy && { egress: input.proxy.configuration }) },
+    {
+      ...input.sandbox.configuration,
+      ...(input.proxy && { egress: input.proxy.configuration }),
+    },
     {
       id: input.sandbox.id,
       implementation: input.sandbox.implementation,
       backend: input.backend,
       operatorOwnedKubernetesResources: input.operatorOwnedKubernetesResources,
       ...(git && { openShellGit: git }),
+      ...(destinationOptions && {
+        gatewayDestinations: { options: destinationOptions, driverId: input.proxy!.id },
+      }),
     },
   );
   const proxy: CredentialProxyDriver | undefined =
@@ -109,6 +122,59 @@ export function createOpenShellCapabilities(input: {
     async close() {
       await git?.close();
       await input.backend.client.close();
+    },
+  };
+}
+
+/** Gateway-only views refuse execution without constructing management clients. */
+export function createOpenShellGatewayCapabilities(input: {
+  readonly sandboxId: string;
+  readonly proxyId: string;
+  readonly options: OpenShellGatewayDestinationsOptions;
+}): { readonly sandbox: SandboxDriver; readonly proxy: CredentialProxyDriver } {
+  const refuse = (): never => {
+    throw new DependencyUnavailableError(
+      "Gateway-only registration does not provide OpenShell management or execution operations.",
+    );
+  };
+  const unavailable = async (): Promise<never> => refuse();
+  return {
+    sandbox: {
+      id: input.sandboxId,
+      implementation: "openshell",
+      capability: "sandbox",
+      facets: ["networking"],
+      gatewayProxy: openShellGatewayProxyAttachment(input.options, input.proxyId, input.sandboxId),
+      cleanup: unavailable,
+    },
+    proxy: {
+      id: input.proxyId,
+      implementation: "openshell",
+      capability: "credential_proxy",
+      gatewayDestinations: openShellGatewayDestinations(
+        input.options,
+        input.proxyId,
+        input.sandboxId,
+      ),
+      // The existing contract requires sourceControl, but Gateway-only registration
+      // has no credential authority. Refuse identity reads instead of inventing one.
+      sourceControl: {
+        get backend(): never {
+          return refuse();
+        },
+        get sender(): never {
+          return refuse();
+        },
+        get resolver(): never {
+          return refuse();
+        },
+        providers: [],
+        assertAvailable: unavailable,
+      },
+      configureRevision: unavailable,
+      wiringStatus: unavailable,
+      verifyInstallation: unavailable,
+      removeRevision: unavailable,
     },
   };
 }

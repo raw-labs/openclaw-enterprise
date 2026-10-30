@@ -1,3 +1,4 @@
+import { normalizeGatewayOutbound, type GatewayOutbound } from "@openclaw-enterprise/contracts";
 import { NativeIAMDriver } from "@openclaw-enterprise/iam";
 import { isReducedCredentialPlan } from "./credential-policy-reduction.ts";
 
@@ -362,6 +363,7 @@ import {
 } from "./backends.ts";
 import {
   InMemoryPlatformState,
+  validComputeAdmission,
   type PlatformReadView,
   type PlatformOperation,
   type PlatformStateStore,
@@ -848,6 +850,7 @@ export interface CreateAgentInput {
   readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode?: HarnessExecutionMode;
   readonly gatewayManagedMode?: boolean;
+  readonly gatewayOutbound?: GatewayOutbound;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingRequest[];
@@ -888,6 +891,7 @@ export interface ValidateAgentCreateInput {
   readonly initialWorkspaceFiles?: InitialWorkspaceFiles;
   readonly executionMode?: HarnessExecutionMode;
   readonly gatewayManagedMode?: boolean;
+  readonly gatewayOutbound?: GatewayOutbound;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   /**
@@ -931,6 +935,7 @@ export interface UpdateAgentInput {
   readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode?: HarnessExecutionMode;
   readonly gatewayManagedMode?: boolean;
+  readonly gatewayOutbound?: GatewayOutbound;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers | null;
   readonly repositoryBindings?: readonly RepositoryBindingRequest[];
@@ -2118,6 +2123,11 @@ export class OpenClawController {
         ]),
       ),
       this.selections.has("credential_proxy") ? this.selectedProxyOwner() : undefined,
+      [
+        ...new Set(
+          [...this.registry.values()].flatMap(({ owner }) => (owner === undefined ? [] : [owner])),
+        ),
+      ],
     );
   }
 
@@ -2988,6 +2998,8 @@ export class OpenClawController {
     if (!validExecutionMode(executionMode)) {
       throw new ScopeViolationError("The Agent Harness execution mode is invalid.");
     }
+    const gatewayOutbound = this.gatewayOutbound(input.gatewayOutbound, executionMode);
+    this.requireUnassignedGatewayOutboundEmpty(gatewayOutbound);
     const gatewayManagedMode = normalizeGatewayManagedMode(input.gatewayManagedMode, true);
     const backendId = this.backendId(input.backendId);
     const plugins = normalizeAgentPlugins(input.plugins);
@@ -3041,6 +3053,7 @@ export class OpenClawController {
       harnessAuth,
       executionMode,
       gatewayManagedMode,
+      gatewayOutbound,
       ...(plugins === undefined ? {} : { plugins }),
       ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
       ...(input.repositoryBindings === undefined
@@ -3208,6 +3221,7 @@ export class OpenClawController {
           harnessAuth,
           executionMode,
           gatewayManagedMode,
+          gatewayOutbound,
           ...(backendId === undefined ? {} : { backendId }),
           ...(plugins === undefined ? {} : { plugins }),
           ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
@@ -9351,6 +9365,8 @@ export class OpenClawController {
     if (!validExecutionMode(executionMode)) {
       throw new ScopeViolationError("The Agent Harness execution mode is invalid.");
     }
+    const gatewayOutbound = this.gatewayOutbound(input.gatewayOutbound, executionMode);
+    this.requireUnassignedGatewayOutboundEmpty(gatewayOutbound);
     const gatewayManagedMode = normalizeGatewayManagedMode(
       input.gatewayManagedMode,
       this.gatewayManagedModeSupported(),
@@ -9433,6 +9449,7 @@ export class OpenClawController {
           : { credentialSources }),
         executionMode,
         gatewayManagedMode,
+        gatewayOutbound,
         ...(plugins === undefined ? {} : { plugins }),
         ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
         ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -9490,6 +9507,8 @@ export class OpenClawController {
     if (!validExecutionMode(executionMode)) {
       throw new ScopeViolationError("The Agent Harness execution mode is invalid.");
     }
+    const gatewayOutbound = this.gatewayOutbound(input.gatewayOutbound, executionMode);
+    this.requireUnassignedGatewayOutboundEmpty(gatewayOutbound);
     const plugins = normalizeAgentPlugins(input.plugins);
     const pluginApprovers = normalizeAgentPluginApprovers(input.pluginApprovers);
     const harnessAuth = this.plannedHarnessAuth(input.harnessAuth ?? null);
@@ -9710,9 +9729,13 @@ export class OpenClawController {
     if (input.configurationId !== undefined && !isNonEmptyString(input.configurationId)) {
       throw new ScopeViolationError("The exact Agent Configuration identity is missing.");
     }
-    if (input.configurationId === undefined && input.gatewayManagedMode === undefined) {
+    if (
+      input.configurationId === undefined &&
+      input.gatewayManagedMode === undefined &&
+      input.gatewayOutbound === undefined
+    ) {
       throw new ScopeViolationError(
-        "An Agent update must name a Configuration or Gateway managed mode.",
+        "An Agent update must name a Configuration, Gateway managed mode or Gateway outbound destinations.",
       );
     }
     const requestedAuth =
@@ -9745,6 +9768,22 @@ export class OpenClawController {
       if (agent.status !== "active") {
         throw new AgentDeletingError();
       }
+      if (input.gatewayOutbound !== undefined) {
+        await this.authorize(principalId, "administer", {
+          kind: "agent",
+          id: agent.id,
+          namespaceId: agent.namespaceId,
+        });
+      }
+      const gatewayOutbound =
+        input.gatewayOutbound === undefined
+          ? undefined
+          : this.gatewayOutbound(input.gatewayOutbound, input.executionMode ?? agent.executionMode);
+      // A mode-only edit must not leave dedicated-only authority on an embedded Agent.
+      this.gatewayOutbound(
+        gatewayOutbound ?? agent.gatewayOutbound,
+        input.executionMode ?? agent.executionMode,
+      );
       const configurationId = input.configurationId ?? agent.configurationId;
       if (gatewayManagedMode !== undefined) {
         await this.authorizeGatewayManagedModeChange(
@@ -9870,6 +9909,7 @@ export class OpenClawController {
         repositoryAccess,
         requestedSources,
         gatewayManagedMode,
+        gatewayOutbound,
       );
       if (!updated) {
         throw new ResourceStateConflictError("The Agent Configuration changed during its update.");
@@ -10471,6 +10511,10 @@ export class OpenClawController {
         // The name then becomes the served Agent's OpenClaw display name.
         configuration: frozenValues(withAgentIdentityName(admittedConfiguration, lockedAgent.name)),
         gatewayManagedMode: lockedAgent.gatewayManagedMode,
+        gatewayOutbound: this.gatewayOutbound(
+          lockedAgent.gatewayOutbound,
+          lockedAgent.executionMode,
+        ),
         harness: revisionHarness,
         compute: { id: compute.id, implementation: compute.implementation },
         ...(sandbox === undefined ? {} : { sandboxDriverId: sandbox.id }),
@@ -10493,6 +10537,11 @@ export class OpenClawController {
         throw new ConfigurationHarnessError(GATEWAY_MANAGED_MODE_UNSUPPORTED);
       }
       const computeAdmission = compute.admitRevision?.(freezeAgentRevision(revisionDraft));
+      if (computeAdmission !== undefined && !validComputeAdmission(computeAdmission)) {
+        throw new ResourceStateConflictError(
+          "Compute admission evidence must be printable ASCII within the 256 KiB persisted budget.",
+        );
+      }
       const revision = await state.revisions.createRevision(
         freezeAgentRevision({
           ...revisionDraft,
@@ -11994,6 +12043,7 @@ export class OpenClawController {
       }
     }
     const plan = this.provisioningPlan(record);
+    this.requireUnassignedGatewayOutboundEmpty(plan.gatewayOutbound);
     if (this.selectedDriver("iam").namespacePolicyTransaction !== "platform-unit-of-work") {
       throw new DependencyUnavailableError(
         "Agent provisioning requires transactional Namespace policy management.",
@@ -12912,6 +12962,7 @@ export class OpenClawController {
             : {}),
           executionMode: plan.executionMode,
           gatewayManagedMode: plan.gatewayManagedMode,
+          gatewayOutbound: plan.gatewayOutbound,
           ...(plugins === undefined ? {} : { plugins }),
           ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
           ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -12993,6 +13044,7 @@ export class OpenClawController {
     readonly harnessAuth: HarnessAuthBinding | null;
     readonly executionMode: HarnessExecutionMode;
     readonly gatewayManagedMode: boolean;
+    readonly gatewayOutbound: GatewayOutbound;
   } {
     const plan = asRecord(record.plan);
     let configuration: AgentProvisioningConfigurationInput;
@@ -13014,7 +13066,31 @@ export class OpenClawController {
       harnessAuth: normalizeProvisioningHarnessAuth(plan?.harnessAuth ?? null),
       executionMode,
       gatewayManagedMode: normalizeGatewayManagedMode(plan?.gatewayManagedMode, true),
+      gatewayOutbound: this.gatewayOutbound(plan?.gatewayOutbound, executionMode),
     };
+  }
+
+  private gatewayOutbound(value: unknown, executionMode: HarnessExecutionMode): GatewayOutbound {
+    let outbound: GatewayOutbound;
+    try {
+      outbound = normalizeGatewayOutbound(value);
+    } catch {
+      throw new ScopeViolationError(
+        "Gateway outbound destinations require unique exact canonical DNS hosts on TCP/443.",
+      );
+    }
+    if (executionMode !== "dedicated" && outbound.destinations.length > 0) {
+      throw new ScopeViolationError("Gateway outbound destinations require dedicated execution.");
+    }
+    return outbound;
+  }
+
+  private requireUnassignedGatewayOutboundEmpty(outbound: GatewayOutbound): void {
+    if (outbound.destinations.length > 0) {
+      throw new ScopeViolationError(
+        "Create the Agent with empty Gateway outbound destinations, then set them with update and administer on that exact Agent.",
+      );
+    }
   }
 
   /**

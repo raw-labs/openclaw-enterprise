@@ -372,7 +372,7 @@ export async function createQaInstallation(
   context,
   controlPlane,
   artifacts,
-  { repositoryInputs = true } = {},
+  { repositoryInputs = true, gatewayDestinations = false } = {},
 ) {
   assert.ok(["compose", "kubernetes"].includes(controlPlane));
   const suffix = randomUUID().slice(0, 8);
@@ -392,6 +392,7 @@ export async function createQaInstallation(
     OCC_DEVELOPMENT_COMPUTE_DRIVER: "kubernetes",
     OCC_DEVELOPMENT_CONTROL_PLANE: controlPlane,
     OCC_DEVELOPMENT_SANDBOX_DRIVER: "none",
+    ...(gatewayDestinations ? { OCC_DEVELOPMENT_GATEWAY_DESTINATIONS: "1" } : {}),
     OCC_DEVELOPMENT_CONTAINER_ENGINE: "docker",
     OCC_DEVELOPMENT_COMPOSE_PROJECT: cluster,
     OCC_DEVELOPMENT_STATE_DIRECTORY: stateDirectory,

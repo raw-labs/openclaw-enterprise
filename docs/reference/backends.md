@@ -192,22 +192,21 @@ Its closed `configuration` accepts:
   supervisors. Credential registration sends resolved values over this
   connection, and OCC cannot verify the NetworkPolicy itself.
 
-Either `endpoint` or `serviceName` is required. Both `drivers.sandbox` and
-`drivers.credential_gateway` are required and must match the selected bundled
-[OpenShell SandboxDriver](drivers/openshell-sandbox.md) and
-[OpenShell Credential Gateway](drivers/openshell-credential-gateway.md). The
-optional `drivers.credential_refresh` member must match the selected
-[Credential Refresh Driver](drivers/credential-refresh.md); OpenShell keeps
-refresh state on the gateway's provider records, so the two roles share this
-Backend. One
-OpenShell Backend is supported. Composition builds one gateway client object
+Either `endpoint` or `serviceName` is required. Execution selection requires
+`drivers.sandbox` and `drivers.credential_gateway`. Gateway-only selection
+instead registers the Sandbox/Credential Proxy pair without a management Backend,
+endpoint, or management credentials. It does not select Harness credential delivery; see the [experimental flow](../flows/gateway-outbound-destinations.md).
+Optional `drivers.credential_refresh` requires the selected
+[Credential Gateway](drivers/openshell-credential-gateway.md) and
+[Credential Refresh Driver](drivers/credential-refresh.md) on this Backend.
+One OpenShell Backend is supported. Composition builds one gateway client object
 and injects it into all members. It caches ordinary and credential-export
 clients separately per resolved endpoint. The API and worker each construct it,
 so mount their required credential files there, never in the Harness or Agent
 Gateway. Restart these processes after rotating an operator certificate to replace
 cached TLS channels. See the [operator trust requirements](drivers/openshell-credential-gateway.md#experimental-codex-oauth-poc).
 
-Optional `drivers.credential_proxy` selects the paired
+For protected execution, optional `drivers.credential_proxy` selects the paired
 [protected egress adapter](credential-sources/protected-inference.md). It requires an
 authenticated HTTPS gateway and the credential-access protocol. Released OpenShell
 `v0.1.4` supports OAuth refresh and operator `GetProviderCredentials`, but lacks

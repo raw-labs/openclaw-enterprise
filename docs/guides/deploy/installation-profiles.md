@@ -1,9 +1,6 @@
 # Render installation profiles
 
-Installation profiles generate the two trusted files used by a production
-OpenClaw Enterprise install: a Helm values overlay and the Installation startup
-YAML mounted into the controller. Use a profile when you want the standard
-OpenClaw or Codex defaults without editing the production examples by hand.
+Installation profiles generate a Helm values overlay and controller startup YAML.
 
 Profiles only render configuration for an already prepared environment. They do
 not create clusters, Secrets, databases, DNS, certificates, hosted plugin
@@ -19,8 +16,7 @@ must leave channels disabled.
 Use `codex` for dedicated Codex Agents with the bundled Codex PluginDriver. By
 default, hosted plugin discovery and Codex runtime authentication both use a
 `codex_pat` token that you supply later: add a same-Namespace Secret or enter
-the PAT during Agent creation. The renderer does not create the token or make
-catalog discovery ready.
+the PAT during Agent creation.
 
 Both profiles enable:
 
@@ -54,10 +50,8 @@ dedicated Codex Agent reserves `3328Mi`: `2560Mi` for its Gateway on the
 `runtime.nodeSelector` pool. A Harness runs
 the Agent's shell commands, so builds and test suites in large repositories can
 need more than `6Gi`; raise `resources.agent.limits.memory` in the Installation
-for such workloads. Limits reserve no node memory, so Harnesses building at the
-same time on one node can together exhaust it, and the kubelet then evicts Pods
-using more than their requests first; size agents nodes for the turns
-you expect to run concurrently.
+for such workloads. Size nodes for concurrent turns: limits reserve no memory, and the kubelet can
+evict Pods above their requests.
 
 Denying the 11 bundled plugins an OpenAI-only Agent does not use
 (`plugins.deny`) saved only about 50 MiB. Profile input cannot change these values; for others, write the Installation from the production example (see
@@ -83,6 +77,15 @@ container, GitHub Backend, Repo Driver, and Compute peer. The repository registr
 needs Namespace IDs that only exist after the first bootstrap, so most installs
 render with repositories disabled, bootstrap the platform, create the registry,
 then rerender with `repository.enabled: true`.
+
+### Dedicated Gateway proxy inputs
+
+The dedicated profile requires experimental `gatewayProxy` input with
+`sandbox`, `credentialProxy` and complete `infrastructureCidrs`. Do not supply
+a management Backend, endpoint, or token file for this Gateway-only pair. The proxy configuration includes
+stock `gatewayDestinations` assets and exclusions, without credential authority
+or provider custody. This path is not production-qualified. See the
+[selection and exclusion flow](../../flows/gateway-outbound-destinations.md).
 
 ## Prepare inputs
 

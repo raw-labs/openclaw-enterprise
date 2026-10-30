@@ -1,4 +1,5 @@
 import type {
+  GatewayOutbound,
   HarnessAuthBinding,
   HarnessExecutionMode,
   InitialWorkspaceFiles,
@@ -41,6 +42,7 @@ export interface ProvisionAgentInput {
   readonly harnessAuth?: HarnessAuthBinding | null;
   readonly executionMode?: HarnessExecutionMode;
   readonly gatewayManagedMode?: boolean;
+  readonly gatewayOutbound?: GatewayOutbound;
   readonly plugins?: PluginDesiredState;
   readonly pluginApprovers?: PluginApprovers;
   readonly repositoryBindings?: readonly RepositoryBindingRequest[];

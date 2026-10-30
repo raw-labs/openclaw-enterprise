@@ -54,6 +54,19 @@ test(
     });
     await save();
     context.diagnostic(`QA evidence: ${artifacts}`);
+    if (selection.gatewayDestinationsDedicated) {
+      await context.test("normal dedicated Gateway destinations", async (dedicatedContext) => {
+        const { verifyDedicatedGatewayDestinations } =
+          await import("../helpers/qa-gateway-destinations.ts");
+        await stage(
+          dedicatedContext,
+          "kubernetes/Codex",
+          "Gateway-only API/worker isolation and lifecycle",
+          () => verifyDedicatedGatewayDestinations(dedicatedContext, artifacts),
+          "gateway-destinations-dedicated",
+        );
+      });
+    }
     if (selection.sandboxPolicy) {
       const { verifyQaSandboxPolicy } = await import("../helpers/qa-sandbox-policy.mjs");
       await stage(
@@ -61,6 +74,15 @@ test(
         "kubernetes/Codex/OpenShell",
         "shared Driver configuration and real network enforcement",
         () => verifyQaSandboxPolicy(artifacts),
+      );
+    }
+    if (selection.gatewayDestinations) {
+      const { verifyQaSandboxPolicy } = await import("../helpers/qa-sandbox-policy.mjs");
+      await stage(
+        context,
+        "kubernetes/Codex/OpenShell",
+        "experimental Gateway destination proxy and real CNI isolation",
+        () => verifyQaSandboxPolicy(artifacts, "gateway-destinations"),
       );
     }
     for (const installation of selection.installations.filter((value) =>

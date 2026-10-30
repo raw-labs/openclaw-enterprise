@@ -4,6 +4,7 @@
   },
   "fileConcurrency": 8,
   "parallelFiles": [
+    "tests/browser/console-gateway-outbound.test.ts",
     "tests/browser/console-agent-presets.test.ts",
     "tests/browser/console-agents.test.ts",
     "tests/integration/ci-impact.test.mjs",
@@ -34,6 +35,14 @@
     "tests/browser/console-page-header.test.ts"
   ],
   "files": [
+    {
+      "path": "tests/browser/console-gateway-outbound.test.ts",
+      "expectedTests": [
+        "dedicated Agent outbound authoring saves and clears hosts without editing native Configuration",
+        "Agent update without exact Agent administer leaves outbound settings read-only",
+        "embedded Agent has no outbound host-granting controls"
+      ]
+    },
     {
       "path": "tests/browser/console-agents.test.ts"
     },

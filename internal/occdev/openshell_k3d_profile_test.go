@@ -75,6 +75,23 @@ func kubernetesOnlyOpenShellState(t *testing.T) *developmentState {
 	}
 }
 
+// Copy the real pinned asset when a launcher fixture uses a temporary checkout.
+func copyGatewayDestinationRules(t *testing.T, repository string) {
+	t.Helper()
+	const relative = "deploy/runtime/gateway-proxy/sandbox-policy.rego"
+	data, err := os.ReadFile(filepath.Join("../..", relative))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repository, relative)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func readJSONFile(t *testing.T, path string) map[string]any {
 	t.Helper()
 	data, err := os.ReadFile(path)

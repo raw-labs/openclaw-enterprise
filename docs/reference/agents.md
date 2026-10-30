@@ -44,6 +44,24 @@ Configuration with `kind: "agent"`, Namespace Agent `create`, and exact
 Configuration `read`. See [Harness authentication](#harness-authentication)
 for credential permissions and [authorization](authorization.md) for grants.
 
+### Additional Gateway destinations
+
+A dedicated Agent's `gatewayOutbound.destinations` holds extra HTTPS hosts,
+separately from native Configuration. Create or provision with an empty list,
+then use the Console's **Gateway outbound** tab or
+`occ agent update <agent-id> --file outbound.json`. Setting or clearing the list
+requires both `update` and `administer` on that exact Agent.
+
+```json
+{ "gatewayOutbound": { "destinations": [{ "host": "api.example.com", "port": 443 }] } }
+```
+
+Use unique lowercase DNS hosts on TCP/443, without wildcards, IPs, URLs or trailing
+dots. Omission keeps the list; an empty list clears extra hosts. Channels add
+their own requirements. Deploy a new revision to apply edits; existing revisions
+keep their saved policy. Dedicated single-cluster Kubernetes enforcement is
+[experimental](drivers/kubernetes-compute/networking-and-isolation.md).
+
 ### Unreadable saved settings
 
 For unreadable saved settings, Agent and Agent revision list/detail GETs omit them

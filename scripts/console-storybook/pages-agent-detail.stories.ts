@@ -240,3 +240,12 @@ export const PolicyApplied = story("policyApplied");
 export const PolicyRetryApplication = story("policyRetryApplication");
 export const PolicyEditingAdminDenied = story("policyEditingAdminDenied");
 export const PolicyNoNetworkLimits = story("policyNoNetworkLimits");
+
+export const GatewayOutbound = story("gatewayOutbound");
+export const GatewayOutboundEmpty = story("gatewayOutboundEmpty");
+export const GatewayOutboundDenied = story("gatewayOutboundDenied");
+export const GatewayOutboundLoading = story("gatewayOutboundLoading");
+export const GatewayOutboundSaving = story("gatewayOutboundSaving");
+export const GatewayOutboundRefused = story("gatewayOutboundRefused");
+export const GatewayOutboundUnknown = story("gatewayOutboundUnknown");
+export const GatewayOutboundNoCredentials = story("gatewayOutboundNoCredentials");

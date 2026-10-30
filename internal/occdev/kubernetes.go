@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -242,11 +243,16 @@ func (r *runner) importRuntime(ctx context.Context, s *developmentState) (string
 			err != nil || len(source.BuildTimestamp) != 20 || timestamp.Format(time.RFC3339) != source.BuildTimestamp {
 			return "", fmt.Errorf("invalid %s: require a lowercase 40-character commit, 64-character archive SHA-256, and UTC build timestamp YYYY-MM-DDTHH:mm:ssZ", sourcePath)
 		}
-		if err := r.run(ctx, r.engine, "build", "-f", "deploy/runtime/Dockerfile",
-			"--build-arg", "OPENCLAW_COMMIT="+source.Commit,
-			"--build-arg", "OPENCLAW_SOURCE_SHA256="+source.SourceArchiveSHA256,
-			"--build-arg", "OPENCLAW_BUILD_TIMESTAMP="+source.BuildTimestamp,
-			"--tag", image, "."); err != nil {
+		args := []string{"build", "-f", "deploy/runtime/Dockerfile",
+			"--build-arg", "OPENCLAW_COMMIT=" + source.Commit,
+			"--build-arg", "OPENCLAW_SOURCE_SHA256=" + source.SourceArchiveSHA256,
+			"--build-arg", "OPENCLAW_BUILD_TIMESTAMP=" + source.BuildTimestamp}
+		// Warm the compiler before the final graph starts its independent test
+		// stages. This limits concurrent memory demand, not compiler peak memory.
+		if err := r.run(ctx, r.engine, append(slices.Clone(args), "--target", "openclaw-build", ".")...); err != nil {
+			return "", err
+		}
+		if err := r.run(ctx, r.engine, append(args, "--tag", image, ".")...); err != nil {
 			return "", err
 		}
 	}
@@ -409,6 +415,16 @@ func writeInstallation(s *developmentState, reference string, openShell *openShe
 			"id": "codex-plugin", "configuration": map[string]any{"catalogSource": "openai-curated"},
 		}
 	}
+	if s.GatewayDestinations {
+		if len(s.InfrastructureCIDRs) == 0 {
+			return fmt.Errorf("Gateway destinations require discovered infrastructure CIDRs")
+		}
+		compute := config["drivers"].(map[string]any)["compute"].(map[string]any)["configuration"].(map[string]any)
+		compute["network"].(map[string]any)["infrastructureCidrs"] = s.InfrastructureCIDRs
+		if s.SandboxDriver == "none" {
+			configureGatewayOnlyPair(s, config)
+		}
+	}
 	if s.SandboxDriver == "openshell" {
 		if openShell == nil {
 			return fmt.Errorf("OpenShell development assets are required")
@@ -437,9 +453,9 @@ func writeInstallation(s *developmentState, reference string, openShell *openShe
 			// Native OpenClaw uses Node; retain both architecture-specific Codex allowances.
 			"configuration": map[string]any{"binaries": append(openShellCodexBinaries(), "/usr/local/bin/node")},
 		}
-		if s.ProtectedEgress {
+		if s.secureOpenShell() {
 			if s.egressKeyID == "" {
-				return fmt.Errorf("protected egress requires the generated OpenShell JWT key identifier")
+				return fmt.Errorf("secure OpenShell requires the generated JWT key identifier")
 			}
 			config["drivers"].(map[string]any)["credential_proxy"] = developmentEgressConfiguration(s)
 			sandbox := config["drivers"].(map[string]any)["sandbox"].(map[string]any)["configuration"].(map[string]any)
@@ -472,7 +488,7 @@ func openShellCodexBinaries() []string {
 // openShellBackendConfiguration owns the gateway connection shared by the Sandbox and
 // Credential Gateway Drivers.
 func openShellBackendConfiguration(s *developmentState) map[string]any {
-	if s.ProtectedEgress {
+	if s.secureOpenShell() {
 		return map[string]any{
 			"id": "openshell", "type": "openshell",
 			"configuration": map[string]any{

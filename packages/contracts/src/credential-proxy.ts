@@ -427,6 +427,8 @@ export interface CredentialPolicyWithdrawalOptions {
 }
 
 export interface CredentialProxyDriver extends Driver {
+  /** Destination-only Gateway permission; independent of credential exchange and Harness grants. */
+  readonly gatewayDestinations?: import("./gateway-destinations.ts").GatewayDestinationControl;
   readonly capability: "credential_proxy";
   readonly sourceControl: CredentialSourceControl;
   readonly policyReduction?: CredentialPolicyReducer;

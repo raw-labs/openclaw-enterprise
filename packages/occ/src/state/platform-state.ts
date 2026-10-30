@@ -1,3 +1,4 @@
+import { normalizeGatewayOutbound, type GatewayOutbound } from "@openclaw-enterprise/contracts";
 import type { PreparedTokenCurrentProof } from "@openclaw-enterprise/contracts";
 import { assertExecutionAdmission } from "@openclaw-enterprise/contracts";
 import { memoryEgressSendReceipts } from "./egress-send-receipts.ts";
@@ -207,7 +208,10 @@ export interface AgentReadRepository {
 
 export interface AgentRepository extends AgentReadRepository {
   createAgent(
-    agent: Omit<Agent, "gatewayManagedMode"> & { readonly gatewayManagedMode?: boolean },
+    agent: Omit<Agent, "gatewayManagedMode" | "gatewayOutbound"> & {
+      readonly gatewayManagedMode?: boolean;
+      readonly gatewayOutbound?: GatewayOutbound;
+    },
   ): Promise<Readonly<Agent>>;
   setSandboxPolicyEditing(
     namespaceId: string,
@@ -228,6 +232,7 @@ export interface AgentRepository extends AgentReadRepository {
     repositoryAccess?: RepositoryAccess | null,
     credentialSources?: readonly AgentCredentialSourceBinding[],
     gatewayManagedMode?: boolean,
+    gatewayOutbound?: GatewayOutbound,
   ): Promise<Readonly<Agent> | undefined>;
   compareAndSetActiveRevision(
     namespaceId: string,
@@ -790,6 +795,16 @@ function agentCredentialSourceReference(
   return (bindings ?? []).some(({ sourceId }) => sourceId === credentialSourceId);
 }
 
+/** Persisted opaque Compute evidence has a 256 KiB printable-ASCII budget. */
+export function validComputeAdmission(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 262_144 &&
+    /^[\x20-\x7e]+$/.test(value)
+  );
+}
+
 /** A revision freezes exactly the owner's non-model sources, in order. */
 export function credentialSourcesMatch(
   bindings: readonly AgentCredentialSourceBinding[] | undefined,
@@ -861,8 +876,7 @@ function assertAdmittedAgentRevision(revision: AgentRevision): void {
     !isNonEmptyString(revision.compute.id) ||
     !isNonEmptyString(revision.compute.implementation) ||
     (revision.compute.admission !== undefined &&
-      (typeof revision.compute.admission !== "string" ||
-        !/^[\x20-\x7e]{1,1024}$/.test(revision.compute.admission))) ||
+      !validComputeAdmission(revision.compute.admission)) ||
     (revision.sandboxDriverId !== undefined && !isNonEmptyString(revision.sandboxDriverId)) ||
     (revision.secretDriverId !== undefined && !isNonEmptyString(revision.secretDriverId)) ||
     Object.hasOwn(revision, "serviceAccount") ||
@@ -2839,9 +2853,16 @@ function repositories(
         repositoryAccess: _providedRepositoryAccess,
         ...withoutPlugins
       } = agent;
+      if (
+        agent.executionMode !== "dedicated" &&
+        normalizeGatewayOutbound(agent.gatewayOutbound).destinations.length > 0
+      ) {
+        throw new ScopeViolationError("Gateway outbound destinations require dedicated execution.");
+      }
       const saved = immutableCopy({
         ...withoutPlugins,
         gatewayManagedMode: agent.gatewayManagedMode ?? true,
+        gatewayOutbound: normalizeGatewayOutbound(agent.gatewayOutbound),
         ...(plugins === undefined ? {} : { plugins }),
         ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
         ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -2924,6 +2945,7 @@ function repositories(
       nextRepositoryAccess,
       nextCredentialSources,
       gatewayManagedMode,
+      gatewayOutbound,
     ) => {
       const current = await agents.findAgent(namespaceId, agentId);
       if (!current) {
@@ -2988,12 +3010,19 @@ function repositories(
         credentialSources: _currentCredentialSources,
         ...withoutPlugins
       } = current;
+      if (
+        (executionMode ?? current.executionMode) !== "dedicated" &&
+        normalizeGatewayOutbound(gatewayOutbound ?? current.gatewayOutbound).destinations.length > 0
+      ) {
+        throw new ScopeViolationError("Gateway outbound destinations require dedicated execution.");
+      }
       const updated = immutableCopy({
         ...withoutPlugins,
         configurationId,
         backendId: nextBackendId,
         executionMode: executionMode ?? current.executionMode,
         gatewayManagedMode: gatewayManagedMode ?? current.gatewayManagedMode,
+        gatewayOutbound: normalizeGatewayOutbound(gatewayOutbound ?? current.gatewayOutbound),
         harnessAuth: association,
         ...(agentCredentialSources === undefined || agentCredentialSources.length === 0
           ? {}
@@ -3142,6 +3171,8 @@ function repositories(
         owner.servicePrincipalId !== revision.servicePrincipalId ||
         owner.backendId !== revision.backendId ||
         revision.gatewayManagedMode !== owner.gatewayManagedMode ||
+        JSON.stringify(normalizeGatewayOutbound(revision.gatewayOutbound)) !==
+          JSON.stringify(normalizeGatewayOutbound(owner.gatewayOutbound)) ||
         !harnessAuthMatches(owner.harnessAuth, revision.harnessAuth) ||
         !credentialSourcesMatch(owner.credentialSources, revision.credentialSources)
       ) {

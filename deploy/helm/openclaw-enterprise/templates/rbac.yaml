@@ -87,6 +87,10 @@ rules:
   - apiGroups: [apps]
     resources: [deployments]
     verbs: [get, list, create, patch, delete]
+  # Verify proxy Pod -> ReplicaSet -> Deployment ownership without mutating ReplicaSets.
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get]
   - apiGroups: [batch]
     resources: [jobs]
     verbs: [get, create, delete]

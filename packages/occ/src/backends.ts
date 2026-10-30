@@ -407,9 +407,17 @@ function validateOpenShellBackend(
       throw new ScopeViolationError(path(id, `drivers.${key}`) + " is unsupported.");
     }
   }
-  if (!isNonEmptyString(drivers.sandbox) || !isNonEmptyString(drivers.credential_gateway)) {
+  if (
+    !isNonEmptyString(drivers.sandbox) ||
+    (!isNonEmptyString(drivers.credential_gateway) &&
+      !isNonEmptyString(drivers.credential_proxy)) ||
+    (drivers.credential_gateway !== undefined && !isNonEmptyString(drivers.credential_gateway)) ||
+    (drivers.credential_proxy !== undefined && !isNonEmptyString(drivers.credential_proxy)) ||
+    (drivers.credential_refresh !== undefined && !isNonEmptyString(drivers.credential_gateway))
+  ) {
     throw new ScopeViolationError(
-      path(id, "drivers") + " requires sandbox and credential_gateway members.",
+      path(id, "drivers") +
+        " requires sandbox and a credential_gateway or credential_proxy member; refresh requires credential_gateway.",
     );
   }
   if (drivers.credential_refresh !== undefined && !isNonEmptyString(drivers.credential_refresh)) {
@@ -433,7 +441,9 @@ function validateOpenShellBackend(
     },
     drivers: {
       sandbox: drivers.sandbox,
-      credential_gateway: drivers.credential_gateway,
+      ...(drivers.credential_gateway === undefined
+        ? {}
+        : { credential_gateway: drivers.credential_gateway }),
       ...(drivers.credential_proxy === undefined
         ? {}
         : { credential_proxy: backendId(drivers.credential_proxy, "Egress Driver ID") }),
@@ -453,7 +463,9 @@ function backendMembers(backend: BackendDefinition): readonly string[] {
   }
   return [
     `sandbox:${backend.drivers.sandbox}`,
-    `credential_gateway:${backend.drivers.credential_gateway}`,
+    ...(backend.drivers.credential_gateway === undefined
+      ? []
+      : [`credential_gateway:${backend.drivers.credential_gateway}`]),
     ...(backend.drivers.credential_refresh === undefined
       ? []
       : [`credential_refresh:${backend.drivers.credential_refresh}`]),
@@ -518,6 +530,7 @@ export function validateSelectedBackendDrivers(
   backends: readonly BackendDefinition[],
   selected: Readonly<Partial<Record<DriverCapability, Driver>>>,
   proxyOwner?: InstalledDriver,
+  installed: readonly InstalledDriver[] = [],
 ): void {
   const requires = (capability: DriverCapability, id: string, label: string): void => {
     const driver = selected[capability];
@@ -531,6 +544,24 @@ export function validateSelectedBackendDrivers(
     } else if (backend.type === "chatgpt") {
       requires("service_account", backend.drivers.service_account, "ServiceAccount Driver");
     } else {
+      if (backend.drivers.credential_gateway === undefined) {
+        const owner = installed.find(
+          (owner) =>
+            owner.capabilities.includes("sandbox") &&
+            owner.capabilities.includes("credential_proxy") &&
+            owner.require("sandbox").id === backend.drivers.sandbox &&
+            owner.require("credential_proxy").id === backend.drivers.credential_proxy,
+        );
+        if (
+          !owner?.require("sandbox").gatewayProxy ||
+          !owner.require("credential_proxy").gatewayDestinations
+        ) {
+          throw new DriverSelectionError(
+            "The Gateway proxy Backend requires its registered capability pair.",
+          );
+        }
+        continue;
+      }
       requires("sandbox", backend.drivers.sandbox, "Sandbox Driver");
       requires(
         "credential_gateway",
