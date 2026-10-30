@@ -22570,9 +22570,13 @@ test("Gateway destination profile keeps internal transports without ordinary pub
   }
   assert.equal(env.NODE_USE_ENV_PROXY, "1");
   assert.equal(env.NO_PROXY, env.no_proxy);
-  const noProxy = env.NO_PROXY.split(",");
-  assert.equal(noProxy.includes(".svc"), false);
-  assert.equal(noProxy.includes("api.example.com"), false);
+  // Only loopback and the exact Harness transport may bypass the destination proxy.
+  assert.deepEqual(env.NO_PROXY.split(","), [
+    "127.0.0.1",
+    "localhost",
+    "::1",
+    "agent-" + digest(revision.agentId) + "." + namespace.name + ".svc",
+  ]);
   const channels = driver.channelNetworkPolicy(revision, [{ egress: "https-proxy" }], namespace);
   assert.deepEqual(channels.spec.egress, []);
   assert.equal(selectorMatches(channels.spec.podSelector, labels), false);
