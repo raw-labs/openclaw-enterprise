@@ -3066,6 +3066,44 @@ test("dedicated Gateway profile requires explicit independent pair and preserves
     assert.equal(loaded.sandboxDriver, undefined);
     assert.equal(loaded.protectedDriver, undefined);
     assert.ok(loaded.gatewayProxyDriver.require("sandbox").gatewayProxy);
+    // The experimental two-cluster procedure adds the execution target to this
+    // rendered Installation. That must retain the mandatory Gateway-only pair.
+    const remote = structuredClone(rendered);
+    const compute = remote.drivers.compute.configuration;
+    compute.gatewayRouting.hostname = "gateway.example.test";
+    compute.executionCluster = {
+      authentication: {
+        mode: "kubeconfig",
+        kubeconfigPath: "/fixture/execution",
+        context: "execution",
+      },
+      harnessRouting: {
+        hostname: "harness.example.test",
+        gatewayName: "oce-harnesses",
+        gatewayNamespace: "openclaw-system",
+        envoyNamespace: "envoy-gateway-system",
+      },
+      network: {
+        dns: compute.network.dns,
+        harnessEndpointCidrs: ["192.0.2.2/32"],
+        gatewayEndpointCidrs: ["192.0.2.1/32"],
+        pluginStatusProxySourceCidrs: ["192.0.2.2/32"],
+      },
+    };
+    const remotePath = join(output.directory, "remote-installation.json");
+    writeFileSync(remotePath, JSON.stringify(remote));
+    const remoteLoaded = await loadInstallationConfiguration({
+      mode: "production",
+      environment: { OCC_CONFIG_PATH: remotePath },
+    });
+    try {
+      assert.equal(remoteLoaded.sandboxDriver, undefined);
+      const { routedRevision } = await import("../helpers/kubernetes-routed-scenarios.mjs");
+      const revision = routedRevision(remoteLoaded.computeDriver);
+      assert.ok(remoteLoaded.computeDriver.admitRevision(revision).startsWith("kubernetes:v1:"));
+    } finally {
+      await remoteLoaded.gatewayProxyDriver.close();
+    }
   } finally {
     await loaded.gatewayProxyDriver.close();
   }

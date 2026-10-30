@@ -92,9 +92,9 @@ import {
   digest,
   gatewayRouting,
   routedOptions,
-  routedRevision,
+  routedRevision as baseRoutedRevision,
   admitRoutedRevision,
-  createRoutedKubernetesComputeDriver,
+  createRoutedKubernetesComputeDriver as baseCreateRoutedKubernetesComputeDriver,
   selectedOpenShellGatewayDriver,
   labelSelectorLabels,
   selectorMatches,
@@ -105,6 +105,24 @@ import {
 } from "../fixtures/kubernetes-provider-readiness.mjs";
 import { writeSafeKubeconfig, writeUnsafeKubeconfigs } from "../helpers/unsafe-kubeconfigs.mjs";
 import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
+
+// Remote scenarios select the same real paired capability as local dedicated Gateways.
+function createRoutedKubernetesComputeDriver(configuration, selection = {}) {
+  return baseCreateRoutedKubernetesComputeDriver(configuration, {
+    ...(configuration.executionCluster === undefined
+      ? {}
+      : { gatewayProxyDriver: selectedOpenShellGatewayDriver().owner }),
+    ...selection,
+  });
+}
+
+function routedRevision(driver, overrides = {}) {
+  const revision = baseRoutedRevision(driver, overrides);
+  return driver.options.executionCluster !== undefined &&
+    !Object.hasOwn(overrides.compute ?? {}, "admission")
+    ? admitRoutedRevision(driver, revision)
+    : revision;
+}
 
 const { kubeconfigPath, context: contextName } = conformanceKubeconfig;
 
@@ -10190,7 +10208,7 @@ test("native channel providers require Secret bindings and project them only to 
     },
     port: 3128,
   };
-  // The old shared proxy remains a separate-execution-cluster contract.
+  // Remote Harness placement must not restore the bundled Slack bypass.
   const managedDriver = createRoutedKubernetesComputeDriver(
     routedOptions({
       executionCluster: twoClusterOptions().executionCluster,
@@ -10240,7 +10258,12 @@ test("native channel providers require Secret bindings and project them only to 
     [
       {
         name: "HTTPS_PROXY",
-        value: "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+        value:
+          "http://" +
+          managedDriver.gatewayDestinationPlan(managedRevision).endpoint.serviceName +
+          "." +
+          namespace +
+          ".svc:3129",
       },
     ],
   );
@@ -10248,17 +10271,7 @@ test("native channel providers require Secret bindings and project them only to 
     name: namespace,
     plane: "execution",
   });
-  assert.deepEqual(managedPolicy.spec.egress, [
-    {
-      to: [
-        {
-          namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "openclaw-system" } },
-          podSelector: { matchLabels: managedProxy.podLabels },
-        },
-      ],
-      ports: [{ protocol: "TCP", port: 3128 }],
-    },
-  ]);
+  assert.deepEqual(managedPolicy.spec.egress, []);
 
   // Removing channel runtime must revoke the exact existing grant without needing its old proxy.
   const activeRevision = admitRoutedRevision(managedDriver, {
@@ -10538,41 +10551,17 @@ test("native channel providers require Secret bindings and project them only to 
     driver.validateHarnessAuth(revision.harness, revision.harnessAuth, slackAccount({ name }), {});
   }
 
-  // The separate execution-cluster path retains its existing IPv6 shared proxy.
-  const ipv6 = createRoutedKubernetesComputeDriver(
-    routedOptions({
-      executionCluster: twoClusterOptions().executionCluster,
-      runtime: {
-        transportSecretPrefix: "transport",
-        gatewayStorageClassName: "local-path",
-        channels: { proxyUrl: "https://[2001:db8::15]:8443" },
-      },
-    }),
+  // A shared proxy setting cannot admit an unsupported Channel on remote execution.
+  const remote = createRoutedKubernetesComputeDriver(twoClusterOptions());
+  assert.throws(
+    () =>
+      admitRoutedRevision(remote, {
+        ...revision,
+        compute: { id: remote.id, implementation: remote.implementation },
+        configuration: { ...revision.configuration, channels: { msteams: {} } },
+      }),
+    /selected destination contributor/,
   );
-  const teamsRevision = admitRoutedRevision(ipv6, {
-    ...revision,
-    compute: { id: ipv6.id, implementation: ipv6.implementation },
-    configuration: {
-      agents: { defaults: { model: "codex/gpt-5" } },
-      channels: { msteams: {} },
-      logging: {
-        level: "info",
-        consoleLevel: "info",
-        consoleStyle: "json",
-      },
-      diagnostics: { otel: { logs: false } },
-    },
-  });
-  const ipv6Policy = ipv6.channelNetworkPolicy(teamsRevision, ipv6.enabledChannels(teamsRevision), {
-    name: namespace,
-    plane: "execution",
-  });
-  assert.deepEqual(ipv6Policy.spec.egress, [
-    {
-      to: [{ ipBlock: { cidr: "2001:db8::15/128" } }],
-      ports: [{ protocol: "TCP", port: 8443 }],
-    },
-  ]);
 });
 
 test("Kubernetes runtime diagnostics read exact private Pod status without native sends", async () => {
@@ -17406,6 +17395,7 @@ test("activation trims unwritten Agent policies only in its Gateway namespace", 
   const embedded = {
     ...dedicated,
     id: "revision-embedded-trim",
+    compute: { ...dedicated.compute, admission: undefined },
     harness: { id: "openclaw", version: "1.0.0", mode: "embedded" },
     configuration: {
       ...dedicated.configuration,
@@ -22850,7 +22840,7 @@ test("Gateway attachment cleanup refuses foreign ownership and preserves incompl
 });
 
 test("Gateway outbound rejects unenforced topology while retaining empty defaults", () => {
-  for (const configuration of [options(), twoClusterOptions()]) {
+  for (const configuration of [options()]) {
     const driver = createRoutedKubernetesComputeDriver(configuration);
     const revision = routedRevision(driver);
     assert.equal(driver.admitRevision(revision), undefined);
@@ -22864,49 +22854,61 @@ test("Gateway outbound rejects unenforced topology while retaining empty default
           ...revision,
           gatewayOutbound: { destinations: [{ host: "example.com", port: 443 }] },
         }),
-      /dedicated single-cluster enforcement/,
+      /dedicated enforcement/,
     );
   }
 });
 
-test("Gateway destination preparation and activation cannot release a Gateway before attachment readiness", async () => {
-  const selected = gatewayDestinationComputeFixture();
-  const observations = [];
-  selected.sandbox.gatewayProxy.prepare = async (context, plan) => {
-    assert.equal(context.revision.id, plan.revisionId);
-    assert.equal(context.namespaceName, context.namespace.name);
-    observations.push(plan.revisionId);
-    return false;
-  };
-  const { gatewayClients: _directClients, ...network } = selected.driver.options.network;
-  const fixture = workspaceSetupFixture(
-    false,
-    true,
-    network,
-    { runtime: selected.driver.options.runtime },
-    { protectedDriver: selected.owner },
+for (const remote of [false, true]) {
+  test(
+    "Gateway destination preparation and activation wait for attachment readiness, remote=" +
+      remote,
+    async () => {
+      const selected = gatewayDestinationComputeFixture();
+      const observations = [];
+      selected.sandbox.gatewayProxy.prepare = async (context, plan) => {
+        assert.equal(context.revision.id, plan.revisionId);
+        assert.equal(context.namespaceName, context.namespace.name);
+        observations.push(plan.revisionId);
+        return false;
+      };
+      const { gatewayClients: _directClients, ...network } = selected.driver.options.network;
+      const fixture = workspaceSetupFixture(
+        false,
+        true,
+        network,
+        {
+          runtime: selected.driver.options.runtime,
+          ...(remote ? { executionCluster: twoClusterOptions().executionCluster } : {}),
+        },
+        { protectedDriver: selected.owner, gatewayProxyDriver: selected.owner },
+      );
+      const { driver, revision, context, objects, records } = fixture;
+      if (remote) {
+        driver.executionApiClients = driver.apiClients;
+      }
+      revision.sandboxDriverId = selected.sandbox.id;
+      revision.compute.admission = driver.admitRevision(revision);
+      const { workspaceSetup: _initialFiles, ...runtimeContext } = context;
+      const prepared = await driver.prepareRevision(revision, runtimeContext);
+      assert.equal(prepared.ready, false);
+      await assert.rejects(
+        driver.activateRevision(revision, runtimeContext),
+        /proxy is not ready for activation/,
+      );
+      assert.deepEqual(observations, [revision.id, revision.id]);
+      assert.equal(
+        [...objects.values()].some(({ kind }) => kind === "Deployment"),
+        false,
+      );
+      assert.equal(
+        records.some(({ kind }) => kind === "Secret"),
+        false,
+        "no credential copies are projected while the attachment is unavailable",
+      );
+    },
   );
-  const { driver, revision, context, objects, records } = fixture;
-  revision.sandboxDriverId = selected.sandbox.id;
-  revision.compute.admission = driver.admitRevision(revision);
-  const { workspaceSetup: _initialFiles, ...runtimeContext } = context;
-  const prepared = await driver.prepareRevision(revision, runtimeContext);
-  assert.equal(prepared.ready, false);
-  await assert.rejects(
-    driver.activateRevision(revision, runtimeContext),
-    /proxy is not ready for activation/,
-  );
-  assert.deepEqual(observations, [revision.id, revision.id]);
-  assert.equal(
-    [...objects.values()].some(({ kind }) => kind === "Deployment"),
-    false,
-  );
-  assert.equal(
-    records.some(({ kind }) => kind === "Secret"),
-    false,
-    "no credential copies are projected while the attachment is unavailable",
-  );
-});
+}
 
 test("Gateway proxy admission requires complete infrastructure exclusions without changing Harness selection", () => {
   // The real selected OpenShell pair enforces these ranges. Compute must reject
@@ -22935,5 +22937,118 @@ test("Gateway proxy admission requires complete infrastructure exclusions withou
       () => refused.admitRevision(routedRevision(refused)),
       /infrastructureCidrs|address exclusions/,
     );
+  }
+});
+
+// Real admission and OpenShell attachment against the existing API simulator: this proves
+// resource placement and immutable ownership, not live SDK, CNI or remote transport behavior.
+test("remote Harness keeps the revision proxy, DNS and cleanup in the Gateway cluster", async () => {
+  const configuration = twoClusterOptions();
+  configuration.network.dns = { namespace: "control-dns", podLabels: { app: "control-dns" } };
+  configuration.executionCluster.network.dns = {
+    namespace: "execution-dns",
+    podLabels: { app: "execution-dns" },
+  };
+  const selected = selectedOpenShellGatewayDriver();
+  const driver = createRoutedKubernetesComputeDriver(configuration, {
+    gatewayProxyDriver: selected.owner,
+  });
+  const revision = routedRevision(driver, {
+    gatewayOutbound: { destinations: [{ host: "api.example.com", port: 443 }] },
+  });
+  const execution = { name: kubernetesNamespaceName(revision.namespaceId), plane: "execution" };
+  const gateway = { name: kubernetesGatewayNamespaceName(revision.namespaceId), plane: "control" };
+  const api = gatewayProxyApiFixture();
+  driver.apiClients = Promise.resolve({ objects: api });
+  // Touching an execution client for this attachment would fail, even when that cluster is down.
+  driver.executionApiClients = Promise.resolve({
+    get objects() {
+      throw new Error("remote attachment access");
+    },
+  });
+  const context = await driver.gatewayProxyContext(revision, execution);
+  assert.equal(context.kubernetes, api);
+  assert.equal(context.namespaceName, gateway.name);
+  assert.deepEqual(context.dnsPeer, configuration.network.dns);
+  const attachment = selected.owner.require("sandbox").gatewayProxy;
+  const plan = driver.gatewayDestinationPlan(revision);
+  assert.equal(await attachment.prepare(context, plan), true);
+  const workload = driver.deployment(
+    "gateway-remote",
+    { namespaceId: revision.namespaceId, agentId: revision.agentId },
+    gateway,
+    "gateway:local",
+    "gateway-remote",
+    "gateway",
+    {},
+    "info",
+    driver.gatewayConfiguration(revision, undefined, execution),
+  );
+  const env = Object.fromEntries(
+    workload.spec.template.spec.containers[0].env.map(({ name, value }) => [name, value]),
+  );
+  assert.equal(
+    env.HTTPS_PROXY,
+    "http://" + plan.endpoint.serviceName + "." + gateway.name + ".svc:3129",
+  );
+  assert.deepEqual(env.NO_PROXY.split(","), [
+    "127.0.0.1",
+    "localhost",
+    "::1",
+    configuration.executionCluster.harnessRouting.hostname,
+  ]);
+  assert.ok(
+    env.APP_SERVER_URL.startsWith(
+      "wss://" + configuration.executionCluster.harnessRouting.hostname + "/namespaces/",
+    ),
+  );
+  const transport = driver
+    .agentNetworkPolicies(revision, execution)
+    .find(({ resource }) => resource.metadata.name.startsWith("allow-gateway-agent-"));
+  assert.deepEqual(transport.namespace, gateway);
+  assert.deepEqual(transport.resource.spec.egress, [
+    { to: [{ ipBlock: { cidr: "192.0.2.2/32" } }], ports: [{ protocol: "TCP", port: 443 }] },
+  ]);
+  assert.equal(
+    selectorMatches(transport.resource.spec.podSelector, workload.spec.template.metadata.labels),
+    true,
+  );
+  const channel = driver.channelNetworkPolicy(revision, [{ egress: "https-proxy" }], gateway);
+  assert.deepEqual(channel.spec.egress, []);
+  assert.equal(
+    selectorMatches(channel.spec.podSelector, workload.spec.template.metadata.labels),
+    false,
+  );
+  // A newer admission configuration cannot strand the saved proxy or affect its successor.
+  const changed = selectedOpenShellGatewayDriver(["10.0.0.0/8", "203.0.113.0/24"]);
+  driver.gatewayProxyDriver = changed.owner;
+  assert.throws(() => driver.gatewayDestinationPlan(revision), /exact selected capability/);
+  assert.equal(
+    await changed.owner
+      .require("sandbox")
+      .gatewayProxy.remove(await driver.gatewayProxyContext(revision, execution), plan),
+    true,
+  );
+  assert.equal((await api.list("v1", "Pod", gateway.name)).items.length, 0);
+});
+
+test("remote Gateway admission requires the pair and excludes both topology endpoints", () => {
+  const configuration = twoClusterOptions();
+  const bare = new KubernetesComputeDriver(configuration);
+  const candidate = baseRoutedRevision(bare);
+  assert.throws(() => bare.admitRevision(candidate), /exact selected destination proxy/);
+  for (const key of [
+    "harnessEndpointCidrs",
+    "gatewayEndpointCidrs",
+    "pluginStatusProxySourceCidrs",
+  ]) {
+    const changed = structuredClone(configuration);
+    changed.executionCluster.network[key] = ["8.8.8.8/32"];
+    const driver = createRoutedKubernetesComputeDriver(changed);
+    assert.throws(() => routedRevision(driver), /required address exclusions/, key);
+    const covered = createRoutedKubernetesComputeDriver(changed, {
+      gatewayProxyDriver: selectedOpenShellGatewayDriver(["10.0.0.0/8", "8.8.8.8/32"]).owner,
+    });
+    assert.doesNotThrow(() => routedRevision(covered), key);
   }
 });

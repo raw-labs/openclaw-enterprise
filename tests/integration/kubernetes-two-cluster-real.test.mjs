@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { createConnection, isIP } from "node:net";
 import {
   createKubernetesClient,
   validateExplicitK3dLoopbackContext,
@@ -19,6 +20,27 @@ test(
     // The selected fixture is a complete Helm-installed OCE, with separate API
     // and worker credentials. Neither the controller nor its Drivers are mocked.
     const configuration = JSON.parse(await readFile(configurationFile, "utf8"));
+    // Independent responders distinguish policy denial from an unavailable upstream.
+    const destinations = configuration.gatewayDestinations;
+    assert.ok(destinations, "gatewayDestinations.first and replacement are required.");
+    for (const endpoint of [destinations.first, destinations.replacement]) {
+      const url = new URL(endpoint.url);
+      assert.equal(url.protocol, "https:");
+      assert.equal(url.username + url.password + url.hash + url.port, "");
+      assert.equal(isIP(url.hostname), 0);
+      assert.match(url.hostname, /^[a-z0-9.-]+$/);
+      assert.match(endpoint.marker, /^[a-zA-Z0-9_-]{8,120}$/);
+      const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15000) });
+      assert.equal(response.status, 200);
+      assert.ok((await response.text()).includes(endpoint.marker));
+    }
+    assert.notEqual(
+      new URL(destinations.first.url).hostname,
+      new URL(destinations.replacement.url).hostname,
+    );
+    const outbound = (endpoint) => ({
+      destinations: [{ host: new URL(endpoint.url).hostname, port: 443 }],
+    });
     const origin = new URL(configuration.apiUrl);
     assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname));
     assert.ok(["http:", "https:"].includes(origin.protocol));
@@ -164,6 +186,7 @@ test(
       harnessAuth: { method: authMethod, source: secret.ref },
     });
     const agentPath = `${base}/agents/${agent.id}`;
+    await api("PATCH", agentPath, { gatewayOutbound: outbound(destinations.first) });
     const role = await api("POST", `${base}/iam/roles`, {
       name: "Exact model Secret",
       permissions: [{ action: "operate", resourceKind: "secret" }],
@@ -177,9 +200,26 @@ test(
     });
     await api("POST", `${agentPath}/runtime-credentials`, {});
 
-    async function waitForDeployment(revision) {
+    const peer = await api("POST", `${base}/agents`, {
+      name: "two-cluster-peer",
+      configurationId: native.id,
+      executionMode: "dedicated",
+      harnessAuth: { method: authMethod, source: secret.ref },
+    });
+    const peerPath = base + "/agents/" + peer.id;
+    await api("PATCH", peerPath, { gatewayOutbound: outbound(destinations.replacement) });
+    await api("POST", base + "/iam/access-bindings", {
+      subjectKind: "identity",
+      subjectId: peer.servicePrincipalId,
+      roleId: role.id,
+      resourceKind: "secret",
+      resourceId: secret.id,
+    });
+    await api("POST", peerPath + "/runtime-credentials", {});
+
+    async function waitForDeployment(revision, path = agentPath) {
       await cp.waitFor("successful exact revision", async () => {
-        const status = await api("GET", `${agentPath}/deployments/${revision.id}`);
+        const status = await api("GET", `${path}/deployments/${revision.id}`);
         assert.notEqual(status.status, "failed", status.error?.code);
         return status.status === "succeeded";
       });
@@ -189,20 +229,144 @@ test(
       return waitForDeployment(await api("POST", `${agentPath}/deploy`));
     }
     const authenticationPolicies = async () =>
-      (await dp.resources("networkpolicies", namespaces.execution)).filter((policy) =>
-        policy.metadata.name.startsWith("allow-agent-auth-"),
+      (await dp.resources("networkpolicies", namespaces.execution)).filter(
+        (policy) =>
+          policy.metadata.name.startsWith("allow-agent-auth-") &&
+          policy.spec.podSelector.matchLabels["openclaw.dev/agent"] === agent.id,
       );
+    const proxyResources = async (plane, owner = agent) =>
+      JSON.parse(
+        await planes[plane].kubectl(
+          "get",
+          "pods,services,deployments,configmaps,networkpolicies",
+          "-n",
+          namespaces[plane],
+          "-l",
+          "openclaw.dev/agent=" + owner.id,
+          "-o",
+          "json",
+        ),
+      ).items.filter((resource) => resource.metadata.name.startsWith("gateway-proxy-"));
+    async function gatewayExecFor(owner, script, ...args) {
+      const gateway = (await pods("control", "gateway", owner)).find(
+        (pod) => !pod.metadata.deletionTimestamp,
+      );
+      assert.ok(gateway, "Gateway stays in the control cluster");
+      return JSON.parse(
+        await cp.kubectl(
+          "exec",
+          gateway.metadata.name,
+          "-n",
+          namespaces.control,
+          "-c",
+          "gateway",
+          "--",
+          "node",
+          "--input-type=module",
+          "-e",
+          script,
+          ...args,
+        ),
+      );
+    }
+    const gatewayExec = (script, ...args) => gatewayExecFor(agent, script, ...args);
+    async function allowed(endpoint, owner = agent) {
+      const result = await gatewayExecFor(
+        owner,
+        "const r=await fetch(process.argv[1],{redirect:'error',signal:AbortSignal.timeout(15000)});console.log(JSON.stringify({status:r.status,matched:(await r.text()).includes(process.argv[2])}));",
+        endpoint.url,
+        endpoint.marker,
+      );
+      assert.equal(result.status, 200);
+      assert.equal(result.matched, true, "approved upstream returned its independent marker");
+    }
+    async function denied(endpoint, owner = agent) {
+      const result = await gatewayExecFor(
+        owner,
+        "try{await fetch(process.argv[1],{redirect:'error',signal:AbortSignal.timeout(15000)});console.log(JSON.stringify({denied:false}));}catch{console.log(JSON.stringify({denied:true}));}",
+        endpoint.url,
+      );
+      assert.equal(result.denied, true, "unapproved HTTPS destination must be refused");
+    }
+    async function assertProxyPlacement(revision) {
+      const resources = await proxyResources("control");
+      assert.equal(
+        (await proxyResources("execution")).length,
+        0,
+        "no Gateway proxy in execution cluster",
+      );
+      const proxies = resources.filter(
+        (resource) => resource.kind === "Pod" && !resource.metadata.deletionTimestamp,
+      );
+      assert.equal(proxies.length, 1);
+      assert.equal(proxies[0].metadata.labels["openclaw.dev/revision"], revision.id);
+      assert.ok(resources.some((resource) => resource.kind === "Service"));
+      return resources;
+    }
     const first = await deploy();
-    const pods = (plane, role) =>
+    const pods = (plane, role, owner = agent) =>
       planes[plane].resources(
         "pods",
         namespaces[plane],
         "-l",
-        `openclaw.dev/agent=${agent.id},openclaw.dev/workload-role=${role}`,
+        `openclaw.dev/agent=${owner.id},openclaw.dev/workload-role=${role}`,
       );
     assert.equal((await pods("control", "gateway")).length, 1);
     assert.equal((await pods("execution", "gateway")).length, 0);
     assert.equal((await pods("control", "agent")).length, 0);
+    const peerRevision = await waitForDeployment(await api("POST", peerPath + "/deploy"), peerPath);
+    const peerGateway = (await pods("control", "gateway", peer))[0];
+    assert.ok(peerGateway);
+    const peerProxies = await proxyResources("control", peer);
+    assert.ok(
+      peerProxies.some(
+        (resource) =>
+          resource.kind === "Pod" &&
+          resource.metadata.labels["openclaw.dev/revision"] === peerRevision.id,
+      ),
+    );
+    assert.equal((await proxyResources("execution", peer)).length, 0);
+    await allowed(destinations.replacement, peer);
+    await denied(destinations.first, peer);
+    const firstProxy = await assertProxyPlacement(first);
+    // A reachable own frontend controls for CNI refusal of the peer's proxy.
+    const tcp =
+      "import net from 'node:net';const s=net.connect({host:process.argv[1],port:3129});let done=false;function finish(connected){if(done)return;done=true;s.destroy();console.log(JSON.stringify({connected}));}s.setTimeout(5000,()=>finish(false));s.once('connect',()=>finish(true));s.once('error',()=>finish(false));";
+    const firstAddress = firstProxy.find((resource) => resource.kind === "Service").spec.clusterIP;
+    const peerAddress = peerProxies.find((resource) => resource.kind === "Service").spec.clusterIP;
+    for (const [owner, ownAddress, otherAddress] of [
+      [agent, firstAddress, peerAddress],
+      [peer, peerAddress, firstAddress],
+    ]) {
+      assert.equal((await gatewayExecFor(owner, tcp, ownAddress)).connected, true);
+      assert.equal((await gatewayExecFor(owner, tcp, otherAddress)).connected, false);
+    }
+    await allowed(destinations.first);
+    await denied(destinations.replacement);
+    // Raw TCP ignores HTTP(S)_PROXY. The runner connects to each exact IP as
+    // an independent positive control; an unreachable address is not CNI proof.
+    const direct = await gatewayExec(
+      "import dns from 'node:dns/promises';import net from 'node:net';const addresses=await dns.lookup(new URL(process.argv[1]).hostname,{all:true,family:4});const results=[];for(const {address} of addresses){results.push(await new Promise(resolve=>{const s=net.connect({host:address,port:443});let done=false;function finish(connected){if(done)return;done=true;s.destroy();resolve({address,connected});}s.setTimeout(5000,()=>finish(false));s.once('connect',()=>finish(true));s.once('error',()=>finish(false));}));}console.log(JSON.stringify(results));",
+      destinations.first.url,
+    );
+    assert.ok(direct.length > 0);
+    for (const result of direct) {
+      assert.equal(result.connected, false, "direct Gateway TCP bypass to " + result.address);
+      const connected = await new Promise((resolve) => {
+        const socket = createConnection({ host: result.address, port: 443 });
+        socket.setTimeout(10000);
+        socket.once("connect", () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.once("timeout", () => {
+          socket.destroy();
+          resolve(false);
+        });
+        socket.once("error", () => resolve(false));
+      });
+      assert.equal(connected, true, "the exact denied IP is reachable from the independent runner");
+    }
 
     const content = `Two-cluster workspace ${randomUUID()}\n`;
     const workspace = `${agentPath}/workspace/files/USER.md`;
@@ -329,7 +493,20 @@ test(
         async () => (await pods(plane, role)).length === 0,
       );
     }
-    await deploy();
+    await cp.waitFor(
+      "stopped Gateway proxy cleanup",
+      async () => (await proxyResources("control")).length === 0,
+    );
+    assert.equal((await proxyResources("execution")).length, 0);
+    const resumed = await deploy();
+    await assertProxyPlacement(resumed);
+    const resumedResources = await proxyResources("control");
+    assert.ok(
+      firstProxy.every(
+        (old) => !resumedResources.some((item) => item.metadata.uid === old.metadata.uid),
+      ),
+    );
+    await allowed(destinations.first);
     assert.equal((await api("GET", workspace)).content, content);
     const modelDigest = async (pod) => {
       const environment = pod.spec.containers.find((container) => container.name === "agent").env;
@@ -355,7 +532,7 @@ test(
     const expectedFailure =
       authMethod === "codex_pat"
         ? { check: "login", code: "LOGIN_FAILED" }
-        : { check: "model-probe", code: "MODEL_PROBE_FAILED" };
+        : { check: "model-probe", code: "AUTHENTICATION_FAILED" };
     const rejectedHarness = await dp.waitFor(
       "replacement credential failure evidence",
       async () => {
@@ -395,6 +572,8 @@ test(
     // Exclusive RWO replacement stops the predecessor. Workspace access can be
     // unavailable until valid credentials start its successor; verify retention below.
     await api("PATCH", `${base}/secrets/${secret.id}`, { value: modelCredential });
+    const predecessorProxy = [...resumedResources, ...(await proxyResources("control"))];
+    await api("PATCH", agentPath, { gatewayOutbound: outbound(destinations.replacement) });
     const successor = await api("POST", `${agentPath}/deploy`);
     // Exclusive RWO replacement must stop the rejected workload before the
     // Agent-owned policy selects the corrected successor.
@@ -413,6 +592,15 @@ test(
     });
     await waitForDeployment(successor);
     assert.notEqual(successor.id, first.id);
+    await assertProxyPlacement(successor);
+    await cp.waitFor("predecessor Gateway proxy cleanup", async () => {
+      const current = await proxyResources("control");
+      return predecessorProxy.every(
+        (old) => !current.some((item) => item.metadata.uid === old.metadata.uid),
+      );
+    });
+    await allowed(destinations.replacement);
+    await denied(destinations.first);
     assert.equal((await api("GET", workspace)).content, content);
     await dp.waitFor("retired predecessor", async () =>
       (await pods("execution", "agent")).every(
@@ -503,6 +691,12 @@ test(
         code: 1,
         stderr: /Unable to connect to the server|The connection to the server \S+ was refused/,
       });
+      // The execution API is genuinely unavailable. CP egress must not depend
+      // on that cluster, its DNS, or the remote Harness remaining available.
+      const controlProxy = await proxyResources("control");
+      assert.ok(controlProxy.some((resource) => resource.kind === "Pod"));
+      await allowed(destinations.replacement);
+      await denied(destinations.first);
       await api("DELETE", agentPath);
       await cp.waitFor("worker observes unavailable DP during deletion", async () => {
         const output = await cp.kubectl(
@@ -557,9 +751,28 @@ test(
           ).length === 0,
       );
     }
+    for (const plane of ["execution", "control"]) {
+      await planes[plane].waitFor(
+        plane + " proxy cleanup",
+        async () => (await proxyResources(plane)).length === 0,
+      );
+    }
     await cp.waitFor("Agent metadata cleanup", async () =>
       (await api("GET", `${base}/agents`)).every((item) => item.id !== agent.id),
     );
+    assert.equal(
+      (await pods("control", "gateway", peer))[0].metadata.uid,
+      peerGateway.metadata.uid,
+    );
+    await allowed(destinations.replacement, peer);
+    await denied(destinations.first, peer);
+    await api("DELETE", peerPath);
+    await cp.waitFor("peer Agent deletion", async () =>
+      (await api("GET", base + "/agents")).every((item) => item.id !== peer.id),
+    );
+    for (const plane of ["execution", "control"]) {
+      assert.equal((await proxyResources(plane, peer)).length, 0);
+    }
     await api("DELETE", `${base}/configurations/${native.id}`);
     await api("DELETE", `${base}/secrets/${secret.id}`);
     // Installations may seed default Presets into this test-owned Namespace.
@@ -585,7 +798,7 @@ test(
       );
     }
     t.diagnostic(
-      "Real API/worker: separate placement, workspace RPC, Pod reconnect, stop/resume, credential refresh/rejection, revision replacement, model shell execution, DP outage recovery, and two-target deletion passed.",
+      "Real API/worker: separate placement, workspace RPC, Pod reconnect, stop/resume, credential refresh/rejection, revision replacement, model shell execution, Gateway proxy CP placement, host allow/deny, raw TCP no-bypass, replacement/stop cleanup, independent CP egress during DP outage, recovery, and two-target deletion passed.",
     );
   },
 );

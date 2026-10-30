@@ -34,7 +34,8 @@ go to the Agent's gateway; model credentials are configured separately.
 
 ## Configure both Slack proxies
 
-For dedicated single-cluster Kubernetes Agents, keep these routes separate.
+For dedicated Kubernetes Agents, keep these routes separate, including when the
+Harness runs in a separate execution cluster.
 A working Socket Mode connection does not establish that Console directory lookup works.
 
 | Path                                     | Route                                                       | Consumer          |

@@ -4704,10 +4704,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
       enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError),
       {
         embedded: harness.mode === "embedded",
-        channelRuntime:
-          agentSave ||
-          this.options.runtime?.channels !== undefined ||
-          (this.options.runtime !== undefined && this.options.executionCluster === undefined),
+        channelRuntime: agentSave || this.options.runtime !== undefined,
       },
       callerSettingError,
     );
@@ -14123,7 +14120,6 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     const sandbox = owner?.require("sandbox");
     if (
       this.options.runtime === undefined ||
-      this.options.executionCluster !== undefined ||
       revision.harness.mode !== "dedicated" ||
       revision.compute.id !== this.id ||
       revision.compute.implementation !== this.implementation ||
@@ -14131,7 +14127,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       !sandbox?.gatewayProxy
     ) {
       throw new ConfigurationFailure(
-        "Gateway destination control requires dedicated single-cluster execution and its exact selected destination proxy and Sandbox.",
+        "Gateway destination control requires dedicated execution and its exact selected destination proxy and Sandbox.",
       );
     }
     const infrastructure = this.options.network.infrastructureCidrs;
@@ -14154,6 +14150,10 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         ...GATEWAY_PROXY_NONPUBLIC_CIDRS,
         ...infrastructure,
         ...endpointRanges,
+        ...(this.options.executionCluster?.network.harnessEndpointCidrs ?? []),
+        ...(this.options.executionCluster?.network.gatewayEndpointCidrs ?? []),
+        ...(this.options.executionCluster?.network.pluginStatusProxySourceCidrs ?? []),
+        ...(this.options.network.pluginStatusProxySourceCidrs ?? []),
       ])
     ) {
       throw new ConfigurationFailure(
@@ -14185,11 +14185,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
   }
 
   private requiresGatewayDestinations(revision: Readonly<AgentRevision>): boolean {
-    return (
-      this.options.runtime !== undefined &&
-      this.options.executionCluster === undefined &&
-      revision.harness.mode === "dedicated"
-    );
+    return this.options.runtime !== undefined && revision.harness.mode === "dedicated";
   }
 
   /** Cleanup consumes immutable ownership, never permission to start under today's policy. */
@@ -14251,7 +14247,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     if (!admission?.startsWith(GATEWAY_DESTINATIONS_ADMISSION)) {
       if (this.requiresGatewayDestinations(revision)) {
         throw new ConfigurationFailure(
-          "Gateway destination admission is required for dedicated single-cluster execution.",
+          "Gateway destination admission is required for dedicated execution.",
         );
       }
       return undefined;
@@ -14315,11 +14311,12 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     namespace: KubernetesNamespaceAddress,
   ): Promise<GatewayProxyAttachmentContext> {
     const gatewayNamespace = this.gatewayNamespace(revision, namespace);
+    // This attachment belongs to the Gateway, never to the selected Harness Sandbox.
+    const { objects: kubernetes } = await this.clients(gatewayNamespace.plane);
     return {
-      ...(await this.sandboxNamespaceContext(
-        this.sandboxNamespaceForRevision(revision, gatewayNamespace),
-        gatewayNamespace,
-      )),
+      namespace: this.sandboxNamespaceForRevision(revision, gatewayNamespace),
+      kubernetes,
+      signal: this.operationSignal(),
       revision,
       namespaceName: gatewayNamespace.name,
       dnsPeer: this.options.network.dns,
@@ -14498,7 +14495,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       normalizeGatewayOutbound(revision.gatewayOutbound).destinations.length > 0
     ) {
       throw new ConfigurationFailure(
-        "Gateway outbound destinations require dedicated single-cluster enforcement.",
+        "Gateway outbound destinations require dedicated enforcement.",
       );
     }
     let execution: string | undefined;
@@ -15062,9 +15059,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       providers,
       {
         embedded: revision.harness.mode === "embedded",
-        channelRuntime:
-          this.options.runtime?.channels !== undefined ||
-          (this.options.runtime !== undefined && this.options.executionCluster === undefined),
+        channelRuntime: this.options.runtime !== undefined,
       },
       preparationSettingError,
     );
@@ -16715,7 +16710,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             variables.push({ name, value: endpoint });
           }
           const internal = ["127.0.0.1", "localhost", "::1"];
-          if (configuration.harnessNamespace !== undefined) {
+          if (this.options.executionCluster !== undefined) {
+            internal.push(this.options.executionCluster.harnessRouting.hostname);
+          } else if (configuration.harnessNamespace !== undefined) {
             internal.push("agent-" + suffix + "." + configuration.harnessNamespace.name + ".svc");
           }
           if (providerUrl !== undefined) {

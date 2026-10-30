@@ -4,9 +4,9 @@ Configure tenant network boundaries, private Agent routes, and existing
 namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
 
 Gateway destination control is **experimental, not production-qualified**.
-Embedded and separate-cluster networking stays unchanged. See the
-[configuration and exclusion flow](../../../flows/gateway-outbound-destinations.md) and
-[verification status](../../../../specs/plans/0024-gateway-outbound-proxy-reuse.md#verification-evidence).
+The proxy stays with its dedicated Gateway, including with remote Harnesses;
+embedded networking is unchanged. See the [flow](../../../flows/gateway-outbound-destinations.md)
+and [pending qualification](../../../../specs/plans/0024-gateway-outbound-proxy-reuse.md#verification-evidence).
 
 ## Networking
 

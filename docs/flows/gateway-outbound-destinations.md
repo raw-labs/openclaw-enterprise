@@ -11,8 +11,7 @@ last_updated_session: "agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3
 **Experimental — partially verified. Not supported for production.** This trace describes
 the draft source for [RFC-0024](../../specs/rfcs/0024-gateway-outbound-proxy-reuse.md),
 not an accepted or qualified deployment. The experiment must remain a draft and
-must not be merged. The [implementation plan](../../specs/plans/0024-gateway-outbound-proxy-reuse.md)
-tracks required acceptance evidence.
+must not be merged. The [plan](../../specs/plans/0024-gateway-outbound-proxy-reuse.md) tracks acceptance.
 
 Gateway-hosted integrations need external connections; a separate Harness's
 network access does not carry those requests. This experiment extends the selected Credential Proxy
@@ -33,10 +32,11 @@ registration provides destination admission and proxy lifecycle without manageme
 clients. Execution-capable registration retains its separate protected operations
 and proxy instances; Gateway permission grants no protected credential authority.
 
-Every dedicated single-cluster Gateway uses the new route instead of the bundled
-Slack proxy. Compute clears the old Channel grant and projects the revision proxy
-address. The bundled Slack proxy remains available for control-plane credential
-validation and directory lookup; separate execution clusters retain their existing route. Enabled Channels
+Every dedicated Gateway uses the new route instead of the bundled Slack proxy,
+with either a local or remote Harness. Compute clears the old Channel grant and
+projects the revision proxy address. The proxy stays in the Gateway cluster and
+namespace. The bundled Slack proxy remains available for control-plane credential
+validation and directory lookup. Enabled Channels
 remain refused in embedded mode. See the
 [Slack consumer paths](../guides/integrations/slack.md#configure-both-slack-proxies).
 
@@ -58,14 +58,14 @@ complete RFC acceptance remain unverified. The
 - Admission: `apps/controller/src/drivers/compute/kubernetes/index.ts:admitRevision`.
 - Registration: `apps/controller/src/drivers/egress-proxy/openshell-registration.ts:createOpenShellGatewayCapabilities`.
 - Attachment: `apps/controller/src/drivers/sandbox/gateway-proxy-attachment.ts:openShellGatewayProxyAttachment`.
-- Scope: dedicated, single-cluster execution with the exact selected Sandbox and
+- Scope: dedicated Kubernetes execution with the exact selected Sandbox and
   Credential Proxy. Protected Harness and repository admission facts coexist with
   the Gateway policy. Unsupported topologies reject nonempty destination lists;
   their empty/default networking is unchanged.
 
 ## Flow
 
-The arrows describe draft source calls. They do not show live enforcement proof.
+Arrows show source calls, not deployment proof.
 
 ```mermaid
 graph TD
@@ -198,7 +198,9 @@ implementation contributions, not user-supplied wildcard grants or Slack channel
 checks the selected pair and revision scope. It requires explicit Compute
 `network.infrastructureCidrs` and checks that the plan's IPv4 exclusions cover
 those ranges, built-in nonpublic ranges and configured literal infrastructure
-endpoints. `apps/controller/src/drivers/kubernetes/gateway-proxy-network.ts:gatewayProxyExclusionsCover`
+endpoints. With a separate execution cluster, the exclusions must also cover
+the configured Harness and Gateway endpoint CIDRs and status-proxy source ranges.
+`apps/controller/src/drivers/kubernetes/gateway-proxy-network.ts:gatewayProxyExclusionsCover`
 rejects missing coverage and partial overlap.
 `apps/controller/src/drivers/egress-proxy/gateway-destinations.ts:openShellGatewayDestinations`
 builds the policy and revision endpoint. Compute returns the serialized result
@@ -212,7 +214,7 @@ and endpoint. The implementation admits at most 128 contributed entries.
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:gatewayDestinationPlan`
 checks the saved plan against the destinations and Channel configuration in that
-same revision. Missing admission refuses a dedicated single-cluster deployment;
+same revision. Missing admission refuses a dedicated deployment;
 it does not restore an older Slack route.
 A changed selected capability or asset requires a new revision rather than a
 broader retry. Destination permission grants no credential, provider action,
@@ -223,6 +225,9 @@ plugin identity, or tenant authorization.
 `apps/controller/src/drivers/compute/kubernetes/index.ts:prepareGatewayProxy`
 refuses an unprofiled legacy runtime egress grant and clears the old channel
 route before calling the paired Sandbox. Gateway preparation waits for that result.
+`gatewayProxyContext` selects the Kubernetes client from the Gateway namespace
+plane, not the Harness Sandbox context. It supplies the Gateway cluster's DNS
+peer for both local and remote Harness topologies. Removal uses the same context.
 `apps/controller/src/drivers/sandbox/gateway-proxy-attachment.ts:openShellGatewayProxyAttachment`
 creates a revision-owned immutable ConfigMap, NetworkPolicy, Deployment, and
 ClusterIP Service. It checks ownership and authored fields instead of patching
@@ -259,7 +264,9 @@ adds DNS, inbound Gateway access, configured private status ingress, and exact
 proxy-peer grants.
 The workload projection in `apps/controller/src/drivers/compute/kubernetes/index.ts`
 sets uppercase/lowercase proxy variables to the revision Service and sets
-`NO_PROXY` for loopback and required Harness names. It also sets
+`NO_PROXY` for loopback and required Harness names. With a remote Harness, this
+includes its configured routing hostname, not its execution-cluster Service name.
+It also sets
 `NODE_USE_ENV_PROXY=1` for the image's Node HTTP(S) and fetch clients. Gateway Pods use
 `gateway-destinations-v1`; ordinary channel/model grants select a different
 profile. Existing direct Harness and workspace-node transports retain their
@@ -278,7 +285,9 @@ host/port, not encrypted HTTP actions or response contents.
 removes serving routes and Gateway resources and waits for its Pods. Stop then
 shuts down the Harness before `finishRevisionCleanup` removes the proxy and
 credential artifacts. Proxy failure does not skip credential cleanup; Compute
-reports incomplete removal for retry. Yielding stop and retirement retain the
+reports incomplete removal for retry. Full stop and retirement first resolve the
+execution Namespace, so an execution API outage can delay the overall operation
+even though the proxy attachment uses only the Gateway cluster. Yielding stop and retirement retain the
 same Gateway-before-proxy boundary and preserve the successor revision.
 
 `frozenComputeAdmissionFacts` reads saved identities without repeating start
@@ -327,6 +336,8 @@ qualify the stock binary or CNI boundary.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-30 18:06: Trace Gateway-cluster proxy placement and remote Harness routing in the accompanying two-cluster implementation; the real two-cluster workflow passed. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - 171ff6ffb21b91fd85fb1baac1e029547ce44940)
 
 - 2026-10-30 15:36: Trace frozen-identity cleanup and record maintained normal dedicated verification for the accompanying fixes. (agent:main:dashboard:2274f430-9287-4227-b8b3-4feaebe04da3 - c671cb4ed363130342d98db6b28fe3671213092a)
 

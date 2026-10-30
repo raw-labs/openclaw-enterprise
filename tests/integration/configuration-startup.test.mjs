@@ -2969,6 +2969,49 @@ test("Gateway-only paired selection preserves native repository delivery and Com
   assert.equal(facts.execution, undefined);
   loaded.computeDriver.validateExecutionAdmission(revision);
 
+  // Remote placement still uses attachment-only registration, without constructing a
+  // management Backend or granting the pair ownership of Harness credentials.
+  const remoteConfiguration = structuredClone(configuration);
+  delete remoteConfiguration.repository;
+  remoteConfiguration.backend = [];
+  delete remoteConfiguration.drivers.compute.configuration.network.repositoryCredentials;
+  remoteConfiguration.drivers.compute.configuration.executionCluster = {
+    authentication: {
+      mode: "kubeconfig",
+      kubeconfigPath: "/fixture/execution",
+      context: "execution",
+    },
+    harnessRouting: { ...gatewayRouting, hostname: "harness.example.test" },
+    network: {
+      dns: remoteConfiguration.drivers.compute.configuration.network.dns,
+      harnessEndpointCidrs: ["192.0.2.2/32"],
+      gatewayEndpointCidrs: ["192.0.2.1/32"],
+      pluginStatusProxySourceCidrs: ["192.0.2.2/32"],
+    },
+  };
+  const remote = await loadInstallationConfiguration({
+    mode: "production",
+    environment: { OCC_CONFIG_PATH: await fixture(t, remoteConfiguration) },
+    createOpenShellBackend() {
+      assert.fail("Remote Gateway constructed a management Backend");
+    },
+    createSandboxDriver() {
+      assert.fail("Remote Gateway selected a Harness Sandbox");
+    },
+  });
+  t.after(async () => remote.gatewayProxyDriver?.close());
+  assert.equal(remote.sandboxDriver, undefined);
+  assert.equal(remote.protectedDriver, undefined);
+  assert.equal(remote.repositoryGitDriver, undefined);
+  const remoteRevision = routedRevision(remote.computeDriver);
+  const remoteAdmission = remote.computeDriver.admitRevision(remoteRevision);
+  remoteRevision.compute.admission = remoteAdmission;
+  assert.equal(
+    JSON.parse(remoteAdmission.slice("kubernetes:v1:".length)).gatewayDestinations.driverId,
+    remote.gatewayProxyDriver.require("credential_proxy").id,
+  );
+  remote.computeDriver.validateExecutionAdmission(remoteRevision);
+
   const { createConsoleAppFixture } = await import("../helpers/console-app.mjs");
   const { installationDriverConfigurations } =
     await import("../../apps/controller/src/composition/installation-config.ts");

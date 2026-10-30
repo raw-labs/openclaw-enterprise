@@ -16,10 +16,9 @@ rfc: ../rfcs/0024-gateway-outbound-proxy-reuse.md
 
 Implement the RFC through the regular Agent authoring, deployment, activation,
 replacement and stop workflow. Preserve the RFC requirements and the authorized
-ownership clarification. Each dedicated Gateway in
-a single-cluster Kubernetes deployment uses its revision's OpenShell proxy for
-external HTTPS, including Slack. Embedded networking and separate execution
-clusters keep their existing behavior.
+ownership clarification. Each dedicated Kubernetes Gateway uses its revision's
+OpenShell proxy for external HTTPS, including Slack, with either a local or remote
+Harness. Embedded networking is unchanged. Milestone 6 records two-cluster delivery.
 
 Agent settings hold additional destinations. Enabled Channels contribute their
 own requirements. OCC saves these inputs and the effective policy in each Agent
@@ -116,6 +115,28 @@ and the existing Compute and installation composition paths.
 - [ ] Publish only task-owned changes to the existing fork PR branch. Keep the
       RFC consistent with the authorized narrow amendment. Leave upstream untouched
       and keep the PR unmerged unless separately authorized.
+
+### 6. Separate execution cluster
+
+RFC amendment `171ff6ffb` was pushed before implementation on 2026-10-30.
+
+- [x] Require immutable admission in both topologies.
+- [x] Keep proxy resources and DNS in the Gateway cluster; exclude both clusters' infrastructure.
+- [x] Preserve authenticated Harness transport without alternate external grants.
+- [x] Verify the existing Gateway-only profile with the execution-cluster overlay.
+- [x] Extend and run the real two-cluster API/worker integration.
+
+On `171ff6ffb` plus this extension, 453 conformance cases, 48 startup cases,
+one rendered-profile case and five final regressions passed without skips.
+Remote regressions failed against previous source. Typecheck, lint and workspace passed.
+
+Real Helm-installed two-cluster verification: **1 passed, no failures/skips**,
+374 seconds. It proved two-Agent destination/proxy isolation, direct IPv4 TCP
+denial with positive controls, remote model shell execution, workspace retention,
+replacement, stop/resume, execution-node outage and recovered deletion. Gateway
+permissions held during the outage; overall stop/delete still waits for execution
+API recovery. No PAT, IPv6 or immediate outage-time withdrawal claim. Source-matched
+local images were used. Owned resources were removed; no images were published.
 
 ## Verification evidence
 

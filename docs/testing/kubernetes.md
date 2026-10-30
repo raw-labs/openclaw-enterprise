@@ -344,16 +344,14 @@ reference deployment or live EKS behavior.
 
 ## Two-cluster validation
 
-This experimental profile runs OCE and dedicated Codex Harnesses in separate
-clusters. It excludes embedded execution, cloud provisioning and repository
-credential delivery. Re-run it against current images before claiming acceptance.
+This experimental OCE/Codex profile excludes embedded execution, cloud provisioning
+and repository credentials. Run current images before acceptance.
 
 ### Prepare isolated infrastructure
 
-Use two disposable k3d clusters with Kubernetes 1.35 or later, distinct Pod and
-Service CIDRs, enforcing NetworkPolicies, and loopback kubeconfigs. Select an
-existing disposable Linux VM through its Docker context. Do not change the
-default Docker context or kubeconfig. Use unused names and ports:
+Use disposable k3d clusters (Kubernetes 1.35+) with distinct Pod and Service CIDRs,
+enforcing NetworkPolicies and loopback kubeconfigs. Select a disposable local
+Docker context. Preserve defaults; use unused names and ports:
 
 ```sh
 umask 077
@@ -389,29 +387,26 @@ kubectl --kubeconfig "$OCE_TEST_DIR/dp.kubeconfig" label \
   node k3d-openclaw-k8s-local-dp-server-0 oce-role=agents
 ```
 
-Keep the private kubeconfigs out of Git and runtime images. Install Envoy Gateway
-in both clusters and cert-manager in the control plane (CP). Provide independent
-RWO Gateway storage in CP and Harness storage in the execution cluster (DP).
-Import approved immutable images and install the Codex seccomp profile on DP.
+Keep kubeconfigs out of Git and runtime images. Install Envoy Gateway in both clusters, cert-manager in
+control (CP), independent RWO storage in CP and execution (DP), immutable images,
+and the Codex seccomp profile in DP.
 
 After CoreDNS installs, place `coredns.yaml.skip` under
 `/var/lib/rancher/k3s/server/manifests/` on each owned test node to retain local
-DNS settings across restarts. This is fixture setup, not production DNS setup.
+DNS settings across restarts. This is not production DNS setup.
 
 ### Configure the network and credentials
 
-All cross-cluster traffic uses verified HTTPS. Set reachable DNS names,
-certificates, observed CIDRs, and cluster API access. Do not use cluster-local
-`.svc` addresses across clusters. CP API and worker use separate scoped DP
-kubeconfigs; Gateway uses the exact-Agent transport token to reach the Harness,
-and the workspace node uses its node-only identity to reach Gateway.
+Use verified HTTPS and reachable DNS names, certificates and observed CIDRs,
+not cross-cluster `.svc` addresses. CP API and worker need separate scoped DP
+kubeconfigs. Gateway authenticates to Harness with its Agent transport token;
+the workspace node uses its node-only Gateway identity.
 
-Create a DP TLS Secret and install `deploy/helm/openclaw-execution` with
-`routing.hostname`, `gatewayClassName`, `tlsSecretName`, and
-`controlPlaneCidrs`. Provision distinct DP API and worker kubeconfigs, then
-store them in separate CP Secrets with a `kubeconfig` key. Administrators own
-credential issuance, rotation, and tenant grants. The worker must not have
-RoleBinding-write or impersonation permission.
+Install `deploy/helm/openclaw-execution` with a DP TLS Secret and
+`routing.hostname`, `gatewayClassName`, `tlsSecretName` and `controlPlaneCidrs`.
+Store scoped DP kubeconfigs in separate CP Secrets under `kubeconfig`.
+Administrators issue credentials and tenant grants. Deny worker RoleBinding
+writes and impersonation.
 
 Add this to the Installation Compute configuration:
 
@@ -453,10 +448,9 @@ from controller and runtime Pods before creating Agents.
 ### Install and exercise the platform
 
 Follow [production installation](../guides/deploy/production-installation.md)
-for PostgreSQL, restricted roles, bootstrap and the CP Helm release. Prepare
-bootstrap PVC ownership before initialization. If initialization fails, check
-commit state and follow bootstrap recovery; do not reset the database or delete
-protected output automatically.
+for PostgreSQL, restricted roles, bootstrap PVC ownership and CP Helm setup.
+On initialization failure, check commit state and use bootstrap recovery; do not
+reset the database or delete protected output.
 
 Grant the DP tenant worker and API bindings and the three CP bindings in
 [Agent preparation](../guides/deploy/production-agents.md#grant-tenant-rolebindings).
@@ -470,14 +464,28 @@ objects. Each object needs `kubeconfigPath`, `kubernetesContext`, `release`, and
 provide its credential through `OPENAI_API_KEY` or `CODEX_ACCESS_TOKEN`, not the
 fixture. The pass covers only the selected method.
 
+Set `gatewayDestinations.first` and `gatewayDestinations.replacement` to distinct
+public HTTPS endpoints: each needs `url` and `marker` (8–120 letters, digits,
+underscores or hyphens). Require trusted TLS, TCP/443, HTTP 200 without redirects,
+and runner reachability, including direct TCP to the Gateway-resolved IPv4 addresses.
+
+Select the Gateway-only Sandbox and Credential Proxy pair in the Installation.
+Its blocked infrastructure CIDRs must include both clusters' Pod, Service, node,
+and API address ranges. Import the selected immutable proxy images into CP.
+Agents are API-created, then updated with approved hosts. A peer checks mutual
+host denial and cross-proxy isolation. A successor changes the first host.
+Do not add test-only egress grants.
+
 ```sh
 OCC_TEST_TWO_CLUSTER_CONFIG=/private/path/two-cluster.json \
   node --test tests/integration/kubernetes-two-cluster-real.test.mjs
 ```
 
-The selected test fails on missing inputs. It checks real model turns, workspace
-RPC, replacement and recovery. It stops and restores the selected DP node; do
-not run other tests against it concurrently.
+Missing inputs fail. The test checks model turns, workspace RPC, CP proxy
+placement, host policy, direct-TCP denial and proxy cleanup on replacement, stop
+and deletion. Stopping DP must preserve CP egress enforcement; cleanup resumes
+after recovery. DP is restored even on failure. Do not run concurrent tests
+against it. Skips are not proof.
 A failed run retains its Namespace. Delete its Agent, Configuration, Secret and
 seeded Presets through the API before deleting the Namespace. The test does not
 establish recovery after worker retry exhaustion or an aged node reconnect after
@@ -491,7 +499,7 @@ k3d_local cluster delete openclaw-k8s-local-cp openclaw-k8s-local-dp
 docker --context "$OCE_DOCKER_CONTEXT" network rm oce-two-cluster-local
 ```
 
-Remove the private test directory when you no longer need its kubeconfigs.
+Remove the private directory after cleanup.
 
 ### Upgrade the execution chart
 
