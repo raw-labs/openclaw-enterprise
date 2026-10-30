@@ -25,10 +25,10 @@ The entrypoint enforces hard expiry independently of the controller and Pod
 deadline. Client-alive checks disconnect unresponsive SSH sessions; controller
 activity tracking owns the environment idle deadline.
 
-For the packaged Crabbox path, configure the Compute Driver with
-`temporaryEnvironments.defaultProfileId` selecting an approved profile whose
-Namespace allowlist includes the Agent. Omit it to keep HTTP profile discovery
-without selecting the CLI adapter. Configure `temporaryEnvironmentApiUrl` as
+For the packaged Crabbox path, configure approved profiles on the Compute Driver,
+then PATCH the Agent metadata with `temporaryEnvironments: {profileId: "acceptance"}`
+and deploy a new revision. Its Namespace must be in the profile allowlist. An absent
+selection disables both workload discovery and the CLI adapter; `null` removes it. Configure `temporaryEnvironmentApiUrl` as
 HTTPS and `temporaryEnvironmentApiEgress` with the actual translated IPv4 `/32`
 and TCP port; private PKI additionally requires `temporaryEnvironmentApiCaBundle`
 containing PEM certificates. Projected workload credentials and the ordinary

@@ -277,6 +277,7 @@ export const agents = occSchema.table(
     harnessAuthCredentialSourceId: text("harness_auth_credential_source_id").generatedAlwaysAs(
       sql`CASE WHEN harness_auth->>'method' = 'credential_source' THEN harness_auth->>'sourceId' END`,
     ),
+    temporaryEnvironments: jsonb("temporary_environments").$type<{ readonly profileId: string }>(),
     credentialSources: jsonb("credential_sources").$type<readonly AgentCredentialSourceBinding[]>(),
     activeRevisionId: text("active_revision_id"),
     desiredRuntimeState: text("desired_runtime_state")
@@ -295,6 +296,10 @@ export const agents = occSchema.table(
       table.servicePrincipalId,
     ),
     check("agents_id_format", sql`${table.id} ~ ${identifierPatterns.agent}`),
+    check(
+      "agents_temporary_environments_valid",
+      sql`temporary_environments IS NULL OR (jsonb_typeof(temporary_environments) = 'object' AND temporary_environments ? 'profileId' AND (temporary_environments - 'profileId') = '{}'::jsonb AND jsonb_typeof(temporary_environments->'profileId') = 'string' AND temporary_environments->>'profileId' ~ '^[a-z][a-z0-9-]{0,62}$')`,
+    ),
     check("agents_name_length", sql`char_length(${table.name}) BETWEEN 1 AND 200`),
     check("agents_execution_mode_valid", sql`${table.executionMode} IN ('embedded', 'dedicated')`),
     check(
@@ -664,7 +669,13 @@ export const agentRevisions = occSchema.table(
           - 'configuration_id' - 'configuration_kind' - 'configuration_generation'
           - 'draft_spec' - 'harness' - 'compute' - 'sandbox_driver_id'
           - 'secret_driver_id' - 'secret_bindings' - 'harness_auth' - 'credential_sources' - 'plugins'
-          - 'repository_credentials') = '{}'::jsonb
+          - 'repository_credentials' - 'plugin_approvers' - 'temporary_environments') = '{}'::jsonb
+        AND (NOT (${table.admittedSpec} ? 'temporary_environments') OR
+          (jsonb_typeof(${table.admittedSpec}->'temporary_environments') = 'object'
+           AND (${table.admittedSpec}->'temporary_environments') ? 'profileId'
+           AND ((${table.admittedSpec}->'temporary_environments') - 'profileId') = '{}'::jsonb
+           AND jsonb_typeof(${table.admittedSpec}#>'{temporary_environments,profileId}') = 'string'
+           AND ${table.admittedSpec}#>>'{temporary_environments,profileId}' ~ '^[a-z][a-z0-9-]{0,62}$'))
         AND jsonb_typeof(${table.admittedSpec}->'configuration_id') = 'string'
         AND (${table.admittedSpec}->>'configuration_id') ~ ${identifierPatterns.configuration}
         AND jsonb_typeof(${table.admittedSpec}->'configuration_kind') = 'string'

@@ -52,6 +52,64 @@ function request(revision, overrides = {}) {
 
 async function exercise(store, reopened) {
   const { namespace, agent, revision } = await owner(store);
+  const selected = await store.transact((unit) =>
+    unit.agents.updateConfiguration(
+      namespace.id,
+      agent.id,
+      agent.configurationId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { profileId: "ordinary-tests" },
+    ),
+  );
+  assert.deepEqual(selected.temporaryEnvironments, { profileId: "ordinary-tests" });
+  assert.deepEqual(
+    (await reopened.read((view) => view.agents.findAgent(namespace.id, agent.id)))
+      .temporaryEnvironments,
+    { profileId: "ordinary-tests" },
+  );
+  const snapshot = {
+    ...revision,
+    id: "rev_" + randomUUID(),
+    revision: 2,
+    temporaryEnvironments: selected.temporaryEnvironments,
+  };
+  await store.transact((unit) => unit.revisions.createRevision(snapshot));
+  await store.transact((unit) =>
+    unit.agents.updateConfiguration(
+      namespace.id,
+      agent.id,
+      agent.configurationId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+    ),
+  );
+  assert.equal(
+    (await reopened.read((view) => view.agents.findAgent(namespace.id, agent.id)))
+      .temporaryEnvironments,
+    undefined,
+  );
+  assert.deepEqual(
+    (
+      await reopened.read((view) =>
+        view.revisions.findRevision(namespace.id, agent.id, snapshot.id),
+      )
+    ).temporaryEnvironments,
+    { profileId: "ordinary-tests" },
+  );
   const input = request(revision, { lifetimeSeconds: 1 });
   const reserve = (value = input) =>
     store.transact((unit) => unit.temporaryEnvironments.reserve(value));

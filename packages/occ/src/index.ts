@@ -637,6 +637,7 @@ export interface CreateAgentInput {
 }
 
 export interface UpdateAgentInput {
+  readonly temporaryEnvironments?: Agent["temporaryEnvironments"] | null;
   readonly namespaceId: string;
   readonly agentId: string;
   readonly configurationId: string;
@@ -2222,6 +2223,47 @@ export class OpenClawController {
     return { servicePrincipalId: principalId, namespaceId, agentId, revisionId };
   }
 
+  private validateAgentTemporaryEnvironments(
+    namespaceId: string,
+    value: Agent["temporaryEnvironments"] | null | undefined,
+  ) {
+    if (value == null) {
+      return undefined;
+    }
+    if (
+      typeof value !== "object" ||
+      Object.keys(value).length !== 1 ||
+      typeof value.profileId !== "string" ||
+      !/^[a-z][a-z0-9-]{0,62}$/.test(value.profileId)
+    ) {
+      throw new ScopeViolationError("Invalid Agent temporary environment profile selection.");
+    }
+    if (
+      !this.temporaryEnvironmentPolicy()?.profiles.some(
+        (p) => p.id === value.profileId && p.namespaceIds.includes(namespaceId),
+      )
+    ) {
+      throw new AuthorizationDeniedError(
+        "The temporary environment profile is not approved for this Agent Namespace.",
+      );
+    }
+    return Object.freeze({ profileId: value.profileId });
+  }
+  private async admittedTemporaryEnvironmentProfile(
+    state: PlatformReadView,
+    identity: AgentWorkloadIdentity,
+  ) {
+    const revision = await state.revisions.findRevision(
+      identity.namespaceId,
+      identity.agentId,
+      identity.revisionId,
+    );
+    return this.temporaryEnvironmentPolicy()?.profiles.find(
+      (p) =>
+        p.id === revision?.temporaryEnvironments?.profileId &&
+        p.namespaceIds.includes(identity.namespaceId),
+    );
+  }
   private temporaryEnvironmentConnectionAllowed(record: Readonly<TemporaryEnvironmentReservation>) {
     return (
       this.temporaryEnvironmentPolicy()?.profiles.some(
@@ -2296,10 +2338,11 @@ export class OpenClawController {
       agentId,
       revisionId,
     );
-    return this.withTemporaryEnvironmentAuthority(identity, async () => {
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const selected = await this.admittedTemporaryEnvironmentProfile(state, identity);
       const profiles =
         this.temporaryEnvironmentPolicy()
-          ?.profiles.filter((profile) => profile.namespaceIds.includes(namespaceId))
+          ?.profiles.filter((profile) => profile.id === selected?.id)
           .map((profile) => ({
             id: profile.id,
             cpuMillis: profile.cpuMillis,
@@ -2327,10 +2370,8 @@ export class OpenClawController {
     );
     return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
       const policy = this.temporaryEnvironmentPolicy();
-      const profile = policy?.profiles.find(
-        (candidate) =>
-          candidate.id === input.profileId && candidate.namespaceIds.includes(namespaceId),
-      );
+      const admitted = await this.admittedTemporaryEnvironmentProfile(state, identity);
+      const profile = admitted?.id === input.profileId ? admitted : undefined;
       if (!policy || !profile) {
         throw new AuthorizationDeniedError(
           "The requested temporary environment profile is not approved for this Namespace.",
@@ -2422,7 +2463,11 @@ export class OpenClawController {
     );
     return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
       const existing = await this.ownedTemporaryEnvironment(state, identity, requestId);
-      if (!this.temporaryEnvironmentConnectionAllowed(existing)) {
+      const admitted = await this.admittedTemporaryEnvironmentProfile(state, identity);
+      if (
+        admitted?.id !== existing.profileId ||
+        !this.temporaryEnvironmentConnectionAllowed(existing)
+      ) {
         throw new AuthorizationDeniedError(
           "The temporary environment profile is no longer approved.",
         );
@@ -6572,6 +6617,9 @@ export class OpenClawController {
       }
       await this.guardAgentProvisioning(state, namespace.id, agent.id);
       await this.guardProvisioningConfiguration(state, namespace.id, input.configurationId);
+      if (input.temporaryEnvironments !== undefined) {
+        this.validateAgentTemporaryEnvironments(namespace.id, input.temporaryEnvironments);
+      }
       const previousAuth = this.harnessAuthBinding(agent.harnessAuth);
       // Every update needs the caller's grant on each source the Agent binds now, but not a
       // usable record: after a Secret Driver or Credential Gateway change, an update must still
@@ -6630,6 +6678,7 @@ export class OpenClawController {
         pluginApprovers,
         repositoryAccess,
         requestedSources,
+        input.temporaryEnvironments,
       );
       if (!updated) {
         throw new ResourceStateConflictError("The Agent Configuration changed during its update.");
@@ -6856,6 +6905,10 @@ export class OpenClawController {
       requireDedicatedNativeSupport(revisionHarness, sandbox, this.nativeWorkers);
       const harnessAuth = await this.admitHarnessAuth(state, principalId, lockedAgent);
       const credentialSourceType = await this.admittedCredentialSourceType(harnessAuth, sandbox);
+      const temporaryEnvironments = this.validateAgentTemporaryEnvironments(
+        namespace.id,
+        lockedAgent.temporaryEnvironments,
+      );
       const credentialSources = await this.admitCredentialSources(
         state,
         principalId,
@@ -7012,6 +7065,7 @@ export class OpenClawController {
       }
       const revision = await state.revisions.createRevision(
         freezeAgentRevision({
+          ...(temporaryEnvironments === undefined ? {} : { temporaryEnvironments }),
           id: this.nextIdentifier("agent_revision"),
           namespaceId: namespace.id,
           agentId: lockedAgent.id,

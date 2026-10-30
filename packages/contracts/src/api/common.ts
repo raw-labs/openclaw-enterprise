@@ -715,8 +715,15 @@ export const ProvisionAgentBody = Type.Object(
   { additionalProperties: false },
 );
 
+export const AgentTemporaryEnvironmentsSchema = Type.Object(
+  { profileId: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }) },
+  { additionalProperties: false },
+);
 export const UpdateAgentBody = Type.Object(
   {
+    temporaryEnvironments: Type.Optional(
+      Type.Union([AgentTemporaryEnvironmentsSchema, Type.Null()]),
+    ),
     configurationId: ConfigurationId,
     backendId: Type.Optional(Type.Union([BackendId, Type.Null()])),
     harnessAuth: Type.Optional(Type.Union([HarnessAuthBindingSchema, Type.Null()])),

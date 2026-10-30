@@ -1,3 +1,5 @@
+import { KubernetesComputeDriver } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
+import { conformanceKubernetesOptions } from "../helpers/kubernetes-compute.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -460,4 +462,80 @@ test("public Agent revisions return the selected binding without private credent
   });
   const historical = await fixture.request("GET", `${path}/${revision.id}`);
   assert.deepEqual(historical.data.harnessAuth, agent.harnessAuth);
+});
+
+test("Agent metadata opt-in is admitted separately from strict Harness JSON and disabled revisions stay disabled", async (t) => {
+  const fixture = await createConsoleAppFixture(t);
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Temporary profiles", { ready: true });
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Opt-in Agent",
+    createHarnessConfiguration("openclaw", "gpt-4.1"),
+  );
+  const compute = new KubernetesComputeDriver(
+    {
+      ...conformanceKubernetesOptions({ gatewayTrustedProxyCidrs: ["127.0.0.1/32"] }),
+      temporaryEnvironments: {
+        profiles: [
+          {
+            id: "tests-small",
+            namespaceIds: [namespace.id],
+            image: "registry.example/ssh@sha256:" + "a".repeat(64),
+            cpuMillis: 100,
+            memoryMiB: 128,
+            lifetimeSeconds: 600,
+            idleTimeoutSeconds: 60,
+            egress: [],
+          },
+          {
+            id: "forbidden",
+            namespaceIds: ["ns_00000000-0000-4000-8000-000000000001"],
+            image: "registry.example/ssh@sha256:" + "b".repeat(64),
+            cpuMillis: 100,
+            memoryMiB: 128,
+            lifetimeSeconds: 600,
+            idleTimeoutSeconds: 60,
+            egress: [],
+          },
+        ],
+        quota: { maxEnvironments: 2, maxCpuMillis: 200, maxMemoryMiB: 256 },
+      },
+    },
+    { id: "temporary-policy" },
+  );
+  fixture.controller.registerDriver(compute);
+  fixture.controller.selectDriver("compute", compute.id);
+  const path = "/namespaces/" + namespace.id + "/agents/" + agent.id;
+  assert.equal(agent.temporaryEnvironments, undefined);
+  const disabled = await fixture.deployAgent(namespace.id, agent.id);
+  assert.equal(disabled.temporaryEnvironments, undefined);
+  for (const profileId of ["unknown", "forbidden"]) {
+    const denied = await fixture.request("PATCH", path, {
+      body: { configurationId: agent.configurationId, temporaryEnvironments: { profileId } },
+    });
+    assert.equal(denied.status, 403, JSON.stringify(denied.body));
+  }
+  const updated = await fixture.updateAgent(namespace.id, agent.id, {
+    configurationId: agent.configurationId,
+    temporaryEnvironments: { profileId: "tests-small" },
+  });
+  assert.deepEqual(updated.temporaryEnvironments, { profileId: "tests-small" });
+  const admitted = await fixture.deployAgent(namespace.id, agent.id);
+  assert.deepEqual(admitted.temporaryEnvironments, { profileId: "tests-small" });
+  assert.equal(admitted.configuration.temporaryEnvironments, undefined);
+  await fixture.updateAgent(namespace.id, agent.id, {
+    configurationId: agent.configurationId,
+    temporaryEnvironments: null,
+  });
+  const next = await fixture.deployAgent(namespace.id, agent.id);
+  assert.equal(next.temporaryEnvironments, undefined);
+  assert.deepEqual(
+    (await fixture.request("GET", path + "/revisions/" + admitted.id)).data.temporaryEnvironments,
+    { profileId: "tests-small" },
+  );
+  assert.equal(
+    (await fixture.request("GET", path + "/revisions/" + disabled.id)).data.temporaryEnvironments,
+    undefined,
+  );
 });

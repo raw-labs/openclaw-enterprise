@@ -101,6 +101,7 @@ export async function reconcileTemporaryEnvironment(
         revision?.compute.id !== compute.id ||
         revision.compute.implementation !== compute.implementation ||
         revision.servicePrincipalId !== record.servicePrincipalId ||
+        revision.temporaryEnvironments?.profileId !== record.profileId ||
         decision?.allowed !== true ||
         decision.driverId !== deps.iam.id ||
         profile?.fingerprint !== record.profileFingerprint ||

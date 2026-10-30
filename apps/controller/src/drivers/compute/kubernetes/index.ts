@@ -2242,7 +2242,10 @@ function nativeRuntimeSnapshot(revision: AgentRevision): NativeRuntimeSnapshot |
     );
   }
   return {
-    configuration: JSON.stringify(nativeRuntimeConfiguration(revision.configuration)),
+    configuration: JSON.stringify({
+      ...nativeRuntimeConfiguration(revision.configuration),
+      skills: revision.configuration.skills,
+    }),
   };
 }
 
@@ -3347,14 +3350,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
     } else if (hasDirectGatewayClients) {
       throw new ConfigurationFailure(
         "Gateway routing derives the Envoy gateway client peer; do not configure network.gatewayClients.",
-      );
-    }
-    if (
-      options.temporaryEnvironments?.defaultProfileId !== undefined &&
-      (options.temporaryEnvironmentApiUrl === undefined || options.runtime === undefined)
-    ) {
-      throw new ConfigurationFailure(
-        "Temporary environment adapter selection requires an OCC endpoint and Agent runtime.",
       );
     }
     if (
@@ -5350,11 +5345,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
       repositoryConsumer?.role !== "gateway"
         ? revision.configuration
         : repositoryNativeConfiguration(revision.configuration);
-    const admittedNativeConfiguration = this.gatewayNativeHookRelayConfiguration(
+    const admittedNativeConfiguration = this.temporaryEnvironmentSkillConfiguration(
       revision,
-      this.gatewaySandboxConfiguration(
+      this.gatewayNativeHookRelayConfiguration(
         revision,
-        this.kubernetesGatewayConfigurationDocument(nativeConfiguration),
+        this.gatewaySandboxConfiguration(
+          revision,
+          this.kubernetesGatewayConfigurationDocument(nativeConfiguration),
+        ),
       ),
     );
     const admittedRevision = { ...revision, configuration: admittedNativeConfiguration };
@@ -5849,6 +5847,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
               repositoryConsumer?.role === "gateway" ? repositoryMaterial : undefined,
               undefined,
               providerEndpoint,
+              revision.temporaryEnvironments,
             ),
             gatewayOwnership,
             gatewayNamespace,
@@ -6007,6 +6006,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
         workspaceSetup,
         repositoryConsumer?.role === "agent" ? repositoryMaterial : undefined,
         nativeRuntime,
+        undefined,
+        revision.temporaryEnvironments,
       );
       if (node !== undefined) {
         if (nativeRuntime === undefined) {
@@ -6327,11 +6328,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
       repositoryConsumer?.role !== "gateway"
         ? revision.configuration
         : repositoryNativeConfiguration(revision.configuration);
-    const admittedNativeConfiguration = this.gatewayNativeHookRelayConfiguration(
+    const admittedNativeConfiguration = this.temporaryEnvironmentSkillConfiguration(
       revision,
-      this.gatewaySandboxConfiguration(
+      this.gatewayNativeHookRelayConfiguration(
         revision,
-        this.kubernetesGatewayConfigurationDocument(nativeConfiguration),
+        this.gatewaySandboxConfiguration(
+          revision,
+          this.kubernetesGatewayConfigurationDocument(nativeConfiguration),
+        ),
       ),
     );
     const admittedRevision = { ...revision, configuration: admittedNativeConfiguration };
@@ -6451,6 +6455,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
               [],
               workspaceSetup,
               repositoryMaterial,
+              undefined,
+              undefined,
+              revision.temporaryEnvironments,
             ),
             gatewayOwnership,
             namespace,
@@ -6563,6 +6570,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
         workspaceSetup,
         repositoryMaterial,
         nativeRuntime,
+        undefined,
+        revision.temporaryEnvironments,
       );
     let providerEndpoint: SandboxHarnessEndpoint | undefined;
     if (sandboxDriver?.provisionHarness === undefined) {
@@ -6704,6 +6713,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         undefined,
         undefined,
         providerEndpoint,
+        revision.temporaryEnvironments,
       ),
       gatewayOwnership,
       gatewayNamespace,
@@ -11019,6 +11029,30 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     return `https://${host}${port === 443 ? "" : `:${port}`}`;
   }
 
+  private temporaryEnvironmentSkillConfiguration(
+    revision: AgentRevision,
+    configuration: OpenClawConfigurationDocument,
+  ): OpenClawConfigurationDocument {
+    const document = structuredClone(configuration);
+    const skills = asRecord(document.skills) ?? {};
+    const entries = asRecord(skills.entries) ?? {};
+    const crabbox = asRecord(entries.crabbox) ?? {};
+    return {
+      ...document,
+      skills: {
+        ...skills,
+        entries: {
+          ...entries,
+          crabbox: { ...crabbox, enabled: revision.temporaryEnvironments !== undefined },
+          "crabbox-quickstart": {
+            ...(asRecord(entries["crabbox-quickstart"]) ?? {}),
+            enabled: revision.temporaryEnvironments !== undefined,
+          },
+        },
+      },
+    } as OpenClawConfigurationDocument;
+  }
+
   private gatewayNativeHookRelayConfiguration(
     revision: AgentRevision,
     configuration: OpenClawConfigurationDocument,
@@ -12138,8 +12172,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           `require("node:fs").writeFileSync("/runtime-state/home/.config/crabbox/config.yaml", ${JSON.stringify(JSON.stringify({ provider: "external", target: "linux", external: { command: "/usr/local/bin/occ-crabbox-provider", capabilities: { idempotentLeaseId: true }, connection: { ssh: { trustProviderOutput: true } }, workRoot: "/workspace" } }))}, {mode:0o600});`,
         ]
       : [];
-    const workloadCa =
-      role === "agent" || embedded ? this.options.temporaryEnvironmentApiCaBundle : undefined;
+    const workloadCa = temporaryAdapter ? this.options.temporaryEnvironmentApiCaBundle : undefined;
     const script = [
       writableConfiguration
         ? 'const { chmodSync, copyFileSync, mkdirSync } = require("node:fs");'
@@ -12684,6 +12717,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       },
     ];
     const workloadApiPolicies =
+      revision.temporaryEnvironments === undefined ||
       this.options.temporaryEnvironmentApiEgress === undefined
         ? []
         : [
@@ -13669,6 +13703,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     repositoryMaterial?: ResolvedRepositoryMaterialSpec,
     nativeRuntime?: NativeRuntimeSnapshot,
     providerEndpoint?: SandboxHarnessEndpoint,
+    temporaryEnvironments?: AgentRevision["temporaryEnvironments"],
   ): ManagedKubernetesObject {
     if (nativeRuntime !== undefined && (embedded || role !== "agent")) {
       throw new ConfigurationFailure(
@@ -13727,17 +13762,25 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       providerEndpoint === undefined
         ? undefined
         : providerHarnessUrl(providerEndpoint, providerNetwork!);
-    const defaultProfileId = this.options.temporaryEnvironments?.defaultProfileId;
-    const temporaryAdapter = (role === "agent" || embedded) && defaultProfileId !== undefined;
+    const profileId = temporaryEnvironments?.profileId;
+    const temporaryAdapter = (role === "agent" || embedded) && profileId !== undefined;
     if (
       temporaryAdapter &&
-      !this.options.temporaryEnvironments!.profiles.find(
+      !this.options.temporaryEnvironments?.profiles.find(
         (profile) =>
-          profile.id === defaultProfileId && profile.namespaceIds.includes(ownership.namespaceId),
+          profile.id === profileId && profile.namespaceIds.includes(ownership.namespaceId),
       )
     ) {
       throw new ConfigurationFailure(
-        "Temporary environment default profile is not eligible for this Namespace.",
+        "Temporary environment selected profile is not eligible for this Namespace.",
+      );
+    }
+    if (
+      temporaryAdapter &&
+      (this.options.temporaryEnvironmentApiUrl === undefined || runtime === undefined)
+    ) {
+      throw new ConfigurationFailure(
+        "Temporary environment selection requires an OCC endpoint and Agent runtime.",
       );
     }
     const initContainers = privateHome
@@ -13929,14 +13972,12 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       }
     }
     if (projected !== undefined) {
-      if (this.options.temporaryEnvironmentApiUrl !== undefined) {
-        if (temporaryAdapter) {
-          variables.push(
-            { name: "OCC_WORKLOAD_SSH_KEY_FILE", value: "/home/node/.ssh/occ-temporary" },
-            { name: "OCC_WORKLOAD_TEMPORARY_PROFILE", value: defaultProfileId! },
-            { name: "CRABBOX_CONFIG", value: "/home/node/.config/crabbox/config.yaml" },
-          );
-        }
+      if (temporaryAdapter && this.options.temporaryEnvironmentApiUrl !== undefined) {
+        variables.push(
+          { name: "OCC_WORKLOAD_SSH_KEY_FILE", value: "/home/node/.ssh/occ-temporary" },
+          { name: "OCC_WORKLOAD_TEMPORARY_PROFILE", value: profileId! },
+          { name: "CRABBOX_CONFIG", value: "/home/node/.config/crabbox/config.yaml" },
+        );
         if (this.options.temporaryEnvironmentApiCaBundle !== undefined) {
           variables.push({ name: "NODE_EXTRA_CA_CERTS", value: "/home/node/occ-workload-ca.pem" });
         }

@@ -742,6 +742,10 @@ test(
         stoppedAgentId: stoppedAgent.id,
       });
       if (temporarySSHImage !== undefined) {
+        await api("PATCH", "/namespaces/" + namespace.id + "/agents/" + agent.id, {
+          configurationId: agent.configurationId,
+          temporaryEnvironments: { profileId: "acceptance" },
+        });
         await allowTemporaryEnvironmentWorkflow({ system, tenant, agent, apply });
       }
       return { agent, agentHash, namespace, secondaryAgent, stoppedAgent, tenant };

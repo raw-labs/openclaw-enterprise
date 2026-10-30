@@ -39,6 +39,16 @@ test("core admits exact workload-owned reservations with real IAM, policy, atomi
           idleTimeoutSeconds: 60,
           egress: [],
         },
+        {
+          id: "other",
+          namespaceIds: [namespace.id],
+          image: "registry.example/ssh@sha256:" + "b".repeat(64),
+          cpuMillis: 100,
+          memoryMiB: 128,
+          lifetimeSeconds: 600,
+          idleTimeoutSeconds: 60,
+          egress: [],
+        },
       ],
       quota: { maxEnvironments: 2, maxCpuMillis: 200, maxMemoryMiB: 256 },
     },
@@ -47,6 +57,7 @@ test("core admits exact workload-owned reservations with real IAM, policy, atomi
     ...revision,
     id: "rev_" + randomUUID(),
     revision: 2,
+    temporaryEnvironments: { profileId: "small" },
     compute: { id: compute.id, implementation: compute.implementation },
   };
   await state.transact(async (unit) => {
@@ -98,6 +109,14 @@ test("core admits exact workload-owned reservations with real IAM, policy, atomi
   };
   const ready = await controller.getTemporaryEnvironmentReadiness(...scope);
   assert.equal(ready.supported, true);
+  assert.deepEqual(
+    ready.profiles.map((p) => p.id),
+    ["small"],
+  );
+  await assert.rejects(
+    controller.acquireTemporaryEnvironment(...scope, { ...input, profileId: "other" }),
+    { name: "AuthorizationDeniedError" },
+  );
   const saved = await controller.acquireTemporaryEnvironment(...scope, input);
   assert.equal(saved.state, "reserved");
   assert.equal(saved.name, input.name);
@@ -176,6 +195,24 @@ test("core admits exact workload-owned reservations with real IAM, policy, atomi
     });
   }
   allowed = true;
+  // Removing only the selected profile prevents readiness, acquisition and renewal.
+  const originalPolicy = compute.options.temporaryEnvironments;
+  compute.options.temporaryEnvironments = {
+    ...originalPolicy,
+    profiles: originalPolicy.profiles.filter((p) => p.id !== "small"),
+  };
+  assert.deepEqual(await controller.getTemporaryEnvironmentReadiness(...scope), {
+    supported: false,
+    profiles: [],
+  });
+  await assert.rejects(controller.touchTemporaryEnvironment(...scope, input.requestId), {
+    name: "AuthorizationDeniedError",
+  });
+  await assert.rejects(
+    controller.acquireTemporaryEnvironment(...scope, { ...input, requestId: randomUUID() }),
+    { name: "AuthorizationDeniedError" },
+  );
+  compute.options.temporaryEnvironments = originalPolicy;
   const touched = await controller.touchTemporaryEnvironment(...scope, input.requestId);
   assert.equal(touched.hardExpiresAt, saved.hardExpiresAt);
   const released = await controller.releaseTemporaryEnvironment(...scope, input.requestId);
@@ -190,5 +227,23 @@ test("core admits exact workload-owned reservations with real IAM, policy, atomi
       .reservedEnvironments,
     1,
     "queued release is not provider absence",
+  );
+  const disabled = { ...active, id: "rev_" + randomUUID(), revision: 3 };
+  delete disabled.temporaryEnvironments;
+  await state.transact(async (unit) => {
+    await unit.revisions.createRevision(disabled);
+    await unit.agents.compareAndSetActiveRevision(namespace.id, agent.id, active.id, disabled.id);
+  });
+  const disabledScope = [...scope.slice(0, 3), disabled.id];
+  assert.deepEqual(await controller.getTemporaryEnvironmentReadiness(...disabledScope), {
+    supported: false,
+    profiles: [],
+  });
+  await assert.rejects(
+    controller.acquireTemporaryEnvironment(...disabledScope, { ...input, requestId: randomUUID() }),
+    { name: "AuthorizationDeniedError" },
+  );
+  await state.transact((unit) =>
+    unit.agents.compareAndSetActiveRevision(namespace.id, agent.id, disabled.id, active.id),
   );
 });

@@ -39,7 +39,7 @@ The controller and worker still enforce the caller's exact resource authority.
 The `temporaryEnvironments` repository participates in the existing read/UOW
 boundary. Trusted admission code can set Namespace count/CPU/memory ceilings and
 reserve immutable Agent/revision-owned requests. Workload-only HTTP acquisition
-now checks exact IAM authority and approved profiles, then commits reservation,
+checks exact IAM authority and the admitted AgentRevision profile selection, then commits reservation,
 quota, audit and existing controller work together. Persistence alone does not
 authorize a caller. The Crabbox adapter preserves the same immutable name, slug
 and request identity and waits for confirmed deletion.

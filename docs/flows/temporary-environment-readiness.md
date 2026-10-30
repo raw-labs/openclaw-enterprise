@@ -1,7 +1,7 @@
 ---
 created: 2026-10-30
 updated: 2026-10-30
-last_updated_session: authoring-run/3f41f626-a22b-4df0-a178-4ddc9bd4eeca
+last_updated_session: authoring-run/698bf847-f591-4d16-9cea-b5bb5ea44aa1
 ---
 
 # Temporary environment workload lifecycle flow
@@ -58,7 +58,12 @@ The same bearer remains invalid on ordinary OCC routes.
 
 `packages/occ/src/index.ts:withTemporaryEnvironmentAuthority` checks exact-Agent IAM operate before lookups and again under
 Namespace then Agent locks. It checks the current revision, ServicePrincipal and
-selected Compute descriptor. Profile policy is selected-driver configuration,
+selected Compute descriptor. Agent PATCH stores an optional generic
+`temporaryEnvironments: {profileId}` selection outside Harness JSON; deployment
+validates it against the selected Compute policy and freezes it in AgentRevision.
+Absence disables discovery and acquisition. The Driver renders provider settings,
+key setup and native skill enablement only from that revision selection. Edits apply
+on deployment, not to an already running revision. Profile policy is selected-driver configuration,
 not a caller image, manifest or network grant. The request admits only a bounded
 identity, approved profile ID and canonical public Ed25519 key. Private keys stay
 with the Agent.
@@ -125,6 +130,8 @@ keep requests; nested-cluster profiles are not supported.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-30 21:00: Add per-Agent desired/admitted profile selection and disabled runtime discovery. (authoring-run/698bf847-f591-4d16-9cea-b5bb5ea44aa1 - 72c8087a6cb24a0b0f83fbba8e66444479755b59)
 
 - 2026-10-30 20:33: Recover the connected draft, verify local contracts and route worker identity checks through the selected IAM Driver; SQL, image and live Agent acceptance remain unrun. (authoring-run/3f41f626-a22b-4df0-a178-4ddc9bd4eeca - 2e6981e9fd640c8e6179e046bcb0f690c2ff38cb)
 

@@ -4,8 +4,6 @@ import type { TemporaryEnvironmentPolicy } from "@openclaw-enterprise/contracts"
 
 /** Operator-supplied images must implement the nonroot SSH entrypoint contract. */
 export interface KubernetesTemporaryEnvironmentOptions {
-  /** Explicit adapter selection; omission keeps HTTP profile discovery available. */
-  readonly defaultProfileId?: string;
   readonly profiles: readonly {
     readonly id: string;
     readonly namespaceIds: readonly string[];
@@ -31,7 +29,7 @@ export function validateTemporaryEnvironmentOptions(
   if (
     value === null ||
     typeof value !== "object" ||
-    Object.keys(value).some((key) => !["profiles", "quota", "defaultProfileId"].includes(key)) ||
+    Object.keys(value).some((key) => !["profiles", "quota"].includes(key)) ||
     !Array.isArray(value.profiles) ||
     value.profiles.length === 0 ||
     value.profiles.length > 32
@@ -107,9 +105,6 @@ export function validateTemporaryEnvironmentOptions(
         );
       }
     }
-  }
-  if (value.defaultProfileId !== undefined && !ids.has(value.defaultProfileId)) {
-    throw new Error("Temporary environment defaultProfileId must select an approved profile.");
   }
 }
 

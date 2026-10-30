@@ -73,8 +73,22 @@ The [Kubernetes testing guide](../../testing/kubernetes.md#temporary-environment
 records the unbundled image contract and real proof requirements.
 
 The Agent image recipe packages unmodified Crabbox and its skills at the RFC pin.
-Set `temporaryEnvironments.defaultProfileId` to select an eligible profile for the
-normal Agent-local external-provider configuration. The separate Gateway receives
+Select an approved profile through the existing Agent edit API:
+
+```http
+PATCH /namespaces/{namespaceId}/agents/{agentId}
+Content-Type: application/json
+
+{"configurationId":"cfg_00000000-0000-4000-8000-000000000001","temporaryEnvironments":{"profileId":"tests-small"}}
+```
+
+This is OCE Agent metadata, not a key inside the strict Harness configuration.
+An absent selection disables the capability; send `temporaryEnvironments: null`
+to remove it. Edits take effect on the next deployment, which freezes the selection
+in the admitted AgentRevision. Operator-approved profiles alone do not enable Agents.
+Readiness and acquisition expose only that revision's selected profile, and renewal
+fails if the profile is removed. Exact-Agent IAM `operate` remains independently required.
+Only an enabled Agent receives provider configuration, key setup and skill discovery. The separate Gateway receives
 no adapter credentials. Private keys remain owner-only inside the Agent; every
 HTTP call rereads its projected credential and refuses redirects.
 

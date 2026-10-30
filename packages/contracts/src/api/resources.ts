@@ -2,6 +2,7 @@ import { Type } from "typebox";
 
 import {
   AgentId,
+  AgentTemporaryEnvironmentsSchema,
   AgentProvisioningWorkId,
   PresetId,
   PresetTemplateSchema,
@@ -306,6 +307,7 @@ export const NamespaceSchema = Type.Object(
 
 export const AgentSchema = Type.Object(
   {
+    temporaryEnvironments: Type.Optional(AgentTemporaryEnvironmentsSchema),
     id: AgentId,
     namespaceId: NamespaceId,
     name: Name,
@@ -337,6 +339,7 @@ const ConfigurationReadErrorSchema = Type.Object(
       Type.Literal("repositoryAccess"),
       Type.Literal("harnessAuth"),
       Type.Literal("credentialSources"),
+      Type.Literal("temporaryEnvironments"),
       Type.Literal("secretBindings"),
       Type.Literal("repositoryCredentials"),
       Type.Literal("configuration"),
@@ -346,7 +349,7 @@ const ConfigurationReadErrorSchema = Type.Object(
 );
 
 const agentReadDescription =
-  "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources.";
+  "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits temporaryEnvironments, plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources.";
 
 export const AgentReadSchema = Type.Union(
   [
@@ -354,6 +357,7 @@ export const AgentReadSchema = Type.Union(
     Type.Object(
       {
         ...Type.Omit(AgentSchema, [
+          "temporaryEnvironments",
           "plugins",
           "pluginApprovers",
           "repositoryBindings",
@@ -991,6 +995,7 @@ export const RepositoryRevisionStateSchema = Type.Object(
 
 export const AgentRevisionSchema = Type.Object(
   {
+    temporaryEnvironments: Type.Optional(AgentTemporaryEnvironmentsSchema),
     id: RevisionId,
     namespaceId: NamespaceId,
     agentId: AgentId,

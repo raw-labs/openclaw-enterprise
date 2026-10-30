@@ -859,7 +859,7 @@ test(
     if (runtimeImage !== undefined) {
       // This credential comes from the actual API-deployed Harness, not a forged claim or
       // fixture verifier. The existing real-runtime selection is mandatory for activation.
-      const pod = await waitFor("adopted Agent Harness for workload admission", () =>
+      let pod = await waitFor("adopted Agent Harness for workload admission", () =>
         workloadPod(existingName, `app.kubernetes.io/name=${revisionName(admitted[4])}`),
       );
       retainedWorkloadCredential = (
@@ -934,6 +934,39 @@ test(
         });
         app = await composePostgresDevelopment(developmentConfig, temporaryDrivers);
         await startWorker();
+        // Operator approval alone leaves this already-admitted Agent disabled.
+        assert.deepEqual((await workloadRequest()).data, { supported: false, profiles: [] });
+        const edit = await request(
+          "PATCH",
+          "/namespaces/" + adopted.data.id + "/agents/" + adoptedTenant.id,
+          {
+            configurationId: adoptedTenant.configurationId,
+            temporaryEnvironments: { profileId: "temporary-tests" },
+          },
+        );
+        assert.equal(edit.status, 200, JSON.stringify(edit.error));
+        const selectedRevision = await deploy(adopted.data.id, adoptedTenant.id);
+        assert.deepEqual(selectedRevision.temporaryEnvironments, { profileId: "temporary-tests" });
+        await waitForActive(adopted.data.id, adoptedTenant.id, selectedRevision.id);
+        pod = await waitFor("opted-in Agent Harness", () =>
+          workloadPod(existingName, "app.kubernetes.io/name=" + revisionName(selectedRevision)),
+        );
+        retainedWorkloadCredential = (
+          await kubectlRead(
+            "exec",
+            pod.metadata.name,
+            "--namespace",
+            existingName,
+            "--",
+            "node",
+            "-e",
+            'process.stdout.write(require("node:fs").readFileSync("/var/run/secrets/openclaw/service-principal/token","utf8"))',
+          )
+        ).trim();
+        assert.deepEqual(
+          (await workloadRequest()).data.profiles.map((p) => p.id),
+          ["temporary-tests"],
+        );
         const generated = (
           await kubectlRead(
             "exec",

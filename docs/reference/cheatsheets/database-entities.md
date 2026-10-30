@@ -59,6 +59,7 @@ cleanup; only worker-confirmed absence releases capacity.
 
 Stores Agent drafts, their desired runtime state, and the active revision reference.
 
+- `temporary_environments` (optional per-Agent approved profile selection)
 - `id`
 - `namespace_id`
 - `name`

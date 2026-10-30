@@ -51,6 +51,21 @@ closed, not fall back to the Harness host.
 
 ### 2. Implement admission, identity and durable lifecycle together
 
+Add `temporaryEnvironments: {profileId}` to OCE Agent configuration through the
+existing configuration-edit API. Absence disables the feature. Persist the
+selection with the Agent and snapshot it into each admitted revision; do not
+insert platform settings into the upstream Harness JSON. Configuration edits
+activate on deployment. The current admitted revision, not the latest mutable
+Agent draft, controls workload acquisition and renewal.
+
+Remove installation-wide `defaultProfileId`. Operator-owned Compute profiles
+define the actual Kubernetes container image, CPU, memory, egress and lifetime;
+the Agent can select but cannot override them. Exact IAM authority remains
+separate. Restrict acquisition to the admitted profile and withhold runtime
+provider configuration, keys and skill discovery when disabled. Invalid
+selections fail only the selected Agent. Retirement preserves controller cleanup
+of old leases. No console control or VM-backed runtime is added.
+
 Extend the existing owners rather than building an adapter against invented APIs:
 
 | Existing owner                                    | Required change                                                                                               |
@@ -184,6 +199,8 @@ No cluster, database or deployment was created or used for these checks.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-10-30: Specify explicit per-Agent profile selection and gated skill/runtime delivery; replace the installation-wide default without expanding VM or deployment scope.
 
 - 2026-10-30: Connect API, durable worker, selected Compute lifecycle and Crabbox adapter/runtime recipes; retain draft status pending live SQL, image and Agent-workflow proof.
 

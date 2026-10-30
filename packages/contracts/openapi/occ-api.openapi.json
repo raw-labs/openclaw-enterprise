@@ -11866,7 +11866,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "data": {
-                      "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources.",
+                      "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits temporaryEnvironments, plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources.",
                       "items": {
                         "anyOf": [
                           {
@@ -12142,6 +12142,17 @@
                                   { "const": "active", "type": "string" },
                                   { "const": "deleting", "type": "string" }
                                 ]
+                              },
+                              "temporaryEnvironments": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "profileId": {
+                                    "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["profileId"],
+                                "type": "object"
                               }
                             },
                             "required": [
@@ -12196,6 +12207,7 @@
                                       { "const": "repositoryAccess", "type": "string" },
                                       { "const": "harnessAuth", "type": "string" },
                                       { "const": "credentialSources", "type": "string" },
+                                      { "const": "temporaryEnvironments", "type": "string" },
                                       { "const": "secretBindings", "type": "string" },
                                       { "const": "repositoryCredentials", "type": "string" },
                                       { "const": "configuration", "type": "string" }
@@ -12264,7 +12276,7 @@
                             "type": "object"
                           }
                         ],
-                        "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources."
+                        "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits temporaryEnvironments, plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources."
                       },
                       "type": "array"
                     },
@@ -12892,6 +12904,14 @@
                             { "const": "active", "type": "string" },
                             { "const": "deleting", "type": "string" }
                           ]
+                        },
+                        "temporaryEnvironments": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "profileId": { "pattern": "^[a-z][a-z0-9-]{0,62}$", "type": "string" }
+                          },
+                          "required": ["profileId"],
+                          "type": "object"
                         }
                       },
                       "required": [
@@ -15459,6 +15479,14 @@
                             { "const": "active", "type": "string" },
                             { "const": "deleting", "type": "string" }
                           ]
+                        },
+                        "temporaryEnvironments": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "profileId": { "pattern": "^[a-z][a-z0-9-]{0,62}$", "type": "string" }
+                          },
+                          "required": ["profileId"],
+                          "type": "object"
                         }
                       },
                       "required": [
@@ -15849,6 +15877,17 @@
                                 { "const": "active", "type": "string" },
                                 { "const": "deleting", "type": "string" }
                               ]
+                            },
+                            "temporaryEnvironments": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "profileId": {
+                                  "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["profileId"],
+                              "type": "object"
                             }
                           },
                           "required": [
@@ -15903,6 +15942,7 @@
                                     { "const": "repositoryAccess", "type": "string" },
                                     { "const": "harnessAuth", "type": "string" },
                                     { "const": "credentialSources", "type": "string" },
+                                    { "const": "temporaryEnvironments", "type": "string" },
                                     { "const": "secretBindings", "type": "string" },
                                     { "const": "repositoryCredentials", "type": "string" },
                                     { "const": "configuration", "type": "string" }
@@ -15971,7 +16011,7 @@
                           "type": "object"
                         }
                       ],
-                      "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources."
+                      "description": "An Agent with readable saved settings, or Agent metadata with configurationReadError (code SAVED_CONFIGURATION_UNREADABLE and the unreadable field). The error variant omits temporaryEnvironments, plugins, pluginApprovers, repositoryBindings, repositoryAccess, harnessAuth, and credentialSources."
                     },
                     "meta": {
                       "additionalProperties": false,
@@ -16288,6 +16328,19 @@
                     },
                     "maxItems": 16,
                     "type": "array"
+                  },
+                  "temporaryEnvironments": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "profileId": { "pattern": "^[a-z][a-z0-9-]{0,62}$", "type": "string" }
+                        },
+                        "required": ["profileId"],
+                        "type": "object"
+                      },
+                      { "type": "null" }
+                    ]
                   }
                 },
                 "required": ["configurationId"],
@@ -16574,6 +16627,14 @@
                             { "const": "active", "type": "string" },
                             { "const": "deleting", "type": "string" }
                           ]
+                        },
+                        "temporaryEnvironments": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "profileId": { "pattern": "^[a-z][a-z0-9-]{0,62}$", "type": "string" }
+                          },
+                          "required": ["profileId"],
+                          "type": "object"
                         }
                       },
                       "required": [
@@ -17348,7 +17409,15 @@
                           "maxProperties": 64,
                           "type": "object"
                         },
-                        "secretDriverId": { "minLength": 1, "type": "string" }
+                        "secretDriverId": { "minLength": 1, "type": "string" },
+                        "temporaryEnvironments": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "profileId": { "pattern": "^[a-z][a-z0-9-]{0,62}$", "type": "string" }
+                          },
+                          "required": ["profileId"],
+                          "type": "object"
+                        }
                       },
                       "required": [
                         "id",
@@ -20622,7 +20691,18 @@
                                 "maxProperties": 64,
                                 "type": "object"
                               },
-                              "secretDriverId": { "minLength": 1, "type": "string" }
+                              "secretDriverId": { "minLength": 1, "type": "string" },
+                              "temporaryEnvironments": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "profileId": {
+                                    "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["profileId"],
+                                "type": "object"
+                              }
                             },
                             "required": [
                               "id",
@@ -20674,6 +20754,7 @@
                                       { "const": "repositoryAccess", "type": "string" },
                                       { "const": "harnessAuth", "type": "string" },
                                       { "const": "credentialSources", "type": "string" },
+                                      { "const": "temporaryEnvironments", "type": "string" },
                                       { "const": "secretBindings", "type": "string" },
                                       { "const": "repositoryCredentials", "type": "string" },
                                       { "const": "configuration", "type": "string" }
@@ -21123,7 +21204,18 @@
                               "maxProperties": 64,
                               "type": "object"
                             },
-                            "secretDriverId": { "minLength": 1, "type": "string" }
+                            "secretDriverId": { "minLength": 1, "type": "string" },
+                            "temporaryEnvironments": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "profileId": {
+                                  "pattern": "^[a-z][a-z0-9-]{0,62}$",
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["profileId"],
+                              "type": "object"
+                            }
                           },
                           "required": [
                             "id",
@@ -21175,6 +21267,7 @@
                                     { "const": "repositoryAccess", "type": "string" },
                                     { "const": "harnessAuth", "type": "string" },
                                     { "const": "credentialSources", "type": "string" },
+                                    { "const": "temporaryEnvironments", "type": "string" },
                                     { "const": "secretBindings", "type": "string" },
                                     { "const": "repositoryCredentials", "type": "string" },
                                     { "const": "configuration", "type": "string" }
@@ -21943,6 +22036,14 @@
                             { "const": "active", "type": "string" },
                             { "const": "deleting", "type": "string" }
                           ]
+                        },
+                        "temporaryEnvironments": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "profileId": { "pattern": "^[a-z][a-z0-9-]{0,62}$", "type": "string" }
+                          },
+                          "required": ["profileId"],
+                          "type": "object"
                         }
                       },
                       "required": [

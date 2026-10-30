@@ -1,3 +1,4 @@
+import { normalizeAgentTemporaryEnvironments } from "@openclaw-enterprise/contracts";
 import { RepositoryTransactionLifetime } from "../ports/transaction.ts";
 import { bindPlatformUnitOfWork } from "../ports/platform-unit-of-work.ts";
 import { createPlatformReadView } from "../ports/platform-read-view.ts";
@@ -185,6 +186,7 @@ export interface AgentRepository extends AgentReadRepository {
     pluginApprovers?: PluginApprovers | null,
     repositoryAccess?: RepositoryAccess | null,
     credentialSources?: readonly AgentCredentialSourceBinding[],
+    temporaryEnvironments?: Agent["temporaryEnvironments"] | null,
   ): Promise<Readonly<Agent> | undefined>;
   compareAndSetActiveRevision(
     namespaceId: string,
@@ -2349,6 +2351,7 @@ function repositories(
       nextPluginApprovers,
       nextRepositoryAccess,
       nextCredentialSources,
+      nextTemporaryEnvironments,
     ) => {
       const current = await agents.findAgent(namespaceId, agentId);
       if (!current) {
@@ -2411,10 +2414,16 @@ function repositories(
         pluginApprovers: _currentPluginApprovers,
         repositoryBindings: _currentRepositoryBindings,
         credentialSources: _currentCredentialSources,
+        temporaryEnvironments: _currentTemporaryEnvironments,
         ...withoutPlugins
       } = current;
+      const temporaryEnvironments =
+        nextTemporaryEnvironments === undefined
+          ? current.temporaryEnvironments
+          : normalizeAgentTemporaryEnvironments(nextTemporaryEnvironments);
       const updated = immutableCopy({
         ...withoutPlugins,
+        ...(temporaryEnvironments === undefined ? {} : { temporaryEnvironments }),
         configurationId,
         backendId: nextBackendId,
         executionMode: executionMode ?? current.executionMode,

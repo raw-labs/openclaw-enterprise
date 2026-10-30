@@ -23,7 +23,6 @@ export async function configureTemporaryEnvironmentWorkflow({
   compute.temporaryEnvironmentApiEgress = { cidr: proxyIP + "/32", port: 8443 };
   compute.temporaryEnvironmentApiCaBundle = ca.toString();
   compute.temporaryEnvironments = {
-    defaultProfileId: "acceptance",
     profiles: [
       {
         id: "acceptance",

@@ -308,11 +308,10 @@ function runtimeOptions() {
   };
   value.temporaryEnvironmentApiUrl = "https://occ.example.test";
   value.temporaryEnvironmentApiEgress = { cidr: "10.42.0.20/32", port: 8443 };
-  value.temporaryEnvironments.defaultProfileId = "small";
   return value;
 }
 
-test("temporary adapter configuration rejects missing transport, unapproved defaults and broad API destinations", () => {
+test("temporary adapter configuration rejects unapproved fields and broad API destinations", () => {
   for (const mutate of [
     (v) => {
       delete v.temporaryEnvironmentApiEgress;
@@ -324,7 +323,7 @@ test("temporary adapter configuration rejects missing transport, unapproved defa
       v.temporaryEnvironmentApiEgress.cidr = "169.254.169.254/32";
     },
     (v) => {
-      v.temporaryEnvironments.defaultProfileId = "unknown";
+      v.temporaryEnvironments.unapprovedOption = "unknown";
     },
     (v) => {
       v.temporaryEnvironmentApiCaBundle = "not a certificate";
@@ -339,7 +338,13 @@ test("temporary adapter configuration rejects missing transport, unapproved defa
   }
 });
 
-function runtimeWorkload(driver, role = "agent", embedded = false, ownerNamespace = namespaceId) {
+function runtimeWorkload(
+  driver,
+  role = "agent",
+  embedded = false,
+  ownerNamespace = namespaceId,
+  selection = { profileId: "small" },
+) {
   return driver.deployment(
     "runtime-test",
     { namespaceId: ownerNamespace, agentId: "agent-test", revisionId: "revision-test" },
@@ -361,6 +366,15 @@ function runtimeWorkload(driver, role = "agent", embedded = false, ownerNamespac
     embedded,
     "principal-test",
     { environment: [], volumes: [], volumeMounts: [], initContainers: [] },
+    [],
+    [],
+    undefined,
+    [],
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    selection,
   );
 }
 
@@ -391,14 +405,39 @@ test("normal Agent deployment selects trusted Crabbox config but never equips it
     assert.equal(env.OCC_WORKLOAD_URL, selected ? "https://occ.example.test" : undefined);
   }
   assert.throws(() => runtimeWorkload(driver, "agent", false, "ns-other"), /not eligible/);
+  for (const selection of [undefined, { profileId: "small" }]) {
+    const native = driver.temporaryEnvironmentSkillConfiguration(
+      { temporaryEnvironments: selection },
+      {
+        skills: {
+          entries: { crabbox: { enabled: true }, "crabbox-quickstart": { enabled: true } },
+        },
+      },
+    );
+    for (const name of ["crabbox", "crabbox-quickstart"]) {
+      assert.equal(native.skills.entries[name].enabled, selection !== undefined);
+    }
+  }
+  const disabledWorkload = runtimeWorkload(driver, "agent", false, "ns-other", null);
+  assert.ok(
+    !JSON.stringify(disabledWorkload.spec.template.spec.initContainers).includes("ssh-keygen"),
+  );
+  assert.ok(
+    !disabledWorkload.spec.template.spec.containers[0].env.some(
+      ({ name }) => name.startsWith("OCC_WORKLOAD_") || name === "CRABBOX_CONFIG",
+    ),
+  );
   const discovery = runtimeOptions();
-  delete discovery.temporaryEnvironments.defaultProfileId;
   const discoveryDriver = new KubernetesComputeDriver(discovery);
   assert.equal(discoveryDriver.getTemporaryEnvironmentPolicy().profiles[0].id, "small");
   assert.ok(
-    !runtimeWorkload(discoveryDriver).spec.template.spec.containers[0].env.some(
-      ({ name }) => name === "CRABBOX_CONFIG",
-    ),
+    !runtimeWorkload(
+      discoveryDriver,
+      "agent",
+      false,
+      "ns-other",
+      null,
+    ).spec.template.spec.containers[0].env.some(({ name }) => name === "CRABBOX_CONFIG"),
   );
 });
 
@@ -411,6 +450,7 @@ test("translated OCC API egress belongs only to the Agent runtime network select
       agentId: "agent-test",
       harness: { id: mode === "embedded" ? "openclaw" : "codex", version: "1.0.0", mode },
       configuration: {},
+      temporaryEnvironments: { profileId: "small" },
     };
     const policies = driver
       .agentNetworkPolicies(revision, {
@@ -422,6 +462,18 @@ test("translated OCC API egress belongs only to the Agent runtime network select
       policy.spec.egress?.some((rule) =>
         rule.to?.some((peer) => peer.ipBlock?.cidr === "10.42.0.20/32"),
       ),
+    );
+    assert.ok(
+      !driver
+        .agentNetworkPolicies(
+          { ...revision, temporaryEnvironments: undefined },
+          { name: kubernetesNamespaceName(namespaceId), plane: "execution" },
+        )
+        .some(({ resource }) =>
+          resource.spec.egress?.some((rule) =>
+            rule.to?.some((peer) => peer.ipBlock?.cidr === "10.42.0.20/32"),
+          ),
+        ),
     );
     assert.equal(grants.length, 1);
     assert.equal(

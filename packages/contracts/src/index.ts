@@ -701,7 +701,29 @@ export type AgentDesiredRuntimeState = "running" | "stopped";
  * succeeds, so there is no `deleted` status and no tombstone to observe.
  */
 export type AgentStatus = "active" | "deleting";
+export interface AgentTemporaryEnvironments {
+  readonly profileId: string;
+}
+export function normalizeAgentTemporaryEnvironments(
+  value: unknown,
+): AgentTemporaryEnvironments | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== 1 ||
+    !("profileId" in value) ||
+    typeof value.profileId !== "string" ||
+    !/^[a-z][a-z0-9-]{0,62}$/.test(value.profileId)
+  ) {
+    throw new Error("Temporary environments require an exact approved profileId.");
+  }
+  return Object.freeze({ profileId: value.profileId });
+}
 export interface Agent extends Scope {
+  readonly temporaryEnvironments?: AgentTemporaryEnvironments;
   readonly id: string;
   readonly namespaceId: string;
   readonly name: string;
@@ -725,6 +747,7 @@ export interface Agent extends Scope {
 export interface ConfigurationReadError {
   readonly code: "SAVED_CONFIGURATION_UNREADABLE";
   readonly field:
+    | "temporaryEnvironments"
     | "plugins"
     | "pluginApprovers"
     | "repositoryBindings"
@@ -738,6 +761,7 @@ export interface ConfigurationReadError {
 
 export type AgentMetadata = Omit<
   Agent,
+  | "temporaryEnvironments"
   | "plugins"
   | "pluginApprovers"
   | "repositoryBindings"
@@ -779,6 +803,7 @@ export interface RevisionHarnessDescriptor extends HarnessDescriptor {
 }
 
 export interface AgentRevision extends Scope {
+  readonly temporaryEnvironments?: AgentTemporaryEnvironments;
   readonly id: string;
   readonly namespaceId: string;
   readonly agentId: string;
@@ -818,6 +843,13 @@ export function freezeAgentRevision(revision: AgentRevision): Readonly<AgentRevi
   return Object.freeze({
     ...revision,
     configuration: immutableCopy(revision.configuration),
+    ...(revision.temporaryEnvironments === undefined
+      ? {}
+      : {
+          temporaryEnvironments: normalizeAgentTemporaryEnvironments(
+            revision.temporaryEnvironments,
+          )!,
+        }),
     ...(revision.secretBindings === undefined
       ? {}
       : { secretBindings: immutableCopy(revision.secretBindings) }),
