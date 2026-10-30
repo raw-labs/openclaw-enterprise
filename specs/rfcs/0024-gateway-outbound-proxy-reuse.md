@@ -20,7 +20,7 @@ Give each dedicated Agent's Gateway its own outbound destination list and enforc
 
 The selected OpenShell Driver runs one proxy Pod per Agent revision, using OpenShell's existing proxy software and policy engine. Enabled Channels automatically contribute their required destinations. Each revision saves its Agent's approved destinations and Channel requirements.
 
-Every dedicated Gateway in a single-cluster Kubernetes deployment uses this route for external HTTPS. Gateway and Harness placement and the Harness's existing protections stay unchanged. Separate execution clusters retain their existing behavior.
+Every dedicated Gateway in a single-cluster Kubernetes deployment uses this route for external HTTPS. Gateway and Harness placement and the Harness's existing protections stay unchanged. Separate execution clusters retain their existing behavior. Reject a nonempty outbound destination list when the selected topology cannot enforce it.
 
 <a id="one-request-before-and-after"></a>
 
@@ -133,13 +133,13 @@ OCC keeps its existing installation-level routes for sign-in, provider services 
 - **OpenShell Sandbox Driver** manages the revision's proxy Pod, Service, policy files and network rules.
 - **Channel Drivers** contribute the destinations required by the Agent's enabled Channels.
 
-The Driver extensions are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts). Compute passes the revision and its destinations to those interfaces. Sandbox and Credential Proxy use the existing [paired Driver registration](../../docs/reference/drivers/selection.md#select-a-protected-sender). The selected Driver must support both Gateway destination control and protected Harness operations, with separate permissions and proxy instances.
+The Driver extensions are [Credential Proxy `gatewayDestinations.admit`](../../packages/contracts/src/credential-proxy.ts) and [Sandbox `gatewayProxy.prepare/remove`](../../packages/contracts/src/gateway-destinations.ts). Compute passes the revision and its destinations to those interfaces. Sandbox and Credential Proxy use the existing [paired Driver registration](../../docs/reference/drivers/selection.md#select-a-protected-sender). Gateway-only registration requires the paired destination admission and proxy lifecycle capabilities, but no OpenShell management Backend, endpoint or management credentials. Selecting OpenShell management-dependent Harness or credential operations also requires their capabilities and an authenticated management Backend. Dependencies follow the selected use; Gateway-only registration must not expose management-dependent operations as usable.
 
 Selecting the paired Driver capabilities for the Gateway proxy does not select
 that Driver to provision the Harness or change repository credential delivery.
 The revision identifies the Gateway proxy pair separately from its Harness
 Sandbox selection. Gateway destination permission grants no authority to release
-Harness or repository credentials.
+Harness or repository credentials. Reuse the standalone proxy and its Kubernetes attachment without constructing unused management clients or supplying placeholder endpoint and token-file settings.
 
 ## Network enforcement and failure
 
@@ -149,7 +149,7 @@ Proxy network rules and OpenShell's DNS/address checks exclude private, loopback
 
 Enforcement requires a Kubernetes network plugin that enforces NetworkPolicies and trusted writers of Pod labels and network rules. Kubernetes allow rules are additive. Remove the Gateway's old Channel egress grant and its access to the bundled Slack proxy, and ensure other rules cannot admit an alternate external route. Direct connections remain blocked when proxy environment variables are absent.
 
-Before starting a Gateway, verify resource ownership, immutable policy, pinned images and readiness of OpenShell itself. Refuse changed or missing dependencies. Stop or replacement first stops the old Gateway, then removes its proxy and waits for its Pods and established connections to disappear. Delete only that revision's resources. Service removal alone cannot close established tunnels.
+Before starting a Gateway, verify resource ownership, immutable policy, pinned images and readiness of OpenShell itself. Refuse changed or missing dependencies. Stop or replacement first stops the old Gateway, then removes its proxy and waits for its Pods and established connections to disappear. Delete only that revision's resources. Service removal alone cannot close established tunnels. Changes to current admission settings must not prevent shutdown of an existing revision. Cleanup uses its saved resource identities and verifies ownership; it must not require permission to start that revision again. Report incomplete cleanup for retry without skipping shutdown of other owned workloads or deleting foreign resources.
 
 <a id="required-evidence-and-current-status"></a>
 
@@ -165,6 +165,8 @@ Exercise the regular Agent authoring, deploy, activation, replacement and stop p
 - Control-plane Slack validation, directory lookups and other installation-level routes, including with no Agent deployed.
 - Refusal of denied hosts and ports, forbidden addresses, wrong policies, changed resources and proxy or forwarder outages.
 - Denial of direct TCP, raw-IP, HTTP, UDP/QUIC, bundled Slack-proxy and alternate-proxy bypass attempts, including without proxy variables.
-- Complete cleanup and closure of established connections after stop or replacement, preserving other Agents and the successor revision.
+- Complete cleanup and closure of established connections after stop or replacement, including after admission configuration changes, preserving other Agents and the successor revision.
+- The regular dedicated Agent workflow with Gateway-only registration and no management Backend; management-dependent selections still reject missing authentication.
+- Rejection of nonempty destination settings when enforcement is unavailable.
 
 The [implementation plan](../plans/0024-gateway-outbound-proxy-reuse.md), [source flow](../../docs/flows/gateway-outbound-destinations.md) and [QA procedure](../../docs/testing/gateway-outbound-destinations.md) hold delivery and verification details. See the pinned OpenShell [standalone role](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-supervisor/src/lib.rs#L536-L629) and [policy rules](../../deploy/runtime/gateway-proxy/sandbox-policy.rego).
