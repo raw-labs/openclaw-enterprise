@@ -1,3 +1,13 @@
+import {
+  temporaryEnvironmentView,
+  validateTemporaryEnvironmentInput,
+  validateTemporaryEnvironmentPolicy,
+  type AcquireTemporaryEnvironmentInput,
+} from "./temporary-environments.ts";
+import type { TemporaryEnvironmentReservation } from "./ports/temporary-environments.ts";
+
+export type { AcquireTemporaryEnvironmentInput } from "./temporary-environments.ts";
+
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -15,6 +25,7 @@ import {
 import type {
   Agent,
   AgentCredentialSourceBinding,
+  AgentWorkloadIdentity,
   AgentRead,
   AgentRevisionRead,
   InitialWorkspaceFiles,
@@ -429,6 +440,14 @@ export type {
   RepositorySessionReadRepository,
   RepositorySessionRepository,
 } from "./ports/repository-sessions.ts";
+export type {
+  TemporaryEnvironmentRequest,
+  TemporaryEnvironmentReservation,
+  TemporaryEnvironmentQuotaLimits,
+  TemporaryEnvironmentQuota,
+  TemporaryEnvironmentReadRepository,
+  TemporaryEnvironmentRepository,
+} from "./ports/temporary-environments.ts";
 export {
   PostgresPlatformState,
   PostgresPlatformStateStore,
@@ -618,6 +637,7 @@ export interface CreateAgentInput {
 }
 
 export interface UpdateAgentInput {
+  readonly temporaryEnvironments?: Agent["temporaryEnvironments"] | null;
   readonly namespaceId: string;
   readonly agentId: string;
   readonly configurationId: string;
@@ -2099,6 +2119,394 @@ export class OpenClawController {
         );
       }
       return agent;
+    });
+  }
+
+  /** Verify provider evidence; the readiness operation checks live state after IAM identity lookup. */
+  async verifyTemporaryEnvironmentCaller(token: string, namespaceId: string, agentId: string) {
+    const driver = this.selectedDriver("compute");
+    if (!driver.verifyAgentWorkloadIdentity) {
+      throw new NotImplementedError(
+        "verifyAgentWorkloadIdentity",
+        "Workload authentication is unsupported.",
+      );
+    }
+    let identity;
+    try {
+      identity = await driver.verifyAgentWorkloadIdentity({ token, namespaceId, agentId });
+    } catch {
+      // Provider errors may contain the submitted credential. Never propagate their text.
+      throw new DependencyUnavailableError("Workload verification is unavailable.");
+    }
+    if (!identity || identity.namespaceId !== namespaceId || identity.agentId !== agentId) {
+      throw new AuthorizationDeniedError("The Agent workload identity was refused.");
+    }
+    return identity;
+  }
+
+  private async requireActiveAgentWorkload(identity: AgentWorkloadIdentity) {
+    const { namespaceId, agentId } = identity;
+    const driver = this.selectedDriver("compute");
+    await this.read(async (state) => {
+      const namespace = await state.namespaces.findNamespace(namespaceId);
+      const agent = await state.agents.findAgent(namespaceId, agentId);
+      const revision = await state.revisions.findRevision(
+        namespaceId,
+        agentId,
+        identity.revisionId,
+      );
+      if (
+        !namespace ||
+        namespace.status !== "ready" ||
+        !agent ||
+        agent.status !== "active" ||
+        agent.desiredRuntimeState !== "running" ||
+        agent.activeRevisionId !== identity.revisionId ||
+        agent.servicePrincipalId !== identity.servicePrincipalId ||
+        !revision ||
+        revision.compute.id !== driver.id ||
+        revision.compute.implementation !== driver.implementation
+      ) {
+        throw new AuthorizationDeniedError("The Agent workload is no longer active.");
+      }
+    });
+  }
+
+  private temporaryEnvironmentPolicy() {
+    const compute = this.selectedDriver("compute");
+    if (
+      !compute.getTemporaryEnvironmentPolicy ||
+      !compute.createTemporaryEnvironment ||
+      !compute.observeTemporaryEnvironment ||
+      !compute.deleteTemporaryEnvironment
+    ) {
+      return undefined;
+    }
+    let policy;
+    try {
+      policy = compute.getTemporaryEnvironmentPolicy();
+    } catch {
+      throw new DependencyUnavailableError("Temporary environment policy is unavailable.");
+    }
+    if (policy !== undefined) {
+      validateTemporaryEnvironmentPolicy(policy);
+    }
+    return policy;
+  }
+
+  private async withTemporaryEnvironmentAuthority<T>(
+    identity: AgentWorkloadIdentity,
+    work: (state: PlatformUnitOfWork) => Promise<T>,
+  ): Promise<T> {
+    const target = {
+      kind: "agent" as const,
+      id: identity.agentId,
+      namespaceId: identity.namespaceId,
+    };
+    await this.authorize(identity.servicePrincipalId, "operate", target);
+    return this.mutate(async (state) => {
+      // IAM policy writes and lifecycle changes share this lock order. Recheck under the lock.
+      await this.lockNamespace(state, identity.namespaceId);
+      await state.agents.lockAgent(identity.namespaceId, identity.agentId);
+      await this.authorize(identity.servicePrincipalId, "operate", target);
+      await this.requireActiveAgentWorkload(identity);
+      return work(state);
+    });
+  }
+
+  private temporaryEnvironmentIdentity(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+  ): AgentWorkloadIdentity {
+    return { servicePrincipalId: principalId, namespaceId, agentId, revisionId };
+  }
+
+  private validateAgentTemporaryEnvironments(
+    namespaceId: string,
+    value: Agent["temporaryEnvironments"] | null | undefined,
+  ) {
+    if (value == null) {
+      return undefined;
+    }
+    if (
+      typeof value !== "object" ||
+      Object.keys(value).length !== 1 ||
+      typeof value.profileId !== "string" ||
+      !/^[a-z][a-z0-9-]{0,62}$/.test(value.profileId)
+    ) {
+      throw new ScopeViolationError("Invalid Agent temporary environment profile selection.");
+    }
+    if (
+      !this.temporaryEnvironmentPolicy()?.profiles.some(
+        (p) => p.id === value.profileId && p.namespaceIds.includes(namespaceId),
+      )
+    ) {
+      throw new AuthorizationDeniedError(
+        "The temporary environment profile is not approved for this Agent Namespace.",
+      );
+    }
+    return Object.freeze({ profileId: value.profileId });
+  }
+  private async admittedTemporaryEnvironmentProfile(
+    state: PlatformReadView,
+    identity: AgentWorkloadIdentity,
+  ) {
+    const revision = await state.revisions.findRevision(
+      identity.namespaceId,
+      identity.agentId,
+      identity.revisionId,
+    );
+    return this.temporaryEnvironmentPolicy()?.profiles.find(
+      (p) =>
+        p.id === revision?.temporaryEnvironments?.profileId &&
+        p.namespaceIds.includes(identity.namespaceId),
+    );
+  }
+  private temporaryEnvironmentConnectionAllowed(record: Readonly<TemporaryEnvironmentReservation>) {
+    return (
+      this.temporaryEnvironmentPolicy()?.profiles.some(
+        (profile) =>
+          profile.id === record.profileId &&
+          profile.fingerprint === record.profileFingerprint &&
+          profile.namespaceIds.includes(record.namespaceId),
+      ) === true
+    );
+  }
+
+  private async ownedTemporaryEnvironment(
+    state: PlatformReadView,
+    identity: AgentWorkloadIdentity,
+    requestId: string,
+  ) {
+    const record = await state.temporaryEnvironments.findByRequest(
+      identity.namespaceId,
+      identity.agentId,
+      requestId,
+    );
+    if (!record) {
+      throw new ScopeViolationError("The temporary environment does not belong to this Agent.");
+    }
+    if (
+      record.revisionId !== identity.revisionId ||
+      record.servicePrincipalId !== identity.servicePrincipalId
+    ) {
+      throw new AuthorizationDeniedError(
+        "The temporary environment belongs to a retired workload identity.",
+      );
+    }
+    return record;
+  }
+
+  private async auditTemporaryEnvironment(
+    state: PlatformUnitOfWork,
+    identity: AgentWorkloadIdentity,
+    operation: "acquire" | "touch" | "release",
+    record: Readonly<TemporaryEnvironmentReservation>,
+  ) {
+    await state.audit.append({
+      id: "aud_" + crypto.randomUUID(),
+      installationId: this.installation.id,
+      namespaceId: identity.namespaceId,
+      occurredAt: this.timestamp(),
+      kind: "mutation",
+      actorId: identity.servicePrincipalId,
+      source: "occ",
+      action: "openclaw.agents.temporary_environments." + operation,
+      resource: { kind: "agent", id: identity.agentId, namespaceId: identity.namespaceId },
+      iamDriverId: this.selectedDriver("iam").id,
+      outcome: "success",
+      details: {
+        environmentId: record.id,
+        requestId: record.requestId,
+        profileId: record.profileId,
+        state: record.state,
+      },
+    });
+  }
+
+  async getTemporaryEnvironmentReadiness(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const selected = await this.admittedTemporaryEnvironmentProfile(state, identity);
+      const profiles =
+        this.temporaryEnvironmentPolicy()
+          ?.profiles.filter((profile) => profile.id === selected?.id)
+          .map((profile) => ({
+            id: profile.id,
+            cpuMillis: profile.cpuMillis,
+            memoryMiB: profile.memoryMiB,
+            lifetimeSeconds: profile.lifetimeSeconds,
+            idleTimeoutSeconds: profile.idleTimeoutSeconds,
+          })) ?? [];
+      return { supported: profiles.length > 0, profiles };
+    });
+  }
+
+  async acquireTemporaryEnvironment(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+    input: AcquireTemporaryEnvironmentInput,
+  ) {
+    validateTemporaryEnvironmentInput(input);
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const policy = this.temporaryEnvironmentPolicy();
+      const admitted = await this.admittedTemporaryEnvironmentProfile(state, identity);
+      const profile = admitted?.id === input.profileId ? admitted : undefined;
+      if (!policy || !profile) {
+        throw new AuthorizationDeniedError(
+          "The requested temporary environment profile is not approved for this Namespace.",
+        );
+      }
+      const existing = await state.temporaryEnvironments.findByRequest(
+        namespaceId,
+        agentId,
+        input.requestId,
+      );
+      if (existing === undefined) {
+        await state.temporaryEnvironments.setQuota(namespaceId, policy.quota);
+      }
+      const record = await state.temporaryEnvironments.reserve({
+        namespaceId,
+        agentId,
+        revisionId,
+        requestId: input.requestId,
+        name: input.name,
+        slug: input.slug,
+        profileId: profile.id,
+        profileFingerprint: profile.fingerprint,
+        cpuMillis: profile.cpuMillis,
+        memoryMiB: profile.memoryMiB,
+        lifetimeSeconds: profile.lifetimeSeconds,
+        idleTimeoutSeconds: profile.idleTimeoutSeconds,
+        sshPublicKey: input.sshPublicKey,
+      });
+      await this.auditTemporaryEnvironment(state, identity, "acquire", record);
+      return temporaryEnvironmentView(record, this.temporaryEnvironmentConnectionAllowed(record));
+    });
+  }
+
+  async getTemporaryEnvironment(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+    requestId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const record = await this.ownedTemporaryEnvironment(state, identity, requestId);
+      return temporaryEnvironmentView(record, this.temporaryEnvironmentConnectionAllowed(record));
+    });
+  }
+
+  async listTemporaryEnvironments(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const records = await state.temporaryEnvironments.listForAgent(namespaceId, agentId);
+      return records
+        .filter(
+          (record) => record.revisionId === revisionId && record.servicePrincipalId === principalId,
+        )
+        .map((record) =>
+          temporaryEnvironmentView(record, this.temporaryEnvironmentConnectionAllowed(record)),
+        );
+    });
+  }
+
+  async touchTemporaryEnvironment(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+    requestId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      const existing = await this.ownedTemporaryEnvironment(state, identity, requestId);
+      const admitted = await this.admittedTemporaryEnvironmentProfile(state, identity);
+      if (
+        admitted?.id !== existing.profileId ||
+        !this.temporaryEnvironmentConnectionAllowed(existing)
+      ) {
+        throw new AuthorizationDeniedError(
+          "The temporary environment profile is no longer approved.",
+        );
+      }
+      const record = await state.temporaryEnvironments.touch(namespaceId, agentId, requestId);
+      if (!record) {
+        throw new ResourceStateConflictError("The temporary environment can no longer be renewed.");
+      }
+      await this.auditTemporaryEnvironment(state, identity, "touch", record);
+      return temporaryEnvironmentView(record);
+    });
+  }
+
+  async releaseTemporaryEnvironment(
+    principalId: string,
+    namespaceId: string,
+    agentId: string,
+    revisionId: string,
+    requestId: string,
+  ) {
+    const identity = this.temporaryEnvironmentIdentity(
+      principalId,
+      namespaceId,
+      agentId,
+      revisionId,
+    );
+    return this.withTemporaryEnvironmentAuthority(identity, async (state) => {
+      await this.ownedTemporaryEnvironment(state, identity, requestId);
+      const record = await state.temporaryEnvironments.requestDeletion(
+        namespaceId,
+        agentId,
+        requestId,
+      );
+      if (!record) {
+        throw new ResourceStateConflictError("The temporary environment changed during release.");
+      }
+      await this.auditTemporaryEnvironment(state, identity, "release", record);
+      // A queued deletion is NOT confirmation. The adapter must poll for the terminal record.
+      return temporaryEnvironmentView(record, false);
     });
   }
 
@@ -6209,6 +6617,9 @@ export class OpenClawController {
       }
       await this.guardAgentProvisioning(state, namespace.id, agent.id);
       await this.guardProvisioningConfiguration(state, namespace.id, input.configurationId);
+      if (input.temporaryEnvironments !== undefined) {
+        this.validateAgentTemporaryEnvironments(namespace.id, input.temporaryEnvironments);
+      }
       const previousAuth = this.harnessAuthBinding(agent.harnessAuth);
       // Every update needs the caller's grant on each source the Agent binds now, but not a
       // usable record: after a Secret Driver or Credential Gateway change, an update must still
@@ -6267,6 +6678,7 @@ export class OpenClawController {
         pluginApprovers,
         repositoryAccess,
         requestedSources,
+        input.temporaryEnvironments,
       );
       if (!updated) {
         throw new ResourceStateConflictError("The Agent Configuration changed during its update.");
@@ -6493,6 +6905,10 @@ export class OpenClawController {
       requireDedicatedNativeSupport(revisionHarness, sandbox, this.nativeWorkers);
       const harnessAuth = await this.admitHarnessAuth(state, principalId, lockedAgent);
       const credentialSourceType = await this.admittedCredentialSourceType(harnessAuth, sandbox);
+      const temporaryEnvironments = this.validateAgentTemporaryEnvironments(
+        namespace.id,
+        lockedAgent.temporaryEnvironments,
+      );
       const credentialSources = await this.admitCredentialSources(
         state,
         principalId,
@@ -6649,6 +7065,7 @@ export class OpenClawController {
       }
       const revision = await state.revisions.createRevision(
         freezeAgentRevision({
+          ...(temporaryEnvironments === undefined ? {} : { temporaryEnvironments }),
           id: this.nextIdentifier("agent_revision"),
           namespaceId: namespace.id,
           agentId: lockedAgent.id,

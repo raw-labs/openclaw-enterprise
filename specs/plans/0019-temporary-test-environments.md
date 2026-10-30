@@ -5,7 +5,7 @@ rfc: ../rfcs/0019-temporary-test-environments.md
 # Implementation plan: temporary test environments through Crabbox
 
 - **ID:** RFC-0019
-- **Delivery status:** Planned
+- **Delivery status:** In progress
 - **Owner:** OCE maintainers
 - **Authority:** [Proposed RFC](../rfcs/0019-temporary-test-environments.md)
 - **Source baseline:** OCE `80725162a946f80652b939a32a57ee4e922eeb5c`; Crabbox `c41270ea7e6016b497095cb8f0260ed1a2816a06`
@@ -23,8 +23,8 @@ controller cleanup and Crabbox adapter. It does not approve deployment, another
 cluster operator, weaker isolation or omission of integration tests. The RFC
 remains Proposed. This document is the implementation plan, not product code.
 
-No infrastructure, dependencies, permissions or admission rules are changed by
-this proposal. No runtime proof has run.
+The draft changes source, packaging and opt-in permissions only. No deployment
+or live-runtime acceptance has run.
 
 ## Ordered implementation
 
@@ -50,6 +50,21 @@ Keep unsupported profiles disabled. Missing isolation or capacity must fail
 closed, not fall back to the Harness host.
 
 ### 2. Implement admission, identity and durable lifecycle together
+
+Add `temporaryEnvironments: {profileId}` to OCE Agent configuration through the
+existing configuration-edit API. Absence disables the feature. Persist the
+selection with the Agent and snapshot it into each admitted revision; do not
+insert platform settings into the upstream Harness JSON. Configuration edits
+activate on deployment. The current admitted revision, not the latest mutable
+Agent draft, controls workload acquisition and renewal.
+
+Remove installation-wide `defaultProfileId`. Operator-owned Compute profiles
+define the actual Kubernetes container image, CPU, memory, egress and lifetime;
+the Agent can select but cannot override them. Exact IAM authority remains
+separate. Restrict acquisition to the admitted profile and withhold runtime
+provider configuration, keys and skill discovery when disabled. Invalid
+selections fail only the selected Agent. Retirement preserves controller cleanup
+of old leases. No console control or VM-backed runtime is added.
 
 Extend the existing owners rather than building an adapter against invented APIs:
 
@@ -125,13 +140,70 @@ provider, SSH transport or network enforcement being proved. Follow the
 
 ## Delivery record
 
-RFC and plan drafted from source inspection. The Kubernetes-first code draft
-was requested on 2026-10-30 and is being developed separately. This RFC PR includes
-no product code or live-machine proof. The cluster-creating profile still needs
-runtime qualification; deployment has not been authorized.
+The first code draft implements only workload authentication and the external
+provider readiness probe. Compute verifies provider evidence; OCC checks current
+Agent/revision state and IAM grants; the adapter calls the actual API and is
+packaged in the runtime image recipe. At that first checkpoint, every lifecycle operation remained refused.
+See the [probe contract](../../docs/reference/authentication/agent-workload-probe.md)
+and [source flow](../../docs/flows/temporary-environment-readiness.md).
+
+The next bounded checkpoint adds immutable reservation records and atomic
+Namespace count/CPU/memory accounting to the existing persistence/UOW owners.
+It enforces owner-scoped idempotency, active-revision admission, bounded hard
+deadlines, rollback and retained cleanup ownership. The PostgreSQL application
+role cannot reset usage or erase reservations. This is an internal storage
+capability, not a new public acquisition route.
+
+A later source checkpoint connects workload API admission and audit to durable
+work, selected Compute allocation/observation/cleanup, idle renewal, expiry and
+owner teardown. Runtime recipes package the pinned unmodified Crabbox CLI/skills,
+external-provider adapter and a nonroot SSH image. The adapter polls exact
+deleted receipts before acknowledging release. The production Agent workflow
+contains a dirty-checkout Crabbox acceptance extension, authored but not run.
+This is still a draft, not demonstrated remote test execution.
+
+Local API credential-precedence and adapter transport tests are authored. The
+existing Kubernetes API/worker suite is extended to exercise real Pod-bound
+TokenReview, PostgreSQL lifecycle checks, IAM revocation and stop, with genuine
+runtime selection. The live extension has not run: no authorized disposable
+cluster/database/runtime image was supplied. No integration-test waiver or
+runtime acceptance is claimed. The cluster-creating profile remains disabled;
+deployment has not been authorized.
+
+Draft validation on 2026-10-30: adapter/API boundary suite 4 passed; existing
+Kubernetes Compute/runtime credential conformance 326 passed. API security plus
+adapter plus real-cluster selection reported 40 passed and one explicitly skipped
+cluster case. TypeScript build, lint, formatting, generated OpenAPI, workspace
+boundary, CI suite ownership, docs links/length and flow structure checks passed.
+These are source/local checks, not live-runtime acceptance.
+
+Persistence checkpoint verification: the new shared UOW integration case passes
+on memory; the actual PostgreSQL case is authored but not run because no migrated
+disposable `OCC_TEST_DATABASE_URL` was supplied. It covers independent dimensions
+and Agents competing for one budget, duplicate replay, rollback, SQL permissions
+and a real lifecycle-lock race. No database, cluster or deployment was created.
+This does not waive the required live SQL and eventual Agent-workflow proof.
+
+Current connected-draft verification: TypeScript build, whole-repository lint,
+formatting, generated OpenAPI, workspace isolation, CI suite ownership and
+documentation links/length checks pass. The focused core/adapter/Driver/storage
+selection reports 19 passed and two PostgreSQL cases skipped. A broader local
+selection reports 392 passed, one process-group fixture failure and 58 skipped
+Helm/image cases. The unchanged process-group helper reported a surviving
+descendant; this is not a clean regression run. Helm/yq, native image builds,
+real SQL and full Agent/SSH acceptance remain unverified. The prior published
+commit also has a First Agent Smoke initialization failure; its logs show
+BackoffLimitExceeded and cluster startup/network errors, not a resolved cause.
+No cluster, database or deployment was created or used for these checks.
 
 ## Manual Notes
 
 ## Changelog
 
+- 2026-10-30: Specify explicit per-Agent profile selection and gated skill/runtime delivery; replace the installation-wide default without expanding VM or deployment scope.
+
+- 2026-10-30: Connect API, durable worker, selected Compute lifecycle and Crabbox adapter/runtime recipes; retain draft status pending live SQL, image and Agent-workflow proof.
+
+- 2026-10-30: Add the bounded reservation/UOW and atomic-quota checkpoint; public lifecycle remains disabled.
+- 2026-10-30: Add the partial workload-readiness code draft and explicit remaining lifecycle work against baseline `51c19ed91`.
 - 2026-10-30: Drafted the plan against OCE `80725162a`; no implementation or runtime verification claimed.

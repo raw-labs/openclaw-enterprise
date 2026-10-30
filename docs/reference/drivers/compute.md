@@ -15,9 +15,10 @@ the [feature matrix](compute-matrix.md), and
 
 ## Interface
 
-The [shared contracts](../../../packages/contracts/src/index.ts) define the types.
-Every `ComputeDriver` has an `id`, `implementation`, and
-`capability: "compute"`.
+[Shared contracts](../../../packages/contracts/src/index.ts) require `id`,
+`implementation`, and `capability: "compute"`.
+
+See the optional, [unqualified temporary-environment contract](../authentication/agent-workload-probe.md).
 
 Optional `getRuntimeImages(revision)` returns
 `{workload, container, image, imageId, commit, openclawCommit}` entries for

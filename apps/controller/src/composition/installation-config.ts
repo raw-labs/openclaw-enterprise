@@ -647,6 +647,18 @@ export async function loadInstallationConfiguration(options: {
     computePackage?.implementation ?? (sshCompute ? "occ/ssh" : "occ/kubernetes"),
     computePackage?.module ?? (sshCompute ? SshComputeDriver : KubernetesComputeDriver),
   );
+  if (
+    kubernetesCompute &&
+    sandboxSelection !== undefined &&
+    ((compute.configuration as unknown as KubernetesComputeDriverOptions).temporaryEnvironments !==
+      undefined ||
+      (compute.configuration as unknown as KubernetesComputeDriverOptions)
+        .temporaryEnvironmentApiUrl !== undefined)
+  ) {
+    throw new Error(
+      "Temporary environment workload access requires bundled Kubernetes-owned Agent execution without a Sandbox Driver.",
+    );
+  }
   const secret = selected(
     secretSelection,
     "secret",

@@ -142,6 +142,11 @@ export function isRepositoryRuntimeRetirementWork(
   );
 }
 
+/** Environment obligations survive every retry and lease loss until confirmed absent. */
+function durableCleanupSql(alias: string): string {
+  return `(${alias}.work_kind = 'temporary_environment' OR ${repositoryCleanupSql(alias)})`;
+}
+
 function repositoryCleanupSql(alias: string): string {
   return `(${alias}.namespace_target IS NULL AND ${alias}.agent_target IS NULL
     AND (
@@ -561,12 +566,16 @@ const insertEvidenceCteSql = (filter = "", reasonCode = "$4::text", details = "'
       'reconcile',
       transitioned.namespace_id,
       CASE
+        WHEN transitioned.work_kind = 'temporary_environment' THEN 'agent'
         WHEN transitioned.revision_id IS NOT NULL
           OR transitioned.repository_cleanup_revision_id IS NOT NULL THEN 'agent_revision'
         WHEN transitioned.agent_id IS NOT NULL THEN 'agent'
         ELSE 'namespace'
       END,
       COALESCE(
+        (SELECT environment.agent_id FROM occ.temporary_environments AS environment
+         WHERE transitioned.work_kind = 'temporary_environment'
+           AND transitioned.idempotency_key = 'temporary_environment:' || environment.id),
         transitioned.revision_id,
         transitioned.repository_cleanup_revision_id,
         transitioned.agent_id,
@@ -575,6 +584,8 @@ const insertEvidenceCteSql = (filter = "", reasonCode = "$4::text", details = "'
       $3::text,
       jsonb_build_object('reasonCode', ${reasonCode}, 'attemptCount', transitioned.attempt_count,
         'workId', transitioned.idempotency_key)
+        || CASE WHEN transitioned.work_kind = 'temporary_environment'
+          THEN jsonb_build_object('temporaryEnvironmentId', substring(transitioned.idempotency_key from length('temporary_environment:') + 1)) ELSE '{}'::jsonb END
         || CASE WHEN transitioned.state = 'failed_permanent'
              THEN jsonb_build_object('final', true) ELSE '{}'::jsonb END
         || ${details}
@@ -906,7 +917,7 @@ export class PostgresWorkQueue {
            )
            UPDATE occ.controller_work AS work
            SET state = 'claimed',
-               attempt_count = CASE WHEN ${repositoryCleanupSql("work")}
+               attempt_count = CASE WHEN ${durableCleanupSql("work")}
                  THEN LEAST(work.attempt_count::bigint + 1, $2::integer)::integer
                  ELSE work.attempt_count + 1 END,
                claim_token = $1::uuid,
@@ -1190,7 +1201,7 @@ export class PostgresWorkQueue {
     validateClaim(claim);
     const failureCode = safeFailureCode(failure.code);
     const jitter = this.nextRandom();
-    const exhausted = `(attempt_count >= $5::integer AND NOT ${repositoryCleanupSql("work")})`;
+    const exhausted = `(attempt_count >= $5::integer AND NOT ${durableCleanupSql("work")})`;
     const retried = await this.client.query(
       `WITH transitioned AS (
          UPDATE occ.controller_work AS work
@@ -1277,7 +1288,7 @@ export class PostgresWorkQueue {
          FOR UPDATE OF agent
        ), eligible AS (
          SELECT source.* FROM source
-         WHERE NOT ${repositoryCleanupSql("source")}
+         WHERE NOT ${durableCleanupSql("source")}
            AND (NOT $7::boolean OR EXISTS (
              SELECT 1 FROM continuing_agent AS agent
              JOIN occ.agent_revisions AS revision
@@ -1341,7 +1352,7 @@ export class PostgresWorkQueue {
       "work.idempotency_key IN (SELECT idempotency_key FROM recovering_activations)";
     const refusedStop =
       "work.idempotency_key IN (SELECT idempotency_key FROM recovering_refused_stops)";
-    const exhaustedClaim = `(work.attempt_count >= $2::integer AND NOT ${repositoryCleanupSql("work")} AND NOT ${recovering} AND NOT ${refusedStop})`;
+    const exhaustedClaim = `(work.attempt_count >= $2::integer AND NOT ${durableCleanupSql("work")} AND NOT ${recovering} AND NOT ${refusedStop})`;
     const stale = await this.client.query(
       `WITH candidates AS (
          SELECT idempotency_key
@@ -1419,7 +1430,7 @@ export class PostgresWorkQueue {
          FROM occ.controller_work AS work
          WHERE state = 'queued'
            AND attempt_count >= $2::integer
-           AND NOT ${repositoryCleanupSql("work")}
+           AND NOT ${durableCleanupSql("work")}
            ${this.namespaceFilter()}
          ORDER BY available_at, created_at, idempotency_key
          FOR UPDATE SKIP LOCKED
@@ -1467,7 +1478,7 @@ export class PostgresWorkQueue {
   private claimablePredicate(maxAttempts: string): string {
     return `work.state = 'queued'
                AND work.available_at <= clock_timestamp()
-               AND (work.attempt_count < ${maxAttempts}::integer OR ${repositoryCleanupSql("work")})
+               AND (work.attempt_count < ${maxAttempts}::integer OR ${durableCleanupSql("work")})
                ${this.namespaceFilter("work")}
                AND NOT EXISTS (
                  SELECT 1

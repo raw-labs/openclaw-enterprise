@@ -76,6 +76,10 @@ a later deployment must retain both earlier files and writes from the failed
 candidate. This proves serial replacement on local storage, not cloud CSI detach,
 node fencing, or data movement between nodes.
 
+### Temporary SSH lifecycle extension
+
+See [temporary environment verification](temporary-environments.md) for the optional SSH image, workload API and packaged Crabbox acceptance path. These require separate authorization and do not run as incidental checks.
+
 ### Fixture images and security controls
 
 The nonroot `tests/fixtures/kubernetes` image uses generated Namespace labels,
@@ -395,6 +399,10 @@ credential separation, not production node-pool isolation; that proof needs
 separate reviewed node pools. Tests must still pass with the actual supported
 gateway/Codex images and authenticated node reconnect; fixture readiness is not
 a substitute for model-backed acceptance.
+
+## Temporary-environment workload probe
+
+See [temporary environment verification](temporary-environments.md#temporary-environment-workload-probe) for workload authentication and lifecycle coverage.
 
 ## Production observability
 

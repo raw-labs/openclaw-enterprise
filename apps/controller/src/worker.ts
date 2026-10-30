@@ -1,3 +1,4 @@
+import { reconcileTemporaryEnvironment } from "./temporary-environment-worker.ts";
 import { isSecretHarnessAuth, isServiceAccountHarnessAuth } from "@openclaw-enterprise/contracts";
 import { isPositiveSafeInteger } from "@openclaw-enterprise/utils";
 import { randomUUID } from "node:crypto";
@@ -552,6 +553,9 @@ function positiveInteger(value: number, name: string): number {
 }
 
 function workOperation(claim: ControllerWork): string {
+  if (claim.kind === "temporary_environment") {
+    return "temporary_environment.reconcile";
+  }
   if (isCredentialWithdrawalWork(claim)) {
     return "agent_revision.credential_withdrawal";
   }
@@ -1163,7 +1167,9 @@ export class ControllerWorker {
             throw error;
           } finally {
             let kind: WorkKind = "namespace_ensure";
-            if (claim.kind === "provisioning") {
+            if (claim.kind === "temporary_environment") {
+              kind = "temporary_environment";
+            } else if (claim.kind === "provisioning") {
               kind = "agent_provisioning";
             } else if (claim.agentTarget === "deleted") {
               kind = "agent_delete";
@@ -1806,6 +1812,15 @@ export class ControllerWorker {
   }
 
   private async process(claim: ClaimedWork): Promise<void> {
+    if (claim.kind === "temporary_environment") {
+      this.passOutcome = await reconcileTemporaryEnvironment(claim, {
+        state: this.state,
+        compute: this.compute,
+        iam: this.iam,
+        effect: (operation) => this.withClaimHeartbeat(claim, operation),
+      });
+      return;
+    }
     if (claim.kind === "provisioning") {
       await this.processAgentProvisioning(claim);
       return;

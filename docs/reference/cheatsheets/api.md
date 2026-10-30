@@ -62,14 +62,18 @@
 - [`listAgentRepositoryOptions`](../api.md#get-namespacesnamespaceidagentsagentidrepositoryoptions): List approved repository choices for updating one Agent.
 - [`listAgents`](../api.md#get-namespacesnamespaceidagents): List authorized Agents in one exact Namespace.
 - [`listRepositoryOptions`](../api.md#get-namespacesnamespaceidagentsrepositoryoptions): List approved repository choices for Agent creation in one Namespace.
+- [`listTemporaryEnvironments`](../api.md#get-namespacesnamespaceidagentsagentidtemporaryenvironments): List temporary environments owned by the current Agent revision.
 - [`getAgent`](../api.md#get-namespacesnamespaceidagentsagentid): Get an exact Namespace-owned Agent.
 - [`getAgentCredentialWithdrawal`](../api.md#get-namespacesnamespaceidagentsagentidcredentialsourcescredentialsourceidwithdrawal): Get the withdrawal state of a credential source for an Agent.
 - [`getAgentProvisioning`](../api.md#get-namespacesnamespaceidagentsprovisionworkid): Get first-time provisioning status for one exact work item.
 - [`getAgentRuntimeImages`](../api.md#get-namespacesnamespaceidagentsagentidruntimeimages): Read observed images and source commits for an Agent's active runtime.
 - [`getSavedAgentPluginPolicyCapabilities`](../api.md#get-namespacesnamespaceidagentsagentidpluginscapabilities): Read selected Plugin Driver policy capabilities for an active Agent with caller Agent read/update permission.
+- [`getTemporaryEnvironment`](../api.md#get-namespacesnamespaceidagentsagentidtemporaryenvironmentsrequestid): Read exact-request temporary environment state and usable SSH metadata.
+- [`getTemporaryEnvironmentReadiness`](../api.md#get-namespacesnamespaceidagentsagentidtemporaryenvironmentsreadiness): Check approved temporary environment profiles for the active Agent workload.
 - [`createAgent`](../api.md#post-namespacesnamespaceidagents): Create a Namespace-owned Agent.
 - [`provisionAgent`](../api.md#post-namespacesnamespaceidagentsprovision): Create a new Agent and queue first-time provisioning.
 - [`updateAgent`](../api.md#patch-namespacesnamespaceidagentsagentid): Replace an exact Namespace-owned Agent's editable draft.
+- [`acquireTemporaryEnvironment`](../api.md#post-namespacesnamespaceidagentsagentidtemporaryenvironments): Reserve an approved temporary environment for the active Agent workload.
 - [`deployAgent`](../api.md#post-namespacesnamespaceidagentsagentiddeploy): Admit an immutable revision from the Agent's saved draft.
 - [`discoverAgentModels`](../api.md#post-namespacesnamespaceidagentsmodels): List provider models for Agent creation without storing the supplied credential.
 - [`discoverAgentPluginDetails`](../api.md#post-namespacesnamespaceidagentspluginsdetails): Read plugin details using the selected Driver.
@@ -83,11 +87,13 @@
 - [`startAgentDeviceAuthorization`](../api.md#post-namespacesnamespaceidagentsdeviceauthorizations): Experimental: Start a private device login for Agent configuration.
 - [`startSavedAgentDeviceAuthorization`](../api.md#post-namespacesnamespaceidagentsagentiddeviceauthorizations): Experimental: Start a private device login for Agent configuration.
 - [`stopAgent`](../api.md#post-namespacesnamespaceidagentsagentidstop): Stop one Agent while retaining its revision and persistent state.
+- [`touchTemporaryEnvironment`](../api.md#post-namespacesnamespaceidagentsagentidtemporaryenvironmentsrequestidtouch): Renew idle lifetime without extending the immutable hard deadline.
 - [`withdrawAgentCredentialSource`](../api.md#post-namespacesnamespaceidagentsagentidcredentialsourcescredentialsourceidwithdraw): Revoke one credential source from an Agent's active revision.
 - [`getAgentNativeAdmin`](../api.md#get-namespacesnamespaceidagentsagentidnativeadmin): Resolve native admin UI launch availability for one Agent.
 - [`cancelAgentDeviceAuthorization`](../api.md#delete-namespacesnamespaceidagentsdeviceauthorizationssecretid): Experimental: Discard a local device login without upstream revocation.
 - [`cancelSavedAgentDeviceAuthorization`](../api.md#delete-namespacesnamespaceidagentsagentiddeviceauthorizationssecretid): Experimental: Discard a local device login without upstream revocation.
 - [`deleteAgent`](../api.md#delete-namespacesnamespaceidagentsagentid): Begin or retry deletion of an exact Namespace-owned Agent and its AgentRevisions.
+- [`releaseTemporaryEnvironment`](../api.md#delete-namespacesnamespaceidagentsagentidtemporaryenvironmentsrequestid): Request cleanup; only deleted state confirms provider absence.
 
 ### Agent deployments
 

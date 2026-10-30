@@ -277,6 +277,7 @@ export const agents = occSchema.table(
     harnessAuthCredentialSourceId: text("harness_auth_credential_source_id").generatedAlwaysAs(
       sql`CASE WHEN harness_auth->>'method' = 'credential_source' THEN harness_auth->>'sourceId' END`,
     ),
+    temporaryEnvironments: jsonb("temporary_environments").$type<{ readonly profileId: string }>(),
     credentialSources: jsonb("credential_sources").$type<readonly AgentCredentialSourceBinding[]>(),
     activeRevisionId: text("active_revision_id"),
     desiredRuntimeState: text("desired_runtime_state")
@@ -295,6 +296,10 @@ export const agents = occSchema.table(
       table.servicePrincipalId,
     ),
     check("agents_id_format", sql`${table.id} ~ ${identifierPatterns.agent}`),
+    check(
+      "agents_temporary_environments_valid",
+      sql`temporary_environments IS NULL OR (jsonb_typeof(temporary_environments) = 'object' AND temporary_environments ? 'profileId' AND (temporary_environments - 'profileId') = '{}'::jsonb AND jsonb_typeof(temporary_environments->'profileId') = 'string' AND temporary_environments->>'profileId' ~ '^[a-z][a-z0-9-]{0,62}$')`,
+    ),
     check("agents_name_length", sql`char_length(${table.name}) BETWEEN 1 AND 200`),
     check("agents_execution_mode_valid", sql`${table.executionMode} IN ('embedded', 'dedicated')`),
     check(
@@ -664,7 +669,13 @@ export const agentRevisions = occSchema.table(
           - 'configuration_id' - 'configuration_kind' - 'configuration_generation'
           - 'draft_spec' - 'harness' - 'compute' - 'sandbox_driver_id'
           - 'secret_driver_id' - 'secret_bindings' - 'harness_auth' - 'credential_sources' - 'plugins'
-          - 'repository_credentials') = '{}'::jsonb
+          - 'repository_credentials' - 'plugin_approvers' - 'temporary_environments') = '{}'::jsonb
+        AND (NOT (${table.admittedSpec} ? 'temporary_environments') OR
+          (jsonb_typeof(${table.admittedSpec}->'temporary_environments') = 'object'
+           AND (${table.admittedSpec}->'temporary_environments') ? 'profileId'
+           AND ((${table.admittedSpec}->'temporary_environments') - 'profileId') = '{}'::jsonb
+           AND jsonb_typeof(${table.admittedSpec}#>'{temporary_environments,profileId}') = 'string'
+           AND ${table.admittedSpec}#>>'{temporary_environments,profileId}' ~ '^[a-z][a-z0-9-]{0,62}$'))
         AND jsonb_typeof(${table.admittedSpec}->'configuration_id') = 'string'
         AND (${table.admittedSpec}->>'configuration_id') ~ ${identifierPatterns.configuration}
         AND jsonb_typeof(${table.admittedSpec}->'configuration_kind') = 'string'
@@ -1081,7 +1092,10 @@ export const controllerWork = occSchema.table(
     })
       .onUpdate("restrict")
       .onDelete("no action"),
-    check("controller_work_kind_valid", sql`${table.workKind} IN ('lifecycle', 'provisioning')`),
+    check(
+      "controller_work_kind_valid",
+      sql`${table.workKind} IN ('lifecycle', 'provisioning', 'temporary_environment')`,
+    ),
     check(
       "controller_work_idempotency_key_length",
       sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 512`,
@@ -1098,7 +1112,8 @@ export const controllerWork = occSchema.table(
     check(
       "controller_work_namespace_target_valid",
       sql`(
-        (${table.workKind} = 'lifecycle' AND ${table.agentId} IS NULL AND ${table.revisionId} IS NULL
+        (${table.workKind} = 'temporary_environment' AND ${table.agentId} IS NULL AND ${table.revisionId} IS NULL AND ${table.namespaceTarget} IS NULL AND ${table.agentTarget} IS NULL AND ${table.idempotencyKey} ~ '^temporary_environment:tenv_[0-9a-f-]{36}$')
+        OR (${table.workKind} = 'lifecycle' AND ${table.agentId} IS NULL AND ${table.revisionId} IS NULL
           AND ${table.namespaceTarget} IS NOT NULL
           AND ${table.namespaceTarget} IN ('ready', 'deleted')
           AND ${table.agentTarget} IS NULL)
@@ -1572,5 +1587,156 @@ export const apikey = occSchema.table(
   (table) => [
     index("apikey_config_id_idx").on(table.configId),
     index("apikey_reference_id_idx").on(table.referenceId),
+  ],
+);
+
+export const temporaryEnvironmentQuotas = occSchema.table(
+  "temporary_environment_quotas",
+  {
+    namespaceId: text("namespace_id")
+      .primaryKey()
+      .references(() => namespaces.id, { onDelete: "restrict", onUpdate: "restrict" }),
+    maxEnvironments: integer("max_environments").notNull(),
+    maxCpuMillis: integer("max_cpu_millis").notNull(),
+    maxMemoryMiB: integer("max_memory_mib").notNull(),
+    reservedEnvironments: integer("reserved_environments").notNull().default(0),
+    reservedCpuMillis: integer("reserved_cpu_millis").notNull().default(0),
+    reservedMemoryMiB: integer("reserved_memory_mib").notNull().default(0),
+  },
+  (table) => [
+    check(
+      "temporary_environment_quotas_max_environments_check",
+      sql`${table.maxEnvironments} BETWEEN 1 AND 1000`,
+    ),
+    check("temporary_environment_quotas_max_cpu_millis_check", sql`${table.maxCpuMillis} > 0`),
+    check("temporary_environment_quotas_max_memory_mib_check", sql`${table.maxMemoryMiB} > 0`),
+    check(
+      "temporary_environment_quota_usage_valid",
+      sql`${table.reservedEnvironments} BETWEEN 0 AND ${table.maxEnvironments} AND ${table.reservedCpuMillis} BETWEEN 0 AND ${table.maxCpuMillis} AND ${table.reservedMemoryMiB} BETWEEN 0 AND ${table.maxMemoryMiB}`,
+    ),
+  ],
+);
+
+export const temporaryEnvironments = occSchema.table(
+  "temporary_environments",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`'tenv_' || gen_random_uuid()::text`),
+    namespaceId: text("namespace_id")
+      .notNull()
+      .references(() => temporaryEnvironmentQuotas.namespaceId, {
+        onDelete: "restrict",
+        onUpdate: "restrict",
+      }),
+    agentId: text("agent_id").notNull(),
+    revisionId: text("revision_id").notNull(),
+    servicePrincipalId: text("service_principal_id").notNull(),
+    liveRevisionId: text("live_revision_id"),
+    livePrincipalId: text("live_principal_id"),
+    sshPublicKey: text("ssh_public_key").notNull(),
+    idleTimeoutSeconds: integer("idle_timeout_seconds").notNull(),
+    idleExpiresAt: timestamp("idle_expires_at", { withTimezone: true }).notNull(),
+    allocationStarted: boolean("allocation_started").notNull().default(false),
+    providerRef: text("provider_ref"),
+    ssh: jsonb("ssh"),
+    requestId: text("request_id").notNull(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    profileId: text("profile_id").notNull(),
+    profileFingerprint: text("profile_fingerprint").notNull(),
+    cpuMillis: integer("cpu_millis").notNull(),
+    memoryMiB: integer("memory_mib").notNull(),
+    lifetimeSeconds: integer("lifetime_seconds").notNull(),
+    state: text("state").notNull().default("reserved"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    hardExpiresAt: timestamp("hard_expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique("temporary_environments_request_unique").on(
+      table.namespaceId,
+      table.agentId,
+      table.requestId,
+    ),
+    foreignKey({
+      name: "temporary_environments_revision_owner",
+      columns: [table.namespaceId, table.agentId, table.liveRevisionId],
+      foreignColumns: [agentRevisions.namespaceId, agentRevisions.agentId, agentRevisions.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      name: "temporary_environments_principal_owner",
+      columns: [table.namespaceId, table.agentId, table.livePrincipalId],
+      foreignColumns: [iamIdentities.namespaceId, iamIdentities.agentId, iamIdentities.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    check(
+      "temporary_environments_name_check",
+      sql`char_length(${table.name}) BETWEEN 1 AND 128 AND ${table.name} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'`,
+    ),
+    check(
+      "temporary_environments_slug_check",
+      sql`char_length(${table.slug}) BETWEEN 1 AND 128 AND ${table.slug} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'`,
+    ),
+    check(
+      "temporary_environments_request_id_check",
+      sql`char_length(${table.requestId}) BETWEEN 1 AND 128 AND ${table.requestId} ~ '^[A-Za-z0-9]' AND ${table.requestId} !~ '[^A-Za-z0-9._:-]'`,
+    ),
+    check(
+      "temporary_environments_profile_id_check",
+      sql`char_length(${table.profileId}) BETWEEN 1 AND 128 AND ${table.profileId} ~ '^[A-Za-z0-9]' AND ${table.profileId} !~ '[^A-Za-z0-9._:-]'`,
+    ),
+    check(
+      "temporary_environments_profile_fingerprint_check",
+      sql`char_length(${table.profileFingerprint}) = 64 AND ${table.profileFingerprint} !~ '[^a-f0-9]'`,
+    ),
+    check("temporary_environments_cpu_millis_check", sql`${table.cpuMillis} > 0`),
+    check("temporary_environments_memory_mib_check", sql`${table.memoryMiB} > 0`),
+    check(
+      "temporary_environments_lifetime_seconds_check",
+      sql`${table.lifetimeSeconds} BETWEEN 1 AND 86400`,
+    ),
+    check(
+      "temporary_environments_state_check",
+      sql`${table.state} IN ('reserved','provisioning','ready','deleting','deleted')`,
+    ),
+    check(
+      "temporary_environments_idle_timeout_seconds_check",
+      sql`${table.idleTimeoutSeconds} BETWEEN 1 AND 86400`,
+    ),
+    check(
+      "temporary_environments_idle_valid",
+      sql`${table.idleExpiresAt} <= ${table.hardExpiresAt} AND ${table.idleExpiresAt} > ${table.createdAt}`,
+    ),
+    check(
+      "temporary_environments_key_valid",
+      sql`length(${table.sshPublicKey}) BETWEEN 20 AND 16384 AND ${table.sshPublicKey} !~ E'[\\r\\n]'`,
+    ),
+    check(
+      "temporary_environments_live_owner",
+      sql`(${table.state} = 'deleted' AND ${table.liveRevisionId} IS NULL AND ${table.livePrincipalId} IS NULL) OR (${table.state} <> 'deleted' AND ${table.liveRevisionId} = ${table.revisionId} AND ${table.liveRevisionId} IS NOT NULL AND ${table.livePrincipalId} = ${table.servicePrincipalId} AND ${table.livePrincipalId} IS NOT NULL)`,
+    ),
+    check(
+      "temporary_environments_ready",
+      sql`${table.state} <> 'ready' OR (${table.allocationStarted} AND ${table.providerRef} IS NOT NULL AND ${table.ssh} IS NOT NULL)`,
+    ),
+    check(
+      "temporary_environments_allocation_state",
+      sql`(${table.state} <> 'reserved' OR NOT ${table.allocationStarted}) AND (${table.state} NOT IN ('provisioning','ready') OR ${table.allocationStarted})`,
+    ),
+    check(
+      "temporary_environments_receipt_valid",
+      sql`${table.providerRef} IS NULL OR length(${table.providerRef}) BETWEEN 1 AND 16384`,
+    ),
+    check(
+      "temporary_environments_ssh_valid",
+      sql`${table.ssh} IS NULL OR (jsonb_typeof(${table.ssh})='object' AND ${table.ssh} ?& ARRAY['host','port','user'] AND (${table.ssh} - 'host' - 'port' - 'user')='{}'::jsonb AND jsonb_typeof(${table.ssh}->'host')='string' AND length(${table.ssh}->>'host') BETWEEN 1 AND 253 AND jsonb_typeof(${table.ssh}->'user')='string' AND length(${table.ssh}->>'user') BETWEEN 1 AND 64 AND jsonb_typeof(${table.ssh}->'port')='number' AND (${table.ssh}->>'port') ~ '^[0-9]{1,5}$' AND (${table.ssh}->>'port')::integer BETWEEN 1 AND 65535)`,
+    ),
+    check(
+      "temporary_environments_deadline_valid",
+      sql`${table.hardExpiresAt} = ${table.createdAt} + ${table.lifetimeSeconds} * interval '1 second'`,
+    ),
   ],
 );

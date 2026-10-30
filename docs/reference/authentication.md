@@ -12,9 +12,10 @@ to an explicitly provisioned Principal or ServicePrincipal and owns
 For a sign-in procedure, see
 [human administrator sign-in](authentication/service-api-keys.md#sign-in-as-a-human-administrator).
 For non-Agent automation, see the [service-key procedure](authentication/service-api-keys.md).
-The [platform console](console.md) at `/console/` uses these session endpoints. Public signup, OIDC
-provisioning or claim mapping, and bearer credentials are unsupported; generic OIDC
-sign-in for enrolled accounts is in [OIDC sign-in](../guides/deploy/oidc-sign-in.md).
+The [console](console.md) uses these sessions. Public signup and OIDC provisioning
+are unsupported; see [enrolled OIDC sign-in](../guides/deploy/oidc-sign-in.md).
+Bearer authentication is restricted to the opt-in
+[draft workload probe](authentication/agent-workload-probe.md).
 
 ## Installation and account ownership
 
@@ -198,7 +199,7 @@ HTTP-only, use `SameSite=Lax`, and cover `/`. Production enables secure cookies;
 the configured base URL is also the trusted origin. Session inspection exposes
 only `authenticated`, `sessionKey`, and the account's `id`, `email`, and `name`.
 
-Protected requests resolve the current stored session with cookie caching
+Ordinary session-authenticated requests resolve the current stored session with cookie caching
 disabled. A missing, expired, revoked, or forged session is rejected, as is an
 `Authorization` header even alongside a session cookie.
 
@@ -276,7 +277,8 @@ principal through the selected IAM Driver and authorizes the exact resource
 operation. Each identity lookup
 and authorization decision loads current IAM policy, so account and permission
 changes are visible across controller instances. Caller-supplied identity
-headers and bearer credentials are not authorization evidence.
+headers grant no authority. Only the draft workload probe verifies bearer
+credentials through Compute.
 
 | Condition                                                      | Result                                                                             |
 | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- |

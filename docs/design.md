@@ -24,9 +24,12 @@ particular deployment enforces its networking, storage, or placement requirement
 
 The API, console, durable worker, PostgreSQL persistence, and Kubernetes packaging
 are implemented. Single-cluster Kubernetes execution places Gateway and Harness in one tenant
-namespace with separate Pods, identities and storage. External access-gateway admission, workload
-token authentication to OCC, and general credential-free model inference remain
-planned. The two-cluster profile is experimental.
+namespace with separate Pods, identities and storage. External access-gateway admission,
+general workload API authentication, and credential-free model inference remain
+planned. The disabled-by-default [temporary-environment draft](reference/authentication/agent-workload-probe.md)
+connects workload-scoped APIs, quota reservations and worker reconciliation to
+Kubernetes allocation and cleanup. End-to-end runtime qualification remains
+incomplete. The two-cluster profile is experimental.
 
 <a id="openclaw-as-the-open-enterprise-agent-platform"></a>
 <a id="summary"></a>
@@ -271,13 +274,13 @@ promises to reset persistent gateway state on redeployment.
 
 These approved requirements are not established by the implemented architecture:
 
-| Area                         | Current boundary and remaining work                                                                                                                                                                                                                                                                   |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| External admission           | Sessions and service keys authenticate to OCC. The separate OpenClaw Access Gateway (OAG) and trusted-ingress admission protocol remain planned. See [access design](design/access.md).                                                                                                               |
-| Workload identity            | Agents own ServicePrincipals and may receive projected Kubernetes tokens. OCC token verification, identity exchange, and workload API authentication remain deferred. See [authorization](reference/authorization.md#principals).                                                                     |
-| Model mediation              | Harnesses receive scoped model credentials. General `InferenceDriver` mediation, restricted model egress, and credential-free execution remain planned; OpenShell credential substitution is not a supported deployment substitute. See [runtime isolation](reference/security/runtime-isolation.md). |
-| Runtime trust                | Separate placement is implemented; general mutually authenticated, workload-bound transport and complete two-cluster runtime acceptance remain pending. See [Kubernetes Compute](reference/drivers/kubernetes-compute.md).                                                                            |
-| Resource and policy coverage | The design's `SandboxPolicy`, published Harness and Channel resource model, and Restrictions across every integration exceed the current API and Driver contracts. See [resource requirements](design/resources.md) and [Sandbox contract](reference/drivers/sandbox.md).                             |
+| Area                         | Current boundary and remaining work                                                                                                                                                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| External admission           | Sessions and service keys authenticate to OCC. The separate OpenClaw Access Gateway (OAG) and trusted-ingress admission protocol remain planned. See [access design](design/access.md).                                                                                                                |
+| Workload identity            | Agents own ServicePrincipals and may receive projected Kubernetes tokens. General workload API authentication and identity exchange remain deferred; the opt-in temporary-environment routes accept narrowly scoped Pod-bound credentials. See [authorization](reference/authorization.md#principals). |
+| Model mediation              | Harnesses receive scoped model credentials. General `InferenceDriver` mediation, restricted model egress, and credential-free execution remain planned; OpenShell credential substitution is not a supported deployment substitute. See [runtime isolation](reference/security/runtime-isolation.md).  |
+| Runtime trust                | Separate placement is implemented; general mutually authenticated, workload-bound transport and complete two-cluster runtime acceptance remain pending. See [Kubernetes Compute](reference/drivers/kubernetes-compute.md).                                                                             |
+| Resource and policy coverage | The design's `SandboxPolicy`, published Harness and Channel resource model, and Restrictions across every integration exceed the current API and Driver contracts. See [resource requirements](design/resources.md) and [Sandbox contract](reference/drivers/sandbox.md).                              |
 
 Agent and Plugin Directories, plugin invocation approval workflows, broader audit
 export and retention, Budgets, and Routers remain future work. Existing logging

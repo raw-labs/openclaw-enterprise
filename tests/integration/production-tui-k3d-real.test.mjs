@@ -12,6 +12,11 @@ import { availablePort } from "../helpers/available-port.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import { installProductionHelmControlPlane } from "../helpers/production-helm-real.mjs";
 import {
+  configureTemporaryEnvironmentWorkflow,
+  allowTemporaryEnvironmentWorkflow,
+  exerciseTemporaryEnvironmentWorkflow,
+} from "../helpers/temporary-environments-real.mjs";
+import {
   createKubernetesClient,
   createKubernetesInstallationConfiguration,
   kubectlArguments as buildKubectlArguments,
@@ -25,6 +30,7 @@ import {
 } from "../helpers/logging-otel-observation.mjs";
 
 const selected = process.env.OCC_TEST_PRODUCTION_TUI_REAL === "1";
+const temporarySSHImage = process.env.OCC_TEST_KUBERNETES_TEMPORARY_SSH_IMAGE;
 const selection = {
   kubeconfigPath: process.env.OCC_TEST_KUBERNETES_KUBECONFIG,
   kubernetesContext: process.env.OCC_TEST_KUBERNETES_CONTEXT,
@@ -264,6 +270,7 @@ test(
         authBaseURL: baseURL,
         installationName: `Production TUI ${suffix}`,
         apiClients: [{ namespace: system, podLabels: { app: "production-tui-proxy" } }],
+        temporaryEnvironments: { enabled: temporarySSHImage !== undefined },
         metrics: {
           enabled: true,
           scraperNamespaceLabels: { "kubernetes.io/metadata.name": system },
@@ -290,7 +297,9 @@ test(
         "-subj",
         "/CN=localhost",
         "-addext",
-        "subjectAltName=DNS:localhost,IP:127.0.0.1",
+        "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:occ-workload." +
+          system +
+          ".svc.cluster.local",
       ]);
       await createSecret("proxy-tls", {
         "tls.key": await readFile(join(directory, "tls.key"), "utf8"),
@@ -520,10 +529,16 @@ test(
         const result = await request(method, path, body, expected);
         return result.data;
       };
-      return { api, baseURL, externalRequest, runGuideOcc };
+      return { api, baseURL, externalRequest, runGuideOcc, configuration, ca };
     }
 
-    async function provisionNamespaceAndAgent({ api, externalRequest, runGuideOcc }) {
+    async function provisionNamespaceAndAgent({
+      api,
+      externalRequest,
+      runGuideOcc,
+      configuration,
+      ca,
+    }) {
       assert.equal(
         (await externalRequest("GET", "/installation", undefined, { authenticated: false })).status,
         401,
@@ -618,6 +633,21 @@ test(
         assert.ok(!["failed", "deleting"].includes(current.status), `Namespace ${current.status}`);
         return current.status === "ready";
       });
+      if (temporarySSHImage !== undefined) {
+        await configureTemporaryEnvironmentWorkflow({
+          configuration,
+          namespace,
+          system,
+          image: temporarySSHImage,
+          ca,
+          get,
+          createSecret,
+          kubectl,
+        });
+        await writeFile(join(directory, "installation.json"), JSON.stringify(configuration), {
+          mode: 0o600,
+        });
+      }
       // A connectivity demo has no identity wizard; first-run BOOTSTRAP.md would override its nonce prompt.
       const nativeConfiguration = createHarnessConfiguration("openclaw", model);
       nativeConfiguration.agents.defaults.skipBootstrap = true;
@@ -711,6 +741,13 @@ test(
         secondaryAgentId: secondaryAgent.id,
         stoppedAgentId: stoppedAgent.id,
       });
+      if (temporarySSHImage !== undefined) {
+        await api("PATCH", "/namespaces/" + namespace.id + "/agents/" + agent.id, {
+          configurationId: agent.configurationId,
+          temporaryEnvironments: { profileId: "acceptance" },
+        });
+        await allowTemporaryEnvironmentWorkflow({ system, tenant, agent, apply });
+      }
       return { agent, agentHash, namespace, secondaryAgent, stoppedAgent, tenant };
     }
 
@@ -1583,12 +1620,15 @@ test(
       });
     }
 
-    const { api, baseURL, externalRequest, runGuideOcc } = await installProductionControlPlane();
+    const { api, baseURL, externalRequest, runGuideOcc, configuration, ca } =
+      await installProductionControlPlane();
     const { agent, agentHash, namespace, secondaryAgent, stoppedAgent, tenant } =
       await provisionNamespaceAndAgent({
         api,
         externalRequest,
         runGuideOcc,
+        configuration,
+        ca,
       });
     const {
       secondaryRevisionId: secondaryBaselineRevision,
@@ -1596,6 +1636,18 @@ test(
     } = await prepareFleetBaselines();
     const { foreignIP, probe } = await proveProductionApiNetworkPolicy();
     const finalGateway = await exerciseRevisionCutover();
+    if (temporarySSHImage !== undefined) {
+      await exerciseTemporaryEnvironmentWorkflow({
+        api,
+        kubectl,
+        tenant,
+        namespace,
+        agent,
+        pod: finalGateway.pod,
+        suffix,
+        record,
+      });
+    }
     await assertProductionOtelLogs(finalGateway);
     const releaseGateway = await exerciseIndependentImageUpgrades(finalGateway);
     await verifyCredentialBoundariesAndPrepareHandoff(releaseGateway);

@@ -4,6 +4,7 @@ import type { PlatformMetricsSnapshot } from "@openclaw-enterprise/occ";
 export type WorkKind =
   | "namespace_ensure"
   | "namespace_delete"
+  | "temporary_environment"
   | "agent_provisioning"
   | "agent_revision"
   | "agent_stop"

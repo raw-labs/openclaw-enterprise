@@ -34,5 +34,31 @@ continues to suppress unsafe controller compensation.
 These are persistence boundaries; they do not authorize a resource operation.
 The controller and worker still enforce the caller's exact resource authority.
 
+## Draft temporary-environment reservations
+
+The `temporaryEnvironments` repository participates in the existing read/UOW
+boundary. Trusted admission code can set Namespace count/CPU/memory ceilings and
+reserve immutable Agent/revision-owned requests. Workload-only HTTP acquisition
+checks exact IAM authority and the admitted AgentRevision profile selection, then commits reservation,
+quota, audit and existing controller work together. Persistence alone does not
+authorize a caller. The Crabbox adapter preserves the same immutable name, slug
+and request identity and waits for confirmed deletion.
+
+PostgreSQL admission locks the Namespace and Agent in lifecycle order, checks
+ready/running/current-revision state, then spends quota and inserts one record
+in the same transaction. Exact retries preserve identity and deadline; changed
+profile fingerprints or resource/lifetime settings conflict. Missing or exhausted
+quota fails closed. Lowering ceilings below reserved usage is refused. Count
+ceilings are 1–1000; CPU/memory values are positive 32-bit integers; hard lifetimes
+are 1–86400 seconds.
+
+Deadlines and stop request cleanup rather than releasing capacity. The regular
+worker retains a queued obligation through readiness, expiry and uncertain effects.
+Only claim-fenced, Driver-confirmed absence releases counters and detaches live
+revision/principal foreign keys; immutable owner snapshots remain. Arbitrary SQL
+cannot reset counters or discard cleanup work. Memory mirrors admission and queued
+release, but explicitly refuses to emulate durable worker claims. See the
+[implementation trace](../flows/temporary-environment-readiness.md#3-durable-admission-and-reconciliation).
+
 See [PostgreSQL testing](../testing/postgresql.md) for contributor setup and
 [controller reconciliation](controller.md) for worker behavior.

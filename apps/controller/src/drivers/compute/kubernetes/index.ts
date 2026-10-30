@@ -1,3 +1,16 @@
+import {
+  temporaryEnvironmentPolicy,
+  validateTemporaryEnvironmentOptions,
+  type KubernetesTemporaryEnvironmentOptions,
+} from "./temporary-environments.ts";
+import type {
+  TemporaryEnvironmentComputeRequest,
+  TemporaryEnvironmentObservation,
+  TemporaryEnvironmentDeletion,
+  TemporaryEnvironmentPolicy,
+} from "@openclaw-enterprise/contracts";
+
+export type { KubernetesTemporaryEnvironmentOptions } from "./temporary-environments.ts";
 import { compareResourceQuantities } from "./resource-quantities.ts";
 import {
   asRecord,
@@ -15,6 +28,7 @@ import { isDeepStrictEqual } from "node:util";
 import type {
   AppsV1Api,
   AuthorizationV1Api,
+  AuthenticationV1Api,
   CoreV1Api,
   DiscoveryV1Api,
   KubernetesObject,
@@ -252,6 +266,7 @@ export type {
 interface KubernetesApiClients {
   readonly version: VersionApi;
   readonly core: CoreV1Api;
+  readonly authentication: AuthenticationV1Api;
   readonly apps: AppsV1Api;
   readonly authorization: AuthorizationV1Api;
   readonly discovery: DiscoveryV1Api;
@@ -278,6 +293,7 @@ const AGENT_NETWORK_POLICY_NAMES = Object.freeze([
   "allow-gateway-workspace-node",
   "allow-workspace-node-gateway",
   "allow-agent-runtime",
+  "allow-workload-api",
   "allow-plugin-status-proxy",
   "allow-plugin-status-agent",
   "allow-plugin-status-gateway",
@@ -392,6 +408,13 @@ export interface KubernetesComputeDriverOptions {
       readonly port: number;
     };
   };
+  readonly temporaryEnvironments?: KubernetesTemporaryEnvironmentOptions;
+  /** Agent workload endpoint; allocation requires operator profiles. */
+  readonly temporaryEnvironmentApiUrl?: string;
+  /** Exact translated API destination, not a Service subnet or DNS-derived grant. */
+  readonly temporaryEnvironmentApiEgress?: { readonly cidr: string; readonly port: number };
+  /** Optional private CA PEM; system trust remains enabled. */
+  readonly temporaryEnvironmentApiCaBundle?: string;
   readonly servicePrincipalCredentials:
     | { readonly mode: "disabled" }
     | {
@@ -2219,7 +2242,10 @@ function nativeRuntimeSnapshot(revision: AgentRevision): NativeRuntimeSnapshot |
     );
   }
   return {
-    configuration: JSON.stringify(nativeRuntimeConfiguration(revision.configuration)),
+    configuration: JSON.stringify({
+      ...nativeRuntimeConfiguration(revision.configuration),
+      skills: revision.configuration.skills,
+    }),
   };
 }
 
@@ -2337,6 +2363,627 @@ export class KubernetesComputeDriver implements ComputeDriver {
   readonly discoverHarnessModels = discoverHarnessModels;
   readonly startHarnessDeviceAuthorization = startHarnessDeviceAuthorization;
   readonly pollHarnessDeviceAuthorization = pollHarnessDeviceAuthorization;
+
+  getTemporaryEnvironmentPolicy(): TemporaryEnvironmentPolicy | undefined {
+    return temporaryEnvironmentPolicy(this.options.temporaryEnvironments);
+  }
+
+  private temporaryProfile(input: TemporaryEnvironmentComputeRequest) {
+    const profile = this.getTemporaryEnvironmentPolicy()?.profiles.find(
+      (entry) => entry.id === input.profileId,
+    );
+    if (
+      !profile ||
+      profile.fingerprint !== input.profileFingerprint ||
+      !profile.namespaceIds.includes(input.namespaceId) ||
+      profile.cpuMillis !== input.cpuMillis ||
+      profile.memoryMiB !== input.memoryMiB ||
+      profile.lifetimeSeconds !== input.lifetimeSeconds
+    ) {
+      throw new ConfigurationFailure("Temporary environment profile is unavailable or changed.");
+    }
+    return this.options.temporaryEnvironments!.profiles.find((entry) => entry.id === profile.id)!;
+  }
+
+  private temporaryName(input: TemporaryEnvironmentComputeRequest): string {
+    return "temporary-" + sha256Hex(input.namespaceId + "/" + input.agentId + "/" + input.id, 32);
+  }
+
+  private temporaryAnnotations(input: TemporaryEnvironmentComputeRequest): Record<string, string> {
+    return {
+      "openclaw.dev/temporary-environment-id": input.id,
+      "openclaw.dev/temporary-profile": input.profileFingerprint,
+      "openclaw.dev/temporary-request": sha256Hex(
+        JSON.stringify([
+          input.id,
+          input.namespaceId,
+          input.agentId,
+          input.revisionId,
+          input.servicePrincipalId,
+          input.profileId,
+          input.profileFingerprint,
+          input.cpuMillis,
+          input.memoryMiB,
+          input.lifetimeSeconds,
+          input.hardExpiresAt,
+          input.sshPublicKey,
+        ]),
+        64,
+      ),
+    };
+  }
+
+  private temporaryReceipt(input: TemporaryEnvironmentComputeRequest):
+    | {
+        namespace: string;
+        namespaceUid: string;
+        clusterUid: string;
+        resources: Record<string, string>;
+      }
+    | undefined {
+    if (input.providerRef === undefined) {
+      return undefined;
+    }
+    try {
+      const value = JSON.parse(input.providerRef);
+      if (
+        value.version !== 1 ||
+        value.request !== this.temporaryAnnotations(input)["openclaw.dev/temporary-request"] ||
+        typeof value.namespace !== "string" ||
+        typeof value.namespaceUid !== "string" ||
+        !value.namespaceUid ||
+        typeof value.clusterUid !== "string" ||
+        !value.clusterUid ||
+        !value.resources ||
+        Object.keys(value.resources).sort().join(",") !==
+          "NetworkPolicy,OwnerNetworkPolicy,Pod,Service" ||
+        Object.values(value.resources).some((uid) => typeof uid !== "string" || !uid)
+      ) {
+        throw new Error("invalid");
+      }
+      return value;
+    } catch {
+      throw new OwnershipFailure("Temporary environment ownership receipt is invalid.");
+    }
+  }
+
+  private async temporaryResources(input: TemporaryEnvironmentComputeRequest) {
+    const receipt = this.temporaryReceipt(input);
+    const placement =
+      receipt === undefined
+        ? (await this.resolveNamespace(input.namespaceId)).name
+        : { name: receipt.namespace, plane: "execution" as const };
+    const clients = await this.clients(placement.plane);
+    const system = await this.request(() => clients.core.readNamespace({ name: "kube-system" }));
+    const clusterUid = required(system.metadata?.uid, "Kubernetes cluster identity");
+    if (receipt !== undefined && receipt.clusterUid !== clusterUid) {
+      throw new OwnershipFailure("Temporary environment cluster identity changed.");
+    }
+    const namespace = await this.get("Namespace", placement.name, placement);
+    if (namespace !== undefined) {
+      verifiedKubernetesNamespace(namespace.metadata, input.namespaceId);
+      if (receipt !== undefined && namespace.metadata.uid !== receipt.namespaceUid) {
+        throw new OwnershipFailure("Temporary environment Namespace UID changed.");
+      }
+    }
+    const objects: Partial<
+      Record<
+        "Pod" | "Service" | "NetworkPolicy" | "OwnerNetworkPolicy",
+        ManagedKubernetesObject<"Pod" | "Service" | "NetworkPolicy">
+      >
+    > = {};
+    for (const kind of ["NetworkPolicy", "OwnerNetworkPolicy", "Service", "Pod"] as const) {
+      const object = await this.getOwned(
+        kind === "OwnerNetworkPolicy" ? "NetworkPolicy" : kind,
+        this.temporaryName(input) + (kind === "OwnerNetworkPolicy" ? "-owner" : ""),
+        placement,
+        input,
+      );
+      if (object === undefined) {
+        continue;
+      }
+      if (
+        namespace === undefined ||
+        !object.metadata.uid ||
+        Object.entries(this.temporaryAnnotations(input)).some(
+          ([key, value]) => object.metadata.annotations?.[key] !== value,
+        ) ||
+        object.metadata.annotations?.["openclaw.dev/temporary-namespace-uid"] !==
+          namespace.metadata.uid ||
+        object.metadata.labels?.["openclaw.dev/temporary-environment"] !==
+          this.temporaryName(input) ||
+        (receipt !== undefined && receipt.resources[kind] !== object.metadata.uid)
+      ) {
+        throw new OwnershipFailure("Temporary environment resource ownership changed.");
+      }
+      objects[kind] = object;
+    }
+    return { placement, namespace, clusterUid, objects, receipt };
+  }
+
+  async createTemporaryEnvironment(
+    input: TemporaryEnvironmentComputeRequest,
+    signal?: AbortSignal,
+  ): Promise<TemporaryEnvironmentObservation> {
+    return withComputeAbortSignal(signal ?? this.operationSignal(), async () => {
+      const profile = this.temporaryProfile(input);
+      if (
+        !input.allocationStarted ||
+        input.providerRef !== undefined ||
+        !/^ssh-ed25519 [A-Za-z0-9+/]{68}=?$/.test(input.sshPublicKey) ||
+        !Number.isFinite(Date.parse(input.hardExpiresAt))
+      ) {
+        throw new ConfigurationFailure(
+          "Temporary environment requires a durable allocation start and an Ed25519 public key.",
+        );
+      }
+      const key = Buffer.from(input.sshPublicKey.slice("ssh-ed25519 ".length), "base64");
+      if (
+        key.length !== 51 ||
+        key.readUInt32BE(0) !== 11 ||
+        key.subarray(4, 15).toString("ascii") !== "ssh-ed25519" ||
+        key.readUInt32BE(15) !== 32
+      ) {
+        throw new ConfigurationFailure(
+          "Temporary environment requires a valid Ed25519 public key.",
+        );
+      }
+      const remaining = Math.floor((Date.parse(input.hardExpiresAt) - Date.now()) / 1000);
+      if (remaining <= 0 || remaining > profile.lifetimeSeconds) {
+        throw new ConfigurationFailure(
+          "Temporary environment lifetime is outside the approved bound.",
+        );
+      }
+      const { placement, namespace, objects } = await this.temporaryResources(input);
+      if (
+        !namespace?.metadata.uid ||
+        namespace.metadata.deletionTimestamp ||
+        namespace.status?.phase !== "Active"
+      ) {
+        throw new OwnershipFailure("Temporary environment requires an active owned Namespace.");
+      }
+      if (Object.keys(objects).length !== 0) {
+        return this.observeTemporaryEnvironment(input, signal);
+      }
+      // Shared Namespace quota applies to these Pods; never create an isolated quota bypass.
+      const quota = await this.getOwned("ResourceQuota", "openclaw-quota", placement, {
+        namespaceId: input.namespaceId,
+      });
+      if (!quota?.spec?.hard) {
+        throw new ConfigurationFailure(
+          "Temporary environment requires the shared Namespace ResourceQuota.",
+        );
+      }
+      const name = this.temporaryName(input);
+      const selector = { "openclaw.dev/temporary-environment": name };
+      const metadata = {
+        ...this.ownershipMetadata(input),
+        name,
+        namespace: placement.name,
+        labels: {
+          ...this.ownershipMetadata(input).labels,
+          ...selector,
+          [NETWORK_PROFILE_LABEL]: "temporary-ssh-v1",
+          "openclaw.dev/workload-role": "temporary-environment",
+        },
+        annotations: {
+          ...this.ownershipMetadata(input).annotations,
+          ...this.temporaryAnnotations(input),
+          "openclaw.dev/temporary-namespace-uid": namespace.metadata.uid,
+        },
+      };
+      const clients = await this.clients(placement.plane);
+      // Policy and private Service precede the executable resource. Mutations are never retried.
+      await this.request(
+        () =>
+          clients.networking.createNamespacedNetworkPolicy({
+            namespace: placement.name,
+            body: {
+              apiVersion: "networking.k8s.io/v1",
+              kind: "NetworkPolicy",
+              metadata,
+              spec: {
+                podSelector: { matchLabels: selector },
+                policyTypes: ["Ingress", "Egress"],
+                ingress: [
+                  {
+                    _from: [
+                      {
+                        podSelector: {
+                          matchLabels: {
+                            "app.kubernetes.io/managed-by": MANAGER,
+                            "openclaw.dev/namespace": input.namespaceId,
+                            "openclaw.dev/agent": input.agentId,
+                            "openclaw.dev/revision": input.revisionId,
+                            [NETWORK_PROFILE_LABEL]: ORDINARY_NETWORK_PROFILE,
+                          },
+                          matchExpressions: [
+                            {
+                              key: "openclaw.dev/workload-role",
+                              operator: "In",
+                              values: ["agent", "gateway"],
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                    ports: [{ protocol: "TCP", port: 2222 }],
+                  },
+                ],
+                egress: profile.egress.map((rule) => ({
+                  to: [{ ipBlock: { cidr: rule.cidr } }],
+                  ports: [{ protocol: "TCP", port: rule.port }],
+                })),
+              },
+            },
+          }),
+        { mutating: true },
+      );
+      await this.request(
+        () =>
+          clients.networking.createNamespacedNetworkPolicy({
+            namespace: placement.name,
+            body: {
+              apiVersion: "networking.k8s.io/v1",
+              kind: "NetworkPolicy",
+              metadata: { ...metadata, name: name + "-owner" },
+              spec: {
+                podSelector: {
+                  matchLabels: {
+                    "app.kubernetes.io/managed-by": MANAGER,
+                    "openclaw.dev/namespace": input.namespaceId,
+                    "openclaw.dev/agent": input.agentId,
+                    "openclaw.dev/revision": input.revisionId,
+                    [NETWORK_PROFILE_LABEL]: ORDINARY_NETWORK_PROFILE,
+                  },
+                  matchExpressions: [
+                    {
+                      key: "openclaw.dev/workload-role",
+                      operator: "In",
+                      values: ["agent", "gateway"],
+                    },
+                  ],
+                },
+                policyTypes: ["Egress"],
+                egress: [
+                  {
+                    to: [{ podSelector: { matchLabels: selector } }],
+                    ports: [{ protocol: "TCP", port: 2222 }],
+                  },
+                ],
+              },
+            },
+          }),
+        { mutating: true },
+      );
+      await this.request(
+        () =>
+          clients.core.createNamespacedService({
+            namespace: placement.name,
+            body: {
+              apiVersion: "v1",
+              kind: "Service",
+              metadata,
+              spec: {
+                type: "ClusterIP",
+                selector,
+                ports: [{ name: "ssh", port: 2222, targetPort: 2222, protocol: "TCP" }],
+              },
+            },
+          }),
+        { mutating: true },
+      );
+      await this.request(
+        () =>
+          clients.core.createNamespacedPod({
+            namespace: placement.name,
+            body: {
+              apiVersion: "v1",
+              kind: "Pod",
+              metadata,
+              spec: {
+                automountServiceAccountToken: false,
+                enableServiceLinks: false,
+                hostNetwork: false,
+                hostPID: false,
+                hostIPC: false,
+                restartPolicy: "Never",
+                activeDeadlineSeconds: remaining,
+                terminationGracePeriodSeconds: 10,
+                securityContext: {
+                  runAsNonRoot: true,
+                  runAsUser: 1000,
+                  runAsGroup: 1000,
+                  fsGroup: 1000,
+                  seccompProfile: { type: "RuntimeDefault" },
+                },
+                containers: [
+                  {
+                    name: "ssh",
+                    image: profile.image,
+                    imagePullPolicy: "IfNotPresent",
+                    command: ["/usr/local/bin/occ-temporary-ssh"],
+                    env: [
+                      { name: "OCC_SSH_AUTHORIZED_KEY", value: input.sshPublicKey },
+                      { name: "OCC_HARD_EXPIRES_AT", value: input.hardExpiresAt },
+                      {
+                        name: "OCC_IDLE_TIMEOUT_SECONDS",
+                        value: String(profile.idleTimeoutSeconds),
+                      },
+                    ],
+                    ports: [{ name: "ssh", containerPort: 2222 }],
+                    readinessProbe: {
+                      tcpSocket: { port: 2222 },
+                      periodSeconds: 2,
+                      timeoutSeconds: 1,
+                    },
+                    securityContext: {
+                      privileged: false,
+                      allowPrivilegeEscalation: false,
+                      readOnlyRootFilesystem: true,
+                      capabilities: { drop: ["ALL"] },
+                    },
+                    resources: {
+                      requests: {
+                        cpu: String(profile.cpuMillis) + "m",
+                        memory: String(profile.memoryMiB) + "Mi",
+                        "ephemeral-storage": "256Mi",
+                      },
+                      limits: {
+                        cpu: String(profile.cpuMillis) + "m",
+                        memory: String(profile.memoryMiB) + "Mi",
+                        "ephemeral-storage": "256Mi",
+                      },
+                    },
+                    volumeMounts: [
+                      { name: "workspace", mountPath: "/workspace" },
+                      { name: "tmp", mountPath: "/tmp" },
+                    ],
+                  },
+                ],
+                volumes: [
+                  { name: "workspace", emptyDir: { sizeLimit: "192Mi" } },
+                  { name: "tmp", emptyDir: { sizeLimit: "64Mi" } },
+                ],
+              },
+            },
+          }),
+        { mutating: true },
+      );
+      return this.observeTemporaryEnvironment(input, signal);
+    });
+  }
+
+  async observeTemporaryEnvironment(
+    input: TemporaryEnvironmentComputeRequest,
+    signal?: AbortSignal,
+  ): Promise<TemporaryEnvironmentObservation> {
+    return withComputeAbortSignal(signal ?? this.operationSignal(), async () => {
+      const { placement, namespace, clusterUid, objects, receipt } =
+        await this.temporaryResources(input);
+      const pod = objects.Pod;
+      const service = objects.Service;
+      const policy = objects.NetworkPolicy;
+      if (!pod || !service || !policy || !objects.OwnerNetworkPolicy || !namespace) {
+        return {
+          state:
+            !input.allocationStarted && Object.keys(objects).length === 0 ? "absent" : "pending",
+          ...(input.providerRef === undefined ? {} : { providerRef: input.providerRef }),
+        };
+      }
+      const providerRef =
+        input.providerRef ??
+        JSON.stringify({
+          version: 1,
+          request: this.temporaryAnnotations(input)["openclaw.dev/temporary-request"],
+          namespace: placement.name,
+          namespaceUid: namespace.metadata.uid,
+          clusterUid,
+          resources: {
+            Pod: pod.metadata.uid,
+            Service: service.metadata.uid,
+            NetworkPolicy: policy.metadata.uid,
+            OwnerNetworkPolicy: objects.OwnerNetworkPolicy.metadata.uid,
+          },
+        });
+      if (receipt === undefined) {
+        this.temporaryReceipt({ ...input, providerRef });
+      }
+      const conditions = Array.isArray(pod.status?.conditions) ? pod.status.conditions : [];
+      if (
+        pod.metadata.deletionTimestamp ||
+        service.metadata.deletionTimestamp ||
+        policy.metadata.deletionTimestamp ||
+        Date.parse(input.hardExpiresAt) <= Date.now() ||
+        pod.status?.phase !== "Running" ||
+        !conditions.some(
+          (condition) =>
+            asRecord(condition)?.type === "Ready" && asRecord(condition)?.status === "True",
+        ) ||
+        service.spec?.type !== "ClusterIP" ||
+        !isDeepStrictEqual(service.spec?.selector, {
+          "openclaw.dev/temporary-environment": this.temporaryName(input),
+        }) ||
+        typeof service.spec?.clusterIP !== "string" ||
+        isIP(service.spec.clusterIP) === 0
+      ) {
+        return { state: "pending", providerRef };
+      }
+      const clients = await this.clients(placement.plane);
+      const slices = await this.request(() =>
+        clients.discovery.listNamespacedEndpointSlice({
+          namespace: placement.name,
+          labelSelector: "kubernetes.io/service-name=" + this.temporaryName(input),
+        }),
+      );
+      const ready = slices.items.some(
+        (slice) =>
+          slice.metadata?.ownerReferences?.some(
+            (owner) =>
+              owner.kind === "Service" &&
+              owner.uid === service.metadata.uid &&
+              owner.name === service.metadata.name,
+          ) &&
+          slice.ports?.some(
+            (port) => port.name === "ssh" && port.port === 2222 && port.protocol === "TCP",
+          ) &&
+          slice.endpoints?.some(
+            (endpoint) =>
+              endpoint.conditions?.ready === true &&
+              endpoint.targetRef?.kind === "Pod" &&
+              endpoint.targetRef.uid === pod.metadata.uid &&
+              endpoint.targetRef.name === pod.metadata.name &&
+              endpoint.targetRef.namespace === placement.name,
+          ),
+      );
+      return ready
+        ? {
+            state: "ready",
+            providerRef,
+            ssh: { host: service.spec.clusterIP, port: 2222, user: "worker" },
+          }
+        : { state: "pending", providerRef };
+    });
+  }
+
+  async deleteTemporaryEnvironment(
+    input: TemporaryEnvironmentComputeRequest,
+    signal?: AbortSignal,
+  ): Promise<TemporaryEnvironmentDeletion> {
+    return withComputeAbortSignal(signal ?? this.operationSignal(), async () => {
+      const { placement, objects, receipt } = await this.temporaryResources(input);
+      // Without a complete receipt, an in-flight create might still appear: keep quota reserved.
+      const clients = await this.clients(placement.plane);
+      for (const kind of ["Pod", "Service", "NetworkPolicy", "OwnerNetworkPolicy"] as const) {
+        // Keep the policy until the executable Pod is confirmed gone.
+        if (
+          kind !== "Pod" &&
+          (await this.getOwned("Pod", this.temporaryName(input), placement, input)) !== undefined
+        ) {
+          return { state: "pending" };
+        }
+        const object = objects[kind];
+        if (!object || object.metadata.deletionTimestamp) {
+          continue;
+        }
+        const request = {
+          namespace: placement.name,
+          name: object.metadata.name,
+          body: { preconditions: { uid: required(object.metadata.uid, "Temporary resource UID") } },
+        };
+        try {
+          await this.request(
+            async () => {
+              if (kind === "Pod") {
+                await clients.core.deleteNamespacedPod(request);
+              } else if (kind === "Service") {
+                await clients.core.deleteNamespacedService(request);
+              } else {
+                await clients.networking.deleteNamespacedNetworkPolicy(request);
+              }
+            },
+            { mutating: true },
+          );
+        } catch (error) {
+          if (numericErrorStatus(error) !== 404) {
+            throw error;
+          }
+        }
+      }
+      const after = await this.temporaryResources(input);
+      return {
+        state:
+          Object.keys(after.objects).length === 0 &&
+          (receipt !== undefined || !input.allocationStarted)
+            ? "absent"
+            : "pending",
+      };
+    });
+  }
+
+  async verifyAgentWorkloadIdentity(input: {
+    readonly token: string;
+    readonly namespaceId: string;
+    readonly agentId: string;
+  }) {
+    const credentials = this.options.servicePrincipalCredentials;
+    if (
+      this.options.temporaryEnvironmentApiUrl === undefined ||
+      credentials.mode !== "projectedServiceAccountToken"
+    ) {
+      return undefined;
+    }
+    const { name: placement } = await this.resolveNamespace(input.namespaceId);
+    // Only the execution plane can vouch for the Harness. Never retry against another cluster.
+    const clients = await this.clients(placement.plane);
+    const review = await this.request(
+      () =>
+        clients.authentication.createTokenReview({
+          body: {
+            apiVersion: "authentication.k8s.io/v1",
+            kind: "TokenReview",
+            spec: { token: input.token, audiences: [credentials.audience] },
+          },
+        }),
+      { mutating: false },
+    );
+    const status = review.status;
+    const names = status?.user?.extra?.["authentication.kubernetes.io/pod-name"];
+    const uids = status?.user?.extra?.["authentication.kubernetes.io/pod-uid"];
+    if (
+      status?.authenticated !== true ||
+      !status.audiences?.includes(credentials.audience) ||
+      names?.length !== 1 ||
+      uids?.length !== 1 ||
+      !names[0] ||
+      !uids[0]
+    ) {
+      return undefined;
+    }
+    let pod;
+    try {
+      pod = await this.request(
+        () => clients.core.readNamespacedPod({ namespace: placement.name, name: names[0]! }),
+        { mutating: false },
+      );
+    } catch (error) {
+      if (numericErrorStatus(error) === 404) {
+        return undefined;
+      }
+      throw error;
+    }
+    const annotations = pod.metadata?.annotations;
+    const revisionId =
+      annotations?.["openclaw.dev/revision-id"] ?? annotations?.[AGENT_REVISION_ID_ANNOTATION];
+    const servicePrincipalId = annotations?.["openclaw.dev/service-principal-id"];
+    const projected = pod.spec?.volumes?.some(
+      (volume) =>
+        volume.name === "openclaw-service-principal" &&
+        volume.projected?.sources?.some(
+          (source) => source.serviceAccountToken?.audience === credentials.audience,
+        ),
+    );
+    if (
+      pod.metadata?.uid !== uids[0] ||
+      pod.metadata?.deletionTimestamp ||
+      pod.metadata?.labels?.["app.kubernetes.io/managed-by"] !== MANAGER ||
+      annotations?.["openclaw.dev/namespace-id"] !== input.namespaceId ||
+      annotations?.["openclaw.dev/agent-id"] !== input.agentId ||
+      !revisionId ||
+      !servicePrincipalId ||
+      !projected ||
+      status.user?.username !==
+        `system:serviceaccount:${placement.name}:${pod.spec?.serviceAccountName}`
+    ) {
+      return undefined;
+    }
+    return {
+      namespaceId: input.namespaceId,
+      agentId: input.agentId,
+      revisionId,
+      servicePrincipalId,
+    };
+  }
 
   requiresStoppedPredecessors(revision: AgentRevision): boolean {
     return revision.harness.mode === "dedicated";
@@ -2466,6 +3113,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
           },
         },
       },
+      temporaryEnvironments: { type: "object" },
+      temporaryEnvironmentApiUrl: { type: "string", minLength: 1 },
+      temporaryEnvironmentApiEgress: { type: "object" },
+      temporaryEnvironmentApiCaBundle: { type: "string", minLength: 1 },
       servicePrincipalCredentials: {
         type: "object",
         required: ["mode"],
@@ -2583,6 +3234,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
       }
     }
     const options = candidate as unknown as KubernetesComputeDriverOptions;
+    validateTemporaryEnvironmentOptions(options.temporaryEnvironments);
+    if (options.temporaryEnvironments !== undefined && options.executionCluster !== undefined) {
+      throw new ConfigurationFailure("Temporary environments require single-cluster execution.");
+    }
     const authentication = options.authentication;
     if (asRecord(authentication) === undefined) {
       throw new ConfigurationFailure(
@@ -2696,6 +3351,68 @@ export class KubernetesComputeDriver implements ComputeDriver {
       throw new ConfigurationFailure(
         "Gateway routing derives the Envoy gateway client peer; do not configure network.gatewayClients.",
       );
+    }
+    if (
+      options.temporaryEnvironmentApiUrl === undefined &&
+      (options.temporaryEnvironmentApiEgress !== undefined ||
+        options.temporaryEnvironmentApiCaBundle !== undefined)
+    ) {
+      throw new ConfigurationFailure("Temporary environment API transport requires its endpoint.");
+    }
+    if (options.temporaryEnvironmentApiUrl !== undefined) {
+      if (options.runtime === undefined || options.executionCluster !== undefined) {
+        throw new ConfigurationFailure(
+          "Temporary environment API requires single-cluster Agent runtime execution.",
+        );
+      }
+      const egress = options.temporaryEnvironmentApiEgress;
+      const address = egress?.cidr?.split("/")[0] ?? "";
+      if (
+        !egress ||
+        Object.keys(egress).some((key) => !["cidr", "port"].includes(key)) ||
+        isIP(address) !== 4 ||
+        egress.cidr !== address + "/32" ||
+        /^(0|127|169\.254)\./.test(address) ||
+        Number(address.split(".")[0]) >= 224 ||
+        !Number.isSafeInteger(egress.port) ||
+        egress.port < 1 ||
+        egress.port > 65535
+      ) {
+        throw new ConfigurationFailure(
+          "Temporary environment API egress requires an exact IPv4 /32 and TCP port.",
+        );
+      }
+      if (options.temporaryEnvironmentApiCaBundle !== undefined) {
+        const certificates = options.temporaryEnvironmentApiCaBundle.match(
+          /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g,
+        );
+        if (
+          !certificates?.length ||
+          options.temporaryEnvironmentApiCaBundle
+            .replace(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g, "")
+            .trim()
+        ) {
+          throw new ConfigurationFailure(
+            "Temporary environment API CA must contain only PEM certificates.",
+          );
+        }
+        for (const certificate of certificates) {
+          new X509Certificate(certificate);
+        }
+      }
+      const endpoint = new URL(options.temporaryEnvironmentApiUrl);
+      if (
+        endpoint.protocol !== "https:" ||
+        endpoint.username ||
+        endpoint.password ||
+        endpoint.search ||
+        endpoint.hash ||
+        options.servicePrincipalCredentials?.mode !== "projectedServiceAccountToken"
+      ) {
+        throw new ConfigurationFailure(
+          "Temporary environments require an HTTPS OCC URL and projected workload credentials.",
+        );
+      }
     }
     const credentials = options.servicePrincipalCredentials;
     if (asRecord(credentials) === undefined) {
@@ -2890,9 +3607,26 @@ export class KubernetesComputeDriver implements ComputeDriver {
       selection.implementation ?? "kubernetes-local",
       "Kubernetes Compute Driver implementation",
     );
-    this.options = options;
+    this.options = {
+      ...options,
+      ...(options.temporaryEnvironmentApiEgress === undefined
+        ? {}
+        : { temporaryEnvironmentApiEgress: { ...options.temporaryEnvironmentApiEgress } }),
+      ...(options.temporaryEnvironments === undefined
+        ? {}
+        : { temporaryEnvironments: structuredClone(options.temporaryEnvironments) }),
+    };
     if (options.runtime !== undefined) {
       this.requiresAgentRuntimeCredentials = true;
+    }
+    if (
+      (options.temporaryEnvironments !== undefined ||
+        options.temporaryEnvironmentApiUrl !== undefined) &&
+      selection.sandboxDriver !== undefined
+    ) {
+      throw new ConfigurationFailure(
+        "Temporary environments require Kubernetes-owned Agent execution.",
+      );
     }
     this.sandboxDriver = selection.sandboxDriver;
     if (selection.credentialGatewayDriver !== undefined && selection.sandboxDriver === undefined) {
@@ -4611,11 +5345,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
       repositoryConsumer?.role !== "gateway"
         ? revision.configuration
         : repositoryNativeConfiguration(revision.configuration);
-    const admittedNativeConfiguration = this.gatewayNativeHookRelayConfiguration(
+    const admittedNativeConfiguration = this.temporaryEnvironmentSkillConfiguration(
       revision,
-      this.gatewaySandboxConfiguration(
+      this.gatewayNativeHookRelayConfiguration(
         revision,
-        this.kubernetesGatewayConfigurationDocument(nativeConfiguration),
+        this.gatewaySandboxConfiguration(
+          revision,
+          this.kubernetesGatewayConfigurationDocument(nativeConfiguration),
+        ),
       ),
     );
     const admittedRevision = { ...revision, configuration: admittedNativeConfiguration };
@@ -5110,6 +5847,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
               repositoryConsumer?.role === "gateway" ? repositoryMaterial : undefined,
               undefined,
               providerEndpoint,
+              revision.temporaryEnvironments,
             ),
             gatewayOwnership,
             gatewayNamespace,
@@ -5268,6 +6006,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
         workspaceSetup,
         repositoryConsumer?.role === "agent" ? repositoryMaterial : undefined,
         nativeRuntime,
+        undefined,
+        revision.temporaryEnvironments,
       );
       if (node !== undefined) {
         if (nativeRuntime === undefined) {
@@ -5588,11 +6328,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
       repositoryConsumer?.role !== "gateway"
         ? revision.configuration
         : repositoryNativeConfiguration(revision.configuration);
-    const admittedNativeConfiguration = this.gatewayNativeHookRelayConfiguration(
+    const admittedNativeConfiguration = this.temporaryEnvironmentSkillConfiguration(
       revision,
-      this.gatewaySandboxConfiguration(
+      this.gatewayNativeHookRelayConfiguration(
         revision,
-        this.kubernetesGatewayConfigurationDocument(nativeConfiguration),
+        this.gatewaySandboxConfiguration(
+          revision,
+          this.kubernetesGatewayConfigurationDocument(nativeConfiguration),
+        ),
       ),
     );
     const admittedRevision = { ...revision, configuration: admittedNativeConfiguration };
@@ -5712,6 +6455,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
               [],
               workspaceSetup,
               repositoryMaterial,
+              undefined,
+              undefined,
+              revision.temporaryEnvironments,
             ),
             gatewayOwnership,
             namespace,
@@ -5824,6 +6570,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
         workspaceSetup,
         repositoryMaterial,
         nativeRuntime,
+        undefined,
+        revision.temporaryEnvironments,
       );
     let providerEndpoint: SandboxHarnessEndpoint | undefined;
     if (sandboxDriver?.provisionHarness === undefined) {
@@ -5965,6 +6713,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         undefined,
         undefined,
         providerEndpoint,
+        revision.temporaryEnvironments,
       ),
       gatewayOwnership,
       gatewayNamespace,
@@ -6703,6 +7452,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     for (const name of [
       "allow-agent-runtime",
+      "allow-workload-api",
       "allow-plugin-status-proxy",
       "allow-plugin-status-agent",
       "allow-workspace-node-gateway",
@@ -7828,6 +8578,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     return {
       version: new sdk.VersionApi(clientConfiguration),
       core: new sdk.CoreV1Api(clientConfiguration),
+      authentication: new sdk.AuthenticationV1Api(clientConfiguration),
       apps: new sdk.AppsV1Api(clientConfiguration),
       authorization: new sdk.AuthorizationV1Api(clientConfiguration),
       discovery: new sdk.DiscoveryV1Api(clientConfiguration),
@@ -10278,6 +11029,30 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     return `https://${host}${port === 443 ? "" : `:${port}`}`;
   }
 
+  private temporaryEnvironmentSkillConfiguration(
+    revision: AgentRevision,
+    configuration: OpenClawConfigurationDocument,
+  ): OpenClawConfigurationDocument {
+    const document = structuredClone(configuration);
+    const skills = asRecord(document.skills) ?? {};
+    const entries = asRecord(skills.entries) ?? {};
+    const crabbox = asRecord(entries.crabbox) ?? {};
+    return {
+      ...document,
+      skills: {
+        ...skills,
+        entries: {
+          ...entries,
+          crabbox: { ...crabbox, enabled: revision.temporaryEnvironments !== undefined },
+          "crabbox-quickstart": {
+            ...(asRecord(entries["crabbox-quickstart"]) ?? {}),
+            enabled: revision.temporaryEnvironments !== undefined,
+          },
+        },
+      },
+    } as OpenClawConfigurationDocument;
+  }
+
   private gatewayNativeHookRelayConfiguration(
     revision: AgentRevision,
     configuration: OpenClawConfigurationDocument,
@@ -11361,6 +12136,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     image: string,
     embedded: boolean,
     writableConfiguration = false,
+    temporaryAdapter = false,
   ): KubernetesRecord {
     const directories = this.privateStateDirectories(role);
     const volumeMounts: V1VolumeMount[] = [
@@ -11388,6 +12164,15 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       /^\/home\/node/u,
       "/runtime-state/home",
     );
+    const temporarySetup = temporaryAdapter
+      ? [
+          'require("node:fs").mkdirSync("/runtime-state/home/.config/crabbox", {recursive:true,mode:0o700});',
+          'require("node:fs").mkdirSync("/runtime-state/home/.ssh", {recursive:true,mode:0o700});',
+          'if (!require("node:fs").existsSync("/runtime-state/home/.ssh/occ-temporary")) require("node:child_process").execFileSync("/usr/bin/ssh-keygen", ["-q","-t","ed25519","-N","","-f","/runtime-state/home/.ssh/occ-temporary"]);',
+          `require("node:fs").writeFileSync("/runtime-state/home/.config/crabbox/config.yaml", ${JSON.stringify(JSON.stringify({ provider: "external", target: "linux", external: { command: "/usr/local/bin/occ-crabbox-provider", capabilities: { idempotentLeaseId: true }, connection: { ssh: { trustProviderOutput: true } }, workRoot: "/workspace" } }))}, {mode:0o600});`,
+        ]
+      : [];
+    const workloadCa = temporaryAdapter ? this.options.temporaryEnvironmentApiCaBundle : undefined;
     const script = [
       writableConfiguration
         ? 'const { chmodSync, copyFileSync, mkdirSync } = require("node:fs");'
@@ -11396,6 +12181,12 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       "  mkdirSync(path, { recursive: true });",
       "  chmodSync(path, 0o700);",
       "}",
+      ...temporarySetup,
+      ...(workloadCa === undefined
+        ? []
+        : [
+            `require("node:fs").writeFileSync("/runtime-state/home/occ-workload-ca.pem", ${JSON.stringify(workloadCa)}, {mode:0o600});`,
+          ]),
       // The emptyDir root is group-writable under fsGroup, without /tmp's sticky
       // bit. Mount a private child so native safe-temp admission needs no privilege.
       'mkdirSync("/runtime-temporary/tmp", { recursive: true, mode: 0o700 });',
@@ -11925,6 +12716,30 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         ports: [{ protocol: "TCP", port: 443 }],
       },
     ];
+    const workloadApiPolicies =
+      revision.temporaryEnvironments === undefined ||
+      this.options.temporaryEnvironmentApiEgress === undefined
+        ? []
+        : [
+            policy("allow-workload-api", {
+              podSelector: ordinaryNetworkPolicySelector({
+                "openclaw.dev/namespace": revision.namespaceId,
+                "openclaw.dev/agent": revision.agentId,
+                "openclaw.dev/revision": revision.id,
+                "openclaw.dev/workload-role":
+                  revision.harness.mode === "embedded" ? "gateway" : "agent",
+              }),
+              policyTypes: ["Egress"],
+              egress: [
+                {
+                  to: [{ ipBlock: { cidr: this.options.temporaryEnvironmentApiEgress.cidr } }],
+                  ports: [
+                    { protocol: "TCP", port: this.options.temporaryEnvironmentApiEgress.port },
+                  ],
+                },
+              ],
+            }),
+          ];
     const repositoryEgress =
       revision.repositoryCredentials === undefined
         ? []
@@ -12002,6 +12817,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           policyTypes: ["Egress"],
           egress: [...modelEgress, ...repositoryEgress],
         }),
+        ...workloadApiPolicies,
         ...statusPolicies,
       ];
     }
@@ -12050,6 +12866,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           ? { egress: [...modelEgress, ...repositoryEgress] }
           : {}),
       }),
+      ...workloadApiPolicies,
       ...statusPolicies,
     ];
   }
@@ -12886,6 +13703,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     repositoryMaterial?: ResolvedRepositoryMaterialSpec,
     nativeRuntime?: NativeRuntimeSnapshot,
     providerEndpoint?: SandboxHarnessEndpoint,
+    temporaryEnvironments?: AgentRevision["temporaryEnvironments"],
   ): ManagedKubernetesObject {
     if (nativeRuntime !== undefined && (embedded || role !== "agent")) {
       throw new ConfigurationFailure(
@@ -12944,8 +13762,37 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       providerEndpoint === undefined
         ? undefined
         : providerHarnessUrl(providerEndpoint, providerNetwork!);
+    const profileId = temporaryEnvironments?.profileId;
+    const temporaryAdapter = (role === "agent" || embedded) && profileId !== undefined;
+    if (
+      temporaryAdapter &&
+      !this.options.temporaryEnvironments?.profiles.find(
+        (profile) =>
+          profile.id === profileId && profile.namespaceIds.includes(ownership.namespaceId),
+      )
+    ) {
+      throw new ConfigurationFailure(
+        "Temporary environment selected profile is not eligible for this Namespace.",
+      );
+    }
+    if (
+      temporaryAdapter &&
+      (this.options.temporaryEnvironmentApiUrl === undefined || runtime === undefined)
+    ) {
+      throw new ConfigurationFailure(
+        "Temporary environment selection requires an OCC endpoint and Agent runtime.",
+      );
+    }
     const initContainers = privateHome
-      ? [this.privateStateInitContainer(role, image, embedded, writableConfiguration)]
+      ? [
+          this.privateStateInitContainer(
+            role,
+            image,
+            embedded,
+            writableConfiguration,
+            temporaryAdapter,
+          ),
+        ]
       : [];
     if (configuration !== undefined) {
       volumes.push({
@@ -13125,6 +13972,25 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       }
     }
     if (projected !== undefined) {
+      if (temporaryAdapter && this.options.temporaryEnvironmentApiUrl !== undefined) {
+        variables.push(
+          { name: "OCC_WORKLOAD_SSH_KEY_FILE", value: "/home/node/.ssh/occ-temporary" },
+          { name: "OCC_WORKLOAD_TEMPORARY_PROFILE", value: profileId! },
+          { name: "CRABBOX_CONFIG", value: "/home/node/.config/crabbox/config.yaml" },
+        );
+        if (this.options.temporaryEnvironmentApiCaBundle !== undefined) {
+          variables.push({ name: "NODE_EXTRA_CA_CERTS", value: "/home/node/occ-workload-ca.pem" });
+        }
+        variables.push(
+          { name: "OCC_WORKLOAD_URL", value: this.options.temporaryEnvironmentApiUrl },
+          { name: "OCC_WORKLOAD_NAMESPACE_ID", value: ownership.namespaceId },
+          {
+            name: "OCC_WORKLOAD_AGENT_ID",
+            value: required(ownership.agentId, "Workload Agent identity"),
+          },
+          { name: "OCC_WORKLOAD_TOKEN_FILE", value: TOKEN_PATH + "/token" },
+        );
+      }
       volumes.push({
         name: "openclaw-service-principal",
         projected: {

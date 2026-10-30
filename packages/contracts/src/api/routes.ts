@@ -1,4 +1,11 @@
 import { Type } from "typebox";
+import {
+  TemporaryEnvironmentParams,
+  AcquireTemporaryEnvironmentBody,
+  TemporaryEnvironmentResponse,
+  TemporaryEnvironmentListResponse,
+  TemporaryEnvironmentReadinessResponse,
+} from "./temporary-environments.ts";
 
 import {
   AgentParams,
@@ -143,6 +150,117 @@ const runtimeReadErrors = {
 } as const;
 
 export const occApiRoutes = [
+  {
+    operationId: "getTemporaryEnvironmentReadiness",
+    method: "GET",
+    path: "/namespaces/:namespaceId/agents/:agentId/temporary-environments/readiness",
+    action: "openclaw.agents.temporary_environments.readiness",
+    iamAction: "operate",
+    resourceKind: "agent",
+    authorizationTarget: "agent",
+    summary: "Check approved temporary environment profiles for the active Agent workload",
+    tags: ["Agents"],
+    schema: {
+      querystring: EmptyQuery,
+      params: AgentParams,
+      response: {
+        200: TemporaryEnvironmentReadinessResponse,
+        501: ErrorResponseRef,
+        ...readErrors,
+      },
+    },
+  },
+  {
+    operationId: "acquireTemporaryEnvironment",
+    method: "POST",
+    path: "/namespaces/:namespaceId/agents/:agentId/temporary-environments",
+    action: "openclaw.agents.temporary_environments.acquire",
+    iamAction: "operate",
+    resourceKind: "agent",
+    authorizationTarget: "agent",
+    summary: "Reserve an approved temporary environment for the active Agent workload",
+    tags: ["Agents"],
+    schema: {
+      querystring: EmptyQuery,
+      params: AgentParams,
+      body: AcquireTemporaryEnvironmentBody,
+      response: {
+        200: TemporaryEnvironmentResponse,
+        202: TemporaryEnvironmentResponse,
+        ...mutationErrors,
+        501: ErrorResponseRef,
+      },
+    },
+  },
+  {
+    operationId: "listTemporaryEnvironments",
+    method: "GET",
+    path: "/namespaces/:namespaceId/agents/:agentId/temporary-environments",
+    action: "openclaw.agents.temporary_environments.list",
+    iamAction: "operate",
+    resourceKind: "agent",
+    authorizationTarget: "agent",
+    summary: "List temporary environments owned by the current Agent revision",
+    tags: ["Agents"],
+    schema: {
+      querystring: EmptyQuery,
+      params: AgentParams,
+      response: { 200: TemporaryEnvironmentListResponse, ...readErrors },
+    },
+  },
+  {
+    operationId: "getTemporaryEnvironment",
+    method: "GET",
+    path: "/namespaces/:namespaceId/agents/:agentId/temporary-environments/:requestId",
+    action: "openclaw.agents.temporary_environments.read",
+    iamAction: "operate",
+    resourceKind: "agent",
+    authorizationTarget: "agent",
+    summary: "Read exact-request temporary environment state and usable SSH metadata",
+    tags: ["Agents"],
+    schema: {
+      querystring: EmptyQuery,
+      params: TemporaryEnvironmentParams,
+      response: { 200: TemporaryEnvironmentResponse, ...readErrors },
+    },
+  },
+  {
+    operationId: "touchTemporaryEnvironment",
+    method: "POST",
+    path: "/namespaces/:namespaceId/agents/:agentId/temporary-environments/:requestId/touch",
+    action: "openclaw.agents.temporary_environments.touch",
+    iamAction: "operate",
+    resourceKind: "agent",
+    authorizationTarget: "agent",
+    summary: "Renew idle lifetime without extending the immutable hard deadline",
+    tags: ["Agents"],
+    schema: {
+      querystring: EmptyQuery,
+      params: TemporaryEnvironmentParams,
+      body: Type.Object({}, { additionalProperties: false }),
+      response: { 200: TemporaryEnvironmentResponse, ...mutationErrors },
+    },
+  },
+  {
+    operationId: "releaseTemporaryEnvironment",
+    method: "DELETE",
+    path: "/namespaces/:namespaceId/agents/:agentId/temporary-environments/:requestId",
+    action: "openclaw.agents.temporary_environments.release",
+    iamAction: "operate",
+    resourceKind: "agent",
+    authorizationTarget: "agent",
+    summary: "Request cleanup; only deleted state confirms provider absence",
+    tags: ["Agents"],
+    schema: {
+      querystring: EmptyQuery,
+      params: TemporaryEnvironmentParams,
+      response: {
+        200: TemporaryEnvironmentResponse,
+        202: TemporaryEnvironmentResponse,
+        ...mutationErrors,
+      },
+    },
+  },
   {
     operationId: "startAgentDeviceAuthorization",
     method: "POST",

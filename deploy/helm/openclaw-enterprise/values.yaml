@@ -296,3 +296,8 @@ worker:
   leaseDurationMs: 5000
   maxAttempts: 5
   convergenceTimeoutMs: 900000
+
+# Match the operator's Installation workload-authentication/profile opt-in.
+# Tenant worker permissions are bound only in provisioned tenant namespaces.
+temporaryEnvironments:
+  enabled: false

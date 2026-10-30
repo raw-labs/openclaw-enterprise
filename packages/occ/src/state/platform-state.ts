@@ -1,3 +1,4 @@
+import { normalizeAgentTemporaryEnvironments } from "@openclaw-enterprise/contracts";
 import { RepositoryTransactionLifetime } from "../ports/transaction.ts";
 import { bindPlatformUnitOfWork } from "../ports/platform-unit-of-work.ts";
 import { createPlatformReadView } from "../ports/platform-read-view.ts";
@@ -8,6 +9,13 @@ import type {
   RepositorySessionRepository,
 } from "../ports/repository-sessions.ts";
 import { memoryRepositorySessions } from "./memory-repository-sessions.ts";
+import { memoryTemporaryEnvironments } from "./memory-temporary-environments.ts";
+import type {
+  TemporaryEnvironmentQuota,
+  TemporaryEnvironmentReservation,
+  TemporaryEnvironmentReadRepository,
+  TemporaryEnvironmentRepository,
+} from "../ports/temporary-environments.ts";
 import {
   normalizedRepositoryBindings,
   normalizedRepositoryAccess,
@@ -178,6 +186,7 @@ export interface AgentRepository extends AgentReadRepository {
     pluginApprovers?: PluginApprovers | null,
     repositoryAccess?: RepositoryAccess | null,
     credentialSources?: readonly AgentCredentialSourceBinding[],
+    temporaryEnvironments?: Agent["temporaryEnvironments"] | null,
   ): Promise<Readonly<Agent> | undefined>;
   compareAndSetActiveRevision(
     namespaceId: string,
@@ -774,6 +783,7 @@ interface PlatformOperationBase {
 }
 
 export type PlatformOperation =
+  | (PlatformOperationBase & { readonly kind: "temporary_environment"; readonly target?: never })
   | (PlatformOperationBase & {
       readonly kind: "namespace";
       readonly target: "ready" | "deleted";
@@ -846,6 +856,7 @@ export type { AgentProvisioningRecord } from "./agent-provisioning.ts";
 export type { IAMPolicyReadRepository, IAMPolicyRepository } from "@openclaw-enterprise/contracts";
 
 export interface PlatformReadView {
+  readonly temporaryEnvironments: TemporaryEnvironmentReadRepository;
   readonly installations: InstallationReadRepository;
   readonly namespaces: NamespaceReadRepository;
   readonly configurations: ConfigurationReadRepository;
@@ -863,6 +874,7 @@ export interface PlatformReadView {
 }
 
 export interface PlatformUnitOfWork extends PlatformReadView {
+  readonly temporaryEnvironments: TemporaryEnvironmentRepository;
   readonly installations: InstallationRepository;
   readonly namespaces: NamespaceRepository;
   readonly configurations: ConfigurationRepository;
@@ -915,6 +927,8 @@ interface IAMSubjectSource {
 }
 
 interface PlatformSnapshot {
+  readonly temporaryEnvironmentQuotas: Map<string, Readonly<TemporaryEnvironmentQuota>>;
+  readonly temporaryEnvironmentReservations: Map<string, Readonly<TemporaryEnvironmentReservation>>;
   installation: Readonly<Installation> | undefined;
   readonly namespaces: Map<string, Readonly<PersistedNamespace>>;
   readonly configurations: Map<string, Readonly<ConfigurationOwnership>>;
@@ -958,6 +972,9 @@ export function assertSameCredentialSourceFields(
 }
 
 function operationIdempotencyKey(operation: Readonly<PlatformOperation>): string {
+  if (operation.kind === "temporary_environment") {
+    return "temporary_environment:" + operation.resourceId;
+  }
   if (operation.kind === "agent") {
     return `agent:${operation.resourceId}:${operation.action}:${operation.target}:${operation.operationId}`;
   }
@@ -1000,6 +1017,8 @@ function cloneSnapshot(snapshot: PlatformSnapshot): PlatformSnapshot {
     workspaceSetups: new Map(
       Array.from(snapshot.workspaceSetups, ([key, setup]) => [key, immutableCopy(setup)]),
     ),
+    temporaryEnvironmentQuotas: new Map(snapshot.temporaryEnvironmentQuotas),
+    temporaryEnvironmentReservations: new Map(snapshot.temporaryEnvironmentReservations),
     // Revisions are copied on ingress/egress; appends replace frozen history arrays.
     // A separate Map isolates this snapshot's future appends without copying history.
     revisions: new Map(snapshot.revisions),
@@ -1356,6 +1375,7 @@ function repositories(
       }
       const saved = immutableCopy({ ...namespace, status: next });
       snapshot.namespaces.set(key, saved);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(saved);
     },
     markNamespaceDeleted: async (namespaceId, deletedAt) => {
@@ -2275,6 +2295,7 @@ function repositories(
         status: "active" as const,
       });
       snapshot.agents.set(key, saved);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(saved);
     },
     lockAgent: async (namespaceId, agentId) => agents.findAgent(namespaceId, agentId),
@@ -2291,6 +2312,7 @@ function repositories(
       }
       const saved = immutableCopy({ ...agent, desiredRuntimeState: next });
       snapshot.agents.set(key, saved);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(saved);
     },
     transitionAgentStatus: async (namespaceId, agentId, expected, next) => {
@@ -2314,6 +2336,7 @@ function repositories(
       }
       const saved = immutableCopy({ ...agent, status: next });
       snapshot.agents.set(key, saved);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(saved);
     },
     updateConfiguration: async (
@@ -2328,6 +2351,7 @@ function repositories(
       nextPluginApprovers,
       nextRepositoryAccess,
       nextCredentialSources,
+      nextTemporaryEnvironments,
     ) => {
       const current = await agents.findAgent(namespaceId, agentId);
       if (!current) {
@@ -2390,10 +2414,16 @@ function repositories(
         pluginApprovers: _currentPluginApprovers,
         repositoryBindings: _currentRepositoryBindings,
         credentialSources: _currentCredentialSources,
+        temporaryEnvironments: _currentTemporaryEnvironments,
         ...withoutPlugins
       } = current;
+      const temporaryEnvironments =
+        nextTemporaryEnvironments === undefined
+          ? current.temporaryEnvironments
+          : normalizeAgentTemporaryEnvironments(nextTemporaryEnvironments);
       const updated = immutableCopy({
         ...withoutPlugins,
+        ...(temporaryEnvironments === undefined ? {} : { temporaryEnvironments }),
         configurationId,
         backendId: nextBackendId,
         executionMode: executionMode ?? current.executionMode,
@@ -2407,6 +2437,7 @@ function repositories(
         ...(repositoryAccess === undefined ? {} : { repositoryAccess }),
       });
       snapshot.agents.set(agentKey(namespaceId, agentId), updated);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(updated);
     },
     compareAndClearActiveRevision: async (namespaceId, agentId, expectedRevisionId) => {
@@ -2417,6 +2448,7 @@ function repositories(
       const { activeRevisionId: _activeRevisionId, ...stopped } = current;
       const updated = immutableCopy(stopped);
       snapshot.agents.set(agentKey(namespaceId, agentId), updated);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(updated);
     },
     compareAndSetActiveRevision: async (
@@ -2435,6 +2467,7 @@ function repositories(
       }
       const updated = immutableCopy({ ...current, activeRevisionId: candidateRevisionId });
       snapshot.agents.set(agentKey(namespaceId, agentId), updated);
+      markTemporaryEnvironmentCleanup(snapshot);
       return immutableCopy(updated);
     },
   };
@@ -2788,6 +2821,27 @@ function repositories(
     revisions,
     iamPolicy,
     repositorySessions,
+    temporaryEnvironments: memoryTemporaryEnvironments({
+      enqueue: (record) => {
+        snapshot.operations.push(
+          immutableCopy({
+            kind: "temporary_environment",
+            action: "reconcile",
+            namespaceId: record.namespaceId,
+            resourceId: record.id,
+            actorId: record.servicePrincipalId,
+          }),
+        );
+      },
+      quotas: snapshot.temporaryEnvironmentQuotas,
+      reservations: snapshot.temporaryEnvironmentReservations,
+      namespace: (id) => snapshot.namespaces.get(id),
+      agent: (namespaceId, agentId) => snapshot.agents.get(agentKey(namespaceId, agentId)),
+      revision: (namespaceId, agentId, revisionId) =>
+        snapshot.revisions
+          .get(agentKey(namespaceId, agentId))
+          ?.find((revision) => revision.id === revisionId),
+    }),
     provisioning: {
       findByWorkId: provisioningAbsent,
       findWithWork: provisioningAbsent,
@@ -2922,7 +2976,7 @@ function repositories(
                 )?.agentId
             : undefined;
         return immutableCopy({
-          kind: "lifecycle",
+          kind: operation.kind === "temporary_environment" ? "temporary_environment" : "lifecycle",
           idempotencyKey,
           namespaceId: operation.namespaceId,
           ...(operation.kind === "agent" ? { agentId: operation.resourceId } : {}),
@@ -2947,6 +3001,25 @@ function repositories(
       },
     },
   };
+}
+
+function markTemporaryEnvironmentCleanup(snapshot: PlatformSnapshot): void {
+  for (const [id, row] of snapshot.temporaryEnvironmentReservations) {
+    const owner = snapshot.agents.get(agentKey(row.namespaceId, row.agentId));
+    if (
+      row.state !== "deleted" &&
+      row.state !== "deleting" &&
+      (snapshot.namespaces.get(row.namespaceId)?.status !== "ready" ||
+        owner?.status !== "active" ||
+        owner.desiredRuntimeState !== "running" ||
+        owner.activeRevisionId !== row.revisionId)
+    ) {
+      snapshot.temporaryEnvironmentReservations.set(
+        id,
+        immutableCopy({ ...row, state: "deleting" }),
+      );
+    }
+  }
 }
 
 /**
@@ -2975,6 +3048,15 @@ function finalizeAgentDeletion(
     agent.status !== "deleting" ||
     agent.desiredRuntimeState !== "stopped"
   ) {
+    return false;
+  }
+  if (
+    [...snapshot.temporaryEnvironmentReservations.values()].some(
+      (row) =>
+        row.namespaceId === namespaceId && row.agentId === agentId && row.state !== "deleted",
+    )
+  ) {
+    // PostgreSQL RESTRICT foreign keys retain owners while cleanup is unfinished.
     return false;
   }
   const installation = snapshot.installation;
@@ -3052,6 +3134,8 @@ function finalizeAgentDeletion(
 /** Process-local, single-writer state. No restart or multi-process durability. */
 export class InMemoryPlatformState implements PlatformStateStore {
   private snapshot: PlatformSnapshot = {
+    temporaryEnvironmentQuotas: new Map(),
+    temporaryEnvironmentReservations: new Map(),
     installation: undefined,
     namespaces: new Map(),
     configurations: new Map(),

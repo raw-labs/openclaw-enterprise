@@ -79,7 +79,10 @@
     "tests/conformance/slack-configuration.test.mjs",
     "tests/conformance/grafana-overview-dashboard.test.mjs",
     "tests/conformance/split-layout-tenants.test.mjs",
-    "tests/conformance/split-layout-adopt.test.mjs"
+    "tests/conformance/split-layout-adopt.test.mjs",
+    "tests/integration/temporary-environment-provider.test.mjs",
+    "tests/conformance/kubernetes-temporary-environments.test.mjs",
+    "tests/integration/temporary-environment-core.test.mjs"
   ],
   "files": [
     {
@@ -329,6 +332,15 @@
     },
     {
       "path": "tests/conformance/split-layout-adopt.test.mjs"
+    },
+    {
+      "path": "tests/integration/temporary-environment-provider.test.mjs"
+    },
+    {
+      "path": "tests/conformance/kubernetes-temporary-environments.test.mjs"
+    },
+    {
+      "path": "tests/integration/temporary-environment-core.test.mjs"
     }
   ]
 }

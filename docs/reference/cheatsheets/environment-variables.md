@@ -17,6 +17,13 @@ Command-line flags override these variables. See the [CLI reference](../cli.md).
 - `OCC_CA_BUNDLE` — Additional PEM certificate-authority bundle for HTTPS.
 - `OCC_TIMEOUT_SECONDS` — Request timeout in whole seconds; default: `30`.
 
+## Draft Agent workload probe
+
+`OCC_WORKLOAD_URL`, `OCC_WORKLOAD_NAMESPACE_ID`, `OCC_WORKLOAD_AGENT_ID`, and
+`OCC_WORKLOAD_TOKEN_FILE` are Driver-delivered inputs to `occ-crabbox-provider`.
+They are not controller service keys or repository-selected configuration. See
+the [draft contract](../authentication/agent-workload-probe.md).
+
 ## Controller and authentication
 
 See the [production settings](../settings/production.md) or

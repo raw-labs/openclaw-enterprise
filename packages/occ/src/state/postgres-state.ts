@@ -1,3 +1,4 @@
+import { normalizeAgentTemporaryEnvironments } from "@openclaw-enterprise/contracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isDeepStrictEqual } from "node:util";
 import { DatabaseError } from "pg";
@@ -6,6 +7,7 @@ import { RepositoryTransactionLifetime } from "../ports/transaction.ts";
 import { bindRepository } from "../ports/repository-factory.ts";
 import { bindPlatformUnitOfWork } from "../ports/platform-unit-of-work.ts";
 import { createPlatformReadView } from "../ports/platform-read-view.ts";
+import { postgresTemporaryEnvironments } from "./postgres-temporary-environments.ts";
 import { postgresRepositorySessions } from "./postgres-repository-sessions.ts";
 import {
   validRepositoryBindingSelections,
@@ -410,6 +412,13 @@ function agentFromRow(row: PostgresRow, metadata = agentMetadataFromRow(row)): R
   }
   return immutableCopy({
     ...metadata,
+    ...(row.temporary_environments == null
+      ? {}
+      : {
+          temporaryEnvironments: configurationRead("temporaryEnvironments", () =>
+            normalizeAgentTemporaryEnvironments(jsonObject(row.temporary_environments))!,
+          ),
+        }),
     ...(plugins === undefined ? {} : { plugins }),
     ...(pluginApprovers === undefined ? {} : { pluginApprovers }),
     ...(repositoryBindings === undefined ? {} : { repositoryBindings }),
@@ -582,6 +591,7 @@ function revisionFromRow(
     sandbox_driver_id?: AgentRevision["sandboxDriverId"];
     harness_auth: AgentRevision["harnessAuth"];
     credential_sources?: AgentRevision["credentialSources"];
+    temporary_environments?: AgentRevision["temporaryEnvironments"];
     secret_driver_id?: AgentRevision["secretDriverId"];
     secret_bindings?: AgentRevision["secretBindings"];
     plugins?: AgentRevision["plugins"];
@@ -632,6 +642,13 @@ function revisionFromRow(
   }
   return immutableCopy({
     ...metadata,
+    ...(admitted.temporary_environments === undefined
+      ? {}
+      : {
+          temporaryEnvironments: configurationRead("temporaryEnvironments", () =>
+            normalizeAgentTemporaryEnvironments(admitted.temporary_environments)!,
+          ),
+        }),
     configurationId: admitted.configuration_id,
     configurationKind: admitted.configuration_kind,
     configurationGeneration: admitted.configuration_generation,
@@ -2981,7 +2998,7 @@ export class PostgresPlatformState implements PlatformStateStore {
         (
           await client.query(
             `SELECT a.id, a.namespace_id, a.name, a.configuration_id, a.execution_mode,
-                    a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources,
+                    a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources, a.temporary_environments,
                     a.active_revision_id, a.desired_runtime_state, a.status, a.created_at
              FROM occ.agents AS a
              JOIN occ.namespaces AS n ON n.id = a.namespace_id AND n.deleted_at IS NULL
@@ -3061,7 +3078,7 @@ export class PostgresPlatformState implements PlatformStateStore {
         (
           await client.query(
             `SELECT a.id, a.namespace_id, a.name, a.configuration_id, a.execution_mode,
-                      a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources,
+                      a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources, a.temporary_environments,
                       a.active_revision_id, a.desired_runtime_state, a.status, a.created_at
                FROM occ.agents AS a
                JOIN occ.namespaces AS n ON n.id = a.namespace_id AND n.deleted_at IS NULL
@@ -3146,9 +3163,9 @@ export class PostgresPlatformState implements PlatformStateStore {
           `INSERT INTO occ.agents
            (id, namespace_id, name, configuration_id, backend_id, execution_mode,
              service_principal_id, harness_auth, active_revision_id, created_at, plugins,
-             plugin_approvers, repository_bindings, repository_access, credential_sources)
+             plugin_approvers, repository_bindings, repository_access, credential_sources, temporary_environments)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb,
-                    $14::jsonb, $15::jsonb)`,
+                    $14::jsonb, $15::jsonb, $16::jsonb)`,
           [
             saved.id,
             saved.namespaceId,
@@ -3165,6 +3182,9 @@ export class PostgresPlatformState implements PlatformStateStore {
             repositoryBindings === undefined ? null : JSON.stringify(repositoryBindings),
             repositoryAccess === undefined ? null : JSON.stringify(repositoryAccess),
             agentCredentialSources === undefined ? null : JSON.stringify(agentCredentialSources),
+            saved.temporaryEnvironments === undefined
+              ? null
+              : JSON.stringify(normalizeAgentTemporaryEnvironments(saved.temporaryEnvironments)),
           ],
         );
         await client.query(
@@ -3186,6 +3206,7 @@ export class PostgresPlatformState implements PlatformStateStore {
         pluginApprovers,
         repositoryAccess,
         nextCredentialSources,
+        nextTemporaryEnvironments,
       ) => {
         if (harnessAuth !== undefined) {
           await assertHarnessAuthAvailable(
@@ -3215,12 +3236,13 @@ export class PostgresPlatformState implements PlatformStateStore {
                    plugin_approvers = CASE WHEN $11::boolean THEN $12::jsonb ELSE a.plugin_approvers END,
                    repository_bindings = CASE WHEN $13::boolean THEN $14::jsonb ELSE a.repository_bindings END,
                    repository_access = CASE WHEN $15::boolean THEN $16::jsonb ELSE a.repository_access END,
-                   credential_sources = CASE WHEN $17::boolean THEN $18::jsonb ELSE a.credential_sources END
+                   credential_sources = CASE WHEN $17::boolean THEN $18::jsonb ELSE a.credential_sources END,
+                   temporary_environments = CASE WHEN $19::boolean THEN $20::jsonb ELSE a.temporary_environments END
                FROM occ.namespaces AS n
                WHERE a.namespace_id = $1 AND a.id = $2
                  AND n.id = a.namespace_id AND n.deleted_at IS NULL
                  RETURNING a.id, a.namespace_id, a.name, a.configuration_id, a.execution_mode,
-                          a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources,
+                          a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources, a.temporary_environments,
                           a.active_revision_id, a.desired_runtime_state, a.status, a.created_at`,
               [
                 namespaceId,
@@ -3249,6 +3271,10 @@ export class PostgresPlatformState implements PlatformStateStore {
                 nextCredentialSources === undefined || nextCredentialSources.length === 0
                   ? null
                   : JSON.stringify(nextCredentialSources),
+                nextTemporaryEnvironments !== undefined,
+                nextTemporaryEnvironments == null
+                  ? null
+                  : JSON.stringify(normalizeAgentTemporaryEnvironments(nextTemporaryEnvironments)),
               ],
             )
           ).rows,
@@ -3270,7 +3296,7 @@ export class PostgresPlatformState implements PlatformStateStore {
                 AND a.active_revision_id IS NOT DISTINCT FROM $3::text
                   AND n.id = a.namespace_id AND n.deleted_at IS NULL
                   RETURNING a.id, a.namespace_id, a.name, a.configuration_id, a.execution_mode,
-                          a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources,
+                          a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources, a.temporary_environments,
                           a.active_revision_id, a.desired_runtime_state, a.status, a.created_at`,
               [namespaceId, agentId, expectedRevisionId ?? null, candidateRevisionId],
             )
@@ -3287,7 +3313,7 @@ export class PostgresPlatformState implements PlatformStateStore {
                WHERE a.namespace_id = $1 AND a.id = $2 AND a.active_revision_id = $3
                  AND n.id = a.namespace_id AND n.deleted_at IS NULL
                 RETURNING a.id, a.namespace_id, a.name, a.configuration_id, a.execution_mode,
-                         a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources,
+                         a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources, a.temporary_environments,
                          a.active_revision_id, a.desired_runtime_state, a.status, a.created_at`,
               [namespaceId, agentId, expectedRevisionId],
             )
@@ -3306,7 +3332,7 @@ export class PostgresPlatformState implements PlatformStateStore {
                  AND a.desired_runtime_state = ANY($3::text[])
                  AND n.id = a.namespace_id AND n.deleted_at IS NULL
                 RETURNING a.id, a.namespace_id, a.name, a.configuration_id, a.execution_mode,
-                         a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources,
+                         a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources, a.temporary_environments,
                          a.active_revision_id, a.desired_runtime_state, a.status, a.created_at`,
               [namespaceId, agentId, expectedStates, next],
             )
@@ -3328,7 +3354,7 @@ export class PostgresPlatformState implements PlatformStateStore {
                  AND a.status = ANY($3::text[])
                  AND n.id = a.namespace_id AND n.deleted_at IS NULL
                RETURNING a.id, a.namespace_id, a.name, a.configuration_id, a.execution_mode,
-                         a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources,
+                         a.backend_id, a.plugins, a.plugin_approvers, a.repository_bindings, a.repository_access, a.service_principal_id, a.harness_auth, a.credential_sources, a.temporary_environments,
                          a.active_revision_id, a.desired_runtime_state, a.status, a.created_at`,
               [namespaceId, agentId, expectedStatuses, next],
             )
@@ -3466,6 +3492,9 @@ export class PostgresPlatformState implements PlatformStateStore {
               ...(revision.repositoryCredentials === undefined
                 ? {}
                 : { repository_credentials: revision.repositoryCredentials }),
+              ...(revision.temporaryEnvironments === undefined
+                ? {}
+                : { temporary_environments: revision.temporaryEnvironments }),
               harness_auth: revision.harnessAuth,
               ...(revision.credentialSources === undefined
                 ? {}
@@ -3808,6 +3837,7 @@ export class PostgresPlatformState implements PlatformStateStore {
       revisions,
       iamPolicy,
       repositorySessions: postgresRepositorySessions(client),
+      temporaryEnvironments: postgresTemporaryEnvironments(client),
       provisioning: {
         findByWorkId: async (workId) => {
           const found = rows(
@@ -4615,10 +4645,10 @@ export class PostgresPlatformState implements PlatformStateStore {
           const found = rows(
             (
               await client.query(
-                `SELECT idempotency_key, namespace_id, agent_id, revision_id, actor_id,
+                `SELECT work_kind, idempotency_key, namespace_id, agent_id, revision_id, actor_id,
                         namespace_target, agent_target
                  FROM occ.controller_work
-                 WHERE work_kind = 'lifecycle'
+                 WHERE work_kind IN ('lifecycle', 'temporary_environment')
                  ORDER BY created_at, idempotency_key`,
               )
             ).rows,
@@ -4634,6 +4664,13 @@ export class PostgresPlatformState implements PlatformStateStore {
                 resourceId: revisionId ?? agentId ?? namespaceId,
                 actorId: text(row, "actor_id"),
               };
+              if (text(row, "work_kind") === "temporary_environment") {
+                return immutableCopy({
+                  ...base,
+                  kind: "temporary_environment",
+                  resourceId: text(row, "idempotency_key").slice("temporary_environment:".length),
+                });
+              }
               // The three shapes are distinguished by which owner columns are
               // populated: a revision names one, Agent teardown names only its
               // Agent, and Namespace work names neither and carries a target.

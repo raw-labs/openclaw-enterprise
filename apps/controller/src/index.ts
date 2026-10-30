@@ -78,6 +78,7 @@ import Fastify, {
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AdmittedCaller } from "./admission/admission-verifier.ts";
+import { admissionKey, keyedAdmission } from "./auth/admission.ts";
 import {
   OCC_SERVICE_KEY_HEADER,
   SERVICE_KEY_NAME_MAX_LENGTH,
@@ -1179,12 +1180,22 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
             name: options.auth?.sessionCookieName ?? "openclaw_occ.session_token",
           },
           serviceApiKey: { type: "apiKey", in: "header", name: OCC_SERVICE_KEY_HEADER },
+          agentWorkload: {
+            type: "http",
+            scheme: "bearer",
+            description:
+              "Active Agent workload credential; accepted only by temporary-environment operations.",
+          },
         },
       },
       security: [{ sessionCookie: [] }, { serviceApiKey: [] }],
     },
   });
 
+  const workloadAdmission = keyedAdmission(
+    { perMinute: 60, concurrent: 4 },
+    { perMinute: 600, concurrent: 16 },
+  );
   let controller = options.controller;
   let bootstrapping = false;
   const installationId =
@@ -1192,6 +1203,14 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
   const admissions = new WeakMap<FastifyRequest, AdmittedCaller>();
   const contexts = new WeakMap<FastifyRequest, RequestContext>();
   const requestStartedAt = new WeakMap<FastifyRequest, bigint>();
+  const workloadOnlyOperations: ReadonlySet<string> = new Set([
+    "getTemporaryEnvironmentReadiness",
+    "acquireTemporaryEnvironment",
+    "listTemporaryEnvironments",
+    "getTemporaryEnvironment",
+    "touchTemporaryEnvironment",
+    "releaseTemporaryEnvironment",
+  ]);
   const factory = options.auditEventFactory ?? new AuditEventFactory();
   const createAuthAccountOperation = {
     operationId: "createAuthAccount",
@@ -1733,6 +1752,44 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     }
 
     let admitted: AdmittedCaller;
+    if (workloadOnlyOperations.has(operation.operationId)) {
+      // This is a workload-only surface. Never fall back to a human session or service key.
+      const authorization = request.headers.authorization;
+      const token =
+        typeof authorization === "string"
+          ? /^Bearer ([A-Za-z0-9._~-]{1,16384})$/.exec(authorization)?.[1]
+          : undefined;
+      if (
+        !controller ||
+        !token ||
+        request.headers.cookie !== undefined ||
+        request.headers[OCC_SERVICE_KEY_HEADER] !== undefined
+      ) {
+        await denial(operation, request, "authorization_denial");
+        throw failure(401, "UNAUTHENTICATED", "An Agent workload credential is required.");
+      }
+      try {
+        const identity = await workloadAdmission.admit([admissionKey("ip", remoteAddress)], () =>
+          controller!.verifyTemporaryEnvironmentCaller(
+            token,
+            String(params.namespaceId),
+            String(params.agentId),
+          ),
+        );
+        admissions.set(request, {
+          method: "workload",
+          externalIdentity: { issuer: "compute-workload", subject: identity.servicePrincipalId },
+          admittedScope: { installationId, namespaceId: identity.namespaceId },
+          agentId: identity.agentId,
+          revisionId: identity.revisionId,
+          decisionId: `adm_${randomUUID()}`,
+        });
+      } catch (error) {
+        await denial(operation, request, "authorization_denial");
+        throw error;
+      }
+      return;
+    }
     try {
       admitted = await options.auth.admissionVerifier.verifyControllerRequest({
         requestId: request.id,
@@ -1794,7 +1851,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     try {
       selected = selectedIAMDriver();
       identity = await selected.lookupIdentity(
-        admitted.method === "api_key"
+        admitted.method === "api_key" || admitted.method === "workload"
           ? {
               servicePrincipalId: admitted.externalIdentity.subject,
               ...(admitted.admittedScope.namespaceId === undefined
@@ -1814,17 +1871,24 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
       );
     }
 
-    if (
-      !identity ||
-      (admitted.method === "api_key"
-        ? identity.kind !== "service_principal" ||
-          identity.agentId !== undefined ||
-          identity.id !== admitted.externalIdentity.subject ||
-          identity.namespaceId !== admitted.admittedScope.namespaceId
-        : identity.kind !== "principal" ||
-          identity.issuer !== admitted.externalIdentity.issuer ||
-          identity.subject !== admitted.externalIdentity.subject)
-    ) {
+    const serviceIdentityMatches =
+      identity?.kind === "service_principal" &&
+      identity.id === admitted.externalIdentity.subject &&
+      identity.namespaceId === admitted.admittedScope.namespaceId;
+    const exactIdentity =
+      (admitted.method === "workload" &&
+        identity?.kind === "service_principal" &&
+        serviceIdentityMatches &&
+        identity.agentId === admitted.agentId) ||
+      (admitted.method === "api_key" &&
+        identity?.kind === "service_principal" &&
+        serviceIdentityMatches &&
+        identity.agentId === undefined) ||
+      (admitted.method === "session" &&
+        identity?.kind === "principal" &&
+        identity.issuer === admitted.externalIdentity.issuer &&
+        identity.subject === admitted.externalIdentity.subject);
+    if (!identity || !exactIdentity) {
       await denial(operation, request, "authorization_denial");
       throw failure(403, "FORBIDDEN", "The exact platform operation was not authorized.");
     }
@@ -1887,6 +1951,60 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     const body = request.body as Record<string, unknown> | undefined;
     if (body !== undefined) {
       validateConfiguration(body);
+    }
+
+    if (workloadOnlyOperations.has(operation.operationId)) {
+      const caller = admissions.get(request);
+      if (caller?.method !== "workload") {
+        throw failure(401, "UNAUTHENTICATED", "An Agent workload credential is required.");
+      }
+      const scope = [
+        context.actorId,
+        params.namespaceId!,
+        params.agentId!,
+        caller.revisionId,
+      ] as const;
+      let data: unknown;
+      let status = 200;
+      switch (operation.operationId) {
+        case "getTemporaryEnvironmentReadiness":
+          data = await controller!.getTemporaryEnvironmentReadiness(...scope);
+          break;
+        case "acquireTemporaryEnvironment": {
+          const environment = await controller!.acquireTemporaryEnvironment(...scope, {
+            requestId: body!.requestId as string,
+            name: body!.name as string,
+            slug: body!.slug as string,
+            profileId: body!.profileId as string,
+            sshPublicKey: body!.sshPublicKey as string,
+          });
+          data = environment;
+          status = environment.state === "ready" ? 200 : 202;
+          break;
+        }
+        case "listTemporaryEnvironments":
+          data = await controller!.listTemporaryEnvironments(...scope);
+          break;
+        case "getTemporaryEnvironment":
+          data = await controller!.getTemporaryEnvironment(...scope, params.requestId!);
+          break;
+        case "touchTemporaryEnvironment":
+          data = await controller!.touchTemporaryEnvironment(...scope, params.requestId!);
+          break;
+        case "releaseTemporaryEnvironment": {
+          const environment = await controller!.releaseTemporaryEnvironment(
+            ...scope,
+            params.requestId!,
+          );
+          data = environment;
+          status = environment.state === "deleted" ? 200 : 202;
+          break;
+        }
+        default:
+          throw failure(404, "NOT_FOUND", "The workload operation is unavailable.");
+      }
+      reply.code(status).send({ data, meta: { requestId: request.id } });
+      return;
     }
 
     if (operation.operationId === "bootstrapInstallation") {
@@ -3828,6 +3946,9 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
         "x-openclaw-permissions": permissions,
         ...(operation.operationId === "bootstrapInstallation"
           ? { security: [{ sessionCookie: [] }] }
+          : {}),
+        ...(workloadOnlyOperations.has(operation.operationId)
+          ? { security: [{ agentWorkload: [] }] }
           : {}),
       } as DocumentedFastifySchema;
       routes.route({
