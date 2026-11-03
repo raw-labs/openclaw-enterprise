@@ -8,7 +8,7 @@ author: miguelbranco80
 
 - **ID:** RFC-0019
 - **Created:** 2026-11-03
-- **Implementation candidate:** [Fork PR #2](https://github.com/raw-labs/openclaw-enterprise/pull/2)
+- **Draft implementation:** [PR #2](https://github.com/raw-labs/openclaw-enterprise/pull/2)
 
 ## Summary
 
@@ -24,10 +24,6 @@ a usable editor, a reachable callback and the right network destinations.
 The initial target is Microsoft Public cloud with an app password and Kubernetes
 Compute. Embedded execution, sovereign clouds, SSO, federated credentials and
 Teams approval workflows are outside this proposal.
-
-The existing implementation plan predates directory lookup and file settings.
-This proposal includes those current additions rather than treating that plan's
-original exclusions as the complete feature scope.
 
 ## Proposal
 
@@ -56,10 +52,9 @@ Bind the callback to the serving revision. A failed replacement must not remove
 its predecessor's route. Disablement, stop and deletion remove the serving
 callback and its authentication override through the existing lifecycle.
 
-Reuse the channel proxy for declared Microsoft destinations, without depending
-on the separate general Gateway-outbound proposal. Keep direct Gateway egress
-fenced. Only Installation operators may configure proxy destinations or declare
-that a reviewed proxy enforces guarded-download address checks; Agent JSON cannot
+Reuse the channel proxy for declared Microsoft destinations. Keep direct
+Gateway egress fenced. Only Installation operators may configure proxy
+destinations or declare that a reviewed proxy enforces guarded-download address checks; Agent JSON cannot
 replace that policy. The managed proxy rejects private/reserved DNS answers and
 pins the checked public IPv4 address. Native URL, redirect and credential-forwarding
 checks remain active.
@@ -79,38 +74,26 @@ not interchangeable with the native Team ID used for message routing.
 ### Files
 
 Allow an optional native `sharePointSiteId` setting to be saved, reopened and
-cleared without altering other native configuration. This adds configuration,
-not an OCE upload engine or a Microsoft permission grant. Explain that the native
-channel-file path creates organization-scoped links, which can reach people
-outside the Team who obtain them.
+cleared without altering other native configuration. The native plugin owns
+uploads; OCE stores the setting and does not grant Microsoft permissions.
+Channel-file links are organization-scoped: people outside the Team who obtain
+a link may be able to access the file. Explain that scope in the editor.
 
 Incoming downloads require separately approved exact storage/redirect hosts and
 native media/authentication restrictions. Do not forward provider credentials
-merely because a storage host is reachable. Live file delivery remains a separate
-qualification requirement.
+merely because a storage host is reachable.
 
-## Delivery and verification
+## Required verification
 
-The [existing plan](https://github.com/raw-labs/openclaw-enterprise/blob/93c1dc4f24b9f544b26a451b71a0cfeff34be4fc/specs/plans/0045-teams-channel-support.md) is implementation history, not acceptance of this
-expanded proposal. Before claiming support, exercise Console save/reopen and
-Secret denial, native SDK rejection of invalid callbacks, real public TLS and
-routing, live permitted/denied messages, replies, directory-consent failures,
-attachments and serving-revision cleanup. Keep Slack behavior unchanged.
-Kubernetes fixtures and local SDK checks do not prove live Microsoft delivery.
+Verify Console save/reopen and Secret denial, native SDK rejection of invalid
+callbacks, public TLS and routing, permitted and denied messages, replies,
+directory-consent failures, attachments and serving-revision cleanup. Use a real
+Teams application and public callback for provider tests. Verify that Slack
+continues to work.
 
-## Alternatives and decision
+## Alternatives
 
 Manual native JSON avoids an editor but leaves packaging, routing and Secret
 problems unresolved. A second OCE message service would duplicate the native
-plugin. Prefer the native plugin with Compute-owned infrastructure. Channel and
-Compute maintainers must review the public authentication boundary and expanded
-lookup/file scope before adoption.
-
-## Source and review status
-
-Prepared from [candidate source `93c1dc4f2`](https://github.com/raw-labs/openclaw-enterprise/blob/93c1dc4f24b9f544b26a451b71a0cfeff34be4fc) and its current documentation.
-Candidate code exists in the linked implementation PR, not in this documentation
-branch. `Not implemented` describes this review baseline; it does not erase the
-candidate's delivery history or certify that the candidate meets this proposal.
-Design approval and implementation qualification remain separate. This PR changes
-neither the existing implementation nor the integration bundle.
+plugin. Using the native plugin with Compute-owned infrastructure keeps provider
+behavior in OpenClaw and deployment ownership in OCE.
