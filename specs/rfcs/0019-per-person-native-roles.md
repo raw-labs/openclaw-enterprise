@@ -8,7 +8,7 @@ author: miguelbranco80
 
 - **ID:** RFC-0019
 - **Created:** 2026-11-03
-- **Implementation candidate:** [Fork PR #1](https://github.com/raw-labs/openclaw-enterprise/pull/1)
+- **Draft implementation:** [PR #1](https://github.com/raw-labs/openclaw-enterprise/pull/1)
 
 ## Summary
 
@@ -19,10 +19,9 @@ separate from permission to use its native interface.
 
 ## Problem
 
-The initial sharing path admits people through a shared native administrator
-identity. Sharing an Agent should not require giving every person administrator
-access. The broader [Agent access RFC](0010-agent-access.md) covers identity and
-sharing; this proposal isolates the native Gateway-entry decision for review.
+Sharing currently admits people through a shared native administrator identity.
+Sharing an Agent should not require giving every person administrator access. The broader [Agent access RFC](0010-agent-access.md) covers identity and
+sharing. This proposal adds per-person roles at Gateway entry.
 
 ## Proposal
 
@@ -53,7 +52,7 @@ transport must refuse entry.
 
 Recheck long-lived WebSocket authority and close a connection within 30 seconds
 of a changed or revoked assignment. Reconnection must use current authority.
-This is not a promise to cancel commands already accepted by the runtime.
+Closing a connection does not cancel commands already accepted by the runtime.
 Keep owner password/token access and the separate workspace service identity;
 automation must not borrow a person's profile or lose its required platform
 access when that person is revoked. Reserved service roles cannot be replaced
@@ -63,37 +62,23 @@ by user-authored role definitions.
 
 People still share the Agent's files, tools, plugins and provider accounts.
 Native roles are permission checks, not process or credential isolation. This
-proposal does not map Slack or Teams senders to people, add named teams, delegate
-external accounts, or complete the wider Agent access RFC. It does not resolve
-the interaction with automatic native-admin preparation in implementation #12;
-that combination needs an explicit compatible identity and device policy.
+proposal does not map Slack or Teams senders to people, add named teams or
+delegate external accounts. When combined with automatic native administration,
+device approval must preserve the person's assigned role rather than grant
+administrator scopes or substitute a shared machine identity.
 
-## Delivery and verification
-
-Keep execution details in the [existing role-assignment plan](https://github.com/raw-labs/openclaw-enterprise/blob/f30db5c4045cbf2c1f5eef4576361112535ed8b4/specs/plans/0047-agent-runtime-role-assignments.md). The
-candidate also needs a bridge to the pinned native Gateway; its compatibility
-and maintenance cost need runtime-owner review.
+## Required verification
 
 Required outcomes are distinct identities and allowed/denied native actions,
 authorized assignment changes, downgrade and revocation of open connections,
 refusal of forged headers or policy mismatches, and retained workspace service
-access. Exercise the real sharing API, PostgreSQL, proxy and native Gateway;
-UI fixtures alone do not prove those boundaries. Qualify the actual packaged
-runtime and show the sharing workflow in the Console.
+access. Exercise the real sharing API, PostgreSQL, proxy and native Gateway.
+Package the identity bridge with the pinned native Gateway, verify policy-digest
+compatibility, and exercise assignment changes through the Console.
 
-## Alternatives and decision
+## Alternatives
 
 Keeping shared administrator access is simpler but cannot provide limited
 sharing. Reimplementing native permissions in OCE creates two authorities that
-can disagree. Prefer exact OCE assignments to native roles. IAM and native-runtime
-maintainers must approve the assignment and identity bridge; this proposal does
-not record their acceptance.
-
-## Source and review status
-
-Prepared from [candidate source `f30db5c40`](https://github.com/raw-labs/openclaw-enterprise/blob/f30db5c4045cbf2c1f5eef4576361112535ed8b4) and its current documentation.
-Candidate code exists in the linked implementation PR, not in this documentation
-branch. `Not implemented` describes this review baseline; it does not erase the
-candidate's delivery history or certify that the candidate meets this proposal.
-Design approval and implementation qualification remain separate. This PR changes
-neither the existing implementation nor the integration bundle.
+can disagree. Exact OCE assignments to native roles keep entry authorization
+and native permission enforcement with their existing owners.
