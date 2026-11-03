@@ -8,14 +8,12 @@ author: miguelbranco80
 
 - **ID:** RFC-0019
 - **Created:** 2026-11-03
-- **Implementation candidate:** [Fork PR #11](https://github.com/raw-labs/openclaw-enterprise/pull/11)
+- **Draft implementation:** [PR #11](https://github.com/raw-labs/openclaw-enterprise/pull/11)
 
 ## Summary
 
 Let operators render a trusted custom Installation profile, choose whether to
 seed bundled Presets, and use a readable custom Preset as the Console's starter.
-Extend the existing profile renderer and Preset selection; do not add a new
-profile system or install arbitrary Driver code.
 
 ## Problem and scope
 
@@ -24,8 +22,8 @@ defines the bundled `openclaw` and `codex` families. Operators also need to sele
 a supported Plugin Driver and supply their own Presets. A Namespace with only
 custom Presets should still have a useful Create Agent shortcut.
 
-This proposal covers those additions, not a replacement for the original profile
-architecture, resource provisioning, or a user-selectable Console profile catalog.
+The scope is custom profile input, Preset seeding and starter selection. Resource
+provisioning and a user-selectable Console profile catalog are out of scope.
 
 ## Proposal
 
@@ -42,7 +40,6 @@ Copy only the supported Plugin Driver selection and its configuration into the
 Installation. Accept the bundled `occ-plugin` and `codex-plugin` selections;
 this does not load external Driver modules. Configuration must be an object,
 but the selected Driver still validates its own options at controller startup.
-Successful rendering does not prove startup or deployment.
 
 Descriptive profile metadata, including `recommendedPreset`, is not a second
 source of deployment policy and does not choose the Console starter. Hosted
@@ -69,7 +66,7 @@ If no Preset is readable, keep the ordinary chooser/empty state. Keep variable
 entry, editable drafts, navigation and explicit cancellation behavior. Switching
 starters must not silently discard an unsaved draft.
 
-## Delivery and verification
+## Required verification
 
 Verify both renderer entry points, strict input refusal and stale-output removal.
 Exercise default/custom/no-default seeding and real PostgreSQL restart/upgrade
@@ -77,22 +74,10 @@ preservation. Check that hosted prerequisites follow the Plugin Driver rather
 than the profile name. Exercise exact-read denial, unreadable `default-codex`,
 custom names, ties and retained drafts through the Console/API.
 
-These outcomes belong to the linked implementation. Rendering and UI fixtures
-do not qualify installed infrastructure, images or model execution.
-
-## Alternatives and decision
+## Alternatives
 
 Editing bundled profiles works locally but creates changes to carry across every
 upstream update. Requiring a readable `default-codex` forces operators to retain
 a stock naming convention. Prefer a validated input file and a readable-starter
-fallback. Installation and Console maintainers must review those two contracts;
-profile metadata must not become an implicit permission or provisioning mechanism.
-
-## Source and review status
-
-Prepared from [candidate source `5acf92b89`](https://github.com/raw-labs/openclaw-enterprise/blob/5acf92b89f9053fec747a802e3790822a5b4340d) and its current documentation.
-Candidate code exists in the linked implementation PR, not in this documentation
-branch. `Not implemented` describes this review baseline; it does not erase the
-candidate's delivery history or certify that the candidate meets this proposal.
-Design approval and implementation qualification remain separate. This PR changes
-neither the existing implementation nor the integration bundle.
+fallback. Keep descriptive profile metadata separate from permissions and
+provisioning settings.
