@@ -8,7 +8,7 @@ author: miguelbranco80
 
 - **ID:** RFC-0019
 - **Created:** 2026-11-03
-- **Implementation candidate:** [Fork PR #15](https://github.com/raw-labs/openclaw-enterprise/pull/15)
+- **Draft implementation:** [PR #15](https://github.com/raw-labs/openclaw-enterprise/pull/15)
 
 ## Summary
 
@@ -22,10 +22,9 @@ Adding Codex can turn an unrestricted allowlist into a restrictive Codex-only
 list. Removing Codex can empty that list, making it unrestricted. A Harness switch
 should change runtime wiring, not quietly narrow or widen plugin permissions.
 
-This proposal is an OpenClaw Enterprise (OCE) admission rule. It complements the
-existing [native plugin policy](0009-native-plugin-tool-policy.md) and
-[policy-enforcement RFC](0014-plugin-policy-enforcement.md); it does not redesign
-native tool policy or add a permission service.
+Enforce the requirement at OpenClaw Enterprise (OCE) admission. Keep the
+[native plugin policy](0009-native-plugin-tool-policy.md) and
+[tool-policy enforcement](0014-plugin-policy-enforcement.md) unchanged.
 
 ## Proposal
 
@@ -69,7 +68,7 @@ a stricter OCE rule: required plugin permission must be explicit before admissio
 Existing Configurations and stored plans may need an operator edit; do not add a
 silent compatibility grant.
 
-## Delivery and verification
+## Required verification
 
 Exercise Harness switches with unrestricted, restrictive, denied, disabled and
 ambiguous required-plugin settings. Verify unchanged allow/deny values, clear
@@ -79,21 +78,12 @@ Cover direct API, stored-plan replay, retry and worker paths as well as the UI.
 Use real PostgreSQL and Kubernetes/Secret Drivers to observe zero Secret reads
 and infrastructure writes after server refusal. In the allowed control, verify
 model credentials reach only the selected Harness, not the separate Gateway.
-Provider execution is a separate proof from configuration admission.
+Verify provider execution separately from configuration admission.
 
-## Alternatives and decision
+## Alternatives
 
 Automatically repairing permissions feels convenient but turns a runtime choice
 into an implicit authorization change. Trusting native auto-enable behavior alone
 leaves OCE's declared policy misleading. Prefer preserving policy and refusing
-incompatible selections. Harness and plugin-policy maintainers must approve the
-stricter admission rule and its effect on existing plans.
-
-## Source and review status
-
-Prepared from [candidate source `65dc3e90e`](https://github.com/raw-labs/openclaw-enterprise/blob/65dc3e90ecb0799ddeb22899bbbc41a5548d37a1) and its current documentation.
-Candidate code exists in the linked implementation PR, not in this documentation
-branch. `Not implemented` describes this review baseline; it does not erase the
-candidate's delivery history or certify that the candidate meets this proposal.
-Design approval and implementation qualification remain separate. This PR changes
-neither the existing implementation nor the integration bundle.
+incompatible selections. Existing plans must meet the same explicit permission
+requirement before they can run.
