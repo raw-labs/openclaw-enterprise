@@ -57,10 +57,11 @@ still needs readable, valid Preset files.
 
 ### Console starter
 
-Prefer a readable Preset named `default-codex`. Otherwise choose the first
-readable Preset using case-insensitive browser-locale name order, with exact-name
-ordering to break ties. Authorize the exact Preset read; listing visibility alone
-is insufficient. Show a custom starter's name before the user selects it.
+For the quick-start shortcut, choose the first Preset the current user has
+permission to read, using case-insensitive browser-locale name order, with
+exact-name ordering to break ties. No Preset name gets special priority.
+Authorize the exact Preset read; listing visibility alone is insufficient.
+Show the starter's name before the user selects it.
 
 If no Preset is readable, keep the ordinary chooser/empty state. Keep variable
 entry, editable drafts, navigation and explicit cancellation behavior. Switching
@@ -71,13 +72,14 @@ starters must not silently discard an unsaved draft.
 Verify both renderer entry points, strict input refusal and stale-output removal.
 Exercise default/custom/no-default seeding and real PostgreSQL restart/upgrade
 preservation. Check that hosted prerequisites follow the Plugin Driver rather
-than the profile name. Exercise exact-read denial, unreadable `default-codex`,
-custom names, ties and retained drafts through the Console/API.
+than the profile name. Exercise exact-read denial, inaccessible Presets, name
+ordering, ties and retained drafts through the Console/API. Verify that bundled
+Preset names receive no priority over custom names.
 
 ## Alternatives
 
 Editing bundled profiles works locally but creates changes to carry across every
-upstream update. Requiring a readable `default-codex` forces operators to retain
-a stock naming convention. Prefer a validated input file and a readable-starter
-fallback. Keep descriptive profile metadata separate from permissions and
-provisioning settings.
+upstream update. Requiring a particular Preset name forces operators to retain
+a stock naming convention. Prefer a validated input file and a starter selected
+by name order from accessible Presets. Keep descriptive profile metadata separate
+from permissions and provisioning settings.
