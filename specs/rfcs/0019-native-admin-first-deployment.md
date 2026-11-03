@@ -8,7 +8,7 @@ author: miguelbranco80
 
 - **ID:** RFC-0019
 - **Created:** 2026-11-03
-- **Implementation candidate:** [Fork PR #12](https://github.com/raw-labs/openclaw-enterprise/pull/12)
+- **Draft implementation:** [PR #12](https://github.com/raw-labs/openclaw-enterprise/pull/12)
 
 ## Summary
 
@@ -25,9 +25,9 @@ OpenClaw Control Plane (OCC) knows that identity. Kubernetes Compute owns native
 Gateway policy. Preparation must join those inputs without moving Driver policy
 into OCC or changing saved Configuration.
 
-This remains the existing Installation-enabled native-admin pilot. It does not
-enable the pilot by default, grant new human permissions, change native terminal
-policy, or approve the broader native execution design.
+Preparation applies only when the Installation enables native administration.
+It does not enable native administration by default, grant human permissions or
+change native terminal policy.
 
 ## Proposal
 
@@ -65,35 +65,27 @@ The existing private human route still requires a valid session and exact-Agent
 `administer` authority. Retain its bounded WebSocket authorization lease. This
 proposal does not cancel commands that the Gateway has already accepted.
 
-The selected candidate prepares the existing machine identity. Per-person native
-roles in implementation #1 need a separately reviewed combination: administrator
-auto-approval must not silently grant a limited human administrator scopes or
-replace their identity with the machine identity.
+Preparation uses the machine trusted-proxy identity. If per-person roles are
+enabled, device approval must preserve each person's assigned scopes and identity.
+It must not grant a limited user administrator scopes or replace their identity
+with the machine identity. That combination requires a compatible identity and
+device-approval policy.
 
-## Delivery and verification
+## Required verification
 
 Verify first deployment through the actual API and guided worker path, including
 replay, denied callers, opt-outs and each conflict. Check saved Configuration,
 generations and old revisions remain unchanged. Verify compatible explicit
 settings remain intact.
 
-Installed Gateway/browser access and current-image Kubernetes/model checks are
-separate from source or fixture proof. Record the exact tested revision and
-remaining gaps in the implementation, not as implied acceptance of this RFC.
+Exercise native browser access on first deployment using the packaged Gateway
+behind the installed Kubernetes routing path. Verify origin checks and native
+authorization as well as successful page access. Verify that the prepared
+Configuration still supports normal model execution.
 
-## Alternatives and decision
+## Alternatives
 
 Manual JSON preparation avoids a new hook but retains the first-deployment
 problem. Hardcoding Kubernetes policy in OCC breaks Driver ownership. Prefer
-the optional Compute transformation. Compute and native-admin owners must decide
-whether to approve automatic administrator preparation within the enabled pilot;
-existing candidate code does not settle that decision.
-
-## Source and review status
-
-Prepared from [candidate source `37fac70df`](https://github.com/raw-labs/openclaw-enterprise/blob/37fac70dfb784351544189ad07909588b327ef47) and its current documentation.
-Candidate code exists in the linked implementation PR, not in this documentation
-branch. `Not implemented` describes this review baseline; it does not erase the
-candidate's delivery history or certify that the candidate meets this proposal.
-Design approval and implementation qualification remain separate. This PR changes
-neither the existing implementation nor the integration bundle.
+the optional Compute transformation to keep Agent identity in OCC and native
+Gateway policy in the selected Driver.
