@@ -4,7 +4,7 @@ implementation_status: Not implemented
 author: miguelbranco80
 ---
 
-# Proposal: Custom Installation profiles and readable Preset starters
+# Proposal: Custom Installation profiles and Preset quick-start
 
 - **ID:** RFC-0019
 - **Created:** 2026-11-03
@@ -12,8 +12,9 @@ author: miguelbranco80
 
 ## Summary
 
-Let operators render a trusted custom Installation profile, choose whether to
-seed bundled Presets, and use a readable custom Preset as the Console's starter.
+Let operators render a trusted custom Installation profile and choose whether to
+create bundled Presets at startup. Let users start an Agent from a custom Preset
+they have permission to read.
 
 ## Problem and scope
 
@@ -36,50 +37,60 @@ files, invalid JSON and mismatched names. Do not silently use the bundled profil
 when custom input fails. A failed rerender must remove stale generated outputs
 so that callers cannot mistake them for the new result.
 
-Copy only the supported Plugin Driver selection and its configuration into the
-Installation. Accept the bundled `occ-plugin` and `codex-plugin` selections;
-this does not load external Driver modules. Configuration must be an object,
-but the selected Driver still validates its own options at controller startup.
+Copy the selected Plugin Driver and its configuration into the Installation.
+Select either bundled Plugin Driver, `occ-plugin` or `codex-plugin`. Custom
+profiles cannot install additional Plugin Drivers. If supplied, `configuration`
+must be a JSON object; the selected Driver validates its options at controller
+startup.
 
-Descriptive profile metadata, including `recommendedPreset`, is not a second
-source of deployment policy and does not choose the Console starter. Hosted
-catalog credential and discovery-network requirements follow the selected
-Plugin Driver, independently of the profile family. Runtime credentials remain
+Profile metadata, including `recommendedPreset`, describes the profile; it does
+not configure the deployment or choose the Console starter. When the selected
+Plugin Driver uses a hosted catalog, its credential and network access
+requirements apply regardless of the profile family. Runtime credentials remain
 owned by each Agent.
 
 ### Preset seeding
 
 Add `presets.includeDefaults`, defaulting to `true`. When false, seed only
-explicitly listed files; with no files, seed none. Preserve saved and edited
-Presets across startup and upgrades. Disabling seeding must not delete existing
-resources or overwrite custom Configuration. The renderer checks paths; startup
-still needs readable, valid Preset files.
+explicitly listed files; with no files, seed none. A custom file takes precedence
+over a bundled Preset with the same name. Reject the configuration if two custom
+files define Presets with the same name.
+
+Preserve saved and edited Presets across startup and upgrades. Disabling seeding
+must not delete existing resources or overwrite custom Configuration. The
+renderer checks paths; the controller must be able to read and validate the
+Preset files at startup.
 
 ### Console starter
 
 For the quick-start shortcut, choose the first Preset the current user has
 permission to read, using case-insensitive browser-locale name order, with
 exact-name ordering to break ties. No Preset name gets special priority.
-Authorize the exact Preset read; listing visibility alone is insufficient.
+Check permission to read the selected Preset when loading it; appearing in the
+list alone is insufficient.
 Show the starter's name before the user selects it.
 
-If no Preset is readable, keep the ordinary chooser/empty state. Keep variable
-entry, editable drafts, navigation and explicit cancellation behavior. Switching
-starters must not silently discard an unsaved draft.
+If the user cannot read any Preset, disable quick-start and show the ordinary
+chooser's empty state. Keep variable entry, editable drafts, navigation and
+explicit cancellation behavior. Switching starters must not silently discard an
+unsaved draft.
 
 ## Required verification
 
-Verify both renderer entry points, strict input refusal and stale-output removal.
+Verify the renderer's CLI and programmatic entry points, rejection of invalid
+input and removal of stale outputs.
 Exercise default/custom/no-default seeding and real PostgreSQL restart/upgrade
-preservation. Check that hosted prerequisites follow the Plugin Driver rather
-than the profile name. Exercise exact-read denial, inaccessible Presets, name
-ordering, ties and retained drafts through the Console/API. Verify that bundled
-Preset names receive no priority over custom names.
+preservation. Verify that a custom file takes precedence over a bundled Preset
+with the same name and that duplicate names across custom files are rejected.
+Check that hosted catalog requirements follow the Plugin Driver rather than the
+profile name. Through the Console/API, verify denied reads, Presets the user
+cannot read, name ordering, ties and retained drafts. Verify that bundled Preset
+names receive no priority over custom names.
 
 ## Alternatives
 
 Editing bundled profiles works locally but creates changes to carry across every
 upstream update. Requiring a particular Preset name forces operators to retain
 a stock naming convention. Prefer a validated input file and a starter selected
-by name order from accessible Presets. Keep descriptive profile metadata separate
-from permissions and provisioning settings.
+by name order from Presets the user can read. Keep descriptive profile metadata
+separate from permissions and provisioning settings.
