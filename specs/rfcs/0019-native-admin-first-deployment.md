@@ -65,7 +65,9 @@ The existing private human route still requires a valid session and exact-Agent
 `administer` authority. Retain its bounded WebSocket authorization lease. This
 proposal does not cancel commands that the Gateway has already accepted.
 
-Preparation uses the machine trusted-proxy identity. If per-person roles are
+The first version supports only the machine trusted-proxy identity. Per-person
+role configurations remain unsupported by this preparation until compatible
+identity and device-approval integration is available. When that integration is
 enabled, device approval must preserve each person's assigned scopes and identity.
 It must not grant a limited user administrator scopes or replace their identity
 with the machine identity. That combination requires a compatible identity and
