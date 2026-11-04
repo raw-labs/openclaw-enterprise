@@ -42,6 +42,9 @@ For example, a Preset binds both `TOOL_TOKEN` and `SECOND_TOKEN` to the same Sec
 Creating the Agent retains both destinations and ensures one exact Secret grant;
 it neither creates a replacement Secret nor grants Namespace-wide access.
 
+Removing a Secret binding from the Configuration later does not revoke the
+Agent's IAM grant. Revocation remains a separate IAM operation.
+
 ### Authorization and partial failure
 
 The signed-in caller still needs the existing Installation administration/delegation
@@ -55,6 +58,9 @@ show that credential access is not confirmed. Retry against the same Agent and
 Configuration, reading exact existing bindings before adding missing ones. Do not
 recreate the Agent, duplicate grants, silently change saved inputs or report
 successful credential setup when only some grants succeeded.
+
+Retry uses the Secret bindings confirmed during creation, even if the
+Configuration has since changed; it does not switch to the current bindings.
 
 The supported queued-provisioning path keeps worker-owned grant handling. Worker
 delivery must recheck current authority: revocation after admission must prevent
