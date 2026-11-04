@@ -8,7 +8,7 @@ author: miguelbranco80
 
 - **ID:** RFC-0029
 - **Created:** 2026-10-30
-- **Last updated:** 2026-10-30
+- **Last updated:** 2026-11-04
 - **Implementation plan:** [Temporary test environments](../plans/0029-temporary-test-environments.md)
 
 ## Summary
@@ -18,6 +18,10 @@ Harness or conversation. Keep Crabbox's existing skill and CLI. Add an external
 Crabbox provider adapter that asks OpenClaw Control Plane (OCC) to create and
 manage the machine.
 
+The first implementation uses a nonroot Linux Pod on Kubernetes, with disposable
+storage and private SSH, not a VM. Running Docker or k3d inside it needs a
+separately qualified execution profile.
+
 OpenClaw Enterprise (OCE) would own authorization, resource limits, isolation,
 expiry and deletion. Crabbox would synchronize the checkout, execute commands
 and return results. This is a proposed platform extension, not a supported
@@ -25,7 +29,7 @@ configuration today.
 
 ## Why this is useful
 
-An Agent may need to build a large project or start a disposable k3d cluster
+An Agent may need to build a large project or run a resource-heavy test suite
 halfway through a conversation. Doing that on the Harness host competes with
 other work for memory and CPU. Moving the entire session is unnecessary: only
 the test needs another machine.
@@ -55,10 +59,10 @@ protocol connects to a small adapter that calls OCE's own API.
 | OCE core/controller   | Authorize requests, record ownership and deadlines, and retry cleanup until it finishes. |
 | ComputeDriver         | Create, inspect, connect to and delete the actual infrastructure; Kubernetes is first.   |
 
-The Driver is not a second lease server. OCE decides when cleanup is due; the
-Driver removes the resources and reports whether they are gone. Neither relies
-on the LLM remembering a final tool call. The common OCE contract stays independent
-of Crabbox, so other callers could use the same capability.
+OCE decides when cleanup is due; the Driver removes the resources and reports
+whether they are gone. Cleanup does not rely on the Agent remembering a final
+tool call. The common OCE contract stays independent of Crabbox, so other callers
+could use the same capability.
 
 All OCE connections below are proposed:
 
@@ -79,11 +83,11 @@ An Agent can own several environments, subject to operator-set concurrency and
 capacity limits. An environment is not an AgentRevision, and creating one does
 not redeploy the Agent.
 
-OCC records the owner, admitted execution profile, caller-scoped request ID,
+OCC records the owner, approved execution profile, request ID for that caller,
 provider resource identity, deadlines and lifecycle state. The profile fixes
 allowed image, CPU, memory, placement, network access and maximum lifetime.
-Admission snapshots those settings so later configuration changes cannot
-silently broaden an existing environment's authority.
+When OCC accepts a request, it saves those settings so later configuration
+changes cannot silently broaden an existing environment's authority.
 
 Reuse existing persistence, IAM, audit and controller work. The Driver reports
 readiness and an authorized SSH route only after applying isolation.
@@ -111,7 +115,7 @@ temporaryEnvironments:
 ```
 
 The setting belongs to OCE Agent configuration, not the upstream Harness JSON.
-OCC snapshots the selection into the admitted AgentRevision. A saved edit takes
+OCC saves the approved selection in the AgentRevision. A saved edit takes
 effect when that revision is deployed, not halfway through an existing runtime.
 Removing the selection disables the next revision; retirement of the old
 revision starts cleanup of its environments. There is no installation-wide
@@ -126,11 +130,10 @@ limits. Selecting a profile does not grant IAM authority: exact-Agent permission
 and current workload identity are still required. Unknown, disallowed or
 unsupported selections fail admission for that Agent, not unrelated Agents.
 
-The initial Kubernetes implementation supplies a nonroot Linux Pod/container
-with disposable storage and private SSH, **not a VM**. Its image provides the
-remote test tools. Different approved images and sizes are different profiles;
-no arbitrary Pod manifest, cloud VM type or provisioning credential is exposed
-to the Agent. Adding Kubernetes nodes is outside this feature.
+The Pod's image provides the remote test tools. Different approved images and
+sizes are different profiles. The Agent cannot supply an arbitrary Pod manifest
+or cloud VM type and receives no provisioning credentials. Adding Kubernetes
+nodes is outside this feature.
 
 Runtime images may contain the unchanged Crabbox CLI and skill files, but only
 an opted-in Agent discovers the Crabbox skills and receives trusted provider
@@ -154,9 +157,10 @@ OCE adapter. Initially target Linux and the ordinary SSH lease path:
 | Cleanup           | Request scoped cleanup without acquiring authority over other owners.                         |
 | Doctor            | Check configuration and access without allocating a machine.                                  |
 
-Use stable, caller-scoped request IDs for repeat-safe acquisition. A repeated
-request with different settings is a conflict, not a new allocation. Connection
-information comes from the admitted resource, not a caller-selected destination.
+Each caller supplies a request ID so retries return the same environment instead
+of creating another. Reusing that ID with different settings is a conflict.
+Connection information comes from the admitted resource, not a caller-selected
+destination.
 
 Crabbox's external provider accepts SSH connection and proxy metadata. A public
 SSH port is not required. OCC must authorize access to the exact environment;
@@ -164,8 +168,7 @@ SSH credentials and routing must not allow another tenant's endpoint. Do not
 forward OCC credentials, model credentials or the whole local environment into
 the test command. Export requested outputs before deleting the environment.
 
-Crabbox's coordinator is not required for this path. OCC owns server-side
-lifecycle; Crabbox retains only the client state needed for its workflow.
+Crabbox retains only the client state needed for its workflow.
 
 ## Authorization and isolation
 
@@ -179,9 +182,7 @@ Caller flags, repository configuration and adapter configuration cannot broaden
 server-enforced limits. Denied requests and successful mutations produce audit
 evidence without credentials or test-output contents.
 
-Implement temporary environments through Kubernetes first, with private access,
-resource limits and disposable storage. The API describes an execution
-environment, not necessarily a literal VM. Do not make KubeVirt or another VM
+The API describes an execution environment. Do not make KubeVirt or another VM
 operator a requirement of the platform contract.
 
 Cluster-creating tests need a separately qualified execution profile with its own
@@ -233,21 +234,17 @@ boundary explicit.
 
 ## Delivery and decisions requested
 
-The [plan](../plans/0029-temporary-test-environments.md) specifies the connected
-implementation and real proof. Source review found a compatible Crabbox extension
-point. A connected source draft exists, but no live Agent-to-Crabbox
-acceptance test has run. Per-Agent selection and its runtime delivery remain
-part of that draft, not a supported deployment.
+The [plan](../plans/0029-temporary-test-environments.md) records implementation
+work, verification results and remaining gaps. A draft implementation exists,
+but no live Agent-to-Crabbox acceptance test has run. Per-Agent selection and
+runtime setup are not yet supported deployment features. The RFC remains
+Proposed; implementation work does not establish acceptance or deployment
+approval.
 
-Draft implementation of this Kubernetes-first scope was requested on 2026-10-30.
-That permits development of the proposal; it does not mark the RFC accepted or
-approve deployment. Review must settle the exact ComputeDriver and workload
-identity contracts before merge. Non-Kubernetes implementations are not required
-for the initial delivery.
-
-Cluster-creating tests still need a qualified Kubernetes execution profile. If
-that requires another runtime or cluster operator, review the dependency before
-adding it; it is not a prerequisite for defining the common API.
+Review must settle the exact ComputeDriver and workload identity contracts before
+merge. Non-Kubernetes implementations are not required for the initial delivery.
+If cluster-creating tests need another runtime or cluster operator, review that
+dependency before adding it.
 
 Delivery requires a real Agent-to-Crabbox-to-OCC test with a dirty checkout,
 remote command output, denial checks, duplicate-request recovery, client loss,
