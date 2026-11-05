@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import dns from "node:dns";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 
@@ -10,13 +11,81 @@ const SHUTDOWN_DRAIN_MS = 2_000;
 const CLIENT_DRAIN_TIMEOUT_MS = 10_000;
 const ALLOWED_SUFFIXES = [".slack.com", ".slack-edge.com", ".slack-msgs.com"];
 const ALLOWED_HOSTS = new Set(["slack.com", "slack-edge.com", "slack-msgs.com"]);
-const MICROSOFT_PUBLIC_HOSTS = new Set([
+// Public-cloud text messaging only: no broad Microsoft or SharePoint wildcard.
+const TEAMS_HOSTS = new Set([
   "login.microsoftonline.com",
   "login.botframework.com",
   "api.botframework.com",
-  "graph.microsoft.com",
   "smba.trafficmanager.net",
+  "graph.microsoft.com",
 ]);
+const teamsEnabled = process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED === "true";
+if (
+  process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED !== undefined &&
+  !["true", "false"].includes(process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED)
+) {
+  throw new Error("OCC_CHANNEL_PROXY_TEAMS_ENABLED must be true or false.");
+}
+const TEAMS_FILE_HOST_SUFFIXES = [
+  ".sharepoint.com",
+  ".sharepoint-df.com",
+  ".1drv.com",
+  ".onedrive.com",
+  ".blob.core.windows.net",
+];
+const teamsFileHosts = readTeamsFileHosts(process.env.OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS);
+// Match the Helm proxy's public IPv4 egress boundary. Validate every DNS answer before
+// opening a socket, then connect to that numeric address so DNS cannot change underneath it.
+const blockedAddresses = new net.BlockList();
+for (const [address, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+]) {
+  blockedAddresses.addSubnet(address, prefix, "ipv4");
+}
+
+function readTeamsFileHosts(value) {
+  if (value === undefined) {
+    return new Set();
+  }
+  let hosts;
+  try {
+    hosts = JSON.parse(value);
+  } catch {
+    throw new Error(
+      "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS must be a JSON list of exact Microsoft storage hostnames.",
+    );
+  }
+  if (
+    !Array.isArray(hosts) ||
+    hosts.length > 32 ||
+    (!teamsEnabled && hosts.length > 0) ||
+    hosts.some(
+      (host) =>
+        typeof host !== "string" ||
+        host.length > 253 ||
+        !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host) ||
+        !TEAMS_FILE_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix)),
+    )
+  ) {
+    throw new Error(
+      "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS requires Teams and at most 32 exact lowercase Microsoft storage hostnames.",
+    );
+  }
+  return new Set(hosts);
+}
 
 function parsePort(value) {
   if (value === undefined || value === "") {
@@ -44,15 +113,15 @@ function parseConnectTarget(target) {
   return { host: match[1].toLowerCase(), port };
 }
 
-function isAllowedSlackConnectTarget(target, teamsEnabled) {
+function isAllowedSlackConnectTarget(target) {
   const parsed = parseConnectTarget(target);
   if (parsed === undefined || parsed.port !== 443) {
     return false;
   }
   return (
     ALLOWED_HOSTS.has(parsed.host) ||
-    ALLOWED_SUFFIXES.some((suffix) => parsed.host.endsWith(suffix)) ||
-    (teamsEnabled && MICROSOFT_PUBLIC_HOSTS.has(parsed.host))
+    (teamsEnabled && (TEAMS_HOSTS.has(parsed.host) || teamsFileHosts.has(parsed.host))) ||
+    ALLOWED_SUFFIXES.some((suffix) => parsed.host.endsWith(suffix))
   );
 }
 
@@ -106,10 +175,7 @@ function closeClientWhenDrained(clientSocket, drainTimeoutMs) {
   clientSocket.once("close", () => clearTimeout(timer));
 }
 
-export function createSlackProxyServer({
-  clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS,
-  teamsEnabled = false,
-} = {}) {
+export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS } = {}) {
   const server = createServer((request, response) => {
     response.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
     response.end("CONNECT required\n");
@@ -120,41 +186,87 @@ export function createSlackProxyServer({
     // EPIPE or ECONNRESET while the 403 is written; without a listener
     // that error exits the process.
     closeOnSocketError(clientSocket);
-    if (!isAllowedSlackConnectTarget(request.url, teamsEnabled)) {
+    if (!isAllowedSlackConnectTarget(request.url)) {
       reject(clientSocket, 403, "Forbidden");
       closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
       return;
     }
     const target = parseConnectTarget(request.url);
-    const upstream = net.connect({ host: target.host, port: target.port });
+    let upstream;
     let connected = false;
-    upstream.setTimeout(CONNECT_TIMEOUT_MS);
-    upstream.once("connect", () => {
-      connected = true;
-      upstream.setTimeout(0);
-      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      if (head.length > 0) {
-        upstream.write(head);
-      }
-      upstream.pipe(clientSocket);
-      clientSocket.pipe(upstream);
-    });
-    upstream.once("timeout", () => upstream.destroy(new Error("upstream connection timeout")));
-    upstream.once("error", () => {
-      if (connected) {
-        // Before the upstream's EOF, the reply is cut: reset, so the client cannot take it as
-        // whole. After it (a client byte piped into the ended upstream, say), the reply is
-        // complete and the close handler lets the client drain it.
-        if (!clientSocket.destroyed && !clientSocket.writableEnded) {
-          clientSocket.resetAndDestroy();
-        }
+    let finished = false;
+    // One deadline covers resolution and connection; a late resolver callback cannot
+    // create an upstream after timeout, client disconnect, or process shutdown.
+    const timer = setTimeout(() => fail(502, "Bad Gateway"), CONNECT_TIMEOUT_MS);
+    const finish = () => {
+      finished = true;
+      clearTimeout(timer);
+    };
+    const fail = (status, message) => {
+      if (finished) {
         return;
       }
-      reject(clientSocket, 502, "Bad Gateway");
+      finish();
+      upstream?.destroy();
+      if (!clientSocket.destroyed) {
+        reject(clientSocket, status, message);
+        closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
+      }
+    };
+    clientSocket.once("close", () => {
+      finish();
+      upstream?.destroy();
     });
-    upstream.once("close", () => closeClientWhenDrained(clientSocket, clientDrainTimeoutMs));
-    clientSocket.once("close", () => upstream.destroy());
-    clientSocket.once("error", () => upstream.destroy());
+    clientSocket.once("error", () => {
+      finish();
+      upstream?.destroy();
+    });
+    dns.lookup(target.host, { family: 4, all: true, verbatim: true }, (error, addresses) => {
+      if (finished) {
+        return;
+      }
+      if (error || addresses.length === 0) {
+        fail(502, "Bad Gateway");
+        return;
+      }
+      if (
+        addresses.some(
+          ({ address, family }) =>
+            family !== 4 || net.isIP(address) !== 4 || blockedAddresses.check(address, "ipv4"),
+        )
+      ) {
+        fail(403, "Forbidden");
+        return;
+      }
+      upstream = net.connect({ host: addresses[0].address, family: 4, port: target.port });
+      upstream.once("connect", () => {
+        connected = true;
+        finish();
+        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        if (head.length > 0) {
+          upstream.write(head);
+        }
+        upstream.pipe(clientSocket);
+        clientSocket.pipe(upstream);
+      });
+      upstream.once("error", () => {
+        if (connected) {
+          // Before the upstream's EOF, the reply is cut: reset, so the client cannot take it as
+          // whole. After it (a client byte piped into the ended upstream, say), the reply is
+          // complete and the close handler lets the client drain it.
+          if (!clientSocket.destroyed && !clientSocket.writableEnded) {
+            clientSocket.resetAndDestroy();
+          }
+          return;
+        }
+        fail(502, "Bad Gateway");
+      });
+      upstream.once("close", () => {
+        if (connected) {
+          closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
+        }
+      });
+    });
   });
 
   return server;
@@ -162,11 +274,7 @@ export function createSlackProxyServer({
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = parsePort(process.env.OCC_SLACK_PROXY_PORT);
-  const teams = process.env.OCC_CHANNEL_PROXY_TEAMS;
-  if (teams !== undefined && teams !== "true" && teams !== "false") {
-    throw new Error("OCC_CHANNEL_PROXY_TEAMS must be true or false.");
-  }
-  const server = createSlackProxyServer({ teamsEnabled: teams === "true" });
+  const server = createSlackProxyServer();
   const sockets = new Set();
   server.on("connection", (socket) => {
     sockets.add(socket);

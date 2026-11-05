@@ -24,7 +24,11 @@ import {
   runtimeLogSources,
   waitForNativeRedeploy,
 } from "../helpers/local-first-agent-native.mjs";
-import { localFirstAgentStack } from "../helpers/local-first-agent-stack.mjs";
+import { localOpenShellGatewayOptions } from "../helpers/local-openshell-gateway.mjs";
+import {
+  localFirstAgentStack,
+  measureFirstAgentStage,
+} from "../helpers/local-first-agent-stack.mjs";
 import { GrpcOpenShellGatewayClient } from "../../apps/controller/src/drivers/sandbox/openshell-gateway-client.ts";
 import { availablePort } from "../helpers/available-port.mjs";
 import { stopProcess } from "../helpers/stop-process.mjs";
@@ -175,9 +179,13 @@ function readResult({ stdout, stderr }, expectedReply, { apiOrigin, browserOrigi
   assert.ok(model, `Missing selected model.\n${diagnostic}`);
   assert.ok(proof, `Missing generated model verification nonce.\n${diagnostic}`);
   assert.ok(consoleLine, `Missing Console URL.\n${diagnostic}`);
-  assert.ok(replyHeading, `Missing custom model reply.\n${diagnostic}`);
-  const reply = stdout.slice(replyHeading.index + replyHeading[0].length).replace(/\r?\n$/, "");
-  assert.equal(reply, expectedReply, diagnostic);
+  if (expectedReply === undefined) {
+    assert.equal(replyHeading, null, "Nonce-only reuse must not issue a custom prompt");
+  } else {
+    assert.ok(replyHeading, `Missing custom model reply.\n${diagnostic}`);
+    const reply = stdout.slice(replyHeading.index + replyHeading[0].length).replace(/\r?\n$/, "");
+    assert.equal(reply, expectedReply, diagnostic);
+  }
 
   let consoleUrl;
   try {
@@ -224,7 +232,7 @@ async function readPrivateJson(path, label) {
   }
 }
 
-async function readKubernetesJson({ stateDirectory, cluster, env }, args, label) {
+async function readKubernetes({ stateDirectory, cluster, env }, args, label, output, signal) {
   const environment = { ...env };
   delete environment.OPENAI_API_KEY;
   delete environment.OPENAI_API_KEY_FILE;
@@ -240,14 +248,34 @@ async function readKubernetesJson({ stateDirectory, cluster, env }, args, label)
         `k3d-${cluster}`,
         ...args,
         "--output",
-        "json",
+        output,
       ],
-      { env: environment, timeout: 20_000, maxBuffer: 1024 * 1024 },
+      { env: environment, timeout: 20_000, signal, maxBuffer: 1024 * 1024 },
     );
-    return JSON.parse(stdout);
+    return output === "json" ? JSON.parse(stdout) : stdout;
   } catch {
     throw new Error(`Could not read ${label} in the local Kubernetes context.`);
   }
+}
+
+function readKubernetesJson(kube, args, label) {
+  return readKubernetes(kube, args, label, "json");
+}
+
+function nativeAgentPodSelector(agentId, revisionId) {
+  return `openclaw.dev/agent=${agentId},openclaw.dev/revision=${revisionId},openclaw.dev/workload-role=agent`;
+}
+
+// Project only the fields needed to join the agent imageID to the model probe's log stream.
+function readNativeProbePod(kube, { namespaceId, agentId, revisionId }, signal) {
+  const selector = `${nativeAgentPodSelector(agentId, revisionId)},openclaw.dev/namespace=${namespaceId}`;
+  return readKubernetes(
+    kube,
+    ["get", "pods", "--all-namespaces", "--selector", selector],
+    "the native model probe's Harness Pod",
+    'jsonpath={range .items[*]}{.metadata.name} {.metadata.uid} {range .status.containerStatuses[?(@.name=="agent")]}{.restartCount} {.imageID}{end}{"\\n"}{end}',
+    signal,
+  );
 }
 
 async function readSecretResourceVersion({ stateDirectory, cluster, env, namespaceId, secretId }) {
@@ -437,16 +465,23 @@ test("native terminal failures report only fixed failure codes", async (t) => {
     progress: null,
     error: failure("RUNTIME_AUTHENTICATION_FAILED"),
   };
+  const probeStream = {
+    source: "agent",
+    container: "agent",
+    pod: "native-agent",
+    podUid: randomUUID(),
+    restartCount: 0,
+  };
   const probeLog = (fields) =>
     sanitizeRuntimeLogChunk({
-      stream: { source: "agent", container: "agent" },
+      stream: probeStream,
       lines: [
         { raw: JSON.stringify({ event: "openclaw.model_probe", elapsedMs: 5, ...fields }) },
         { raw: "private-sentinel" },
       ],
       truncated: false,
     }).records;
-  const page = (records) => ({ revisionId, source: "agent", records });
+  const page = (records) => ({ revisionId, source: "agent", stream: probeStream, records });
 
   function reportedFailure(message) {
     assert.doesNotMatch(message, /sentinel|ns_|agt_|rev_/i);
@@ -460,6 +495,9 @@ test("native terminal failures report only fixed failure codes", async (t) => {
       for (const [key, value] of Object.entries(observation.modelProbe)) {
         assert.ok(retained.includes(`"${key}":${JSON.stringify(value)}`), retained);
       }
+      if (typeof observation.probePodImage === "object") {
+        assert.ok(retained.includes(JSON.stringify(observation.probePodImage)), retained);
+      }
       if (observation.modelProbe.providerStatus === 401) {
         assert.match(retained, /"credentialAttachment":"not observed"/);
       }
@@ -467,7 +505,7 @@ test("native terminal failures report only fixed failure codes", async (t) => {
     return { category, ...observation };
   }
 
-  async function observe(response, provisioned, responses, expectedPaths) {
+  async function observe(response, provisioned, responses, expectedPaths, readProbePod) {
     const calls = [];
     const request = async (method, path, body, signal) => {
       calls.push({ method, path, body, signal });
@@ -481,6 +519,7 @@ test("native terminal failures report only fixed failure codes", async (t) => {
         namespaceId,
         provisioningPath,
         provisioned,
+        readProbePod,
         signal,
       }),
       (error) => {
@@ -541,6 +580,84 @@ test("native terminal failures report only fixed failure codes", async (t) => {
       modelProbe: { probes: 1, code: "AUTHENTICATION_FAILED", ...provider },
       credentialAttachment: "not observed",
     });
+
+    const { pod, podUid } = records[0].stream;
+    const digest = `sha256:${"a".repeat(64)}`;
+    const row = `${pod} ${podUid} 0 private-sentinel@${digest}`;
+    const imageFor = async (result, lines = records) => {
+      const failure = await observe(
+        handoff,
+        handoff,
+        [deployment, page(lines)],
+        [deploymentPath, logPath],
+        async () => {
+          if (result === undefined) {
+            throw new Error("private-sentinel");
+          }
+          return result;
+        },
+      );
+      assert.equal(failure.modelProbe.providerStatus, 401);
+      return failure.probePodImage;
+    };
+    assert.deepEqual(await imageFor(row), { digest, podUid });
+    for (const other of [
+      row.replace(podUid, randomUUID()),
+      row.replace(" 0 ", " 1 "),
+      `${row}\n${row}`,
+      row.slice(0, -1),
+      undefined,
+    ]) {
+      assert.equal(await imageFor(other), "unavailable");
+    }
+    const gap = { type: "gap", reason: "stream_replaced", stream: probeStream };
+    assert.equal(await imageFor(row, [gap, ...records]), "unavailable");
+
+    // A later READY keeps the observed 401, and the image can belong only to that 401.
+    const ready = probeLog({ code: "READY" });
+    const recovered = await observe(
+      handoff,
+      handoff,
+      [deployment, page([...records, ...ready])],
+      [deploymentPath, logPath],
+      async () => row,
+    );
+    assert.deepEqual(recovered.modelProbe, {
+      probes: 2,
+      code: "AUTHENTICATION_FAILED",
+      ...provider,
+    });
+    assert.deepEqual(recovered.probePodImage, { digest, podUid });
+
+    // A success-only, ambiguous, mismatched or mixed-stream page reads no Pod.
+    // The diagnostic catch would swallow a throw here, so count reads instead.
+    let podReads = 0;
+    const noPodRead = async () => {
+      podReads += 1;
+      return row;
+    };
+    const otherStream = { ...probeStream, podUid: randomUUID() };
+    const mixed = [...records, ...ready.map((record) => ({ ...record, stream: otherStream }))];
+    const unattributed = [
+      [deployment, ready],
+      [deployment, [...records, ...records]],
+      [deployment, mixed],
+      [
+        { ...deployment, error: failure("RUNTIME_MODEL_PROBE_FAILED") },
+        probeLog({ code: "AUTHENTICATION_FAILED", ...provider }),
+      ],
+    ];
+    for (const [current, lines] of unattributed) {
+      const { probePodImage } = await observe(
+        handoff,
+        handoff,
+        [current, page(lines)],
+        [deploymentPath, logPath],
+        noPodRead,
+      );
+      assert.equal(probePodImage, "unavailable");
+    }
+    assert.equal(podReads, 0);
   });
 
   await t.test("print other for values outside the fixed vocabularies", async () => {
@@ -1070,7 +1187,6 @@ test(
     const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
     const name = `first-agent-${suffix}`;
     const firstReply = `FIRST_AGENT_${suffix.toUpperCase()}_ONE`;
-    const secondReply = `FIRST_AGENT_${suffix.toUpperCase()}_TWO`;
     const env = { ...stack.environment, OCC_DEVELOPMENT_COMPUTE_DRIVER: "kubernetes" };
     delete env.OPENAI_API_KEY_FILE;
     delete env.CODEX_ACCESS_TOKEN_FILE;
@@ -1087,12 +1203,14 @@ test(
 
     // The unique Agent remains until the fixture or the owner destroys the selected disposable stack.
     const first = readResult(
-      await runFirstAgent({
-        name,
-        prompt: promptFor(firstReply),
-        env,
-        signal: context.signal,
-      }),
+      await measureFirstAgentStage(context, "initial-deploy-and-model", () =>
+        runFirstAgent({
+          name,
+          prompt: promptFor(firstReply),
+          env,
+          signal: context.signal,
+        }),
+      ),
       firstReply,
       resultOrigins,
     );
@@ -1125,9 +1243,10 @@ test(
       const appServerUrl = gateway.spec.template.spec.containers[0].env.find(
         ({ name: variable }) => variable === "APP_SERVER_URL",
       )?.value;
+      const appServerScheme = recorded.deploymentMode === "k3d" ? "wss" : "ws";
       assert.match(
         appServerUrl ?? "",
-        /^ws:\/\/[a-z0-9-]+--[a-z0-9-]+\.openshell\.localhost:8080\/$/,
+        new RegExp(`^${appServerScheme}://[a-z0-9-]+--[a-z0-9-]+\\.openshell\\.localhost:8080/$`),
       );
       const openShellNamespace =
         recorded.deploymentMode === "k3d" ? recorded.platformNamespace : "openshell-system";
@@ -1176,10 +1295,22 @@ test(
           { env: safeEnvironment, stdio: "ignore" },
         );
         context.after(() => stopProcess(forward));
-        const client = new GrpcOpenShellGatewayClient({
-          endpoint: `http://127.0.0.1:${port}`,
-          auth: { mode: "unauthenticated" },
-        });
+        const options =
+          recorded.deploymentMode === "k3d"
+            ? await localOpenShellGatewayOptions(
+                context,
+                [
+                  "--kubeconfig",
+                  join(stateDirectory, "kubeconfig"),
+                  "--context",
+                  `k3d-${recorded.cluster}`,
+                ],
+                safeEnvironment,
+                openShellNamespace,
+                port,
+              )
+            : { endpoint: `http://127.0.0.1:${port}`, auth: { mode: "unauthenticated" } };
+        const client = new GrpcOpenShellGatewayClient(options);
         try {
           const sandboxName = new URL(appServerUrl).hostname.split("--")[1].split(".")[0];
           const deadline = Date.now() + 30_000;
@@ -1261,13 +1392,14 @@ test(
     delete reuseEnv.CODEX_ACCESS_TOKEN;
     delete reuseEnv.CODEX_ACCESS_TOKEN_FILE;
     const second = readResult(
-      await runFirstAgent({
-        name,
-        prompt: promptFor(secondReply),
-        env: reuseEnv,
-        signal: context.signal,
-      }),
-      secondReply,
+      await measureFirstAgentStage(context, "reuse-model", () =>
+        runFirstAgent({
+          name,
+          env: reuseEnv,
+          signal: context.signal,
+        }),
+      ),
+      undefined,
       resultOrigins,
     );
 
@@ -1333,6 +1465,25 @@ test(
           const request = (method, path, body, signal) =>
             requestLocalApi(first.origin, serviceKey, method, path, body, signal);
           const configuration = createHarnessConfiguration("openclaw", expectedModel);
+          const providerFile = process.env.OCC_TEST_LOCAL_FIRST_AGENT_NATIVE_PROVIDER_FILE;
+          if (providerFile) {
+            const provider = await readPrivateJson(
+              providerFile,
+              "the native model provider catalog",
+            );
+            const model = provider.models?.[0]?.id;
+            assert.ok(typeof model === "string" && model.length > 0);
+            configuration.models.providers.openai = {
+              baseUrl: provider.baseUrl,
+              api: provider.api,
+              models: provider.models,
+              apiKey: { source: "env", provider: "default", id: "OPENAI_API_KEY" },
+            };
+            configuration.agents.defaults.model = `openai/${model}`;
+            configuration.agents.defaults.models = {
+              [`openai/${model}`]: { agentRuntime: { id: "openclaw" } },
+            };
+          }
           const installation = await request("GET", "/installation");
           assert.equal(installation.capabilities?.nativeWorkers?.support, "pinned-runtime");
           assert.ok(
@@ -1351,87 +1502,101 @@ test(
           const nativeSource = await request("POST", `${base}/credential-sources`, {
             name: `first-agent-native-${suffix}`,
             type: "openai",
+            config: { authorized_base_url: configuration.models.providers.openai.baseUrl },
             secrets: { api_key: nativeSecret.ref },
           });
           assert.equal(nativeSource.type, "openai");
           assert.equal(nativeSource.state, "ready");
+          assert.equal(
+            nativeSource.config.authorized_base_url,
+            new URL(configuration.models.providers.openai.baseUrl).href.replace(/\/$/u, ""),
+          );
           assert.deepEqual(nativeSource.secrets.api_key, nativeSecret.ref);
           // The regular Console API creates the Configuration, Agent, source
           // grant, transport and revision; the Agent receives no Secret grant.
-          const submitted = await request("POST", `${base}/agents/provision`, {
-            requestId: `req_${randomUUID()}`,
-            name: `first-agent-native-${suffix}`,
-            executionMode: "dedicated",
-            harnessAuth: { method: "credential_source", sourceId: nativeSource.id },
-            configuration: {
-              kind: "agent",
-              values: {
-                ...configuration,
-                tools: { allow: ["exec"] },
-              },
-            },
-            initialWorkspaceFiles: { ...WORKSPACE_DEFAULTS },
-            workspaceDefaultsId: WORKSPACE_DEFAULTS_ID,
-          });
-          const deadline = Date.now() + 8 * 60_000;
-          const provisioningPath = nativeProvisioningPath(
-            first.namespaceId,
-            submitted.provisioning,
-          );
-          let provisioned;
-          let deployment;
-          let nativeAgent;
-          while (Date.now() < deadline) {
-            nativeContext.signal.throwIfAborted();
-            provisioned = await request("GET", provisioningPath);
-            const failureDiagnostics = {
-              request,
-              namespaceId: first.namespaceId,
-              provisioningPath,
-              provisioned,
-              signal: nativeContext.signal,
-            };
-            await assertNativeWorkNotFailed(
-              provisioned,
-              "Guided native provisioning must succeed",
-              failureDiagnostics,
-            );
-            if (provisioned.status === "succeeded") {
-              assert.ok(provisioned.agentId && provisioned.revisionId);
-              const nativePath = `${base}/agents/${provisioned.agentId}`;
-              deployment = await request(
-                "GET",
-                `${nativePath}/deployments/${provisioned.revisionId}`,
+          const kube = { stateDirectory, cluster: recorded.cluster, env };
+          const { provisioned, nativeAgent } = await measureFirstAgentStage(
+            nativeContext,
+            "native-deploy",
+            async () => {
+              const submitted = await request("POST", `${base}/agents/provision`, {
+                requestId: `req_${randomUUID()}`,
+                name: `first-agent-native-${suffix}`,
+                executionMode: "dedicated",
+                harnessAuth: { method: "credential_source", sourceId: nativeSource.id },
+                configuration: {
+                  kind: "agent",
+                  values: {
+                    ...configuration,
+                    tools: { allow: ["exec"] },
+                  },
+                },
+                initialWorkspaceFiles: { ...WORKSPACE_DEFAULTS },
+                workspaceDefaultsId: WORKSPACE_DEFAULTS_ID,
+              });
+              const deadline = Date.now() + 8 * 60_000;
+              const provisioningPath = nativeProvisioningPath(
+                first.namespaceId,
+                submitted.provisioning,
               );
-              await assertNativeWorkNotFailed(
-                deployment,
-                "The admitted native revision must become ready",
-                failureDiagnostics,
-              );
-              nativeAgent = await request("GET", nativePath);
-              if (
-                deployment.status === "succeeded" &&
-                nativeAgent.activeRevisionId === provisioned.revisionId
-              ) {
-                break;
+              let provisioned;
+              let deployment;
+              let nativeAgent;
+              while (Date.now() < deadline) {
+                nativeContext.signal.throwIfAborted();
+                provisioned = await request("GET", provisioningPath);
+                const failureDiagnostics = {
+                  request,
+                  namespaceId: first.namespaceId,
+                  provisioningPath,
+                  provisioned,
+                  signal: nativeContext.signal,
+                  readProbePod: (revision, signal) => readNativeProbePod(kube, revision, signal),
+                };
+                await assertNativeWorkNotFailed(
+                  provisioned,
+                  "Guided native provisioning must succeed",
+                  failureDiagnostics,
+                );
+                if (provisioned.status === "succeeded") {
+                  assert.ok(provisioned.agentId && provisioned.revisionId);
+                  const nativePath = `${base}/agents/${provisioned.agentId}`;
+                  deployment = await request(
+                    "GET",
+                    `${nativePath}/deployments/${provisioned.revisionId}`,
+                  );
+                  await assertNativeWorkNotFailed(
+                    deployment,
+                    "The admitted native revision must become ready",
+                    failureDiagnostics,
+                  );
+                  nativeAgent = await request("GET", nativePath);
+                  if (
+                    deployment.status === "succeeded" &&
+                    nativeAgent.activeRevisionId === provisioned.revisionId
+                  ) {
+                    break;
+                  }
+                }
+                await new Promise((resolve) =>
+                  setTimeout(resolve, Math.min(2_000, Math.max(1, deadline - Date.now()))),
+                );
               }
-            }
-            await new Promise((resolve) =>
-              setTimeout(resolve, Math.min(2_000, Math.max(1, deadline - Date.now()))),
-            );
-          }
-          if (Date.now() >= deadline && provisioned?.status !== "succeeded") {
-            await failNativeProvisioningDeadline({
-              request,
-              provisioningPath,
-              provisioned,
-              namespaceId: first.namespaceId,
-              signal: nativeContext.signal,
-            });
-          }
-          assert.equal(provisioned?.status, "succeeded");
-          assert.equal(deployment?.status, "succeeded");
-          assert.equal(nativeAgent?.activeRevisionId, provisioned.revisionId);
+              if (Date.now() >= deadline && provisioned?.status !== "succeeded") {
+                await failNativeProvisioningDeadline({
+                  request,
+                  provisioningPath,
+                  provisioned,
+                  namespaceId: first.namespaceId,
+                  signal: nativeContext.signal,
+                });
+              }
+              assert.equal(provisioned?.status, "succeeded");
+              assert.equal(deployment?.status, "succeeded");
+              assert.equal(nativeAgent?.activeRevisionId, provisioned.revisionId);
+              return { provisioned, nativeAgent };
+            },
+          );
           assert.equal(nativeAgent.executionMode, "dedicated");
           assert.deepEqual(nativeAgent.harnessAuth, {
             method: "credential_source",
@@ -1494,7 +1659,6 @@ test(
             agentId: nativeAgent.id,
             workspaceFile,
           };
-          const kube = { stateDirectory, cluster: recorded.cluster, env };
           const readProviderRevision = async (revisionId) => {
             const pods = await readKubernetesJson(
               kube,
@@ -1503,7 +1667,7 @@ test(
                 "pods",
                 "--all-namespaces",
                 "--selector",
-                `openclaw.dev/agent=${nativeAgent.id},openclaw.dev/revision=${revisionId},openclaw.dev/workload-role=agent`,
+                nativeAgentPodSelector(nativeAgent.id, revisionId),
               ],
               "the native OpenShell Harness",
             );
@@ -1546,12 +1710,39 @@ test(
               claimName: volume.persistentVolumeClaim.claimName,
               subPath: mount.subPath,
             };
-            return { pod, sandbox, workspaceStorage };
+            // Match RPC node observations to this revision's configured workspace node.
+            // Kubernetes supplies the public identity; do not read node enrollment Secrets.
+            const gatewayPods = await readKubernetesJson(
+              kube,
+              [
+                "get",
+                "pods",
+                "--all-namespaces",
+                "--selector",
+                `openclaw.dev/agent=${nativeAgent.id},openclaw.dev/revision=${revisionId},openclaw.dev/workload-role=gateway,openclaw.dev/namespace=${first.namespaceId}`,
+              ],
+              "the native Gateway's workspace-node identity",
+            );
+            const gateways = gatewayPods.items.filter((item) => !item.metadata.deletionTimestamp);
+            assert.equal(gateways.length, 1);
+            const nodeIds = gateways[0].spec.containers.flatMap((item) =>
+              (item.env ?? [])
+                .filter(({ name }) => name === "OPENCLAW_WORKSPACE_NODE_ID")
+                .map(({ value }) => value),
+            );
+            assert.equal(nodeIds.length, 1);
+            assert.ok(
+              typeof nodeIds[0] === "string" && /^[a-f0-9]{64}$/.test(nodeIds[0]),
+              "The native Gateway must name its exact workspace node",
+            );
+            return { pod, sandbox, workspaceStorage, expectedNodeId: nodeIds[0] };
           };
           const initialProvider = await readProviderRevision(provisioned.revisionId);
-          const firstNativeProof = await assertNativeWorkerProofInController(
-            nativeContext,
-            proofOptions,
+          const firstNativeProof = await measureFirstAgentStage(nativeContext, "native-model", () =>
+            assertNativeWorkerProofInController(nativeContext, {
+              ...proofOptions,
+              expectedNodeId: initialProvider.expectedNodeId,
+            }),
           );
           assert.equal(
             firstNativeProof.hostname,
@@ -1561,20 +1752,27 @@ test(
 
           // A new revision replaces the provider-owned workload while retaining
           // Agent storage.
-          const replacement = await request("POST", `${nativePath}/deploy`);
-          assert.notEqual(replacement.id, provisioned.revisionId);
-          assert.equal(replacement.harness.id, "openclaw");
-          assert.equal(replacement.harness.mode, "dedicated");
-          const { deployment: replacementDeployment, agent: replacementAgent } =
-            await waitForNativeRedeploy({
-              request,
-              namespaceId: first.namespaceId,
-              agentId: nativeAgent.id,
-              revisionId: replacement.id,
-              signal: nativeContext.signal,
-            });
-          assert.equal(replacementDeployment?.status, "succeeded");
-          assert.equal(replacementAgent?.activeRevisionId, replacement.id);
+          const replacement = await measureFirstAgentStage(
+            nativeContext,
+            "native-redeploy",
+            async () => {
+              const replacement = await request("POST", `${nativePath}/deploy`);
+              assert.notEqual(replacement.id, provisioned.revisionId);
+              assert.equal(replacement.harness.id, "openclaw");
+              assert.equal(replacement.harness.mode, "dedicated");
+              const { deployment: replacementDeployment, agent: replacementAgent } =
+                await waitForNativeRedeploy({
+                  request,
+                  namespaceId: first.namespaceId,
+                  agentId: nativeAgent.id,
+                  revisionId: replacement.id,
+                  signal: nativeContext.signal,
+                });
+              assert.equal(replacementDeployment?.status, "succeeded");
+              assert.equal(replacementAgent?.activeRevisionId, replacement.id);
+              return replacement;
+            },
+          );
           const replacementProvider = await readProviderRevision(replacement.id);
           assert.notEqual(replacementProvider.pod.metadata.uid, initialProvider.pod.metadata.uid);
           assert.notEqual(
@@ -1587,11 +1785,17 @@ test(
             assert.equal(file.name, filename);
             assert.equal(file.content, content, `Redeployment must preserve ${filename}`);
           }
-          const replacementNativeProof = await assertNativeWorkerProofInController(nativeContext, {
-            ...proofOptions,
-            session: firstNativeProof.session,
-            sessionFile: firstNativeProof.sessionFile,
-          });
+          const replacementNativeProof = await measureFirstAgentStage(
+            nativeContext,
+            "native-resumed-model",
+            () =>
+              assertNativeWorkerProofInController(nativeContext, {
+                ...proofOptions,
+                expectedNodeId: replacementProvider.expectedNodeId,
+                session: firstNativeProof.session,
+                sessionFile: firstNativeProof.sessionFile,
+              }),
+          );
           assert.equal(
             replacementNativeProof.hostname,
             replacementProvider.pod.spec.hostname ?? replacementProvider.pod.metadata.name,

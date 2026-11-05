@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
-updated: 2026-10-14
-last_updated_session: authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c
+updated: 2026-11-05
+last_updated_session: authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f
 ---
 
 # Agent channel runtime
@@ -78,9 +78,10 @@ Teams message engine or channel credential broker is introduced.
 
 ### 3. Publish the serving callback
 
-`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback`
-reads the owned Gateway Deployment. A candidate whose revision does not match
-that Deployment cannot claim or delete its predecessor's callback.
+`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileGatewayRoute`
+reads the owned Gateway Deployment and passes its serving revision to
+`reconcileTeamsRoute`. Preparing a candidate preserves its predecessor's callback
+and revision-selecting Service.
 `activateRevisionWorkloads` rejects stale activation before publishing the new route.
 
 The `channels` HTTPS listener accepts an exact Agent path and POST method, rewrites
@@ -92,10 +93,11 @@ Envoy Gateway peer to the native Gateway port; other tenants gain no ingress gra
 
 ### 4. Disable, stop or delete
 
-`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsCallback` removes obsolete callback resources when the activated
+`apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileTeamsRoute` removes obsolete callback resources when the activated
 revision disables Teams. `stopRevision` removes the serving route first.
-`deleteGatewayUnauthenticatedRoutes` deletes HTTPRoute before its revision-selecting Service and SecurityPolicy,
-then its NetworkPolicy, using the exact revision, observed UID and resourceVersion.
+`deleteGatewayUnauthenticatedRoutes` deletes HTTPRoute before its authentication
+policy. It removes the owned callback Service and NetworkPolicy too, using the
+exact revision, observed UID and resourceVersion.
 Retiring an older revision cannot delete a newer callback. Existing Agent deletion
 uses the same owned Gateway cleanup and removes retained credential artifacts.
 Stop/delete do not consult the opt-in topology gate: disabling the trusted option
@@ -120,6 +122,8 @@ it does not establish native plugin support or execution containment.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-11-05 01:49: Port the isolated trial to current admission and retain guarded native Teams routing and exact credential scope. (authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f - 94346f8101230627f206ed9731f2c32beba27bad)
 
 - 2026-10-14 11:41: Trace trusted opt-in, shared credential execution and exact callback Service fencing. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
 
