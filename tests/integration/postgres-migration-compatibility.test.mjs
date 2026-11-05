@@ -1553,6 +1553,7 @@ async function canonicalData(db) {
               "harness_auth_credential_source_id",
               "plugin_approvers",
               "credential_sources",
+              "temporary_environments",
             ]
           : table === "controller_work"
             ? ["work_kind"]
@@ -1631,6 +1632,7 @@ test(
       [48, "preCodexPatSources"],
       [49, "preAgentCredentialSources"],
       [50, "preCredentialWithdrawalRequester"],
+      [51, "preTemporaryEnvironments"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
@@ -1890,6 +1892,7 @@ test(
       [48, "preCodexPatSources"],
       [49, "preAgentCredentialSources"],
       [50, "preCredentialWithdrawalRequester"],
+      [51, "preTemporaryEnvironments"],
     ]) {
       void context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -1969,6 +1972,7 @@ test(
       [48, "preCodexPatSources"],
       [49, "preAgentCredentialSources"],
       [50, "preCredentialWithdrawalRequester"],
+      [51, "preTemporaryEnvironments"],
     ]) {
       void context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });

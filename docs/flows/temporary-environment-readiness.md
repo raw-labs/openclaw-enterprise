@@ -1,7 +1,7 @@
 ---
 created: 2026-10-30
 updated: 2026-10-30
-last_updated_session: authoring-run/698bf847-f591-4d16-9cea-b5bb5ea44aa1
+last_updated_session: authoring-run/75379d85-463e-40d8-88ce-9a6f4f82a456
 ---
 
 # Temporary environment workload lifecycle flow
@@ -110,13 +110,16 @@ and manifest decisions; they do not prove a cluster or network boundary.
 The existing real Agent API/worker scenario contains admission, queue, SSH,
 renewal and confirmed deletion. The production Helm/TUI workflow also invokes
 packaged unmodified Crabbox inside its real Agent, transfers a dirty checkout and
-runs twice at capacity one to verify cleanup and reuse. Both are authored but not run.
+runs twice at capacity one to verify cleanup and reuse. These live-runtime cases are authored but not run.
 See [Kubernetes testing](../testing/kubernetes.md#temporary-environment-workload-probe)
 and [PostgreSQL testing](../testing/postgresql.md) for authorized prerequisites.
 No integration-test waiver is claimed.
 
-Image builds, native image qualification, real PostgreSQL execution and actual
-unmodified Crabbox invocation remain required proof. The adapter rejects indefinite
+Real PostgreSQL 18.6 execution with Drizzle 0.45.3 verifies fresh guarded
+initialization, completed-history rechecks and the four reservation/lifecycle
+persistence cases without skips, using separate migrator and application roles.
+Image builds, native image qualification and actual unmodified Crabbox invocation
+remain required proof. The adapter rejects indefinite
 keep requests; nested-cluster profiles are not supported.
 
 ## Related docs
@@ -130,6 +133,8 @@ keep requests; nested-cluster profiles are not supported.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-10-30 23:00: Record real PostgreSQL reservation/lifecycle proof alongside qualified source metadata; installed runtime acceptance remains separate. (authoring-run/75379d85-463e-40d8-88ce-9a6f4f82a456 - 8e27cf318)
 
 - 2026-10-30 21:00: Add per-Agent desired/admitted profile selection and disabled runtime discovery. (authoring-run/698bf847-f591-4d16-9cea-b5bb5ea44aa1 - 72c8087a6cb24a0b0f83fbba8e66444479755b59)
 
