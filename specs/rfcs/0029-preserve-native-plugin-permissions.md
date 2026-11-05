@@ -4,86 +4,96 @@ implementation_status: Not implemented
 author: miguelbranco80
 ---
 
-# Proposal: Preserve native plugin permissions when switching Harness
+# Preserve native plugin permissions when switching Harness
 
-- **ID:** RFC-0029
-- **Created:** 2026-11-03
-- **Draft implementation:** [PR #15](https://github.com/raw-labs/openclaw-enterprise/pull/15)
+## Decision
 
-## Summary
+Keep authored `plugins.allow` and `plugins.deny` unchanged when the user switches
+Harness in Create Agent. Change runtime wiring separately, and use the existing
+server admission rules. Do not add stricter required-plugin validation to this
+editor fix.
 
-Keep authored native `plugins.allow` and `plugins.deny` unchanged when the user
-switches Harness. If the selected Harness requires a blocked plugin, explain the
-conflict and require an explicit policy edit instead of silently changing access.
+Implementation: [PR #15](https://github.com/raw-labs/openclaw-enterprise/pull/15).
+The proposal remains subject to maintainer review; an unmerged implementation is
+not release evidence.
 
-## Problem and scope
+## Problem
 
-Adding Codex can turn an unrestricted allowlist into a restrictive Codex-only
-list. Removing Codex can empty that list, making it unrestricted. A Harness switch
-should change runtime wiring, not quietly narrow or widen plugin permissions.
+Adding Codex can turn a missing or empty allowlist into a restrictive Codex-only
+list. Removing Codex can empty a Codex-only list, making it unrestricted. Both
+changes alter plugin permissions without an explicit policy edit.
 
-Enforce the requirement at OpenClaw Enterprise (OCE) admission. Keep the
-[native plugin policy](0009-native-plugin-tool-policy.md) and
-[tool-policy enforcement](0014-plugin-policy-enforcement.md) unchanged.
+Selecting a Harness should change how the Agent runs, not silently narrow or
+widen its authored allow/deny lists.
 
-## Proposal
+## Behavior and ownership
 
-### Preserve policy, change wiring
+The Console's Create Agent form owns changes to the draft Configuration. When
+Harness selection changes:
 
-The Create Agent workflow may add or remove Codex runtime wiring when the Harness
-changes, but it must preserve authored allow/deny lists. A missing or empty
-allowlist remains unrestricted. Do not insert a required plugin into a restrictive
-list or remove its denial automatically.
+- Preserve `plugins.allow` and `plugins.deny`, including omitted fields, empty
+  arrays, unrelated plugin IDs and their order.
+- Add or remove Codex runtime wiring without inserting Codex into the allowlist
+  or removing it from either list.
+- Preserve an explicitly disabled Codex entry through a Harness round trip.
+  When no entry exists, selecting Codex supplies the normal runtime defaults.
+- Keep unrelated Configuration fields and ordinary draft restoration intact.
 
-Codex requires `codex`. Native OpenClaw requires the plugin for its selected
-supported model provider, currently `openai` or `anthropic`. Refuse when global
-plugin disablement, an explicit denial, allowlist exclusion, a disabled required
-entry or duplicate normalized required-entry aliases makes that requirement
-ambiguous or blocked.
+An explicit JSON edit or applying a different Preset can replace policy. Merely
+switching Harness cannot.
 
-A refusal names the required plugin and tells the operator to edit **Advanced
-settings → Configuration JSON**, preserving existing entries. For example,
-switching a `["codex"]` allowlist to OpenClaw/OpenAI requires the operator to
-choose a compatible policy, such as `["codex", "openai"]`, before saving.
+Kubernetes Compute remains the owner of its admission decisions. The Console
+uses the existing preflight and provisioning paths rather than duplicating those
+rules in the browser. Direct API calls, deployment, queued work, authorization
+and credential handling keep their existing contracts. This change adds no
+Driver interface, persisted state, remembered policy or worker validation layer.
 
-### Enforce at the server boundary
+## Saved settings and effective runtime
 
-The Console refuses an incompatible selection before writes. Kubernetes Compute
-also checks the existing Harness admission path for Agent save/update, deployment,
-and fresh or stored provisioning/retry. A direct API call or an older saved plan
-must not bypass the rule. Recheck queued work before Secret reads, credential
-materialization or Kubernetes effects; retain existing exact-resource and
-initiating-actor authorization.
+A saved `plugins.entries.codex.enabled: false` is accepted for Dedicated Codex.
+Its runtime overlay enables the required Codex plugin at startup without changing
+the saved Configuration. Preserving the authored setting does not mean the
+running Codex plugin stays disabled.
 
-Do not add persisted workaround state, a remembered previous allowlist or another
-Driver interface. A refusal must leave authored policy unchanged and must not
-queue a partial deployment.
+Existing admission rejects settings that prevent that Gateway from starting,
+including `plugins.enabled: false`, a denial of Codex, or a nonempty allowlist
+that excludes Codex. The Console leaves those settings editable when admission
+refuses them; it does not silently repair the lists.
 
-### Native compatibility
+OpenClaw's model-provider admission also stays unchanged. This proposal does not
+add an explicit-permission rule for the OpenAI or Anthropic provider plugins.
+Configuration acceptance alone does not prove provider loading or a model turn.
+The [Harness reference](../../docs/reference/harness-execution.md#native-runtime-selection)
+owns current runtime and admission behavior.
 
-The pinned native Gateway can accept some configurations and auto-enable a
-provider in memory despite an allowlist exclusion. Configuration acceptance is
-not proof of successful provider execution. This proposal intentionally applies
-a stricter OCE rule: required plugin permission must be explicit before admission.
-Existing Configurations and stored plans may need an operator edit; do not add a
-silent compatibility grant.
+## Alternatives and tradeoffs
 
-## Required verification
+**Automatically add or remove required IDs.** This makes Harness switching
+convenient but can change a restrictive allowlist into unrestricted access, or
+restrict an unrestricted Configuration. Keep runtime wiring separate instead.
 
-Exercise Harness switches with unrestricted, restrictive, denied, disabled and
-ambiguous required-plugin settings. Verify unchanged allow/deny values, clear
-repair guidance, zero writes on Console refusal and successful explicit repair.
-Cover direct API, stored-plan replay, retry and worker paths as well as the UI.
+**Reject every disabled or excluded required plugin before saving.** This makes
+saved intent more literal, but creates a broader admission policy and rejects
+some settings that the runtime accepts and corrects. It also duplicates server
+rules in the Console. That policy is outside this editor fix.
 
-Use real PostgreSQL and Kubernetes/Secret Drivers to observe zero Secret reads
-and infrastructure writes after server refusal. In the allowed control, verify
-model credentials reach only the selected Harness, not the separate Gateway.
-Verify provider execution separately from configuration admission.
+**Discard an explicit disabled entry when changing Harness.** This simplifies
+wiring cleanup but loses authored state during a round trip. Preserve it and
+explain the effective-runtime distinction instead.
 
-## Alternatives
+## Verification
 
-Automatically repairing permissions feels convenient but turns a runtime choice
-into an implicit authorization change. Trusting native auto-enable behavior alone
-leaves OCE's declared policy misleading. Prefer preserving policy and refusing
-incompatible selections. Existing plans must meet the same explicit permission
-requirement before they can run.
+Exercise the real Console form and supported API save/readback path with missing,
+empty and restrictive allowlists, a denylist, unrelated plugin entries and an
+explicit disabled Codex entry. Verify unchanged policy after switching to Codex
+and back, explicit JSON edits, navigation and restored drafts.
+
+Verify that a disabled Codex entry saves without an editor repair. Retain existing
+server admission coverage for actual Gateway blockers; do not replace it with
+new browser-only policy tests. Demonstrate that the original editor fails the
+permission-preservation regression tests.
+
+Rebuild and inspect the matching Storybook scenarios. Capture Harness switching
+and the unchanged Configuration, including the accepted disabled-entry path.
+Storybook simulates API/runtime state; browser/API tests do not establish live
+plugin execution, credential delivery or a model turn.
