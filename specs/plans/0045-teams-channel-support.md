@@ -76,7 +76,11 @@ Compute/proxy/Helm run passed 529/530, then the repaired affected fixture passed
 contains 14 states and a 21.44-second interaction recording using simulated state.
 Console and native image inputs are unchanged by this admission repair.
 
-Final refreshed-diff independent review remains pending. Exact-final-head native
+Independent Codex review of the full refreshed diff at
+`95f24e2b12c0075475cb693f00f0cbc3103f1f0a` completed two passes with no
+actionable P0–P2 findings. Types, full lint, format, workspace, CI inventory,
+docs and flow checks passed; the 17-node flow rendered without errors and was
+visually inspected. Later changes record this result only. Exact-final-head native
 qualification on both architectures, approved live Teams messages/attachments,
 production public Envoy ingress and required CI remain before-merge holds.
 
