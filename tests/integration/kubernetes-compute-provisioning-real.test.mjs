@@ -1293,12 +1293,32 @@ test(
       envoyNamespace: platformNamespace,
       channels: { hostname: "channels.example.test" },
     };
+    const controllerImage = process.env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE;
+    assert.match(controllerImage ?? "", /^\S+@sha256:[a-f0-9]{64}$/i);
+    const kubernetesService = await resource("service", "kubernetes", "default");
+    const kubernetesEndpoints = await resource("endpoints", "kubernetes", "default");
+    // Exclude the selected cluster's infrastructure even when its addresses are public.
+    const infrastructureAddresses = [
+      ...(kubernetesService.spec.clusterIPs ?? [kubernetesService.spec.clusterIP]),
+      ...(kubernetesEndpoints.subsets ?? []).flatMap(({ addresses = [] }) =>
+        addresses.map(({ ip }) => ip),
+      ),
+    ];
+    const denyCidrs = [
+      ...new Set(
+        infrastructureAddresses.map((address) => {
+          const family = isIP(address);
+          assert.notEqual(family, 0);
+          return `${address}/${family === 4 ? 32 : 128}`;
+        }),
+      ),
+    ];
     const runtime = {
       transportSecretPrefix: "transport",
       gatewayStorageClassName: "local-path",
       // Current Compute admission owns the endpoint; keep synthetic keys offline.
       modelProvider: { protocol: "openai-responses", baseUrl: "https://127.0.0.1:9/v1" },
-      channels: { proxyUrl: "http://10.42.0.15:3128" },
+      gatewayOutbound: { enabled: true, image: controllerImage, denyCidrs },
     };
     const network = {
       dns: { namespace: "kube-system", podLabels: { "k8s-app": "kube-dns" } },
@@ -1509,18 +1529,40 @@ test(
         { SLACK_APP_TOKEN: true, SLACK_BOT_TOKEN: true, MSTEAMS_APP_PASSWORD: true },
         "the real Pod receives the exact bound values without credential readback in test output",
       );
+      const agentDeployments = await waitFor(
+        "only the serving revision's workloads to remain",
+        async () => {
+          const current = (await resources("deployments", placement)).filter(
+            ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId,
+          );
+          return current.length === 2 &&
+            current.every(
+              ({ metadata }) =>
+                metadata.annotations?.["openclaw.dev/agent-revision-id"] === revisionId,
+            )
+            ? current
+            : undefined;
+        },
+      );
+      const proxy = agentDeployments.find(
+        ({ spec }) =>
+          spec.template.metadata.labels["openclaw.dev/workload-role"] === "gateway-outbound",
+      );
+      assert.ok(proxy, "the trial uses a managed proxy, not an operator-supplied shared endpoint");
+      assert.equal(proxy.metadata.labels["openclaw.dev/revision"], revisionId);
+      const proxyService = await resource("service", proxy.metadata.name, placement);
+      assert.equal(proxyService.spec.selector["openclaw.dev/revision"], revisionId);
       assert.equal(
         environment.find(({ name }) => name === "HTTPS_PROXY").value,
-        runtime.channels.proxyUrl,
+        `http://${proxyService.metadata.name}.${placement}.svc:${proxyService.spec.ports[0].port}`,
       );
       assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
+      assert.equal(environment.find(({ name }) => name === "OPENCLAW_PROXY_ACTIVE").value, "1");
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
       assert.equal(
-        (await resources("deployments", placement)).filter(
-          ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId,
-        ).length,
-        1,
-        "embedded remains one combined OpenClaw workload",
+        agentDeployments.length,
+        2,
+        "embedded has one combined OpenClaw workload plus its revision-owned outbound proxy",
       );
       const callback = await resource("httproute", callbackName, placement);
       assert.equal(callback.metadata.annotations["openclaw.dev/agent-revision-id"], revisionId);
@@ -1642,11 +1684,21 @@ test(
       "embedded channel stop",
       async () =>
         (await missing("deployment", gateway, placement)) &&
-        (await missing("httproute", callbackName, placement)),
+        (await missing("httproute", callbackName, placement)) &&
+        !(await resources("deployments", placement)).some(
+          ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId,
+        ),
     );
     for (const kind of ["service", "securitypolicy", "networkpolicy"]) {
       assert.equal(await missing(kind, callbackName, placement), true);
     }
+    assert.equal(
+      (await resources("deployments", placement)).filter(
+        ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId,
+      ).length,
+      0,
+      "stopping withdraws both the combined runtime and its managed outbound proxy",
+    );
     const deleted = await stock.request("DELETE", agentPath);
     assert.equal(deleted.status, 202, JSON.stringify(deleted.body));
     await waitFor(
