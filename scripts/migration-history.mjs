@@ -249,6 +249,7 @@ function catalogAtMigrationCount(count, completedCount) {
       68: "preAgentDeployIntent",
       69: "preAgentCredentialSourceLimit",
       70: "preAgentPluginDriver",
+      71: "preInstallationGatewayProxy",
     }[count] ?? `migrationCount${count}`
   );
 }

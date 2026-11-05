@@ -820,7 +820,6 @@ export const agentRevisions = occSchema.table(
           NOT (${table.admittedSpec} ? 'repository_credentials')
           OR occ.repository_credentials_are_valid(${table.admittedSpec}->'repository_credentials')
         )
-        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound') AND (${table.admittedSpec} #>> '{harness,mode}' = 'dedicated' OR ${table.admittedSpec} #>> '{gateway_outbound,selection,mode}' = 'channelsOnly')))
         AND (
           NOT (${table.admittedSpec} ? 'plugins')
           OR jsonb_typeof(${table.admittedSpec}->'plugins') = 'object'

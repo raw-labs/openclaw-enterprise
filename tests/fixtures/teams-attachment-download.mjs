@@ -4,7 +4,7 @@ import https from "node:https";
 import { createRequire } from "node:module";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import { startSlackProxy } from "../helpers/slack-proxy.mjs";
+import { startGatewayProxy } from "../helpers/gateway-proxy.mjs";
 
 // Run inside the selected native image. Only upstream DNS/connection routing is
 // simulated; the SDK guard, TLS, redirects, media storage and proxy are real.
@@ -42,10 +42,10 @@ test("native guarded attachment downloads use the reviewed channel proxy", async
     return new Promise((resolve) => server.close(resolve));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const proxy = await startSlackProxy(t, {
+  const proxy = await startGatewayProxy(t, {
     upstreamPort: server.address().port,
     upstreamHosts: ["graph.microsoft.com", "tenant.sharepoint.com", "neighbor.sharepoint.com"],
-    destinations: ["graph.microsoft.com", "tenant.sharepoint.com"],
+    allowedHosts: ["graph.microsoft.com", "tenant.sharepoint.com"],
   });
   process.env.HTTPS_PROXY = `http://127.0.0.1:${proxy.port}`;
   process.env.NO_PROXY = "";
@@ -69,8 +69,8 @@ test("native guarded attachment downloads use the reviewed channel proxy", async
   await assert.rejects(fetchWithSsrFGuard(options), { name: "TypeError", message: /fetch failed/ });
   assert.deepEqual(requests, [], "HTTPS_PROXY alone must not bypass strict native transport");
 
-  // This is the declaration projected by Kubernetes Compute only for an
-  // operator-approved proxy. Leave the native guard in its default strict mode.
+  // Exercise the native SDK trusted-proxy guard separately from Gateway startup.
+  // Full native proxy lifecycle and Compute projection have their own integration proof.
   process.env.OPENCLAW_PROXY_ACTIVE = "1";
   const download = await fetchWithSsrFGuard(options);
   try {

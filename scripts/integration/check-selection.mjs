@@ -71,6 +71,15 @@ for (const feature of selection.features) {
   ancestor(feature.commit);
 }
 const known = new Set(selected);
+for (const feature of selection.retiredFeatures ?? []) {
+  assert.ok(!known.has(feature.number), `Retired PR #${feature.number} is still selected`);
+  assert.equal(feature.status, "replaced");
+  assert.equal(feature.author, "miguelbranco80");
+  ancestor(feature.commit);
+  assert.ok(selected.has(feature.replacedBy));
+  assert.ok(feature.reason);
+  known.add(feature.number);
+}
 for (const feature of selection.absorbedFeatures ?? []) {
   assert.ok(!known.has(feature.number), `Duplicate absorbed PR #${feature.number}`);
   known.add(feature.number);
@@ -94,8 +103,10 @@ for (const bridge of selection.compatibility) {
   }
 }
 for (const mapping of selection.migrationMappings) {
-  assert.ok(selected.has(mapping.pullRequest));
-  const feature = selection.features.find(({ number }) => number === mapping.pullRequest);
+  assert.ok(known.has(mapping.pullRequest));
+  const feature = [...selection.features, ...(selection.retiredFeatures ?? [])].find(
+    ({ number }) => number === mapping.pullRequest,
+  );
   const sourceCommit = mapping.sourceCommit ?? feature.commit;
   ancestor(sourceCommit);
   git("merge-base", "--is-ancestor", sourceCommit, mapping.publishedAt ?? feature.commit);
@@ -151,7 +162,9 @@ for (const migration of selection.integrationMigrations ?? []) {
   );
 }
 for (const reconciliation of selection.migrationReconciliations ?? []) {
-  const feature = selection.features.find(({ number }) => number === reconciliation.pullRequest);
+  const feature = [...selection.features, ...(selection.retiredFeatures ?? [])].find(
+    ({ number }) => number === reconciliation.pullRequest,
+  );
   assert.equal(reconciliation.sourceCommit, feature?.commit);
   const source = execFileSync("git", ["show", `${feature.commit}:${reconciliation.source}`]);
   assert.equal(createHash("sha256").update(source).digest("hex"), reconciliation.sourceSha256);
@@ -183,6 +196,18 @@ if (selection.publishedMigrationPrefix) {
       execFileSync("git", ["show", `${prefix.commit}:${path}`]),
       `Published migration bytes changed: ${path}`,
     );
+  }
+}
+if (selection.batch.preservedMigrationPrefix) {
+  const { commit, entryCount } = selection.batch.preservedMigrationPrefix;
+  ancestor(commit);
+  const prior = JSON.parse(git("show", `${commit}:migrations/meta/_journal.json`));
+  const current = JSON.parse(readFileSync("migrations/meta/_journal.json", "utf8"));
+  assert.equal(prior.entries.length, entryCount);
+  assert.deepEqual(current.entries.slice(0, entryCount), prior.entries);
+  for (const entry of prior.entries) {
+    const path = `migrations/${entry.tag}.sql`;
+    assert.deepEqual(readFileSync(path), execFileSync("git", ["show", `${commit}:${path}`]));
   }
 }
 console.log(

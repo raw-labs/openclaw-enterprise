@@ -54,7 +54,7 @@ graph TD
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:enabledChannels`
 uses `configuration-rules.ts:enabledChannelProviders` and `requireChannelTopology`
-to require supported providers and managed Gateway outbound. Embedded workloads
+to require supported providers and a selected Installation Gateway proxy. Embedded workloads
 need the explicit [trial option](../guides/integrations/embedded-channel-trial.md).
 It additionally requires channel routing for enabled Teams. An omitted `webhook.path`, including `webhook: {}`, uses the native
 `/api/messages` default. Non-object webhook values, custom paths, legacy

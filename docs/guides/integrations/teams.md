@@ -37,17 +37,20 @@ gatewayRouting:
         podSelector:
           matchLabels:
             app: public-ingress
-outboundProxy:
+gatewayProxy:
   enabled: true
-  denyCidrs:
-    - 203.0.113.0/24 # Replace with reviewed Installation infrastructure CIDRs.
+  allowedHosts:
+    - login.microsoftonline.com
+    - login.botframework.com
+    - api.botframework.com
+    - smba.trafficmanager.net
+    - graph.microsoft.com
 ```
 
 Keep the existing private gateway settings. In the Installation's selected
 Compute Driver configuration, set `gatewayRouting.channels.hostname` to the
-same hostname and enable `runtime.gatewayOutbound` with reviewed infrastructure
-exclusions. For profile-based installations, use the `gatewayOutbound` input
-shown in [outbound setup](slack.md#configure-outbound-access).
+same hostname and select the matching `runtime.proxy` endpoint. For profiles,
+use the [shared Gateway proxy](gateway-proxy.md) inputs.
 
 Enabling Teams automatically declares its exact Microsoft Public cloud hosts:
 `login.microsoftonline.com`, `login.botframework.com`, `api.botframework.com`,
@@ -127,30 +130,23 @@ network requirements. Live outgoing file delivery remains unqualified.
 Attachments remain unqualified for live Teams use. For a controlled trial,
 review the actual attachment URL and each redirect hostname without logging
 signed URLs. On a dedicated Agent, an administrator can approve the required
-exact storage hosts through the [Gateway Network setting](../../reference/gateway-outbound.md):
+exact storage hosts through the [operator Gateway proxy host list](gateway-proxy.md):
 
 ```json
 {
-  "gatewayOutbound": {
-    "mode": "restricted",
-    "hosts": ["tenant.sharepoint.com", "files.blob.core.windows.net"]
+  "proxy": {
+    "bundled": true,
+    "allowedHosts": ["tenant.sharepoint.com", "files.blob.core.windows.net"]
   }
 }
 ```
 
-Enabled Teams contributes its messaging destinations automatically. Additional
-storage hosts belong to this Agent's admitted revision, rather than an
-Installation-wide shared proxy. Add each required redirect hostname separately
-and redeploy. Embedded evaluation permits only channel-derived destinations;
-it cannot approve additional storage hosts with this setting.
-
-The managed proxy validates DNS answers and pins the selected public IPv4
-address. Private/reserved addresses, mixed public/private answers, unsupported
-IPv6 routes and timeouts fail closed. Compute projects `OPENCLAW_PROXY_ACTIVE=1`
-only when the Gateway has admitted managed transport, allowing native guarded
-fetch to use that proxy. Native URL, redirect and credential checks remain active.
-The marker applies throughout the Gateway but adds no destinations. Agent
-Configuration cannot override the transport or its trust markers.
+Include the messaging hosts as well as each required storage/redirect hostname
+in the operator's list; an explicit list replaces the Slack defaults. The policy
+is shared across Gateways, not frozen per Agent revision. The bundled proxy
+permits CONNECT/443 and its Kubernetes policy excludes private/reserved IPv4.
+Native URL, redirect and credential checks remain active. Verify guarded media
+transport with the actual runtime; a rendered endpoint alone is not proof.
 
 Native `channels.msteams.mediaAllowHosts` may also need an exact destination
 that its defaults do not admit. This is separate from proxy admission and
@@ -189,14 +185,11 @@ Team link again when reopening to browse names. See the
 [directory reference](../../reference/drivers/teams-channel.md) for bounds and
 visibility limits.
 
-The production API needs its control-plane proxy to permit
-`login.microsoftonline.com:443` and `graph.microsoft.com:443`. Helm
-`outboundProxy.enabled` derives these management destinations from the bundled
-Channel Driver. An approved external endpoint can instead be selected with
-`api.controlPlaneOutboundProxyUrl`. Agent network selections do not broaden
-this API-only route. Missing directory consent or egress
-leaves exact-ID entry available and does not make Graph access a deployment
-prerequisite.
+The production API uses the same selected proxy for directory lookup. Its host
+policy must permit `login.microsoftonline.com:443` and `graph.microsoft.com:443`.
+Select it through `gatewayProxy` and matching Compute `runtime.proxy`, or through
+the paired profile renderer. Missing directory consent or egress leaves exact-ID
+entry available and does not make Graph access a deployment prerequisite.
 
 ## Diagnose a missing reply
 

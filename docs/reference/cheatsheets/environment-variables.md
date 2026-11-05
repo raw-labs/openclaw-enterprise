@@ -53,9 +53,12 @@ console uses the current origin and has no separate environment settings.
 - `OCC_AUTH_COOKIE_DOMAIN` — Shared parent domain for console and Agent cookies; required when the pilot is enabled.
 - `OCC_GATEWAY_API_KEY_PATH` — API/worker absolute path to the private gateway service-key file for operator RPCs and dedicated node enrollment.
 - `OCC_PREPROVISIONED_NAMESPACE` — API/worker JSON `{"namespaceId", "uid"}` binding one operator-created tenant namespace; set by Helm `preprovisionedNamespace`. See [preprovisioned namespace](../drivers/kubernetes-compute/preprovisioned-namespace.md).
-- `OCC_CHANNEL_DIRECTORY_PROXY_URL` — Optional API-only HTTP(S) proxy endpoint for production Slack directory lookup and credential validation; set by Helm `slackProxy.enabled` or `api.channelDirectoryProxyUrl`.
+- `OCC_CHANNEL_DIRECTORY_PROXY_URL` — Optional API-only HTTP(S) proxy endpoint for production Slack directory lookup and credential validation; set by Helm `gatewayProxy.enabled` or `gatewayProxy.url`.
 - `OCC_API_HTTPS_EGRESS_OPEN` — `true` when API egress allows TCP 443 to any address, so a Slack check without a proxy can succeed; default: `false`. Set by the chart from sign-in `egressCidrs`.
-- `OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST` — Exact Kubernetes Service host accepted as a managed Slack directory proxy; set only by Helm `slackProxy.enabled`.
+- `OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST` — Exact Kubernetes Service host accepted as a managed Slack directory proxy; set only by Helm `gatewayProxy.enabled`.
+- `OCC_GATEWAY_PROXY_PORT` — Bundled CONNECT server listen port; Helm sets it from `gatewayProxy.port` (default `3128`).
+- `OCC_GATEWAY_PROXY_ALLOWED_HOSTS` — JSON hostname policy for the bundled server; Helm sets it from `gatewayProxy.allowedHosts`. See [Gateway outbound access](../../guides/integrations/gateway-proxy.md).
+- `OPENCLAW_INTERNAL_TRANSPORT_URL` — Compute-provisioned exact dedicated Codex transport endpoint; runtime-only input for the internal proxy exception, not an operator bypass setting.
 - `NODE_EXTRA_CA_CERTS` — Additional process-wide Node.js PEM trust, read at startup. The chart combines API roots ([OIDC CA settings](../settings/oidc.md)); Compute combines public [Sandbox endpoint](../drivers/sandbox.md#interface) and execution-cluster roots for the dedicated Gateway.
 - `OCC_GATEWAY_CA_PATH` — API-only path to the Gateway-only CA bundle that dedicated Harness nodes trust; empty means none. Unset, node enrollment uses `NODE_EXTRA_CA_CERTS`. Helm sets it with OIDC CA values.
 - `OCC_EGRESS_AUTHORITY_PORT`, `OCC_OPENSHELL_GIT_PORT` — Chart-set port of its `egressAuthority` and `openshellGit` listeners, or `disabled`. API and worker startup and the upgrade check refuse `CHART_LISTENER_MISMATCH` when the Installation authority uses another port, a host other than `0.0.0.0` or `::`, a disabled listener, or TLS or issuer file paths other than the chart's mounts. Not operator inputs.

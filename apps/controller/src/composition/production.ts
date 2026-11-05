@@ -27,7 +27,7 @@ import {
 } from "../auth/index.ts";
 import { createFastifyApp } from "../index.ts";
 import type { ConsoleTheme } from "../console-theme.ts";
-import { SlackChannelDriver } from "../drivers/channel/slack.ts";
+import { BundledChannelDriver } from "../drivers/channel/index.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -283,7 +283,7 @@ export async function composeProduction(
     }
 
     phaseCompleted("computePreflight");
-    const channelDriver = new SlackChannelDriver(
+    const channelDriver = new BundledChannelDriver(
       globalThis.fetch,
       config.channelDirectoryProxyUrl,
       {

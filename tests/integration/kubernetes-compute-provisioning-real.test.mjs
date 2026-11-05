@@ -541,7 +541,7 @@ test(
           transportSecretPrefix: "transport",
           gatewayStorageClassName: "local-path",
           // The provisioned Agent enables Slack, which needs the Installation's channel runtime.
-          channels: { proxyUrl: "http://10.42.0.15:3128" },
+          proxy: { proxyUrl: "http://10.42.0.15:3128" },
           gatewayNodeSelector: {
             "kubernetes.io/hostname": JSON.parse(await kubectl("get", "nodes", "-o", "json"))
               .items[0].metadata.name,
@@ -1175,32 +1175,15 @@ test(
       envoyNamespace: platformNamespace,
       channels: { hostname: "channels.example.test" },
     };
-    const controllerImage = process.env.OCC_TEST_PRODUCTION_CONTROLLER_IMAGE;
-    assert.match(controllerImage ?? "", /^\S+@sha256:[a-f0-9]{64}$/i);
-    const kubernetesService = await resource("service", "kubernetes", "default");
-    const kubernetesEndpoints = await resource("endpoints", "kubernetes", "default");
-    // Exclude the selected cluster's infrastructure even when its addresses are public.
-    const infrastructureAddresses = [
-      ...(kubernetesService.spec.clusterIPs ?? [kubernetesService.spec.clusterIP]),
-      ...(kubernetesEndpoints.subsets ?? []).flatMap(({ addresses = [] }) =>
-        addresses.map(({ ip }) => ip),
-      ),
-    ];
-    const denyCidrs = [
-      ...new Set(
-        infrastructureAddresses.map((address) => {
-          const family = isIP(address);
-          assert.notEqual(family, 0);
-          return `${address}/${family === 4 ? 32 : 128}`;
-        }),
-      ),
-    ];
+    // An explicit endpoint exercises policy/config projection only. This fixture
+    // does not claim proxy connectivity, native routing, or provider execution.
+    const proxyUrl = "http://192.0.2.20:3128";
     const runtime = {
       transportSecretPrefix: "transport",
       gatewayStorageClassName: "local-path",
       // Current Compute admission owns the endpoint; keep synthetic keys offline.
       modelProvider: { protocol: "openai-responses", baseUrl: "https://127.0.0.1:9/v1" },
-      gatewayOutbound: { enabled: true, image: controllerImage, denyCidrs },
+      proxy: { proxyUrl },
     };
     const network = {
       dns: { namespace: "kube-system", podLabels: { "k8s-app": "kube-dns" } },
@@ -1419,7 +1402,7 @@ test(
           const current = (await resources("deployments", placement)).filter(
             ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId,
           );
-          return current.length === 2 &&
+          return current.length === 1 &&
             current.every(
               ({ spec }) => spec.template.metadata.labels["openclaw.dev/revision"] === revisionId,
             )
@@ -1427,25 +1410,20 @@ test(
             : undefined;
         },
       );
-      const proxy = agentDeployments.find(
-        ({ spec }) =>
-          spec.template.metadata.labels["openclaw.dev/workload-role"] === "gateway-outbound",
-      );
-      assert.ok(proxy, "the trial uses a managed proxy, not an operator-supplied shared endpoint");
-      assert.equal(proxy.metadata.labels["openclaw.dev/revision"], revisionId);
-      const proxyService = await resource("service", proxy.metadata.name, placement);
-      assert.equal(proxyService.spec.selector["openclaw.dev/revision"], revisionId);
-      assert.equal(
-        environment.find(({ name }) => name === "HTTPS_PROXY").value,
-        `http://${proxyService.metadata.name}.${placement}.svc:${proxyService.spec.ports[0].port}`,
-      );
-      assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
-      assert.equal(environment.find(({ name }) => name === "OPENCLAW_PROXY_ACTIVE").value, "1");
+      assert.equal(environment.find(({ name }) => name === "HTTPS_PROXY").value, proxyUrl);
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
+      const proxyPolicy = await resource(
+        "networkpolicy",
+        `allow-gateway-channels-${hash(provisioned.agentId)}`,
+        placement,
+      );
+      assert.deepEqual(proxyPolicy.spec.egress, [
+        { to: [{ ipBlock: { cidr: "192.0.2.20/32" } }], ports: [{ protocol: "TCP", port: 3128 }] },
+      ]);
       assert.equal(
         agentDeployments.length,
-        2,
-        "embedded has one combined OpenClaw workload plus its revision-owned outbound proxy",
+        1,
+        "embedded has one combined workload and no per-revision proxy",
       );
       const callback = await waitFor("the serving Teams callback revision", async () =>
         (await resources("httproutes", placement)).find(
@@ -1621,7 +1599,7 @@ test(
         ({ metadata }) => metadata.labels?.["openclaw.dev/agent"] === provisioned.agentId,
       ).length,
       0,
-      "stopping withdraws both the combined runtime and its managed outbound proxy",
+      "stopping removes the Agent workload, not a shared Installation proxy",
     );
     const deleted = await stock.request("DELETE", agentPath);
     assert.equal(deleted.status, 202, JSON.stringify(deleted.body));

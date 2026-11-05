@@ -2,8 +2,6 @@ import type {
   ChannelDirectoryLookupInput,
   ChannelDriver,
   ChannelCredentialReader,
-  GatewayOutboundRequirement,
-  OpenClawConfigurationDocument,
 } from "@openclaw-enterprise/contracts";
 import { ChannelDirectoryError } from "@openclaw-enterprise/occ";
 import { SlackChannelDriver } from "./slack.ts";
@@ -37,22 +35,6 @@ export class BundledChannelDriver implements ChannelDriver {
   ): Promise<void> {
     // Optional Graph consent is never a prerequisite for deploying the Teams bot.
     return this.slack.validateCredentials(values, withSecret);
-  }
-
-  gatewayNetworkRequirements(
-    configuration: Readonly<OpenClawConfigurationDocument>,
-  ): readonly GatewayOutboundRequirement[] {
-    return [
-      ...this.slack.gatewayNetworkRequirements(configuration),
-      ...this.teams.gatewayNetworkRequirements(configuration),
-    ];
-  }
-
-  controlPlaneNetworkRequirements(): readonly GatewayOutboundRequirement[] {
-    return [
-      ...this.slack.controlPlaneNetworkRequirements(),
-      ...this.teams.controlPlaneNetworkRequirements(),
-    ];
   }
 
   lookupDirectory(input: ChannelDirectoryLookupInput, signal?: AbortSignal) {

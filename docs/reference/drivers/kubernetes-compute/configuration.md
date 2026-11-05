@@ -79,16 +79,16 @@ for label constraints, egress rules, and source-address verification.
 Omission selects the verification runtime. Storage requirements are defined in
 [storage and credentials](storage-and-credentials.md).
 
-| Setting                                 | Type       | Requirement | Value, default, and constraints                                                                                                                                                                                                |
-| --------------------------------------- | ---------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `runtime.transportSecretPrefix`         | string     | Required    | Must form a DNS-safe Secret name with `-` and a 12-character suffix.                                                                                                                                                           |
-| `runtime.gatewayStorageClassName`       | string     | Required    | DNS-safe StorageClass name for private `10Gi` RWO gateway disks with filesystem locking and durability.                                                                                                                        |
-| `runtime.nodeSelector`                  | string map | Optional    | Harness and embedded Pod placement. Omission adds no selector.                                                                                                                                                                 |
-| `runtime.gatewayNodeSelector`           | string map | Optional    | Required for dedicated real Gateways, including their state initializer. Use separate trusted and tenant node pools.                                                                                                           |
-| `runtime.nativeOpenClawSessionCapacity` | integer    | Optional    | `1`–`1024`, default `8` retained native session workers per AgentRevision Sandbox.                                                                                                                                             |
-| `runtime.codexSeccompProfile`           | string     | Optional    | Relative localhost profile installed on every eligible node. Omission uses `RuntimeDefault`.                                                                                                                                   |
-| `runtime.modelProvider`                 | object     | Optional    | Shared OpenAI-compatible provider for Codex and OpenClaw. Requires `protocol` and `baseUrl`; see [model providers](model-provider.md).                                                                                         |
-| `runtime.channels`                      | object     | Optional    | Only `experimentalEmbeddedChannels` enables the temporary embedded trial; requires enabled `runtime.gatewayOutbound`. No shared channel proxy. See [trial boundaries](../../../guides/integrations/embedded-channel-trial.md). |
+| Setting                                 | Type       | Requirement | Value, default, and constraints                                                                                                                                  |
+| --------------------------------------- | ---------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime.transportSecretPrefix`         | string     | Required    | Must form a DNS-safe Secret name with `-` and a 12-character suffix.                                                                                             |
+| `runtime.gatewayStorageClassName`       | string     | Required    | DNS-safe StorageClass name for private `10Gi` RWO gateway disks with filesystem locking and durability.                                                          |
+| `runtime.nodeSelector`                  | string map | Optional    | Harness and embedded Pod placement. Omission adds no selector.                                                                                                   |
+| `runtime.gatewayNodeSelector`           | string map | Optional    | Required for dedicated real Gateways, including their state initializer. Use separate trusted and tenant node pools.                                             |
+| `runtime.nativeOpenClawSessionCapacity` | integer    | Optional    | `1`–`1024`, default `8` retained native session workers per AgentRevision Sandbox.                                                                               |
+| `runtime.codexSeccompProfile`           | string     | Optional    | Relative localhost profile installed on every eligible node. Omission uses `RuntimeDefault`.                                                                     |
+| `runtime.modelProvider`                 | object     | Optional    | Shared OpenAI-compatible provider for Codex and OpenClaw. Requires `protocol` and `baseUrl`; see [model providers](model-provider.md).                           |
+| `runtime.proxy`                         | object     | Optional    | Requires `proxyUrl`; optional `managedProxy` has `hostname`, `namespace`, `podLabels`, and `port`. No proxy by default. See [Gateway routing](gateway-proxy.md). |
 
 Stopping a hosted native session releases its slot; saved history does not consume
 capacity. OpenClaw does not retire idle paired-node workers, so size capacity
@@ -189,3 +189,7 @@ drivers:
 
 The [complete Installation example](../../../guides/deploy/production-installation.md#configure-the-installation)
 adds the other required Drivers and settings.
+
+The downstream trusted trial retains `runtime.channels.experimentalEmbeddedChannels`
+(default false). It permits experimental embedded channels only with a selected
+proxy. See [trial limits](../../../guides/integrations/embedded-channel-trial.md).

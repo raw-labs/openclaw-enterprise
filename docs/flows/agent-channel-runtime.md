@@ -67,20 +67,13 @@ into the owning Gateway. Dedicated Harnesses receive model authentication separa
 OpenClaw instead receives both channel and model credentials in its combined
 Gateway/execution Pod. This preserves exact resource ownership but weakens
 credential separation within that Agent.
-The selected `BundledChannelDriver.gatewayNetworkRequirements` aggregates Slack and
-Teams destinations. Worker composition injects only the pure declaration through
-`createBundledChannelNetworkRequirements`; it receives no provider validation or
-directory methods. The API owns credential validation before enqueue; worker
-handoff freezes the same declarations without provider I/O inside its transaction. `admitGatewayOutbound` permits embedded `channelsOnly` snapshots
-only with the trusted option and managed outbound enabled; additional modes remain
-dedicated-only. See [Gateway outbound lifecycle](gateway-outbound.md) for immutable
-proxy policy, readiness, current-ceiling checks and withdrawal.
-
-`gatewayOutboundTransport` adds internal and selected model endpoint hosts to
-`NO_PROXY`, preserving the embedded model route while `HTTPS_PROXY` and
-`NODE_USE_ENV_PROXY` send channel traffic through the revision proxy. The embedded
-process retains its public model egress and can bypass environment settings.
-This is routing, not credential containment.
+`BundledChannelDriver` owns provider credential validation and directory lookup.
+The Installation operator owns outbound destinations through the shared selected
+[Gateway proxy](gateway-outbound-proxy.md). Channel enablement does not expand its
+host list. Compute preserves the trusted embedded trial gate and renders native
+Gateway routing; it does not create per-revision outbound proxies or snapshots.
+The embedded process retains its existing model/tool network permissions; this
+routing is not whole-workload containment or credential mediation.
 
 The runtime image selects upstream `msteams` in
 `deploy/runtime/Dockerfile` and `scripts/build-runtime-assets.mjs`. No independent

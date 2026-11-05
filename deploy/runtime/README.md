@@ -354,9 +354,11 @@ remains unknown. Rebuild the runtime image to include this metadata.
 
 ## Microsoft Teams plugin
 
-The same pinned OpenClaw source assembly bundles `msteams` alongside `codex` and
-`slack`, retaining the Teams SDK and Azure dependencies. Upstream treats plugins
+The pinned source bundles `msteams` alongside `codex` and
+`slack`, with the Teams SDK and Azure dependencies. Upstream treats plugins
 built with their host as bundled; no compatibility override or plugin download
 is used. The Teams startup case exercises actual SDK authentication in the
 assembled image; see [Teams verification](../../docs/testing/teams.md). Live
 Microsoft delivery and public Kubernetes ingress remain separate acceptance checks.
+
+[Internal proxy bridge](../../docs/flows/gateway-outbound-proxy.md).

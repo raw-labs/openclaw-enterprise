@@ -41,8 +41,8 @@ session cookie before forwarding to the native gateway.
 | `NODE_EXTRA_CA_CERTS`                      | Optional PEM bundle for private Gateway or IdP CAs.                                                                | Node reads it at process startup. Normal leaf renewal under that CA does not require a restart; root-bundle changes do.      |
 | `OCC_GATEWAY_CA_PATH`                      | Optional absolute path to the Gateway-only CA bundle; empty means no private Gateway CA.                           | API only; Harness node enrollment reads it instead of `NODE_EXTRA_CA_CERTS`. Helm sets it with OIDC CA values.               |
 
-For Helm, prefer `slackProxy.enabled` over an external
-`api.channelDirectoryProxyUrl`; the
+For Helm, prefer `gatewayProxy.enabled` over an external
+`gatewayProxy.url`; the
 [Slack Channel Driver](../drivers/slack-channel.md#enable-lookup-in-production)
 owns both options' API-only proxy egress and the proxy's `slack.com:443`
 requirement. With neither, the chart renders no proxy egress rule, and Slack
@@ -281,7 +281,7 @@ See [chart defaults](../../../deploy/helm/openclaw-enterprise/values.yaml) for
 credential, runtime-export, and workload isolation boundaries.
 
 The chart rejects obvious malformed quantities such as `foo`, `10MiB`, and
-`1K` in top-level `resources`, `outboundProxy.resources`, Collector `resources`,
+`1K` in top-level `resources`, `gatewayProxy.resources`, Collector `resources`,
 and Collector volume size limits, with an error naming the setting. It also
 rejects a value with a leading `-` (negative) and resource names Kubernetes
 refuses. Kubernetes remains responsible for complete quantity validation;

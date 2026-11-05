@@ -128,9 +128,7 @@ one `@` and a dotted domain.
     "gatewayNodeSelector": { "oce-role": "control" },
     "transportSecretPrefix": "openclaw-agent-transport"
   },
-  "channels": {
-    "managedSlackProxy": true
-  }
+  "proxy": { "bundled": true }
 }
 ```
 
@@ -377,20 +375,12 @@ the install as ready:
   `runtime.gatewayStorageClassName` for gateway state.
 - For Codex, the configured localhost seccomp profile installed and verified on
   every node selected by `runtime.nodeSelector`.
-- For Slack, a proxy route for both gateway runtime traffic and Console
-  directory lookup. The managed proxy serves both; external proxies need both
-  URLs. Rendering proxy wiring does not enable a Slack consumer. Either profile
-  can install the managed
-  proxy for API directory lookup and dedicated gateway use, but Slack-enabled
-  Agents require dedicated Codex execution. The example input sets
-  `managedSlackProxy: true` to use the chart-managed proxy Service. Its network
-  policy allows public IPv4 HTTPS, excluding private and reserved ranges, and the
-  proxy authorizes Slack hostnames, so connectivity survives Slack DNS rotation.
-  For an external proxy, omit `managedSlackProxy` and provide literal IPv4
-  `runtimeProxyUrl` and `directoryProxyUrl` inputs.
-- For hosted `codex-plugin` discovery under either profile family, a PAT supplied
-  through a same-Namespace Secret or the Console. Curated discovery needs no
-  credential. Configure runtime credentials per Agent.
+- For Gateway outbound access, [select one bundled or external proxy](../integrations/gateway-proxy.md).
+  The same endpoint serves channel-directory clients. The bundled default permits
+  Slack; add the destinations required by other integrations to `proxy.allowedHosts`.
+  Rendering proxy wiring does not enable integrations or change channel topology limits.
+- For Codex hosted plugin discovery and runtime authentication, a
+  same-Namespace `codex_pat` token Secret or a PAT entered during Agent creation.
   See [discovery egress](#hosted-discovery-egress).
 - For optional OCE-managed ChatGPT service-account runtime credentials, the
   admin Secret, workspace authority, and app connections described in

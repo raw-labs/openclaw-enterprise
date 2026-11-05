@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
-updated: 2026-11-05
-last_updated_session: authoring-run/7b9b79ce-b682-44c2-881a-2fe4aadc6441
+updated: "2026-11-05 19:30"
+last_updated_session: authoring-run/88571699-9ee3-42d5-89c5-d871f0a18b62
 ---
 
 # Installation Profile Rendering Flow
@@ -174,10 +174,13 @@ already checked in step 3 with the API's `parseCidr` rules
 IPv4-mapped address, and no range that covers every IPv4 peer. Like the chart,
 preflight also refuses a zone ID, which the API accepts.
 
-When `channels.managedSlackProxy` is true, the values also enable the
-chart-managed Slack proxy Service. The chart allows that proxy public IPv4 HTTPS
-egress, excluding private and reserved ranges, and the proxy authorizes Slack
-hostnames. Repository values render only when the input explicitly sets
+The profile's `proxy.bundled` selects the chart-managed Gateway proxy. Its optional
+`proxy.allowedHosts` replaces the Slack-only default. Alternatively `proxy.url`
+selects one external endpoint. Rendering produces Helm `gatewayProxy` and Compute
+`runtime.proxy` together; Helm wires the API directory client to that same endpoint.
+See [Gateway outbound access](../guides/integrations/gateway-proxy.md).
+
+Repository values render only when the input explicitly sets
 `repository.enabled: true`. Repository provider CIDRs pass through unchanged,
 so operators can keep their existing GitHub ranges without DNS snapshots. The
 renderer copies `repository.serviceName` only when the input sets it, and only
@@ -312,6 +315,7 @@ activation, and repository registry creation need separate evidence.
 - 2026-11-05 01:10: Preserve input/profile output-file identity checks and validate Codex catalogSource before rendering in the accompanying refresh. (agent:main:dashboard:34871ae5-240f-4f44-b364-50bd21ecedec - 5acf92b89f9053fec747a802e3790822a5b4340d)
 - 2026-11-05 01:49: Retain current provider routing and validation while carrying the trusted embedded channel trial. (authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f - 94346f8101230627f206ed9731f2c32beba27bad)
 
+- 2026-11-05 19:30: Document one selected bundled or external Gateway proxy (authoring-run/88571699-9ee3-42d5-89c5-d871f0a18b62 - 324fbad6f248bce4606e175fbb67ac506cd824ff)
 - 2026-11-03 15:09: Document shared provider routing and separate destination authorization. (authoring-run/4d0e1a9c-b86a-4b59-be3e-d4306d5da9fc - 47e0e95df)
 
 - 2026-10-28 20:25: Refuse input/output file collisions before cleanup in the accompanying change. (authoring-run/ebaa9b91-58b3-47dc-97d9-ad103250247d - 420d76bcbd15dcd3644e474d413484c35ce22797)

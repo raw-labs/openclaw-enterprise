@@ -1,7 +1,7 @@
 ---
 created: 2026-09-23
-updated: "2026-11-05"
-last_updated_session: "authoring-run/0f9e4fc6-9649-465a-8ab4-3fc3124417e2"
+updated: "2026-11-05 19:30"
+last_updated_session: "authoring-run/88571699-9ee3-42d5-89c5-d871f0a18b62"
 ---
 
 # Production image upgrade flow
@@ -73,8 +73,9 @@ Candidates match the [baseline](../guides/deploy/upgrade-baseline.md#record-the-
 as ordered YAML mappings, including images. Validate both candidates before
 protected-setting projections. `scripts/upgrade-production-images:matches_yaml`
 compares checked conversions and exits on unusable inputs or unwritable
-evidence with `Cannot compare upgrade YAML`. Only the Slack directory proxy and
-curated Codex PluginDriver selection may change before image selection. An explicit
+evidence with `Cannot compare upgrade YAML`. Only the
+curated Codex PluginDriver selection may change before image selection. Proxy
+changes use the protected configuration workflow, not this image-only command. An explicit
 candidate may also wrap the installed single plugin registration in an array.
 Comparison preserves other configuration and never rewrites the baseline. Startup
 checks validate the candidate. Broker checks compare references, not ConfigMap or Secret contents.
@@ -322,6 +323,8 @@ saved mapping, exact-name reuse requires a Namespace without Agents or Secrets.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-05 19:30: Keep general Gateway proxy selection outside image-only candidate changes (authoring-run/88571699-9ee3-42d5-89c5-d871f0a18b62 - 324fbad6f248bce4606e175fbb67ac506cd824ff)
 
 - 2026-11-05 13:53: Require settled Doctor maintenance before runtime startup. (authoring-run/0f9e4fc6-9649-465a-8ab4-3fc3124417e2 - 644b3f9328e9125030e958c7b4233ac37c54b139)
 
