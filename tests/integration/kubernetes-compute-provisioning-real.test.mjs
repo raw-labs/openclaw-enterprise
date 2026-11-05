@@ -1384,6 +1384,32 @@ test(
       );
     };
     await assertServing(provisioned.revisionId);
+    // A changed Installation must reject redeploy before queuing work or stopping
+    // the existing Gateway, even though its saved Teams configuration still reads.
+    const { channels: callbackRouting, ...withoutCallbackRouting } = routing;
+    const { driver: withoutCallbackDriver } = await createDriver({
+      authentication: controller.authentication,
+      gatewayRouting: withoutCallbackRouting,
+      network,
+      runtime: {
+        ...runtime,
+        channels: { ...runtime.channels, experimentalEmbeddedChannels: true },
+      },
+    });
+    const withoutCallback = await createProvisioningApiFixture(
+      context,
+      withoutCallbackDriver,
+      controller.authentication,
+    );
+    const refusedRedeploy = await withoutCallback.request("POST", `${agentPath}/deploy`);
+    // Installation-owned Compute refusals retain the API's existing conflict contract.
+    assert.equal(refusedRedeploy.status, 409, JSON.stringify(refusedRedeploy.body));
+    assert.equal(refusedRedeploy.error.code, "RESOURCE_CONFLICT");
+    assert.equal(
+      (await withoutCallback.request("GET", agentPath)).data.activeRevisionId,
+      provisioned.revisionId,
+    );
+    await assertServing(provisioned.revisionId);
     const candidate = await optedIn.request("POST", `${agentPath}/deploy`);
     assert.equal(candidate.status, 202, JSON.stringify(candidate.body));
     await waitFor(

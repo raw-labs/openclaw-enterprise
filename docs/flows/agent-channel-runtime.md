@@ -49,8 +49,9 @@ and validates same-Namespace resource references. Kubernetes
 `validateHarnessAuth` applies provider settings and `requireChannelTopology` before
 a revision can stop predecessors. `requireTeamsConfiguration` requires explicit
 Public-cloud IDs, an environment Secret reference, the native `/api/messages` path
-and the packaged plugin. Teams also requires an Installation public callback
-hostname. Native JSON cannot provision a listener or change trusted Compute options.
+and the packaged plugin. Deployment admission also requires the Installation public callback
+hostname, before any predecessor stops. Draft Agent save can still proceed while
+an operator prepares this infrastructure. Native JSON cannot provision a listener or change trusted Compute options.
 The temporary `runtime.channels.experimentalEmbeddedChannels` option permits
 embedded OpenClaw only when the Installation administrator explicitly enables it.
 The same option advertises embedded provisioning to the regular API; its default
