@@ -1,3 +1,9 @@
+---
+tags: [human_verified]
+# Backfilled from the verification tag recorded in 17ff921c5.
+last_verified: "2026-11-04"
+---
+
 # Kubernetes tests
 
 ## Overview
@@ -26,7 +32,7 @@ and Keycloak with fixture model responses. Failed cleanup retains state for
 ## Kubernetes HTTP fixture
 
 Install Docker, k3d and `kubectl`; use Kubernetes 1.35+. CI preparation creates
-an owned NetworkPolicy-enforcing cluster, images and migrated limited-role
+an owned enforcing cluster, images and migrated limited-role
 PostgreSQL databases. It preserves default kubeconfig and unrelated resources.
 Run these fixture lanes: `k3d-fixture-configuration`,
 `k3d-fixture-state` and `k3d-fixture-plugins`.
@@ -49,16 +55,14 @@ Selected cases must pass without skips. Lanes check API/worker lifecycle,
 RBAC, storage, revision replacement and enforced network isolation. Enabled Slack
 provisioning uses the actual controller proxy with simulated provider/runtime
 responses; it proves policy and Secret delivery, not native Slack connectivity.
-See [CI image preparation](ci.md#setting-overrides).
+See [CI image preparation](ci/configuration.md#shared-settings).
 
 Missing selectors skip; partial selectors fail. A missing database skips its cases.
 Run files sequentially: they share a database. Fixtures do not prove live OAuth/models,
 cloud volume detach or node fencing.
 
-External OAuth credentials use OpenShell, not Kubernetes bootstrap Jobs or a
-native OAuth store. A green fixture result does not prove live OAuth refresh: the
-[OpenShell OAuth proof](openshell-oauth.md) and the credentialed
-[OpenShell runtime lane](openshell.md) cover it, outside ordinary CI.
+For live refresh, use the [OpenShell OAuth proof](openshell-oauth.md) and
+[credentialed runtime lane](openshell.md).
 
 An imported immutable `OCC_TEST_KUBERNETES_RUNTIME_IMAGE` extends the API/worker
 case through runtime Secret and private-state deletion without a model turn.
@@ -75,9 +79,11 @@ OCC_TEST_KUBERNETES_CONTEXT=k3d-oce \
   node --test tests/integration/installation-handoff-k3d-real.test.ts
 ```
 
-This builds `occ` and checks rendered Jobs, named-read RBAC, and replacement UIDs.
-Suspended Jobs need no database/model credentials; migration/bootstrap and runtime
-remain unproved.
+Checks named-Job access, replacement, interrupted Helm dispatch, CRDs/controllers,
+quota headroom, address drift and denials. EKS connectivity and Envoy acceptance
+remain unproved. The [production observability lane](local.md#kubernetes-observability-acceptance)
+runs `installation-receipt-k3d-real.test.ts` with PostgreSQL to check bootstrap
+after interruption before and after UID capture.
 
 ### Production workload network access
 
@@ -91,7 +97,7 @@ chart's selectors.
 ## Kubernetes model turns and Secrets
 
 Real-runtime tests need authorized model credentials, real Gateway/Codex images,
-an owned NetworkPolicy-enforcing cluster and migrated `openclaw_k8s_*` database.
+an owned enforcing cluster and migrated `openclaw_k8s_*` database.
 Fixtures do not prove model turns. Follow
 [Codex sandbox setup](../guides/deploy/codex-sandbox.md) for seccomp prerequisites.
 

@@ -6,7 +6,7 @@ author: miguelbranco80
 
 # Proposal: managed outbound HTTPS for dedicated Gateways
 
-- **ID:** RFC-0029
+- **ID:** RFC-0030
 - **Created:** 2026-10-14
 - **Last updated:** 2026-10-24
 - **Implementation:** [Draft PR #2518](https://github.com/openclaw/openclaw-enterprise/pull/2518)

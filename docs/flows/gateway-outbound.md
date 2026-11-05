@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
 updated: 2026-11-05
-last_updated_session: authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f
+last_updated_session: authoring-run/b9e5fd30-5839-4193-8cb7-9e0cb0954397
 ---
 
 # Gateway Outbound Flow
@@ -75,7 +75,7 @@ Ordinary updates retain saved authority even after an Installation tightening;
 deployment rechecks it. State persists the selection beside other Agent settings.
 
 `packages/occ/src/state/postgres-state.ts:updateConfiguration` writes
-`gateway_outbound`; `migrations/0067_gateway_outbound.sql` constrains its shape,
+`gateway_outbound`; `migrations/0069_gateway_outbound.sql` constrains its shape,
 DNS names, and dedicated-only extra authority. The memory adapter mirrors those
 invariants. The normal mutation audit names the actor and exact Agent.
 
@@ -244,3 +244,5 @@ compatibility with every native plugin transport or provider.
 
 - 2026-10-14 17:45: Add durable terminal-maintenance withdrawal (authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3 - 27562ebf56a8315a663583731a303ca362cbfc5d)
 - 2026-10-14 16:16: Document accompanying Gateway outbound implementation (authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3 - bd8fe1f7b0b798dca84d6f90b7377ddda79d88a6)
+
+- 2026-11-05: Merge pinned main 717e8bf, preserve Plugin Driver admission and serialization beside Gateway outbound, and move the unpublished migration to 0069. (authoring-run/b9e5fd30-5839-4193-8cb7-9e0cb0954397)

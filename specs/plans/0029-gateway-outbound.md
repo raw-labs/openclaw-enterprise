@@ -1,12 +1,12 @@
 ---
-rfc: ../rfcs/0029-gateway-outbound.md
+rfc: ../rfcs/0030-gateway-outbound.md
 ---
 
 # Implementation plan: managed Gateway outbound HTTPS
 
-- **ID:** RFC-0029
+- **ID:** RFC-0030
 - **Delivery status:** In progress
-- **Authority:** [RFC-0029](../rfcs/0029-gateway-outbound.md)
+- **Authority:** [RFC-0030](../rfcs/0030-gateway-outbound.md)
 - **RFC review:** [#3520](https://github.com/openclaw/openclaw-enterprise/pull/3520)
 - **Original source baseline:** `d3ccc54781d0d50b40e9aeb814f0573d38c0a585`
 - **Current refresh target:** upstream `main` at `b891554203643c769f19d71860d03382bb9717bc`
@@ -138,3 +138,9 @@ prerequisite failures; targeted passing suites do not imply all local suites pas
   against current main and composed Gateway/reader withdrawal through Compute.
 - 2026-10-19: Renumbered to RFC-0023 after upstream allocated RFC-0021 and RFC-0022;
   integrated Sandbox policies while retaining the separate Gateway transport boundary.
+
+## 2026-11-05 baseline refresh
+
+Upstream `717e8bf2a3ef3fa4d4fa7e53cc6927500533ddbd` allocated RFC-0029 to
+per-Agent plugin catalogs. This unmerged proposal now uses RFC-0030; the existing
+plan filename is retained. Decision and implementation statuses are unchanged.

@@ -19,11 +19,11 @@ import {
   waitForInputValue,
   settlePageRequests,
   waitForEnabled,
-} from "./console-agents-browser-helpers.mjs";
+} from "./console-agents-browser-helpers.ts";
 import {
   deploymentRecordUrl,
   expectDeploymentOutcome,
-} from "./console-deployment-activity-helpers.mjs";
+} from "./console-deployment-activity-helpers.ts";
 
 import {
   expectNativeAdminHidden,
