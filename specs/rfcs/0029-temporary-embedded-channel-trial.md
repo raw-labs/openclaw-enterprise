@@ -99,7 +99,8 @@ replacement and stop/delete. Proxy tests exercise the real CONNECT process and
 denial policy against loopback upstreams. Fixtures do not prove native provider
 authentication, Teams JWT enforcement, public TLS or model execution. Live model
 and Slack/Teams verification is excluded at the requesting user's direction.
-Native image checks and independent review remain acceptance holds until recorded.
+Independent review of the refreshed source is recorded in the plan. Final-head
+native image checks and the maintainer trust decision remain acceptance holds.
 
 Use [trial setup](../../docs/guides/integrations/embedded-channel-trial.md) for the
 trusted setting and [Teams setup](../../docs/guides/integrations/teams.md) for shared

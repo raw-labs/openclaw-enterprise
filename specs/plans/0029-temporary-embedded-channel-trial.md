@@ -63,7 +63,7 @@ proxy limits and credential withdrawal.
 | Independent GPT-6.1 Sol review                                | Canonical autoreview helper                                                     | Unavailable: account rejects the requested model; fallback prevented         |
 | Public callback, native JWT, channel delivery and model turns | Native runtime, public TLS, authorized recipients and provider credentials      | Excluded from this evaluation; remains unverified                            |
 
-## Delivery record
+## Original delivery record
 
 Source implementation and supported workflow fixtures are complete in the
 evaluation branch. The RFC remains Proposed and delivery remains In progress
@@ -88,11 +88,15 @@ Teams implementation; it does not copy its Console editor.
 - Kubernetes Compute conformance: **406 passed, no failures or skips**.
 - Compute and CI contract rerun before the callback repair: **544 passed, no
   failures or skips**; Compute was rerun after that repair as recorded above.
-- All three real Kubernetes/PostgreSQL fixture files: **5 passed, no failures or
-  skips**, including the embedded trial's API/worker admission, exact Secret
-  projection, callback replacement and removal, denied ungranted Agent, and
-  stop/delete after disabling the option. The pre-fix callback port failed this
-  actual workflow with a missing HTTPRoute; the repaired source passes.
+- Real Kubernetes/PostgreSQL fixtures: all **5 distinct cases** pass across
+  sequential runs. The latest affected provisioning file passes **3/3, no skips**
+  at `7b0da6fca`; the other cases passed in the preceding run. Coverage includes
+  API/worker admission, exact Secret projection, callback replacement/removal,
+  denied ungranted Agent and stop/delete with the option disabled. Invalid
+  Installation callback routing returns the existing `409 RESOURCE_CONFLICT`
+  without stopping the original revision, Pod or callback. Earlier failures
+  exposed a missing callback HTTPRoute and an incorrect test response expectation;
+  both were corrected before the affected rerun.
 - The fixture uses simulated native probe responses, not native provider or
   installed Envoy qualification. All disposable cluster/database resources were
   cleaned up. Live provider execution remains excluded by the requesting user.
@@ -102,9 +106,13 @@ Teams implementation; it does not copy its Console editor.
   renders in Chromium/Mermaid with 11 nodes and no rendering errors.
 - Console credential browser coverage: **37 passed, no failures or skips**.
   The seccomp/AppArmor option check passes; it does not establish native startup.
-- Independent refreshed-diff review is pending. Both-architecture final-head
-  native image qualification and the maintainer's adoption decision remain
-  required before merge/adoption.
+- Complete refreshed-diff independent review at `7b0da6fca` found no actionable
+  P0–P2 issues. Earlier review findings were causally reproduced and fixed:
+  Teams proxy opt-in, inherited CI AppArmor and callback admission before
+  predecessor stop. Affected checks pass, including real CONNECT **15/15** and
+  the named CI AppArmor check. Delivery-record edits follow that reviewed code.
+- Both-architecture final-head native image qualification and the maintainer's
+  adoption decision remain required before merge/adoption.
 
 ## Manual Notes
 
