@@ -1210,6 +1210,7 @@ function buildInput(rawInput, diagnostics) {
       "controlPlane",
       "runtime",
       "gatewayOutbound",
+      "channels",
       "controlPlaneOutbound",
       "codex",
       "repository",
@@ -1221,6 +1222,8 @@ function buildInput(rawInput, diagnostics) {
   const controlPlane = section(input, "controlPlane", diagnostics);
   const runtime = section(input, "runtime", diagnostics);
   const gatewayOutbound = section(input, "gatewayOutbound", diagnostics, false);
+  const channels = section(input, "channels", diagnostics, false);
+  closed(channels, "channels", ["experimentalEmbeddedChannels"], diagnostics);
   const controlPlaneOutbound = section(input, "controlPlaneOutbound", diagnostics, false);
   const codex = section(input, "codex", diagnostics, false);
   const repository = section(input, "repository", diagnostics, false);
@@ -1280,7 +1283,6 @@ function buildInput(rawInput, diagnostics) {
       "transportSecretPrefix",
       "codexSeccompProfile",
       "modelProvider",
-      "experimentalEmbeddedChannels",
     ],
     diagnostics,
   );
@@ -1381,6 +1383,7 @@ function buildInput(rawInput, diagnostics) {
     controlPlane,
     runtime,
     gatewayOutbound,
+    channels,
     controlPlaneOutbound,
     codex,
     repository,
@@ -1547,6 +1550,7 @@ function buildRendered(profile, parsed, diagnostics) {
     controlPlane,
     runtime,
     gatewayOutbound,
+    channels,
     controlPlaneOutbound,
     codex,
     repository,
@@ -1654,10 +1658,10 @@ function buildRendered(profile, parsed, diagnostics) {
     diagnostics,
     false,
   );
-  const experimentalEmbeddedChannels = asBoolean(runtime, ["runtime", "experimentalEmbeddedChannels"], diagnostics, false);
+  const experimentalEmbeddedChannels = asBoolean(channels, ["channels", "experimentalEmbeddedChannels"], diagnostics, false);
   if (experimentalEmbeddedChannels) {
     if (!gatewayOutboundEnabled) {
-      diagnostics.errors.push("runtime.experimentalEmbeddedChannels requires gatewayOutbound.enabled.");
+      diagnostics.errors.push("channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled: true.");
     }
     diagnostics.warnings.push("Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.");
   }
@@ -2065,9 +2069,9 @@ function buildRendered(profile, parsed, diagnostics) {
                   ),
                 }
               : {}),
+            ...(channels.experimentalEmbeddedChannels === undefined ? {} : { channels: { experimentalEmbeddedChannels } }),
             ...(gatewayOutboundEnabled
               ? {
-                  ...(experimentalEmbeddedChannels ? { channels: { experimentalEmbeddedChannels: true } } : {}),
                   gatewayOutbound: {
                     enabled: true,
                     allowPublicHttps: asBoolean(

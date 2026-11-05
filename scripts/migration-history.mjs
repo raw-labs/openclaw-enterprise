@@ -148,15 +148,6 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 25) {
     return "main";
   }
-  if (count === 65 && completedCount > 65) {
-    return "preAgentDeployIntent";
-  }
-  if (count === 66 && completedCount > 66) {
-    return "preAgentCredentialSourceLimit";
-  }
-  if (count === 67 && completedCount > 67) {
-    return "preAgentPluginDriver";
-  }
   if (count === completedCount) {
     return "completed";
   }
@@ -238,43 +229,26 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 52) {
     return "preComputePreparationFailureEvidence";
   }
-  if (count === 53) {
-    return "preCredentialSourcePat";
-  }
-  if (count === 54) {
-    return "preComputeRevisionAdmission";
-  }
-  if (count === 55) {
-    return "preHeldAuthenticationSession";
-  }
-  if (count === 56) {
-    return "preCanonicalHarnessAuth";
-  }
-  if (count === 57) {
-    return "preSandboxPolicies";
-  }
-  if (count === 58) {
-    return "preSandboxPolicyAdministrator";
-  }
-  if (count === 59) {
-    return "preCredentialProxy";
-  }
-  if (count === 69) {
-    return "preGatewayOutbound";
-  }
-  if (count === 68) {
-    return "preRuntimeRoles";
-  }
-  if (count === 62) {
-    return "prePreparedAttemptSettlement";
-  }
-  if (count === 64) {
-    return "preSelectedRepositorySet";
-  }
-  if (count === 63) {
-    return "preGatewayManagedMode";
-  }
-  refuse("an incomplete or unsupported development history is installed");
+  return {
+  "53": "preRuntimeRoles",
+  "54": "preHeldAuthenticationSession",
+  "55": "preGatewayOutbound",
+  "56": "preEmbeddedChannelOutbound",
+  "57": "preCredentialSourcePat",
+  "58": "preComputeRevisionAdmission",
+  "59": "preCanonicalHarnessAuth",
+  "60": "preSandboxPolicies",
+  "61": "preSandboxPolicyAdministrator",
+  "62": "preCredentialProxy",
+  "63": "preRepositoryCredentialAuthority",
+  "64": "preCredentialDeliveryCustody",
+  "65": "prePreparedAttemptSettlement",
+  "66": "preGatewayManagedMode",
+  "67": "preSelectedRepositorySet",
+  "68": "preAgentDeployIntent",
+  "69": "preAgentCredentialSourceLimit",
+  "70": "preAgentPluginDriver"
+}[count] ?? `migrationCount${count}`;
 }
 
 async function requireUnambiguousTerminologyData(client) {

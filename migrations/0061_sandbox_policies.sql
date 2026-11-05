@@ -112,7 +112,7 @@ REVOKE ALL ON FUNCTION occ.create_agent_sandbox_policy() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION occ.sandbox_network_grants_are_valid(jsonb), occ.sandbox_policy_is_valid(jsonb,text,text,text,integer) TO occ_app;
 --> statement-breakpoint
 ALTER TABLE occ.iam_restrictions DROP CONSTRAINT iam_restrictions_action_valid,
-  ADD CONSTRAINT iam_restrictions_action_valid CHECK (action IN ('create','read','update','delete','deploy','operate','administer','read_logs','manage_policy')),
+  ADD CONSTRAINT iam_restrictions_action_valid CHECK (action IN ('create','read','update','delete','deploy','operate','administer','read_logs','manage_policy','use')),
   DROP CONSTRAINT iam_restrictions_resource_kind_valid,
   ADD CONSTRAINT iam_restrictions_resource_kind_valid CHECK (resource_kind IN ('installation','namespace','configuration','preset','service_account','secret','credential_source','sandbox_policy','agent','agent_revision'));
 --> statement-breakpoint

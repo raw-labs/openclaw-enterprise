@@ -26,7 +26,6 @@ import type {
   InstallationCapabilities,
   NamespaceStatus,
   PresetVariable,
-  OpenClawConfigurationDocument,
   RepositoryOption,
 } from "@openclaw-enterprise/contracts";
 import type { createFixtureFetch } from "../preview-rules.mts";

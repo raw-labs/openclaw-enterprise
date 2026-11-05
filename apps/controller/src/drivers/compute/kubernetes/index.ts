@@ -607,6 +607,7 @@ interface GatewayConfigurationSnapshot {
   readonly revisionId: string;
   readonly gatewayManagedMode: boolean;
   readonly usesGatewayPasswordEnv: boolean;
+  readonly teamsWebhook: boolean;
   readonly usesWritableNativeAdminConfig: boolean;
   readonly annotations: Readonly<Record<string, string>>;
   readonly loggingLevel: LoggingLevel;
@@ -13423,6 +13424,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       gatewayManagedMode: revision.gatewayManagedMode,
       ...(harnessNamespace === undefined ? {} : { harnessNamespace }),
       usesGatewayPasswordEnv,
+      teamsWebhook: this.enabledChannels(revision).includes("msteams"),
       usesWritableNativeAdminConfig: this.usesWritableNativeAdminConfig(nativeConfiguration),
       annotations: {
         "openclaw.dev/configuration-id": revision.configurationId,
@@ -14043,7 +14045,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           "cookie",
           "forwarded",
           "x-forwarded-for",
-          ...(access !== "operator"
+          ...(access === "node" || access === "node-transfer" || access === "channel"
             ? [
                 TRUSTED_PROXY_SCOPES_HEADER,
                 "x-occ-identity",
@@ -16976,7 +16978,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             ...configuration.annotations,
             [AGENT_REVISION_ANNOTATION]: String(configuration.revision),
             [AGENT_REVISION_ID_ANNOTATION]: configuration.revisionId,
-            "openclaw.dev/msteams-webhook": String(enabledChannels.includes("msteams")),
+            "openclaw.dev/msteams-webhook": String(configuration.teamsWebhook),
           }
         : {};
     const revisionLabels =

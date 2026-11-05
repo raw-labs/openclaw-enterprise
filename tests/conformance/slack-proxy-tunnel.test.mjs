@@ -571,7 +571,7 @@ test(
 );
 
 test(
-  "failed or empty DNS answers return 502 without stopping the proxy",
+  "failed DNS returns 502 and empty answers fail closed without stopping the proxy",
   testOptions,
   async (t) => {
     const upstream = await listen(t, () => assert.fail("a failed lookup reached the upstream"));
@@ -582,7 +582,7 @@ test(
       });
       assert.match(
         await connectThroughProxy(proxy.port, "slack.com:443"),
-        /^HTTP\/1\.1 502 Bad Gateway/,
+        answer === "failure" ? /^HTTP\/1\.1 502 Bad Gateway/ : /^HTTP\/1\.1 403 Forbidden/,
       );
       assert.match(
         await connectThroughProxy(proxy.port, "127.0.0.1:443"),

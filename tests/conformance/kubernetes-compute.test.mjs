@@ -8866,7 +8866,7 @@ test("the canonical Kubernetes runtime validates managed Gateway outbound author
     [
       { channels: { proxyUrl: "http://10.42.0.15:3128" } },
       {
-        path: "/runtime",
+        path: "/runtime/channels",
         code: "UNKNOWN_FIELD",
         message: "Configuration does not satisfy additionalProperties.",
       },
@@ -25000,8 +25000,8 @@ test("an active embedded revision whose stored Gateway tool policy predates the 
 });
 
 test("embedded channels require a trusted boolean and retain native provider selection", () => {
-  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
-  const channels = { proxyUrl: "http://10.42.0.15:3128" };
+  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path", gatewayOutbound };
+  const channels = {};
   const embedded = { id: "openclaw", version: "1.0.0", mode: "embedded" };
   const configuration = {
     agents: { defaults: { model: "anthropic/claude-sonnet-4-5" } },

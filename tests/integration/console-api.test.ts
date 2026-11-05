@@ -2229,7 +2229,7 @@ test("Gateway outbound approval is exact-Agent authority and deployment freezes 
       subjectId: principal.id,
       roleId: "outbound-editor",
       resourceKind: "secret",
-      resourceId: agent.harnessAuth.source.id,
+      resourceId: (() => { assert.ok(agent.harnessAuth !== null && "source" in agent.harnessAuth); return agent.harnessAuth.source.id; })(),
     });
     fixture.policy.bindings.push({
       id: "outbound-config-reader",
@@ -2420,16 +2420,21 @@ test("enabling Slack derives required access without modifying administrator-app
     SLACK_BOT_TOKEN: { source: bot.ref },
     SLACK_APP_TOKEN: { source: app.ref },
   };
-  const values = createHarnessConfiguration("codex", "gpt-5.1");
-  values.plugins.allow.push("slack");
-  values.plugins.entries.slack = { enabled: true };
-  values.channels = {
-    slack: {
+  const baseValues = createHarnessConfiguration("codex", "gpt-5.1");
+  assert.ok(baseValues.plugins);
+  const values = {
+    ...baseValues,
+    plugins: {
+      ...baseValues.plugins,
+      allow: [...baseValues.plugins.allow, "slack"],
+      entries: { ...baseValues.plugins.entries, slack: { enabled: true } },
+    },
+    channels: { slack: {
       enabled: true,
       mode: "socket",
       botToken: { source: "env", provider: "default", id: "SLACK_BOT_TOKEN" },
       appToken: { source: "env", provider: "default", id: "SLACK_APP_TOKEN" },
-    },
+    } },
   };
   const agent = await fixture.createAgent(namespace.id, "Channel integration", values, {
     executionMode: "dedicated",
@@ -2443,6 +2448,8 @@ test("enabling Slack derives required access without modifying administrator-app
     gatewayOutbound: selection,
   });
   const revision = await fixture.deployAgent(namespace.id, agent.id);
+  assert.ok(revision.gatewayOutbound);
+  assert.ok(revision.gatewayOutbound.requirements[0]);
   assert.deepEqual(revision.gatewayOutbound.selection, selection);
   assert.equal(revision.gatewayOutbound.requirements[0].source, "slack");
   assert.ok(
@@ -2451,6 +2458,7 @@ test("enabling Slack derives required access without modifying administrator-app
   values.channels.slack.enabled = false;
   await fixture.updateConfiguration(namespace.id, agent.configurationId, values);
   const later = await fixture.deployAgent(namespace.id, agent.id);
+  assert.ok(later.gatewayOutbound);
   assert.deepEqual(later.gatewayOutbound.selection, selection);
   assert.deepEqual(
     later.gatewayOutbound.requirements,

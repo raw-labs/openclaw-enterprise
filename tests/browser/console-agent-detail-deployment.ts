@@ -1,4 +1,4 @@
-import { nativeAdminComputeDriver } from "./console-agents-test-support.mjs";
+import { nativeAdminComputeDriver } from "./console-agents-test-support.ts";
 import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 import { openAdvancedSettings, waitForLiveControls } from "./console-agents-ui-test-support.ts";
 import assert from "node:assert/strict";

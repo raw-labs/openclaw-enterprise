@@ -5,6 +5,7 @@ import { KubernetesComputeDriver } from "../../apps/controller/src/drivers/compu
  * @param {string} id
  * @param {Pick<NonNullable<ConstructorParameters<typeof KubernetesComputeDriver>[1]>,
  *   "sandboxDriver" | "credentialGatewayDriver" | "protectedDriver"> & {
+ *   gatewayOutbound?: import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesComputeDriverOptions["runtime"]["gatewayOutbound"],
  *   authentication?: import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesComputeDriverOptions["authentication"],
  *   repositoryCredentials?: boolean, gatewayRuntime?: boolean, channelRuntime?: boolean,
  *   routed?: boolean, privateStatus?: boolean, gatewayTrustedProxyCidrs?: string[],

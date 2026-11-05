@@ -1991,32 +1991,32 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [63, "preGatewayManagedMode"],
-      [64, "preSelectedRepositorySet"],
-      [65, "preAgentDeployIntent"],
-      [66, "preAgentCredentialSourceLimit"],
-      [67, "preAgentPluginDriver"],
-      [68, "preRuntimeRoles"],
-      [69, "preGatewayOutbound"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [66, "preGatewayManagedMode"],
+      [67, "preSelectedRepositorySet"],
+      [68, "preAgentDeployIntent"],
+      [69, "preAgentCredentialSourceLimit"],
+      [70, "preAgentPluginDriver"],
+      [53, "preRuntimeRoles"],
+      [55, "preGatewayOutbound"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
         const namespaceId = await seedCanonicalData(db, {
           preset: prefix >= 25,
-          computeAdmission: prefix >= 55,
+          computeAdmission: prefix >= 59,
           // 0060 requires an execution admission on every revision written after it.
-          executionAdmission: prefix >= 62,
+          executionAdmission: prefix >= 63,
         });
         const assertSourceOwners =
-          prefix === 59
+          prefix === 62
             ? await retainGatewaySourcesAcrossProxyAdmission(db.app, db.migrator, namespaceId)
             : undefined;
         const before = await canonicalData(db);
@@ -2440,19 +2440,19 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [63, "preGatewayManagedMode"],
-      [64, "preSelectedRepositorySet"],
-      [65, "preAgentDeployIntent"],
-      [68, "preRuntimeRoles"],
-      [69, "preGatewayOutbound"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [66, "preGatewayManagedMode"],
+      [67, "preSelectedRepositorySet"],
+      [68, "preAgentDeployIntent"],
+      [53, "preRuntimeRoles"],
+      [55, "preGatewayOutbound"],
     ]) {
       void context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -2700,27 +2700,27 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [63, "preGatewayManagedMode"],
-      [64, "preSelectedRepositorySet"],
-      [65, "preAgentDeployIntent"],
-      [68, "preRuntimeRoles"],
-      [69, "preGatewayOutbound"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [66, "preGatewayManagedMode"],
+      [67, "preSelectedRepositorySet"],
+      [68, "preAgentDeployIntent"],
+      [53, "preRuntimeRoles"],
+      [55, "preGatewayOutbound"],
     ]) {
       void context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });
         if (prefix) {
           await seedCanonicalData(db, {
             preset: prefix >= 25,
-            computeAdmission: prefix >= 55,
-            executionAdmission: prefix >= 62,
+            computeAdmission: prefix >= 59,
+            executionAdmission: prefix >= 63,
           });
         }
         const before = await historySnapshot(db);
