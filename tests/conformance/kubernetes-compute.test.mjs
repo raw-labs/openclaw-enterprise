@@ -8380,7 +8380,7 @@ test("account-owned Kubernetes Secrets reject invalid or foreign credentials bef
 
 test("dedicated Codex projects the account-owned token through the common PAT login", () => {
   const driver = createKubernetesComputeDriver(
-    options({
+    teamsOptions({
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
