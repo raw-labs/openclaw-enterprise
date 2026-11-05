@@ -77,7 +77,12 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     }),
   );
 
-  const options = { profile, ciStatePath: statePath, codexVersion: stagingCodexVersion };
+  const options = {
+    profile,
+    appArmorProfile: "",
+    ciStatePath: statePath,
+    codexVersion: stagingCodexVersion,
+  };
   assert.deepEqual(
     await reviewedCodexSeccompSecurityOptions({
       ...options,

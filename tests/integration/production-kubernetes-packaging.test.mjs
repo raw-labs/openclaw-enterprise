@@ -564,8 +564,8 @@ test(
     );
     assert.equal(
       proxy.spec.template.spec.containers[0].env.find(
-        ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS",
-      ).value,
+        ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS_ENABLED",
+      )?.value,
       "true",
     );
     for (const overrides of [
