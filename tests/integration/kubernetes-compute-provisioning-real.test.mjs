@@ -1640,10 +1640,45 @@ test(
         (await optedIn.request("GET", agentPath)).data.activeRevisionId ===
         disabledRevision.data.id,
     );
+    // OCC commits the active pointer before Compute activation. Wait for actual
+    // callback withdrawal and the replacement Pod, not just the database pointer.
     for (const kind of ["httproute", "service", "securitypolicy", "networkpolicy"]) {
-      assert.equal(await missing(kind, callbackName, placement), true);
+      await waitFor(`disabled Teams ${kind} withdrawal`, () =>
+        missing(kind, callbackName, placement),
+      );
     }
+    const disabledPod = await waitFor("the Teams-disabled Gateway revision Pod", async () => {
+      const current = await workloadPod(
+        placement,
+        `app.kubernetes.io/name=${gateway},openclaw.dev/revision=${disabledRevision.data.id}`,
+      );
+      return current?.status.containerStatuses?.some(
+        ({ name, ready }) => name === "gateway" && ready,
+      )
+        ? current
+        : undefined;
+    });
+    assert.equal(
+      (
+        await kubectl(
+          "exec",
+          disabledPod.metadata.name,
+          "--namespace",
+          placement,
+          "--",
+          "node",
+          "-e",
+          'console.log(Object.hasOwn(process.env, "MSTEAMS_APP_PASSWORD"))',
+        )
+      ).trim(),
+      "false",
+      "the serving Pod no longer receives the disabled Teams credential",
+    );
     const disabledGateway = await resource("deployment", gateway, placement);
+    assert.equal(
+      disabledGateway.metadata.annotations["openclaw.dev/agent-revision-id"],
+      disabledRevision.data.id,
+    );
     assert.equal(
       disabledGateway.spec.template.spec.containers[0].env.some(
         ({ name }) => name === "MSTEAMS_APP_PASSWORD",

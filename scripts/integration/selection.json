@@ -672,6 +672,11 @@
         "commit": "4c3d38f1afb405cab96db22933a2fea12fcf1aad",
         "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42074221913",
         "notes": "The real embedded Pod passed exact Secret delivery. The new revision-cutover assertion incorrectly required the Gateway-only agent-revision-id annotation on the outbound proxy. Check the common Pod template revision label instead; retain exact revision ownership and full withdrawal checks."
+      },
+      {
+        "commit": "66fb077ee849e740c1eef0857397f6bb7c146d37",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42075528396",
+        "notes": "Embedded deployment, replacement and stale-retirement fencing passed. Teams disablement incorrectly treated the committed active pointer as completed Kubernetes activation. Await real callback withdrawal and the exact ready replacement Pod, and verify the disabled credential is absent inside that Pod."
       }
     ],
     "localChecks": {
