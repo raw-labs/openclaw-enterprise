@@ -1480,6 +1480,19 @@ test(
     const gateway = gatewayName(provisioned.agentId);
     const callbackName = `${gateway}-msteams`;
     const assertServing = async (revisionId) => {
+      // The active pointer is committed before Kubernetes activation. Observe the
+      // exact ready Pod before checking the serving Deployment and credentials.
+      const pod = await waitFor("the exact Gateway revision Pod to be ready", async () => {
+        const current = await workloadPod(
+          placement,
+          `app.kubernetes.io/name=${gateway},openclaw.dev/revision=${revisionId}`,
+        );
+        return current?.status.containerStatuses?.some(
+          ({ name, ready }) => name === "gateway" && ready,
+        )
+          ? current
+          : undefined;
+      });
       const deployment = await resource("deployment", gateway, placement);
       assert.equal(deployment.metadata.annotations["openclaw.dev/agent-revision-id"], revisionId);
       const environment = deployment.spec.template.spec.containers[0].env;
@@ -1503,17 +1516,6 @@ test(
         assert.equal(ref.optional, false);
         expectedEnvironment[name] = Buffer.from(source.data[ref.key], "base64").toString("utf8");
       }
-      const pod = await waitFor("the exact Gateway revision Pod to be ready", async () => {
-        const current = await workloadPod(
-          placement,
-          `app.kubernetes.io/name=${gateway},openclaw.dev/revision=${revisionId}`,
-        );
-        return current?.status.containerStatuses?.some(
-          ({ name, ready }) => name === "gateway" && ready,
-        )
-          ? current
-          : undefined;
-      });
       const delivered = await kubectl(
         "exec",
         pod.metadata.name,
@@ -1563,7 +1565,13 @@ test(
         2,
         "embedded has one combined OpenClaw workload plus its revision-owned outbound proxy",
       );
-      const callback = await resource("httproute", callbackName, placement);
+      const callback = await waitFor("the serving Teams callback revision", async () =>
+        (await resources("httproutes", placement)).find(
+          ({ metadata }) =>
+            metadata.name === callbackName &&
+            metadata.annotations?.["openclaw.dev/agent-revision-id"] === revisionId,
+        ),
+      );
       assert.equal(callback.metadata.annotations["openclaw.dev/agent-revision-id"], revisionId);
       const callbackService = await resource("service", callbackName, placement);
       assert.equal(callbackService.spec.selector["openclaw.dev/revision"], revisionId);

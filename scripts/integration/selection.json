@@ -677,6 +677,11 @@
         "commit": "66fb077ee849e740c1eef0857397f6bb7c146d37",
         "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42075528396",
         "notes": "Embedded deployment, replacement and stale-retirement fencing passed. Teams disablement incorrectly treated the committed active pointer as completed Kubernetes activation. Await real callback withdrawal and the exact ready replacement Pod, and verify the disabled credential is absent inside that Pod."
+      },
+      {
+        "commit": "81f16f4c33d58255ff7656b97b7c1e03bd273b01",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42076588565",
+        "notes": "The shared serving assertion also read the old Deployment immediately after the active-pointer commit. Observe the exact ready revision Pod and callback before checking projection and fencing at every cutover, including reenablement. Keep all real resource and credential assertions."
       }
     ],
     "localChecks": {
