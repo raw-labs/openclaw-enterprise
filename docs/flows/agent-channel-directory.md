@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
-updated: 2026-10-15
-last_updated_session: authoring-run/6de03ad9-293f-4b20-b21c-a5e0a23cb208
+updated: 2026-11-05
+last_updated_session: authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f
 ---
 
 # Agent Channel Directory Lookup Flow
@@ -21,7 +21,7 @@ actionable error.
   authorized caller posts to the Namespace channel directory route.
 - Assumptions: the caller can create an Agent or update the exact Agent or
   Configuration, and can operate the selected same-Namespace Secret.
-- Source: `apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`,
+- Source: `apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`,
   `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`,
   and `apps/controller/src/drivers/channel/slack.ts:SlackChannelDriver.lookupDirectory`.
 
@@ -67,8 +67,9 @@ platform state. A missing or foreign target is rejected before provider I/O.
 selects the bundled Slack ChannelDriver for production API calls. With
 `OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL`, the Driver tunnels management requests
 to `slack.com:443` through that endpoint. Without it, the Driver uses the process
-HTTP transport; default-deny production egress provides no Slack route and calls
-return unavailable. A missing selected ChannelDriver instead returns `501`
+HTTP transport. With default-deny production egress, unanswered directory calls
+return unavailable; credential validation reports the missing approved route as
+`409`. An explicitly open API HTTPS route keeps its normal retryable error. A missing selected ChannelDriver instead returns `501`
 before the Secret value is read.
 
 With Helm `outboundProxy.enabled`, the API uses
@@ -98,14 +99,21 @@ An incomplete page cannot establish that a name is absent or unique.
 cancels an unused response body on a non-success HTTP status before returning
 the safe rate-limit or unavailable error. This releases occupied transport
 capacity even when the error body has not finished. The same request owner
-serves credential validation; no automatic retry is added. Successful responses
+serves credential validation; no automatic retry is added. Production
+composition sets `expectProxy` unless API HTTPS egress is explicitly open: with no proxy URL, a credential check whose
+fetch fails to connect, resolve, or answer within the time budget raises
+`SlackRouteNotConfiguredError` (`409`) instead of the unavailable error (finding
+2521). Its message names the Helm proxy settings and says to try again when the
+API has another approved route, since an open route can also time out (finding
+2531). Any other fetch rejection, such as a refused redirect, a TLS failure, or
+an invalid header value, stays unavailable (finding 2532). Successful responses
 have an 8,000,000-byte streaming cap before decoded JSON is checked against the
 existing limit of 2,000,000 UTF-16 code units. Overflow cancels the body read and returns `invalid_response`.
 
 ### 3. Display names and save IDs
 
-`apps/controller/src/console/channels/slack.mjs:appendFields`,
-`apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`
+`apps/controller/src/console/channels/slack.mts:appendFields`,
+`apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`
 
 The Console presents bot-token selection before channel access and explains that
 name lookup needs that token. It debounces typing and shows each candidate's name,
@@ -125,7 +133,12 @@ search text remains separate from committed IDs. Plugin approver fields accept
 raw Slack user IDs when lookup is unavailable; directory-selected approvers
 remain workspace-qualified. Arrow keys and Enter select results, and Escape
 closes the list. It resolves saved IDs again when the editor opens or the
-selected Secret changes. A denied or failed lookup leaves manual exact-ID entry
+selected Secret changes. A view sends the first of these name lookups alone
+(`slack-directory.mts:nameLookupInTurn`, `request-turns.mts`); the others wait
+until one succeeds, then go at once. A `403` answers the lookups waiting behind
+it for the same Secret, unsent, so each field shows that refusal and the API
+audits one denial; once no lookup is pending, a later one asks again. A lookup
+still waiting when its page is left is not sent. A denied or failed lookup leaves manual exact-ID entry
 available; no directory result changes the saved Configuration until the
 operator saves the channel edit.
 
@@ -173,6 +186,12 @@ view.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-05 02:50: Trace the accompanying generic management-proxy refresh and current open-egress distinction; update moved Console source pointers. (authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f - a50b14647d4311764cce3359150149bc81f23431)
+
+- 2026-10-30: Send a view's first name lookup alone and the rest after it succeeds, so a revoked grant costs one audited denial. (2939)
+
+- 2026-10-25: Name the Slack proxy settings, and keep a retry for another approved route, when production credential validation cannot connect to Slack. (findings 2521, 2531, 2532)
 
 - 2026-10-15 15:46: Select provider operations and network requirements through shared composition. (authoring-run/6de03ad9-293f-4b20-b21c-a5e0a23cb208 - b0c299f7e8a9cdb992500fa39d32dddea9271ed0)
 

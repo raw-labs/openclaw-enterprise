@@ -1,7 +1,7 @@
 ---
 created: 2026-10-14
-updated: 2026-10-19
-last_updated_session: authoring-run/a17d3f2a-fc44-4f46-af2d-e8749bfb8305
+updated: 2026-11-05
+last_updated_session: authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f
 ---
 
 # Gateway Outbound Flow
@@ -75,7 +75,7 @@ Ordinary updates retain saved authority even after an Installation tightening;
 deployment rechecks it. State persists the selection beside other Agent settings.
 
 `packages/occ/src/state/postgres-state.ts:updateConfiguration` writes
-`gateway_outbound`; `migrations/0064_gateway_outbound.sql` constrains its shape,
+`gateway_outbound`; `migrations/0067_gateway_outbound.sql` constrains its shape,
 DNS names, and dedicated-only extra authority. The memory adapter mirrors those
 invariants. The normal mutation audit names the actor and exact Agent.
 
@@ -219,6 +219,8 @@ compatibility with every native plugin transport or provider.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-11-05 02:50: Trace the accompanying pinned-upstream refresh, moved Console owners, and migration 0067; retain current model and admission behavior. (authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f - a50b14647d4311764cce3359150149bc81f23431)
 
 - 2026-10-19 22:31: Preserve both Sandbox and Gateway snapshots after upstream integration and update the migration link. (authoring-run/a17d3f2a-fc44-4f46-af2d-e8749bfb8305 - 5f494a0fdf8f36f5b4cdf0a2886987ca49a5248c)
 

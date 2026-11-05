@@ -15,7 +15,7 @@
     "requiresPreparedStateForFile": true,
     "controllerImage": true,
     "defaultEnv": {
-      "NODE_BASE_IMAGE": "docker.io/library/node:24-bookworm@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0"
+      "NODE_BASE_IMAGE": "docker.io/library/node:24.22.1-bookworm@sha256:d862bb5d082c5ae0210ac07e8c0344cb8cf7bef6d78e9b8c50c179da923108ea"
     },
     "requireEnv": ["NODE_BASE_IMAGE"],
     "nodeBaseImage": true,

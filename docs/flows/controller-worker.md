@@ -1,16 +1,17 @@
 ---
 created: 2026-08-28
-updated: 2026-10-17
-last_updated_session: fix-1692
+updated: 2026-11-03
+last_updated_session: 01a12074-7896-7f63-99fe-9f42e9041d02
 ---
 
 # Controller Worker Flow
 
 ## Overview
 
-The worker claims PostgreSQL work, rechecks authorization, invokes Compute, and
-saves Namespace, Agent lifecycle, and revision results under its claim. See the
-[contract](../reference/controller.md) and [setup](../guides/deploy.md).
+The worker claims PostgreSQL work, rechecks authorization, calls Compute, and
+saves claim-protected Namespace, Agent stop/deletion, and revision results. The
+[controller reference](../reference/controller.md) owns the contract and the
+[deployment guide](../guides/deploy.md) owns process setup.
 
 ## Entry Points
 
@@ -70,33 +71,35 @@ supplies Kubernetes Compute's optional Sandbox Driver. Selected hooks require
 `setLifecycleDrivers`; unsupported capabilities stop startup. Every worker runs
 available Compute preflight before emitting `worker.started` and entering `run()`.
 
-Metrics scrapes read lifecycle and backlog state over one read-only connection
-through `packages/occ/src/state/postgres-metrics.ts:PostgresMetricsSnapshot.collect`,
-without runtime probes; a failed collection discards its connection
-([metrics contract](../reference/metrics.md#shared-snapshots-and-outages)).
-Transport loss during release rejects the snapshot; the error listener stays
-attached until release returns. Metrics follow finalization independently of logging.
+Metrics scrapes read lifecycle and backlog state through
+`packages/occ/src/state/postgres-metrics.ts:PostgresMetricsSnapshot.collect`
+without runtime probes; the
+[metrics contract](../reference/metrics.md#shared-snapshots-and-outages) owns
+connection and outage handling. Transport loss during release rejects the
+snapshot; the error listener stays attached until release returns. Metrics
+follow finalization independently of logging.
 
-### 2. Commit API admission and the durable work record
+<span id="2-commit-api-admission-and-the-durable-work-record" class="anchor-alias"></span>
+
+### 2. Save the admission decision and queue the operation
 
 `apps/controller/src/http/agents.ts:createAgentHandlers`,
 `packages/occ/src/index.ts:OpenClawController`,
 `packages/occ/src/state/postgres-state.ts:operations.append`
 
-After authentication and authorization, operations call
-`operations.append`, which verifies exact ownership and invokes
-`PostgresWorkQueue.enqueue`. State, admission audit and work commit or roll back
+Authorized operations call `operations.append`, which verifies exact ownership
+and invokes `PostgresWorkQueue.enqueue`. State, admission audit and work commit or roll back
 together.
 
-Agent deployment keeps the validated `deploy` authorization request and decision
-with the saved version until the API appends its audit event, which uses that
-decision's IAM Driver, principal, exact Agent target and evidence even if Driver
-selection changes first; the API neither reauthorizes nor relabels it. Audit
+Agent deployment keeps the validated `deploy` request and decision with the
+saved version; the API's audit event uses that decision's IAM Driver, principal,
+exact Agent target and evidence even if Driver selection changes first, without
+reauthorizing or relabeling. Audit
 failure rolls back the version, desired runtime state and queued work; an
 unknown PostgreSQL commit outcome remains unknown and is not retried.
 
-The queue freezes actor, Namespace owner, lifecycle target, and exact Agent and
-immutable Agent revision for version work. Agent lifecycle work identifies its
+For work on an Agent revision, the queue records the original actor, Namespace
+owner, lifecycle target, Agent ID, and revision ID. Agent lifecycle work identifies its
 Agent and `stopped` or `deleted` target without a version. Reusing an idempotency
 key with a different actor, owner, or target is rejected. The API returns accepted
 state before the worker invokes Compute.
@@ -128,9 +131,9 @@ Empty queues wait for the configured delay. After each pass, `health()` queries 
 calls `onHealthy`, and emits `worker.health`; both are required. Serialized
 failures emit `HEALTH_UNAVAILABLE`, consuming no retries.
 
-Each pass start and claim renewal calls `onProgress`; the liveness probe
-restarts a worker with a stale marker. A client `query_timeout` usually
-frees a stuck pass. See
+At pass start and claim renewal, `onProgress` updates liveness. Packaged probes
+require regular marker files; liveness restarts stale workers. Client
+`query_timeout` usually frees stuck passes. See
 [worker settings](../reference/settings/operations.md#controller-worker-environment).
 
 ### 4. Reload ownership and reauthorize before infrastructure effects
@@ -151,16 +154,17 @@ Version work reloads its Namespace, Agent, saved version, and selected version.
 Agent Principal, a changed Harness descriptor, or a different Compute Driver.
 `authorizeRevision()` rechecks current `deploy` and, for a ServiceAccount
 snapshot, `read` on that exact ServiceAccount. Before Compute effects, the worker
-rechecks each managed credential's frozen Backend binding without a Backend
-client or admin key; the
+rechecks each managed credential's frozen Backend binding; the
 [Backend-managed credential delivery flow](service-account-driver-credential-delivery.md#5-recheck-metadata-and-project-the-account-secret)
 owns these checks.
 
-Revocation and denial fail permanently before the pass prepares a runtime. Older versions
-complete as superseded; selected versions enter finalization or maintenance.
-When Compute requires stopped predecessors, a newer admission supersedes older
-active maintenance before Compute effects, even after candidate failure.
-Recovery uses a new version.
+Revocation and denial fail permanently before Compute. Selected versions enter
+finalization or maintenance. Older versions end superseded, also once the newest,
+without Git, has a held runtime failure. Under
+[exclusive replacement](../reference/drivers/compute.md#production-revision-stages),
+a newer admission supersedes older active maintenance before Compute effects,
+even after candidate failure; a superseded inactive version stops itself, its
+drain yielding as `SUPERSEDED_STOP_YIELDED`. Recovery uses a new version.
 
 Agent-stop work rechecks current exact-Agent `operate`; superseded desired state
 completes without shutdown.
@@ -184,10 +188,10 @@ When Compute's `requiresStoppedPredecessors` capability is set,
 `apps/controller/src/worker.ts:ControllerWorker.prepareRevision` performs
 [exclusive replacement](../reference/drivers/compute.md#production-revision-stages):
 it loads earlier snapshots, including failed candidates, closes their credential
-sessions, and stops them before preparing the candidate; a release failure
-prevents preparation. Their drains yield like a stopped Agent's
-(`PREDECESSOR_STOP_YIELDED`); failing, superseded or stopped work first finishes that stop. The
-dispatch guard keeps maintenance from recreating a predecessor.
+sessions, and stops them first; a release failure prevents preparation. Their
+drains yield like a stopped Agent's (`PREDECESSOR_STOP_YIELDED`); failing,
+superseded or stopped work first finishes that stop. The dispatch guard keeps
+maintenance from recreating a predecessor.
 
 The worker validates Compute's startup plugin warning codes and selection keys
 against the immutable version; the
@@ -203,7 +207,7 @@ later admissions are not added. Partial failure retries idempotent shutdowns,
 keeping the active pointer and retained workspace data. Before the convergence
 deadline, a stopped Agent's Gateway drain, here or in version work, yields to due
 work (`withYieldingGatewayDrain`) as `AGENT_STOP_YIELDED`, refunding the attempt.
-A drain ignores yielded stops; other waits, only stopped Agents'.
+A drain ignores yielded stops; other waits ignore all but predecessors'.
 
 Before shutdown or retirement, including stopped-version recovery, the worker
 binds the server-owned Namespace and Agent after IAM and exact-resource checks.
@@ -220,17 +224,17 @@ the worker invokes neither independently.
 `withClaimHeartbeat()` renews before each effect and every third of the lease
 duration, so sequences of short effects cannot starve renewal. Lease loss,
 heartbeat failure, or shutdown aborts Compute and raises `WorkClaimLostError`;
-expired or replaced claim tokens cannot publish results. A renewal that gets no
-answer, as on a silent database connection, cannot extend the claim: Compute is
-aborted when the last confirmed lease runs out, measured from when that renewal
-was sent, so no later than another worker could recover the claim; an in-flight
-request can still complete. Successful renewals
+expired or replaced claim tokens cannot publish results. An unanswered renewal
+(such as on a silent database connection) cannot extend the claim: Compute aborts
+when the last confirmed lease, measured from that renewal's send time, runs out,
+before another worker could recover the claim; an in-flight request can still
+complete. Successful renewals
 request throttled health updates without delaying effects or renewal; health
 failure does not imply lease loss.
 
-Compute owns infrastructure and Sandbox dispatch. See the
-[Kubernetes implementation](../../apps/controller/src/drivers/compute/kubernetes/index.ts)
-and [Docker execution flow](docker-compose-development.md).
+The [Kubernetes implementation](../../apps/controller/src/drivers/compute/kubernetes/index.ts)
+and [Docker execution flow](docker-compose-development.md) own infrastructure and
+Sandbox dispatch.
 
 When `prepareRevision` rejects, the worker asks Compute for an optional validated
 failure description (Kubernetes names the stage and maps only reviewed
@@ -259,12 +263,12 @@ and production, after the claim-protected compare-and-set of
 `Agent.activeRevisionId`, and the first dedicated version stays inactive until
 commit. A changed pointer causes `ACTIVE_REVISION_CHANGED` and retry.
 
-After the pointer commit, the worker finishes activation and retires the
-predecessor. In a second transaction, `completeActivatedRevision()` rechecks the
-selected version and claim, appends evidence, and completes work. Infrastructure
-effects and database state are not atomic. Retried finalization rechecks the
-active candidate before effects, so a retained plugin failure cannot become
-success after claim loss.
+Committing `Agent.activeRevisionId` records selection. A v5 `online-request` or
+v6 `request-hook-observed` hold for Git material leaves the original work queued
+until that revision reports ready. The worker then activates it and retires its
+predecessor. In a separate transaction, `completeActivatedRevision()` rechecks
+selection and claim, appends evidence, and completes work. Retries recheck the
+active candidate before effects; claim loss cannot turn plugin failure into success.
 
 Stop finalization rechecks the live claim, Agent owner, and stopped desired state.
 After captured cleanup, it clears `activeRevisionId` only if it still identifies
@@ -295,8 +299,8 @@ Pending convergence refunds the attempt and requeues unready versions on the
 cadence in
 [pending deployment progress](../reference/agents/deployment.md#pending-deployment-progress),
 others with backoff. Compute's `pendingReason` selects the pending code.
-`PostgresWorkQueue.defer` appends `reconcile` evidence only when its outcome and
-code differ from that work item's latest evidence. `retry` outcomes consume attempts; permanent failure, exhaustion, deadline, or `AUTHENTICATION_FAILED`
+`PostgresWorkQueue.defer` appends `reconcile` evidence only when its outcome or
+code changes. `retry` outcomes consume attempts; permanent failure, exhaustion, deadline, or `AUTHENTICATION_FAILED`
 terminates work. See [outcomes](../reference/controller.md) and
 [timing controls](../reference/settings/operations.md#controller-worker-environment).
 
@@ -322,21 +326,19 @@ Driver interval, including closing sessions and failed runtime retirement,
 releasing the claim without consuming retries. Obligations survive; lease loss
 aborts the pass.
 
-Terminal rows store `reason_code` and optional `result_data`, shaped as the
-[terminal results reference](../reference/controller/reconciliation.md#terminal-results)
-and [deployment status](../reference/agents.md#deployment-status) define. For
+Terminal rows store `reason_code` and optional `result_data`; see
+[terminal results](../reference/controller/reconciliation.md#terminal-results)
+and [deployment status](../reference/agents.md#deployment-status). For
 `runtimeFailure`, Compute reads cached startup results from its private status
 path, including unready Harnesses without plugins, and verifies runtime
 incarnation without repeating the model probe. Missing or invalid evidence
 leaves the cause unspecified.
 
-`packages/occ/src/state/controller-work.ts:validateFailureData` validates reads
-and writes and rejects data for other failure reasons; the PostgreSQL constraint
-enforces the persisted shape.
+`packages/occ/src/state/controller-work.ts:validateFailureData` rejects invalid
+reads and writes; PostgreSQL enforces the stored shape.
 `PostgresWorkQueue.complete` and `PostgresWorkQueue.fail` publish only under the
 live claim; [deployment status](../reference/agents.md#deployment-status) derives
-`error` and `warnings` from that result. Completion needs no acknowledgment or
-post-commit cleanup; maintenance cannot rewrite deployment warnings.
+`error` and `warnings` from that result. Completion needs no acknowledgment/cleanup; maintenance cannot rewrite warnings.
 
 Indexed `workId` scopes progress to work; maintenance and unbound history cannot
 supply it. `getDeploymentStatus` reads
@@ -347,20 +349,21 @@ Legacy terminal rows derive `reason_code` from matching activation or terminal
 reconcile audit evidence, otherwise `LEGACY_OUTCOME_UNKNOWN`, with `NULL` `result_data`.
 
 If Compute declares maintenance, activation schedules observations for this version.
-Incomplete observations, Compute bindings, and dependency retries or expired claims
-exhausting attempts close the item and schedule another while the version stays
-selected and running within its credential deadline; outages never retire it. Each
-claim reauthorizes its actor. Successor keys use strictly later time buckets despite clock skew.
+Incomplete observations, Compute bindings, and exhausted dependency retries or claims
+queue another item. The version stays selected within its credential deadline; outages
+never retire it. Each claim reauthorizes its actor. Successor time buckets increase despite clock skew.
 [Gateway/reader withdrawal](gateway-outbound.md#5-persist-withdrawal-before-terminal-maintenance)
 precedes terminal maintenance.
 
-`worker.completed` reports the target, outcome, and code; polling continues.
+`worker.completed` reports the target, outcome, and code. On `namespace.ensure`,
+it can also report a [Kubernetes access hint](../reference/drivers/kubernetes-compute.md#failure-conditions)
+from the current pass. The hint stays out of the Driver observation.
 A Namespace pass that observes the same pending state this worker last audited,
 such as a terminating namespace, writes no new lifecycle audit or `reconcile` row;
 a changed pending state or the terminal pass does.
 Lease loss reports `worker.error` `CLAIM_LOST` instead of stale lifecycle state.
-On `SIGTERM` or `SIGINT`, shutdown removes readiness, aborts in-flight work,
-waits for the loop, closes PostgreSQL, and emits `worker.stopped`.
+On `SIGTERM` or `SIGINT`, shutdown aborts in-flight work, waits for the loop,
+removes readiness, closes the other parts and then PostgreSQL, and emits `worker.stopped`.
 
 Each `PostgresWorkQueue.recoverStale()` statement atomically publishes exhausted
 work, failure of a still-provisioning Namespace targeted for `ready`, and audit
@@ -397,21 +400,18 @@ a failed retry keeps the active runtime) or whose predecessor stop yielded
   [stale-claim](../../tests/integration/postgres-worker-stale-claim.test.mjs)
   require PostgreSQL; none proves model execution.
 - [OCC API](../../tests/integration/occ-api.test.mjs) checks deploy audit attribution
-  and append-failure rollback on the authenticated route after changing IAM Drivers.
-- [Sandbox startup](../../tests/integration/sandbox-driver-startup.test.mjs) verifies
-  composition; [k3d integration](../../tests/integration/sandbox-driver-openshell-k3d-real.test.mjs)
-  verifies infrastructure.
+  and append-failure rollback after an IAM Driver change.
+- [Sandbox startup](../../tests/integration/sandbox-driver-startup.test.mjs) and
+  [k3d](../../tests/integration/sandbox-driver-openshell-k3d-real.test.mjs) tests
+  verify composition and infrastructure.
 
 ## Related docs
 
 - [Repository sessions and cleanup](agent-repository-credentials.md)
 - [Backend-managed credential delivery](service-account-driver-credential-delivery.md)
-- [Controller reference](../reference/controller.md)
-- [Deployment](../guides/deploy.md)
 - [Controller settings](../reference/settings.md)
 - [IAM authorization](../reference/authorization.md)
 - [Production startup flow](production-startup.md)
-- [Compose development](docker-compose-development.md)
 - [Harness execution topology](harness-execution-topology.md)
 - [Compute Driver contract](../reference/drivers/compute.md)
 - [Sandbox Driver contract](../reference/drivers/sandbox.md)
@@ -421,6 +421,10 @@ a failed retry keeps the active runtime) or whose predecessor stop yielded
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-03 21:08: Reject directory markers. (01a12074-7896-7f63-99fe-9f42e9041d02 - b627f0997c12d10aaa87f764eac1019c67199d2f)
+
+- 2026-10-30 17:22: Shutdown stops the loop before readiness and parts close. (fix-2997)
 
 - 2026-10-16 13:09: Compose Gateway/reader withdrawal. (authoring-run/523fa03e-fd48-4e90-a757-e4c83a1e2b53 - 792afad4f9e8bd4323fc197a102ebde7961484c9)
 
