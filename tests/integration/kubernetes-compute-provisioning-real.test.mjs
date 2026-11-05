@@ -1537,8 +1537,7 @@ test(
           );
           return current.length === 2 &&
             current.every(
-              ({ metadata }) =>
-                metadata.annotations?.["openclaw.dev/agent-revision-id"] === revisionId,
+              ({ spec }) => spec.template.metadata.labels["openclaw.dev/revision"] === revisionId,
             )
             ? current
             : undefined;

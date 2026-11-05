@@ -667,6 +667,11 @@
         "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42073156502",
         "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42073176489",
         "notes": "Static checks found a stale generated Agent operation count. The cluster embedded-channel lifecycle still selected the retired shared proxy. Regenerate the API reference and use the real revision-owned proxy with exact Secret delivery, revision cutover and withdrawal assertions. Qualify the repaired final SHA."
+      },
+      {
+        "commit": "4c3d38f1afb405cab96db22933a2fea12fcf1aad",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42074221913",
+        "notes": "The real embedded Pod passed exact Secret delivery. The new revision-cutover assertion incorrectly required the Gateway-only agent-revision-id annotation on the outbound proxy. Check the common Pod template revision label instead; retain exact revision ownership and full withdrawal checks."
       }
     ],
     "localChecks": {
