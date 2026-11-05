@@ -15,8 +15,9 @@ rendering does not verify cluster readiness.
 
 Use `openclaw` for embedded OpenClaw Agents with the bundled OpenClaw
 PluginDriver. Operators select plugins manually or through the API. Embedded
-OpenClaw cannot enable external Slack channels; the Standard OpenClaw preset
-must leave channels disabled.
+OpenClaw refuses external channels by default. The unsupported-production
+[embedded-channel trial](../integrations/embedded-channel-trial.md#enable-the-trusted-option)
+accepts trusted `channels.experimentalEmbeddedChannels: true` with a runtime proxy.
 
 Use `codex` for dedicated Codex Agents with the bundled Codex PluginDriver. Its
 stock hosted catalog needs a PAT supplied later through a same-Namespace Secret

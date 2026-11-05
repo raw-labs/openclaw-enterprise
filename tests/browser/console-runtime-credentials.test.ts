@@ -1592,24 +1592,35 @@ test("a channel Secret save refused for a missing binding says where to bind it"
 });
 
 test("Teams-enabled drafts keep console deploy blocked", async (t) => {
-  const fixture = await createConsoleAppFixture(t);
+  const fixture = await createConsoleAppFixture(t, {
+    gatewayRouting: {
+      hostname: "gateway.example.test",
+      gatewayName: "gateway",
+      gatewayNamespace: "system",
+      envoyNamespace: "envoy",
+      channels: { hostname: "channels.example.test" },
+    },
+  });
   await fixture.bootstrap();
   const namespace = await createNamespace(fixture, "Teams credential gate");
   const agent = await createAgent(
     fixture,
     namespace.id,
     "Teams Credential Agent",
-    nativeValues("implicit-teams", {
-      harnessId: "codex",
-      channels: {
-        msteams: {
-          appId: "00000000-0000-4000-8000-000000000000",
-          tenantId: "11111111-1111-4111-8111-111111111111",
-          appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
-          requireMention: true,
+    {
+      ...nativeValues("implicit-teams", {
+        harnessId: "codex",
+        channels: {
+          msteams: {
+            appId: "00000000-0000-4000-8000-000000000000",
+            tenantId: "11111111-1111-4111-8111-111111111111",
+            appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+            requireMention: true,
+          },
         },
-      },
-    }),
+      }),
+      plugins: { allow: ["codex", "msteams"] },
+    },
     { executionMode: "dedicated" },
   );
   const { page } = await newPage(t, fixture);

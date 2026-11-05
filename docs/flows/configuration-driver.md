@@ -174,7 +174,7 @@ intact until rename succeeds, and other writers' temporary files remain untouche
 and cleanup failures propagate to the caller; this does not add automatic retries
 or alter OCC's metadata transaction and compensation boundary.
 
-[Configuration persistence and version snapshots](configuration-driver/persistence-and-revisions.md) traces metadata locking, Driver effects, Agent reference resolution, and snapshot validation after request authorization.
+[Configuration persistence and version snapshots](configuration-driver/persistence-and-revisions.md) traces locking, Driver effects, reference resolution and admission. See [channel admission](agent-channel-runtime.md).
 
 ## Debugging and Verification
 
@@ -257,6 +257,8 @@ its optional integration is skipped.
 - 2026-10-14 16:40: Document Gateway outbound admission (authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3 - bd8fe1f)
 
 - 2026-10-23 13:40: Writes and Preset saves refuse an `agents` model without its provider, with deployment's text. (fix-1828, finding 1828)
+- 2026-10-14 11:41: Document the Installation-controlled embedded channel admission exception in the revision companion. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
+
 - 2026-10-14 10:30: Writes refuse literals in the other slots OpenClaw marks sensitive ([rules](configuration-driver/persistence-and-revisions.md)). (fix-1309, finding 1309)
 - 2026-10-14 09:30: Writes and deployment require references in the other key and header slots the Gateway sends ([list](../reference/configuration/secrets.md#secret-boundaries)); those header slots and MCP headers refuse invalid header names. Stored documents still read. (fix-1307, finding 1307)
 - 2026-10-14 09:00: The Kubernetes model provider rule also checks `agents.*.modelPolicy.allow` entries, which the Dedicated Codex projection qualifies like `models` keys; Dedicated Codex refuses `mediaModels.*` and `voiceModel`. Preset saves run the `agents` shape and roster rules Configuration save runs, checking a templated Agent ID or ownership as far as its written text goes. (fix-1306-1308, findings 1306, 1308)

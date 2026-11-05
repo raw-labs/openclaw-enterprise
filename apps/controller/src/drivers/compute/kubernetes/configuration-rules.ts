@@ -227,14 +227,19 @@ export function requireCodexPlugin(
  */
 export function requireChannelTopology(
   providers: readonly string[],
-  topology: { readonly embedded: boolean; readonly channelRuntime: boolean },
+  topology: {
+    readonly embedded: boolean;
+    readonly channelRuntime: boolean;
+    readonly experimentalEmbeddedChannels?: boolean;
+  },
   createError: SettingError,
 ): void {
   const [provider] = providers;
   if (provider === undefined) {
     return;
   }
-  if (topology.embedded) {
+  // TODO(dedicated native parity): remove this trusted evaluation exception.
+  if (topology.embedded && topology.experimentalEmbeddedChannels !== true) {
     throw createError(
       `channels.${provider}`,
       "is enabled, but channels require a dedicated Agent workload",

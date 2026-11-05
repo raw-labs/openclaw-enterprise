@@ -64,7 +64,12 @@ preparation. `runLane` uses the same selector and retains the file's expected
 cases, environment and cleanup. Results carry `scope: focused`;
 `validateLaneEvidence` rejects them for full-lane aggregation, even for a one-file lane.
 
-CI uses the event checkout without external service credentials. `CI Impact` starts independently of `Suite Audit and Static Checks`, which verifies checkout identity and runs the [documented checks](../testing/ci/required-checks.md#scenarios) in every mode. Docs mode skips test lanes. The [coverage map](../testing/ci/required-checks.md#scenarios) lists matrix jobs and the separate `runtime-image-fixture`; tests mode runs only selected lanes. Image startup parts 1 and 2, PostgreSQL Application and the `checks-baseline` and `checks-browser` parts use `blacksmith-32vcpu-ubuntu-2404` for its 8 CPUs, k3d fixture and observability for its NetworkPolicy-enforcing kernel; `runtime-image-fixture` uses `ubuntu-22.04`. Other jobs use `blacksmith-16vcpu-ubuntu-2404`.
+`CI Impact` starts beside `Suite Audit and Static Checks` on the event checkout
+without provider credentials. Static checks verify identity in every mode; docs
+mode skips tests and tests mode selects lanes.
+[Coverage](../testing/ci/required-checks.md#scenarios) owns default runners;
+[configuration](../testing/ci/configuration.md#local-runner-overrides) owns overrides
+and CI-only AppArmor setup/cleanup.
 
 The selector verifies that the tested merge has the event head as its second parent. It
 compares that tree with its first parent, the current base, using policy from the base.
@@ -264,6 +269,9 @@ External reconciliation awaits an approved resource ledger.
 - 2026-11-04 12:10: Isolate the Codex Git proof queue without Slack. (authoring-run/14bcb9d6-2d4c-449d-8bbc-b64e3ef7e632 - aa60a72115e342ec020d1083fb5e30c139202c84)
 
 - 2026-11-04 10:07: Consolidate Full Integration policy and bound the cutover proof routes. (authoring-run/79147f32-199a-48ad-9b7e-fbdf94bf9d60 - 2628dba73edd44e4980711129e48fb7842828019)
+- 2026-11-05 13:17: Preserve upstream CI selection; link runner configuration. (authoring-run/a3ece01d-0763-41ee-a397-de3e7cac7c8b - 4994f67a0c0c54a2f6cb20ed59f814b452f75c03)
+
+- 2026-11-05 01:49: Preserve CI selection and deadlines with scoped runners and CI-only AppArmor. (authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f - 94346f8101230627f206ed9731f2c32beba27bad)
 
 - 2026-11-03 01:07: Bind staging tests to release source. (authoring-run/c1bf6b1d-bea1-4de7-b3af-4a2ea197ba06 - d2fc28e1d6d70292e462956cedef0dae9281c48c)
 
@@ -276,6 +284,7 @@ External reconciliation awaits an approved resource ledger.
 - 2026-10-23 03:43: Order Docker timestamps and retain twelve latest retry kinds independently of locale. (authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d - 9bca605f5175bb225a522c3d5537a7ee6e1a7751)
 
 - 2026-10-21 04:42: Preserve submillisecond Docker event order. (authoring-run/458f4777-70d1-4992-a922-ab387c6a4aba - e8185dac805b737363c7178d3068b310a53a7c24)
+- 2026-10-20 12:14: Honor configured runner capacity while preserving coverage, default labels and same-source qualification. (authoring-run/025b1d17-5ded-4263-b58b-345fbafcddbb - a77594a92203b9da12690591554b385d9970d904)
 
 - 2026-10-14 22:31: Complete all selection. (authoring-run/d5130a41-8ae6-4a80-aef3-32d61a53348c - 9b50982b75a578d6967ee12befb1fa3904e20a38)
 

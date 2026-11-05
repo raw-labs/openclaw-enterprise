@@ -257,6 +257,7 @@ Plan filenames and historical commit links retain their original names.
 | `0021-gateway-outbound.md`                   | [RFC-0030](../../specs/rfcs/0030-gateway-outbound.md)                   |
 | `0029-gateway-outbound.md`                   | [RFC-0030](../../specs/rfcs/0030-gateway-outbound.md)                   |
 | `0027-shared-model-provider.md`              | [RFC-0028](../../specs/rfcs/0028-shared-model-provider.md)              |
+| `0029-temporary-embedded-channel-trial.md`   | [RFC-0030](../../specs/rfcs/0030-temporary-embedded-channel-trial.md)   |
 
 Earlier versions of the Credential Proxy proposal used these provisional paths.
 RFC-0019, RFC-0021 and RFC-0022 are now assigned to other proposals.

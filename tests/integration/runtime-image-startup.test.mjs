@@ -109,7 +109,30 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     }),
   );
 
-  const options = { profile, ciStatePath: statePath, codexVersion: stagingCodexVersion };
+  const options = {
+    profile,
+    appArmorProfile: "",
+    ciStatePath: statePath,
+    codexVersion: stagingCodexVersion,
+  };
+  assert.deepEqual(
+    await reviewedCodexSeccompSecurityOptions({
+      ...options,
+      appArmorProfile: "oce-ci-codex-bwrap",
+    }),
+    [
+      "--security-opt",
+      "no-new-privileges",
+      "--security-opt",
+      "apparmor=oce-ci-codex-bwrap",
+      "--security-opt",
+      `seccomp=${profile}`,
+    ],
+  );
+  await assert.rejects(
+    reviewedCodexSeccompSecurityOptions({ ...options, appArmorProfile: "unconfined" }),
+    /must select the named CI Codex profile/,
+  );
   assert.deepEqual(await reviewedCodexSeccompSecurityOptions(options), [
     "--security-opt",
     "no-new-privileges",
@@ -132,7 +155,12 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
   // Without a profile, only a local run (no CI, no CI state) may fall back to
   // Docker's default seccomp; CI fails instead of running the case unconfined.
   assert.deepEqual(
-    await reviewedCodexSeccompSecurityOptions({ profile: "", ciStatePath: "", ci: "" }),
+    await reviewedCodexSeccompSecurityOptions({
+      appArmorProfile: "",
+      profile: "",
+      ciStatePath: "",
+      ci: "",
+    }),
     ["--security-opt", "no-new-privileges"],
   );
   for (const environment of [
@@ -141,7 +169,7 @@ test("runtime image seccomp option requires the CI-prepared profile record", asy
     { ciStatePath: statePath, ci: "" },
   ]) {
     await assert.rejects(
-      reviewedCodexSeccompSecurityOptions({ profile: "", ...environment }),
+      reviewedCodexSeccompSecurityOptions({ appArmorProfile: "", profile: "", ...environment }),
       /OCC_TEST_CODEX_SECCOMP_PROFILE is required in CI/,
     );
   }

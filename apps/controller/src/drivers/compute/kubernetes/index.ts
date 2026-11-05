@@ -224,6 +224,7 @@ import {
   enabledChannelProviders,
   OPENCLAW_GATEWAY_PASSWORD,
   requireChannelTopology,
+  requireChannelProxyEnvironment,
   requireCodexPlugin,
   refuseInvalidTrustedProxyIdentities,
   refuseKubernetesPluginEntryKeyVariants,
@@ -560,6 +561,10 @@ export interface KubernetesComputeDriverOptions {
     readonly codexSeccompProfile?: string;
     /** Installation-owned OpenAI-compatible provider shared by supported Harnesses. */
     readonly modelProvider?: ModelProviderConfiguration;
+    readonly channels?: {
+      /** TODO(dedicated native parity): remove the embedded channel trial. */
+      readonly experimentalEmbeddedChannels?: boolean;
+    };
     readonly gatewayOutbound?: {
       readonly enabled: boolean;
       readonly allowPublicHttps?: boolean;
@@ -3343,7 +3348,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     if (input.selection.mode === "channelsOnly" && input.requirements.length === 0) {
       return undefined;
     }
-    if (input.executionMode !== "dedicated" || !this.gatewayOutboundCapabilities.restricted) {
+    if ((input.executionMode !== "dedicated" && !(input.selection.mode === "channelsOnly" && this.options.runtime?.channels?.experimentalEmbeddedChannels === true)) || !this.gatewayOutboundCapabilities.restricted) {
       throw new ResourceConflictError(
         "Gateway requirements need dedicated execution and enabled managed outbound.",
       );
@@ -3544,6 +3549,11 @@ export class KubernetesComputeDriver implements ComputeDriver {
               supportsStandaloneWebSearch: { type: "boolean" },
             },
           },
+          channels: {
+            type: "object",
+            additionalProperties: false,
+            properties: { experimentalEmbeddedChannels: { type: "boolean", default: false } },
+          },
           gatewayOutbound: {
             type: "object",
             required: ["enabled"],
@@ -3596,9 +3606,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   readonly supportsGatewayManagedMode?: true;
   readonly supportsWorkspaceSetup = true as const;
   readonly requiresAgentRuntimeCredentials?: true;
-  readonly agentProvisioning = Object.freeze({
-    executionModes: Object.freeze(["dedicated"] as const),
-  });
+  readonly agentProvisioning: { readonly executionModes: readonly ("dedicated" | "embedded")[] };
   private readonly options: KubernetesComputeDriverOptions;
   private readonly sandboxDriver: SandboxDriver | undefined;
   private readonly preprovisionedNamespace: PreprovisionedKubernetesNamespace | undefined;
@@ -3848,7 +3856,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
         );
       }
       if (options.runtime !== undefined) {
-        const { transportSecretPrefix, gatewayOutbound } = options.runtime;
+        const { transportSecretPrefix, gatewayOutbound, channels } = options.runtime;
+        if (channels?.experimentalEmbeddedChannels === true && gatewayOutbound?.enabled !== true) {
+          throw configurationConstraintFailure("Experimental embedded channels require enabled managed Gateway outbound.", "/runtime/channels");
+        }
         const runtimeProperties = asRecord(
           KubernetesComputeDriver.configurationSchema.properties.runtime.properties,
         );
@@ -4236,6 +4247,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
     );
     // Keep the Driver-owned configuration isolated from its constructor caller.
     this.options = structuredClone(options);
+    // TODO(dedicated native parity): remove embedded provisioning with the trial option.
+    this.agentProvisioning = Object.freeze({
+      executionModes: Object.freeze(
+        options.runtime?.channels?.experimentalEmbeddedChannels === true
+          ? (["dedicated", "embedded"] as const)
+          : (["dedicated"] as const),
+      ),
+    });
     if (options.runtime !== undefined) {
       this.requiresAgentRuntimeCredentials = true;
       this.supportsGatewayManagedMode = true;
@@ -4573,14 +4592,18 @@ export class KubernetesComputeDriver implements ComputeDriver {
   }
 
   validateAgentProvisioning(input: ComputeAgentProvisioningInput): void {
-    if (input.executionMode !== "dedicated") {
+    if (!this.agentProvisioning.executionModes.includes(input.executionMode)) {
       throw new ConfigurationFailure(
         "Kubernetes Agent provisioning supports only dedicated execution mode.",
       );
     }
     this.verifyGatewayRoutingConfiguration({
       configuration: this.namedGatewayConfigurationDocument(input.configuration),
-      harness: { id: "codex", version: "provisioning", mode: "dedicated" },
+      harness: {
+        id: input.executionMode === "embedded" ? "openclaw" : "codex",
+        version: "provisioning",
+        mode: input.executionMode,
+      },
     });
   }
 
@@ -4739,7 +4762,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
       isServiceAccountHarnessAuth(auth) &&
       (auth.credential.kind !== "access_token" ||
         auth.credential.secretRef.name !==
-          `service-account-${sha256Hex(required(auth.source.id, "ServiceAccount ID"), 32)}` ||
+          this.serviceAccountSecretName(required(auth.source.id, "ServiceAccount ID")) ||
         auth.credential.secretRef.key !== SERVICE_ACCOUNT_TOKEN_KEY)
     ) {
       throw new OwnershipFailure(
@@ -4844,6 +4867,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
       {
         embedded: harness.mode === "embedded",
         channelRuntime: agentSave || this.options.runtime?.gatewayOutbound?.enabled === true,
+        experimentalEmbeddedChannels: this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       callerSettingError,
     );
@@ -5561,6 +5585,11 @@ export class KubernetesComputeDriver implements ComputeDriver {
     });
   }
 
+  private serviceAccountSecretName(serviceAccountId: string): string {
+    // Resource-ID naming only; this does not hash or verify a password.
+    return `service-account-${createHash("sha256").update(serviceAccountId).digest("hex").slice(0, 32)}`;
+  }
+
   async storeServiceAccountCredential(input: {
     readonly namespaceId: string;
     readonly serviceAccountId: string;
@@ -5578,7 +5607,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     this.verifyGatewayNamespace(observed, { namespaceId });
 
-    const name = `service-account-${sha256Hex(serviceAccountId, 32)}`;
+    const name = this.serviceAccountSecretName(serviceAccountId);
     const ownership = { namespaceId, serviceAccountId };
     const existing = await this.getOwned("Secret", name, namespace, ownership);
     if (existing !== undefined) {
@@ -5705,7 +5734,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   > {
     const namespaceId = required(input.namespaceId, "ServiceAccount Namespace ID");
     const serviceAccountId = required(input.serviceAccountId, "ServiceAccount ID");
-    const name = `service-account-${sha256Hex(serviceAccountId, 32)}`;
+    const name = this.serviceAccountSecretName(serviceAccountId);
     const namespace = await this.controlNamespace(namespaceId);
     const tenant = await this.getNamespace(namespace);
     if (tenant === undefined) {
@@ -5756,7 +5785,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         ? undefined
         : required(input.credentialId, "ServiceAccount provider credential ID");
     const exact = accessToken !== undefined || credentialId !== undefined;
-    const name = `service-account-${sha256Hex(serviceAccountId, 32)}`;
+    const name = this.serviceAccountSecretName(serviceAccountId);
     if (input.secretRef.name !== name || input.secretRef.key !== SERVICE_ACCOUNT_TOKEN_KEY) {
       throw new OwnershipFailure("Refusing another ServiceAccount's credential Secret.");
     }
@@ -9292,6 +9321,16 @@ export class KubernetesComputeDriver implements ComputeDriver {
     for (const suffix of ["people", "node", "sandbox", "msteams"]) {
       const name = `${gatewayName}-${suffix}`;
       await this.deleteGatewayRoutingResource("HTTPRoute", name, ownership, namespace, revisionId);
+      if (suffix === "msteams") {
+        await this.deleteGatewayRoutingResource("Service", name, ownership, namespace, revisionId);
+        await this.deleteGatewayRoutingResource(
+          "NetworkPolicy",
+          name,
+          ownership,
+          namespace,
+          revisionId,
+        );
+      }
       await this.deleteGatewayRoutingResource(
         "SecurityPolicy",
         name,
@@ -9310,7 +9349,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   }
 
   private async deleteGatewayRoutingResource(
-    kind: "HTTPRoute" | "SecurityPolicy" | "NetworkPolicy",
+    kind: "HTTPRoute" | "SecurityPolicy" | "NetworkPolicy" | "Service",
     name: string,
     ownership: Ownership,
     namespace: KubernetesNamespaceAddress,
@@ -9343,6 +9382,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
               HTTPRoute: GATEWAY_API_VERSION,
               SecurityPolicy: GATEWAY_SECURITY_POLICY_API_VERSION,
               NetworkPolicy: "networking.k8s.io/v1",
+              Service: "v1",
             }[kind],
             kind,
             metadata: { name, namespace: namespace.name },
@@ -14351,7 +14391,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         await this.reconcile(peopleRoute, ownership, namespace);
       }
     }
-    if (this.options.runtime === undefined || revision.harness.mode !== "dedicated") {
+    if (this.options.runtime === undefined) {
       return;
     }
     if (gateway === undefined) {
@@ -14377,6 +14417,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       gatewayRevisionId,
       gatewayRevision,
     );
+    if (revision.harness.mode !== "dedicated") {
+      return;
+    }
     for (const access of ["node", "sandbox"] as const) {
       const publicRoute = this.gatewayRoute(revision, ownership, namespace, service, access);
       if (publicRoute === undefined) {
@@ -14432,7 +14475,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     const routing = this.options.gatewayRouting!;
     // The serving Deployment, rather than a candidate's configuration, owns this callback.
     if (gateway.metadata.annotations?.["openclaw.dev/msteams-webhook"] !== "true") {
-      for (const kind of ["HTTPRoute", "SecurityPolicy"] as const) {
+      for (const kind of ["HTTPRoute", "Service", "SecurityPolicy", "NetworkPolicy"] as const) {
         const existing = await this.getOwned(kind, name, namespace, ownership);
         const existingRevision = existing?.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION];
         if (existingRevision !== undefined) {
@@ -14473,6 +14516,31 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             ],
           }),
     };
+    const callbackService = this.service(name, ownership, namespace, {
+      "app.kubernetes.io/name": service.metadata.name,
+      "openclaw.dev/workload-role": "gateway",
+      "openclaw.dev/agent": revision.agentId,
+      "openclaw.dev/revision": gatewayRevisionId,
+    });
+    callbackService.metadata.annotations = metadata.annotations;
+    // Keep the callback on the observed serving revision during candidate preparation.
+    const network = this.gatewaySandboxNetworkPolicy(revision, metadata, routing, gateway);
+    network.spec!.ingress = [
+      {
+        from: [
+          this.peer({
+            namespace: routing.envoyNamespace,
+            podLabels: {
+              "gateway.envoyproxy.io/owning-gateway-namespace": routing.gatewayNamespace,
+              "gateway.envoyproxy.io/owning-gateway-name": routing.gatewayName,
+            },
+          }),
+        ],
+        ports: [{ protocol: "TCP", port: this.options.network.gatewayPort }],
+      },
+    ];
+    await this.reconcile(network, ownership, namespace);
+    await this.reconcile(callbackService, ownership, namespace);
     // The native Teams SDK validates Microsoft's JWT. This override removes the
     // inherited OCE API-key policy only from the exact POST callback route.
     await this.reconcile(
@@ -14520,7 +14588,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
                 },
                 this.gatewayRouteHeaderFilter("channel"),
               ],
-              backendRefs: [this.gatewayRouteBackendRef(service)],
+              backendRefs: [this.gatewayRouteBackendRef(callbackService)],
             },
           ],
         },
@@ -15740,6 +15808,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       {
         embedded: revision.harness.mode === "embedded",
         channelRuntime: this.options.runtime?.gatewayOutbound?.enabled === true,
+        experimentalEmbeddedChannels: this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       preparationSettingError,
     );
@@ -17724,7 +17793,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     ownership: Ownership,
     namespace: KubernetesNamespaceAddress,
     selector: Record<string, string>,
-  ): ManagedKubernetesObject {
+  ): ManagedKubernetesObject<"Service"> {
     const runtimeAgentService =
       ownership.servicePrincipalId !== undefined && this.options.runtime !== undefined;
     return {

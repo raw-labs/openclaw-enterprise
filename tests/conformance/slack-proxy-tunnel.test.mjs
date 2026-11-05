@@ -601,7 +601,7 @@ test("a stalled DNS lookup is bounded by the connection deadline", testOptions, 
   });
   assert.match(
     await within(connectThroughProxy(proxy.port, "slack.com:443"), "DNS deadline", 15_000),
-    /^HTTP\/1\.1 502 Bad Gateway/,
+    /^HTTP\/1\.1 504 Gateway Timeout/,
   );
   // A resolver which never calls back must not keep shutdown waiting for this request.
   const closed = new Promise((resolve) => proxy.child.once("close", resolve));
@@ -618,7 +618,7 @@ test("a disconnected client cannot open an upstream when DNS completes", async (
   const client = new net.Socket();
   const closed = new Promise((resolve) => client.once("close", resolve));
   t.after(() => client.destroy());
-  const proxy = createOutboundProxyServer({mode: "restricted", destinations: [{host: "slack.com", includeSubdomains: false}], denyCidrs: []});
+  const proxy = createOutboundProxyServer({policy: {mode: "restricted", destinations: [{host: "slack.com", includeSubdomains: false}], denyCidrs: []}});
   proxy.emit("connect", { url: "slack.com:443" }, client, Buffer.alloc(0));
   assert.equal(typeof resolveLookup, "function");
   client.destroy();

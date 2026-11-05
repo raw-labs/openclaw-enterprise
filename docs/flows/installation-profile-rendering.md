@@ -92,6 +92,8 @@ discovery does not. Runtime credentials remain per Agent.
 
 Closed sections reject unknown fields, including unused readiness flags;
 OpenClaw rejects Codex-only inputs.
+`channels.experimentalEmbeddedChannels` must be boolean; true requires a managed
+or external runtime proxy. Directory-only proxy wiring cannot enable the trial.
 
 Credentials belong to Agent setup. `codex.managedServiceAccounts` renders optional
 managed issuance; preflight does not prove it works.
@@ -105,16 +107,12 @@ slashes, or uppercase. Compute applies the same rule to `gatewayNamespace` and
 and `dns`. NetworkPolicies select peers by Namespace-only
 `kubernetes.io/metadata.name`; invalid names fail preflight.
 
-`buildRendered` requires the literal `sha256` algorithm and 64 lowercase
-hexadecimal characters for `controlPlane.controllerImage`, `runtime.image`, and
-enabled `repository.image`. All three must also pass `imageReferenceProblem`
-(`packages/occ/src/image-reference.ts`), a port of the Kubernetes reference
-parser that Compute, the chart and the image tools share: a reference Kubernetes
-refuses to pull, such as an uppercase repository path, fails, and an IPv6
-registry host passes.
-
-Noncanonical digest casing adds a field-specific diagnostic; the final error
-branch writes only `preflight.json`, leaving no deployable artifacts.
+`controlPlane.controllerImage`, `runtime.image`, and enabled `repository.image`
+require literal `sha256` and 64 lowercase hexadecimal characters. They also pass
+the shared Kubernetes reference parser,
+`packages/occ/src/image-reference.ts:imageReferenceProblem`: uppercase repository
+paths fail; IPv6 registry hosts pass. Noncanonical digests add field-specific
+diagnostics and prevent deployment files.
 
 `controlPlane.clusterName` uses the chart/bootstrap `installation.name` rule:
 1–200 characters, without edge whitespace, control characters, or line/paragraph
@@ -166,11 +164,8 @@ Without CA configuration no restriction applies; omission keeps
 `/etc/openclaw/database-ca`. A collision adds a field-specific error and withholds
 both deployment files. Noncolliding paths retain their supplied spelling.
 
-The Helm values select the control-plane image, Better Auth base URL,
-bootstrap administrator, database and cluster egress CIDRs, API client
-selectors, DNS peer, metrics, native admin, private gateway routing, optional
-ChatGPT Backend mounting, optional logging collector, and optional repository
-credential sidecar. Gateway routing is always enabled. Native admin is enabled
+Helm values wire images, bootstrap, authentication, selected peers, metrics and
+optional integrations. Gateway routing is always enabled. Native admin is enabled
 unless `controlPlane.github`, `controlPlane.google` or `controlPlane.oidc` renders external sign-in
 with `auth.recoveryUserId`, which Helm requires with native admin off. An
 optional `controlPlane.trustedProxy` renders `api.trustedProxy`. Its CIDRs were
@@ -217,10 +212,14 @@ for gateway-to-proxy egress; the chart grants API-to-proxy egress. Repository
 opt-in adds the GitHub Backend, Repo Driver,
 and worker peer expected by the broker sidecar.
 
-The renderer derives the Compute Gateway name the same way Helm does: it
-truncates `<releaseName>-agent-gateways` to 63 characters and removes a trailing
-hyphen. HTTPRoute parent references therefore match the Gateway the chart
-renders.
+An explicit `channels.experimentalEmbeddedChannels` value reaches Compute's
+`runtime.channels` for either proxy path. Omission leaves the default refusal;
+true adds a shared-credential, unsupported-production preflight warning. Agent
+native JSON cannot set this Installation option. Its bytes enter the paired checksum.
+
+Compute's Gateway name matches Helm: `<releaseName>-agent-gateways`, truncated
+to 63 characters with a trailing hyphen removed. HTTPRoute parent references
+therefore select the rendered Gateway.
 
 `presets.includeDefaults` defaults to `true`; `presets.files` adds JSON paths.
 Disabling defaults without files seeds nothing. Rendering validates options;
@@ -311,6 +310,7 @@ activation, and repository registry creation need separate evidence.
 - 2026-11-05 12:40: Adopt upstream Plugin Driver arrays in custom-profile validation and hosted discovery diagnostics. (authoring-run/7b9b79ce-b682-44c2-881a-2fe4aadc6441 - cf6f0ca6389e9fc1e4c85463ce08001ea1464066)
 
 - 2026-11-05 01:10: Preserve input/profile output-file identity checks and validate Codex catalogSource before rendering in the accompanying refresh. (agent:main:dashboard:34871ae5-240f-4f44-b364-50bd21ecedec - 5acf92b89f9053fec747a802e3790822a5b4340d)
+- 2026-11-05 01:49: Retain current provider routing and validation while carrying the trusted embedded channel trial. (authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f - 94346f8101230627f206ed9731f2c32beba27bad)
 
 - 2026-11-03 15:09: Document shared provider routing and separate destination authorization. (authoring-run/4d0e1a9c-b86a-4b59-be3e-d4306d5da9fc - 47e0e95df)
 
@@ -319,6 +319,8 @@ activation, and repository registry creation need separate evidence.
 - 2026-10-19 22:48: Add trusted profile-file overrides, optional default Preset seeding and PluginDriver-based catalog prerequisites. (authoring-run/d45560cc-1312-47a3-bc97-9e85137cdea9 - a0e909fda01709486815fcc113db4229eba646bc)
 
 - 2026-10-18 14:40: Compare database CA mount destinations with Helm. (authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d - bcf4fbcf0)
+
+- 2026-10-15 14:08: Carry the trusted embedded-channel trial through managed and external runtime proxy rendering. (authoring-run/9cd1aeed-6fc1-4268-a37e-df389201d4db - b0fa2a6a177be60ee7f62dede78a7578f8198785)
 
 - 2026-10-13 16:26: Merge current profile validation while retaining hosted discovery DNS snapshots and explicit network policy inputs. (authoring-run/1e1d633d-329d-462f-b077-6cb27c43a6e4 - da72ecf45a0989b857fd7f05d8238a38a979eb64)
 
