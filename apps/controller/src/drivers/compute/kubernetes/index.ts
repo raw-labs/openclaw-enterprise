@@ -3841,6 +3841,15 @@ export class KubernetesComputeDriver implements ComputeDriver {
       }
       if (options.runtime !== undefined) {
         const { transportSecretPrefix, proxy } = options.runtime;
+        if (
+          options.runtime.channels?.experimentalEmbeddedChannels === true &&
+          proxy === undefined
+        ) {
+          throw configurationConstraintFailure(
+            "Experimental embedded channels require a selected Gateway proxy.",
+            "/runtime/channels",
+          );
+        }
         const runtimeProperties = asRecord(
           KubernetesComputeDriver.configurationSchema.properties.runtime.properties,
         );

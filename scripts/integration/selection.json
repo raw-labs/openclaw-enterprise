@@ -4,72 +4,26 @@
   "integrationBranch": "codex/raw-integration",
   "upstream": {
     "repository": "openclaw/openclaw-enterprise",
-    "commit": "9876baa21d9b21fec6a4320369d1738b2de03d44"
+    "commit": "324fbad6f248bce4606e175fbb67ac506cd824ff"
   },
   "batch": {
-    "startingIntegration": "90e30b8c6922732ba456ed102b5c72a79fa84b8c",
+    "startingIntegration": "35ec11e43de7ea2de94354db26b774610ede22d7",
     "steps": [
       {
-        "operation": "Anchor selected upstream ancestry without changing the published tree",
-        "commit": "5c3ec64ad0b31193c16ad3a0e0b046cb14fb4082",
-        "input": "9876baa21d9b21fec6a4320369d1738b2de03d44"
-      },
-      {
-        "operation": "Join validated reconstructed tree to all published integration history without rewriting",
-        "commit": "de333c6bcc1db23ffceeb79b9d48a4f9068daaf7",
-        "input": "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"
-      }
-    ],
-    "retainedUnchanged": []
-  },
-  "reconstruction": {
-    "startingCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
-    "steps": [
-      {
-        "pullRequest": 11,
-        "commit": "73b249ade96c468a1fe88f49c3c16f0f3743ad0a",
-        "input": "8439dcf5938b10bc33aa3da197994c9ba6be5496"
-      },
-      {
-        "pullRequest": 13,
-        "commit": "a81b7e1908fa73221eb6aac19c6cff606e7ed781",
-        "input": "cbf561154c48aef94df1fe2f91661b6122fab49b"
-      },
-      {
-        "pullRequest": 15,
-        "commit": "b7f81e6a718dabc6e729ecfb4acc4a129016c603",
-        "input": "5d2f880367add254241f4bcfb947a29ff581397b"
-      },
-      {
-        "pullRequest": 1,
-        "commit": "7bfdbff85fe4e454153c5d2ad2f7f032e87de631",
-        "input": "41aa9f659be13f1293f3bac30abb9461598ce2f0"
-      },
-      {
-        "pullRequest": 18,
-        "commit": "2cc1c0bcb2be29c291d6f0c86def68cffd62ee36",
+        "operation": "Retire PR18 behavior while preserving published SQL and other selected features",
+        "commit": "580db852ce142be8b54ca4f643fb24aaa729b0bf",
         "input": "dfeb2e3060a5d95718af0f90766e601932ce04fa"
       },
       {
-        "pullRequest": 2,
-        "commit": "fcb4ca1f7c3d271794f9c29b6be71551369d0698",
-        "input": "aaa5c43e7ea6a397b254fd95fa52097b02d45bbb"
-      },
-      {
-        "pullRequest": 17,
-        "commit": "5a27904ebfd18e745d256908a8ac78d8522d23a3",
-        "input": "5d8b402f23d9f010d6646c95796ffd42a13dd0bf"
-      },
-      {
-        "pullRequest": 12,
-        "commit": "6cc9b1ff27cd336da6b1d33fefd0844fdaf1f150",
-        "input": "37fac70dfb784351544189ad07909588b327ef47",
-        "reconciliationBase": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0"
+        "operation": "Merge PR36 exact head and reconcile Teams, embedded trial and canonical persistence",
+        "commit": "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
+        "input": "891b0d704af01e49d3f6a809476383ef2474050b"
       }
     ],
-    "reconciliationCommit": "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818",
-    "historyJoin": "de333c6bcc1db23ffceeb79b9d48a4f9068daaf7",
-    "reason": "Compose from the shared current upstream baseline to avoid stale merge bases concealing refreshed feature code, then join the preserved published history without rewriting it."
+    "preservedMigrationPrefix": {
+      "commit": "35ec11e43de7ea2de94354db26b774610ede22d7",
+      "entryCount": 71
+    }
   },
   "features": [
     {
@@ -165,16 +119,16 @@
       "forkState": "open"
     },
     {
-      "number": 18,
-      "title": "Gateway outbound access",
+      "number": 36,
+      "title": "One bundled or external Gateway outbound proxy",
       "author": "miguelbranco80",
-      "headRef": "codex/gateway-outbound",
-      "commit": "dfeb2e3060a5d95718af0f90766e601932ce04fa",
+      "headRef": "openclaw/delta-claw",
+      "commit": "891b0d704af01e49d3f6a809476383ef2474050b",
       "status": "included",
-      "comparisonBase": "717e8bf2a3ef3fa4d4fa7e53cc6927500533ddbd",
+      "comparisonBase": "324fbad6f248bce4606e175fbb67ac506cd824ff",
       "headRepository": "raw-labs/openclaw-enterprise",
-      "baseRef": "codex/gateway-outbound-upstream-d3ccc5478",
-      "draft": false,
+      "baseRef": "main",
+      "draft": true,
       "forkState": "open"
     }
   ],
@@ -313,27 +267,26 @@
       "notes": "Preserve exact runtime role assignments and use authority alongside first-deployment policy preparation and upstream assigning-session protection."
     },
     {
-      "id": "slack-teams-managed-outbound",
-      "pullRequests": [2, 17, 18],
-      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "id": "slack-teams-shared-gateway-proxy",
+      "pullRequests": [2, 17, 36],
+      "commits": ["82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e"],
       "paths": [
-        "apps/controller/src/composition/channel.ts",
         "apps/controller/src/drivers/channel/index.ts",
         "apps/controller/src/drivers/compute/kubernetes/index.ts",
         "tests/fixtures/teams-attachment-download.mjs"
       ],
-      "notes": "Aggregate both providers through the generic managed revision transport. Preserve guarded native media, trust-marker ownership, exact callback fencing and embedded model endpoint bypass; do not restore shared Slack proxies or legacy Teams file-host lists."
+      "notes": "Keep bundled provider directory dispatch, exact Secret projections, Teams callback validation and trusted embedded opt-in. Native routing uses the operator-selected proxy; provider enablement does not add allowed hosts."
     },
     {
       "id": "embedded-profile-admission",
-      "pullRequests": [11, 17, 18],
-      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "pullRequests": [11, 17, 36],
+      "commits": ["82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e"],
       "paths": [
         "scripts/render-installation-profile.mjs",
         "tests/integration/profile-renderer.test.mjs",
         "docs/guides/integrations/embedded-channel-trial.md"
       ],
-      "notes": "Render the trusted trial flag only at runtime.channels.experimentalEmbeddedChannels, require enabled managed outbound, and retain paired checksums and the shared-credential warning."
+      "notes": "Retain runtime.channels.experimentalEmbeddedChannels and paired profile output. Require a selected native Gateway proxy, not retired per-revision outbound."
     },
     {
       "id": "published-persistence-ledger",
@@ -344,7 +297,7 @@
         "tests/integration/postgres-migration-compatibility.test.mjs",
         "migrations/meta/_canonical-history.json"
       ],
-      "notes": "Preserve all62 published journal entries and SQL bytes; append9 selected-upstream migrations with recorded transformations. PostgreSQL18.6 fresh/repeat and populated prefix upgrades, including published62 to71, passed45 cases locally with no skips."
+      "notes": "Preserve all71 published SQL/journal identities; append0072 to retire per-Agent Gateway outbound state. Raw SQL fresh application through72 passes with migrator role; populated upgrade and application proof pending."
     },
     {
       "id": "teams-console-plugin-admission",
@@ -430,6 +383,13 @@
       "pullRequests": [17, 18],
       "sha256": "c3b47c6e8496b6bbdaafe6e9fe4bbf5a89ff5fa4155afc679da872ea37a2248a",
       "reason": "Allow embedded channelsOnly revision snapshots while retaining dedicated-only additional outbound authority. Existing source migration bytes and integration identities remain unchanged."
+    },
+    {
+      "path": "migrations/0072_installation_gateway_proxy.sql",
+      "commit": "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
+      "pullRequests": [36],
+      "sha256": "c2234ccaab335e36b5bdccd3d32e25168a18f9f205120af98de7715230f075c7",
+      "reason": "Forward retirement of Agent outbound selection and snapshots. No published migration is rewritten."
     }
   ],
   "upstreamMigrationMappings": [
@@ -620,7 +580,73 @@
       "sourceSha256": "583a4a0e52142af9921c7238e478ebe6acbc362bdf0a358df4bc26f1d6fd1a2b"
     }
   ],
-  "qualification": {
+  "retiredFeatures": [
+    {
+      "number": 18,
+      "title": "Gateway outbound access",
+      "author": "miguelbranco80",
+      "headRef": "codex/gateway-outbound",
+      "commit": "dfeb2e3060a5d95718af0f90766e601932ce04fa",
+      "status": "replaced",
+      "comparisonBase": "717e8bf2a3ef3fa4d4fa7e53cc6927500533ddbd",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "codex/gateway-outbound-upstream-d3ccc5478",
+      "draft": false,
+      "forkState": "open",
+      "replacedBy": 36,
+      "reason": "User directed replacement of per-Agent/revision Gateway outbound with one operator-selected native Gateway proxy. Historical migrations retain provenance, not active behavior."
+    }
+  ],
+  "historicalReconstruction": {
+    "startingCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+    "steps": [
+      {
+        "pullRequest": 11,
+        "commit": "73b249ade96c468a1fe88f49c3c16f0f3743ad0a",
+        "input": "8439dcf5938b10bc33aa3da197994c9ba6be5496"
+      },
+      {
+        "pullRequest": 13,
+        "commit": "a81b7e1908fa73221eb6aac19c6cff606e7ed781",
+        "input": "cbf561154c48aef94df1fe2f91661b6122fab49b"
+      },
+      {
+        "pullRequest": 15,
+        "commit": "b7f81e6a718dabc6e729ecfb4acc4a129016c603",
+        "input": "5d2f880367add254241f4bcfb947a29ff581397b"
+      },
+      {
+        "pullRequest": 1,
+        "commit": "7bfdbff85fe4e454153c5d2ad2f7f032e87de631",
+        "input": "41aa9f659be13f1293f3bac30abb9461598ce2f0"
+      },
+      {
+        "pullRequest": 18,
+        "commit": "2cc1c0bcb2be29c291d6f0c86def68cffd62ee36",
+        "input": "dfeb2e3060a5d95718af0f90766e601932ce04fa"
+      },
+      {
+        "pullRequest": 2,
+        "commit": "fcb4ca1f7c3d271794f9c29b6be71551369d0698",
+        "input": "aaa5c43e7ea6a397b254fd95fa52097b02d45bbb"
+      },
+      {
+        "pullRequest": 17,
+        "commit": "5a27904ebfd18e745d256908a8ac78d8522d23a3",
+        "input": "5d8b402f23d9f010d6646c95796ffd42a13dd0bf"
+      },
+      {
+        "pullRequest": 12,
+        "commit": "6cc9b1ff27cd336da6b1d33fefd0844fdaf1f150",
+        "input": "37fac70dfb784351544189ad07909588b327ef47",
+        "reconciliationBase": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0"
+      }
+    ],
+    "reconciliationCommit": "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818",
+    "historyJoin": "de333c6bcc1db23ffceeb79b9d48a4f9068daaf7",
+    "reason": "Compose from the shared current upstream baseline to avoid stale merge bases concealing refreshed feature code, then join the preserved published history without rewriting it."
+  },
+  "previousQualification": {
     "policy": "Qualify the final integration commit with exact-head CI,CodeQL,and allfour native controller/runtime architecture outcomes. Local and source PR checks do not qualify publication or deployment.",
     "previousTestedCommit": "bd1736b0f1e4183c43ab4fc93df82708b2724afb",
     "previousRuns": {
@@ -704,5 +730,20 @@
       },
       "pageLengthReview": "Current references and flows between1500 and2500 visible words retain one coherent contract/lifecycle; repeated history and background removed. No new length allowance."
     }
+  },
+  "qualification": {
+    "policy": "User requested publishing this integration replacement before subsequent combined/runtime testing. Source PRs and fork main remain read-only; this is not a source PR merge or release.",
+    "previousTestedCommit": "35ec11e43de7ea2de94354db26b774610ede22d7",
+    "requiredChecks": [
+      "combined source CI",
+      "CodeQL finding accounting",
+      "native AMD64 and ARM64 image qualification",
+      "disposable real OCE lifecycle and proxy behavior"
+    ],
+    "limits": [
+      "Updated integration not yet real-instance qualified. Existing running test instance remains on35ec11e43.",
+      "Raw SQL fresh migration and two Compute proxy regressions passed locally; these do not prove populated upgrade or model execution.",
+      "No source PR merge, image publication, deployment or existing-instance cleanup performed."
+    ]
   }
 }

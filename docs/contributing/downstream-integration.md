@@ -55,6 +55,10 @@ it from the outstanding selection. Squashed commits require comparing behavior
 and tests; ancestry alone cannot prove equivalence. Remove compatibility code
 only after the selected upstream composition supplies its behavior.
 
+`retiredFeatures` records replaced inputs for historical migration provenance.
+They are not active selections. `historicalReconstruction` preserves the earlier
+composition record without claiming that its retired inputs remain enabled.
+
 Deleting a manifest entry does not remove code. Removing a feature requires an
 explicit behavior change and review of its dependent compatibility work.
 Independently rewritten source history also requires a deliberate replacement,

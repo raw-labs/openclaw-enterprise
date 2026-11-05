@@ -25,6 +25,7 @@ import {
   assertGatewayModelTurn,
   createKubernetesInstallationConfiguration,
   createRealKubernetesFixture,
+  deleteNamespaceExplained,
   kubernetesHash as hash,
   productionGatewayMemoryLimit,
   productionGatewayMemoryLimitGi,
@@ -41,6 +42,7 @@ import {
   OTEL_RESOURCE,
 } from "../helpers/logging-otel-observation.mjs";
 import { assertDedicatedSkillSourceLifecycle } from "./dedicated-skill-source-lifecycle.mjs";
+import { installManagedSlackProxyFixture } from "./managed-slack-proxy-k3d.mjs";
 import { installPublicGithubReadFixture } from "./public-github-read-k3d.mjs";
 
 const kubeconfigPath = process.env.OCC_TEST_KUBERNETES_KUBECONFIG;
