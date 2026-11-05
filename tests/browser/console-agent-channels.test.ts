@@ -47,12 +47,11 @@ import {
   setSlackSelection,
   slackSelectionValue,
   statusTone,
-  trackSettledFetches,
   waitForEnabled,
-  waitForIdleFetches,
   waitForInputValue,
   writeRequests,
-} from "./console-agents-browser-helpers.mjs";
+} from "./console-agents-browser-helpers.ts";
+import { trackSettledFetches, waitForIdleFetches } from "./console-fetch-accounting.ts";
 import {
   ACCESS_TAB_UNAVAILABLE,
   BOUND_SECRET_UNLISTED,
@@ -2671,7 +2670,10 @@ async function teamsDirectorySelection(t: TestContext, browserType: BrowserType)
   await staleEdit.getByLabel("Team ID or link", { exact: true }).fill("19:another@thread.tacv2");
   release();
   await finished;
-  await expectNoText(staleEdit, "Former Team person");
+  await assert.rejects(
+    staleEdit.getByText("Former Team person").waitFor({ state: "visible", timeout: 300 }),
+    /Timeout/,
+  );
   assert.equal(await staleEdit.locator("#msteams-group-users").inputValue(), teamsMemberId);
   assert.equal(
     await staleEdit.getByLabel("Allowed people in these channels", { exact: true }).isDisabled(),
