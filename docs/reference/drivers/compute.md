@@ -68,7 +68,7 @@ the dedicated Harness while Compute retains the gateway and routing.
 
 ## Interface
 
-See the [exported interface](../../../packages/contracts/src/drivers/compute/index.ts).
+See [interface](../../../packages/contracts/src/drivers/compute/index.ts).
 
 ### Properties
 
@@ -166,6 +166,9 @@ Workspace-file access requires this endpoint;
 [Agent native admin UI](../agent-native-admin.md#agent-host-identity) uses
 `getAgentRuntimeAccess`. Kubernetes implements
 [private routes](kubernetes-compute/networking-and-isolation.md#private-agent-gateway-routes).
+
+Gateway access uses optional [admission and withdrawal](../gateway-outbound.md)
+hooks; see the [runtime flow](../../flows/gateway-outbound.md).
 
 ### Optional initial runtime credential provisioning
 
@@ -332,7 +335,7 @@ runtime is ready. The worker records warnings on successful deployment. See
 
 ## Configuration
 
-Select Compute under `drivers.compute` in Installation startup YAML. Restart API and worker after changes.
+Select `drivers.compute` in Installation startup YAML. Restart API and worker after changes.
 
 | Setting         | Type   | Requirement | Value, default, and constraints                                  |
 | --------------- | ------ | ----------- | ---------------------------------------------------------------- |

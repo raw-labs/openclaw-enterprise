@@ -61,6 +61,9 @@ type FixtureScenario = Parameters<typeof createConfigurationStore>[0] &
     };
     pluginDiscoveryCredential?: string;
     agentPermissionSummary?: unknown;
+    gatewayReadOnly?: true;
+    gatewayDisabled?: true;
+    gatewayPublicAllowed?: false;
     nativeAdmin?: string;
     nativeAdminUrl?: string;
     nativeAdminReason?: string;
@@ -794,6 +797,25 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
         const saved = lifecycle.lookupAgent(id);
         if (!saved) {
           return error(404);
+        }
+        if (suffix === "/gateway-outbound/capabilities" && method === "GET") {
+          return response({
+            restricted: scenario.gatewayDisabled !== true,
+            publicHttps:
+              scenario.gatewayDisabled !== true && scenario.gatewayPublicAllowed !== false,
+            canConfigure: scenario.gatewayReadOnly !== true,
+            requirements: scenario.slack
+              ? [
+                  {
+                    source: "slack",
+                    destinations: [
+                      { host: "slack.com", includeSubdomains: true },
+                      { host: "slack-edge.com", includeSubdomains: true },
+                    ],
+                  },
+                ]
+              : [],
+          });
         }
         const policyReply = networkPolicy.serve(id, suffix, method, body, url);
         if (policyReply !== undefined) {

@@ -484,6 +484,12 @@ export const responseExamples = {
   listAgentRepositoryOptions: [repository],
   listAgentStandingApprovalScopes: [],
   listAgentStandingApprovals: [],
+  getAgentGatewayOutboundCapabilities: {
+    restricted: true,
+    publicHttps: false,
+    canConfigure: true,
+    requirements: [],
+  },
   getAgentSandboxPolicy: {
     policy,
     editingEnabled: true,

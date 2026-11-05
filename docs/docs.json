@@ -391,6 +391,10 @@
                             "label": "Networking and Isolation"
                           },
                           {
+                            "page": "reference/gateway-outbound",
+                            "label": "Gateway Outbound"
+                          },
+                          {
                             "page": "reference/drivers/kubernetes-compute/gateway-authentication",
                             "label": "Gateway Authentication"
                           },
@@ -1264,6 +1268,8 @@
               "flows/repository-credentials",
               "flows/repository-credential-configuration",
               "flows/agent-presets",
+              "flows/gateway-outbound",
+              "testing/gateway-outbound",
               "flows/credential-source-egress",
               "reference/sandbox-policies",
               "guides/topics/agent-sandbox-policy",

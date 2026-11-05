@@ -2,6 +2,20 @@ import type { Static } from "typebox";
 import type { HarnessAuthBindingSchema } from "./api/common.ts";
 import type { ComputeAgentProvisioningCapabilities } from "./drivers/compute/index.ts";
 import type { DriverCapability } from "./drivers/index.ts";
+import type { GatewayOutboundSelection, GatewayOutboundSnapshot } from "./gateway-outbound.ts";
+
+export type {
+  GatewayOutboundSelection,
+  GatewayOutboundSnapshot,
+  GatewayOutboundRequirement,
+  GatewayOutboundDestination,
+} from "./gateway-outbound.ts";
+export {
+  validGatewayOutboundSelection,
+  validGatewayOutboundSnapshot,
+  GATEWAY_OUTBOUND_HOST_PATTERN,
+} from "./gateway-outbound.ts";
+
 import type {
   ExecutionAdmission,
   ProtectedEgressSource,
@@ -300,6 +314,7 @@ export interface BackendSummary {
 }
 
 export interface InstallationCapabilities {
+  readonly gatewayOutbound?: { readonly restricted: boolean; readonly publicHttps: boolean };
   /** The API offers native admin configuration during Agent provisioning. */
   readonly nativeAdmin?: true;
   readonly agentProvisioning?: ComputeAgentProvisioningCapabilities;
@@ -1004,6 +1019,7 @@ export interface Agent extends Scope {
   readonly harnessAuth: HarnessAuthBinding | null;
   readonly credentialSources?: readonly AgentCredentialSourceBinding[];
   readonly executionMode: HarnessExecutionMode;
+  readonly gatewayOutbound?: GatewayOutboundSelection;
   /** Desired Gateway administration mode; each deployment snapshots the selected value. */
   readonly gatewayManagedMode: boolean;
   /** Driver that admitted the nonempty plugin selection. */
@@ -1021,6 +1037,7 @@ export interface Agent extends Scope {
 export interface ConfigurationReadError {
   readonly code: "SAVED_CONFIGURATION_UNREADABLE";
   readonly field:
+    | "gatewayOutbound"
     | "plugins"
     | "pluginApprovers"
     | "repositoryBindings"
@@ -1035,6 +1052,7 @@ export interface ConfigurationReadError {
 export type AgentMetadata = Omit<
   Agent,
   | "pluginDriver"
+  | "gatewayOutbound"
   | "plugins"
   | "pluginApprovers"
   | "repositoryBindings"
@@ -1087,6 +1105,7 @@ export interface AgentRevision extends Scope {
   readonly configurationKind: ConfigurationKind;
   readonly configurationGeneration: number;
   readonly configuration: OpenClawConfigurationDocument;
+  readonly gatewayOutbound?: GatewayOutboundSnapshot;
   readonly gatewayManagedMode: boolean;
   readonly harness: RevisionHarnessDescriptor;
   readonly compute: {
@@ -1149,6 +1168,9 @@ export function freezeAgentRevision(revision: AgentRevision): Readonly<AgentRevi
       ? {}
       : { egressPlan: immutableCopy(revision.egressPlan) }),
     configuration: immutableCopy(revision.configuration),
+    ...(revision.gatewayOutbound === undefined
+      ? {}
+      : { gatewayOutbound: immutableCopy(revision.gatewayOutbound) }),
     ...(revision.secretBindings === undefined
       ? {}
       : { secretBindings: immutableCopy(revision.secretBindings) }),

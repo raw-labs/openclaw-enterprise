@@ -333,6 +333,13 @@ async function sourceFiles(directory, extensions) {
 test("the Collector exports every OCC API and worker event the docs name", async () => {
   const pattern = await exportedOccEventPattern();
   const emitted = new Set();
+  // These files emit from separate processes. Runtime wrappers have their own
+  // Collector classification; proxy diagnostics remain local proxy logs.
+  const separateProcessSources = new Set([
+    "apps/controller/src/drivers/compute/kubernetes/runtime-entrypoints.ts",
+    "apps/controller/src/gateway/outbound-proxy.mjs",
+    "apps/controller/src/gateway/control-plane-outbound-proxy.mjs",
+  ]);
   for (const path of [
     ...(await sourceFiles("apps/controller/src", [".ts", ".mjs"])),
     ...(await sourceFiles("packages/occ/src", [".ts"])),
@@ -341,7 +348,8 @@ test("the Collector exports every OCC API and worker event the docs name", async
     // Pods; the Collector classifies those runtime wrapper diagnostics separately.
     if (
       path.endsWith("drivers/compute/kubernetes/runtime-entrypoints.ts") ||
-      path.endsWith("drivers/compute/harness-egress-enrollment.ts")
+      path.endsWith("drivers/compute/harness-egress-enrollment.ts") ||
+      separateProcessSources.has(path)
     ) {
       continue;
     }

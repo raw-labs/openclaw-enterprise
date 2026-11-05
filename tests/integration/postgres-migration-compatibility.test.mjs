@@ -1861,6 +1861,7 @@ async function canonicalData(db) {
       "credential_sources",
       "sandbox_policy_editing",
       "gateway_managed_mode",
+      "gateway_outbound",
     ],
     agent_revisions: ["gateway_managed_mode"],
     controller_work: ["work_kind"],
@@ -2004,6 +2005,7 @@ test(
       [66, "preAgentCredentialSourceLimit"],
       [67, "preAgentPluginDriver"],
       [68, "preRuntimeRoles"],
+      [69, "preGatewayOutbound"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
@@ -2450,6 +2452,7 @@ test(
       [64, "preSelectedRepositorySet"],
       [65, "preAgentDeployIntent"],
       [68, "preRuntimeRoles"],
+      [69, "preGatewayOutbound"],
     ]) {
       void context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -2709,6 +2712,7 @@ test(
       [64, "preSelectedRepositorySet"],
       [65, "preAgentDeployIntent"],
       [68, "preRuntimeRoles"],
+      [69, "preGatewayOutbound"],
     ]) {
       void context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });

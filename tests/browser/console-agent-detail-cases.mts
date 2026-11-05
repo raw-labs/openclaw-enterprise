@@ -1941,6 +1941,7 @@ export function registerSettingsRefocusAndTabsCases(detailApp: ReturnType<typeof
       "Configuration",
       "Plugins",
       "Channels",
+      "Network",
       "Repositories",
       "Credentials",
       "Workspace files",
@@ -1994,6 +1995,8 @@ export function registerSettingsRefocusAndTabsCases(detailApp: ReturnType<typeof
       "Right moves focus only",
     );
     for (const [key, focused] of [
+      ["ArrowRight", "Network"],
+      ["ArrowLeft", "Channels"],
       ["ArrowLeft", "Plugins"],
       ["ArrowLeft", "Configuration"],
       ["ArrowLeft", "Access"],
@@ -2113,16 +2116,43 @@ export function registerSettingsRefocusAndTabsCases(detailApp: ReturnType<typeof
       return strip.hasAttribute("data-more-before");
     });
     assert.deepEqual(await edges(), { before: true, after: false, masked: true });
-    // Include enough desktop width for the additional policy tab to fit without scrolling.
-    await page.setViewportSize({ width: 1800, height: 900 });
+    // Tabs can overflow even on desktop because the content column has a maximum width.
+    // Resize the strip itself to prove the no-overflow state independently of that page layout.
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await strip.evaluate((node) => {
+      const first = node.firstElementChild?.getBoundingClientRect();
+      const last = node.lastElementChild?.getBoundingClientRect();
+      if (!first || !last) {
+        throw new Error("Expected Agent tabs");
+      }
+      node.style.maxWidth = "none";
+      node.style.width = `${Math.ceil(last.right - first.left) + 2}px`;
+    });
     await page.waitForFunction(() => {
       const node = globalThis.document.querySelector(".agent-tabs");
       if (!node) {
-        throw new Error("Expected the Agent tab strip");
+        throw new Error("Expected Agent tab strip");
       }
       return !node.hasAttribute("data-more-before") && !node.hasAttribute("data-more-after");
     });
     assert.equal((await edges()).masked, false, "a strip that fits does not fade");
+    // Chromium rounds scrollWidth/clientWidth to integers. A one-pixel remainder can scroll
+    // left even when every tab fits within that rounding tolerance; neither edge should fade.
+    await strip.evaluate((node) => {
+      node.style.width = "1px";
+      node.style.width = `${node.scrollWidth - 1}px`;
+      node.scrollLeft = node.scrollWidth;
+    });
+    await frames();
+    assert.deepEqual(
+      await strip.evaluate((node) => ({
+        overflow: node.scrollWidth - node.clientWidth,
+        left: node.scrollLeft,
+      })),
+      { overflow: 1, left: 1 },
+      "exercise real browser rounding at the scrollable end",
+    );
+    assert.deepEqual(await edges(), { before: false, after: false, masked: false });
   });
 }
 

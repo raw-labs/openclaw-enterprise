@@ -668,7 +668,10 @@ function resolveModelPolicy(
         throw new ConfigurationHarnessError(refusal);
       }
     }
-    selections.push({ models: selection, entry, key });
+    // An inherited selection without an entry policy was already added with the defaults.
+    if (entry.model !== undefined || entry.models !== undefined) {
+      selections.push({ models: selection, entry, key });
+    }
   }
 
   if (defaults?.models !== undefined && !(draft && primary === undefined)) {

@@ -141,7 +141,8 @@ chmod 600 /secure/occ/candidate-values.yaml /secure/occ/candidate-installation.y
 ```
 
 These copies may change the
-[Slack directory proxy](../integrations/slack.md#configure-both-slack-proxies)
+[control-plane outbound proxy](../../reference/gateway-outbound.md)
+(`api.controlPlaneOutboundProxyUrl`)
 and select the [curated Codex PluginDriver](../../reference/drivers/plugin-bundled.md#selection-and-catalogs).
 An explicit candidate may also wrap an existing single `drivers.plugin`
 registration in a one-element array, preserving its `id` and `configuration`.

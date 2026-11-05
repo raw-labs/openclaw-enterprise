@@ -22,6 +22,7 @@ type StoredAgent = {
   activeRevisionId?: unknown;
   backendId?: unknown;
   executionMode?: unknown;
+  gatewayOutbound?: unknown;
   gatewayManagedMode?: unknown;
   harnessAuth?: unknown;
   credentialSources?: unknown;
@@ -52,6 +53,7 @@ export type CreatedRevision = {
   revision: number;
   backendId: unknown;
   gatewayManagedMode: unknown;
+  gatewayOutbound?: unknown;
   createdAt: string;
   configurationId: string;
   configurationKind: StoredConfiguration["kind"];
@@ -86,6 +88,9 @@ type UnreadableRevision = Pick<
 };
 type StoredRevision = CreatedRevision | UnreadableRevision;
 type LifecycleScenario = Parameters<typeof createAgentRoutes>[0] & {
+  gatewayEmbedded?: true;
+  slack?: true;
+  gatewayOutbound?: import("@openclaw-enterprise/contracts").GatewayOutboundSelection;
   candidateSuperseded?: boolean;
   candidateSelected?: boolean;
   agentId?: string;
@@ -234,7 +239,8 @@ export function createAgentLifecycle(
     status: scenario.deleting ? "deleting" : "active",
     desiredRuntimeState: scenario.stopped ? "stopped" : scenario.deployed ? "running" : "stopped",
     configurationId: config.id,
-    executionMode: "dedicated",
+    executionMode: scenario.gatewayEmbedded ? "embedded" : "dedicated",
+    gatewayOutbound: scenario.gatewayOutbound ?? { mode: "channelsOnly" },
     gatewayManagedMode: true,
     harnessAuth: selectedAuth,
     credentialSources: structuredClone(
@@ -288,6 +294,21 @@ export function createAgentLifecycle(
       revision,
       backendId: owner.backendId ?? null,
       gatewayManagedMode: owner.gatewayManagedMode,
+      gatewayOutbound: {
+        selection: structuredClone(owner.gatewayOutbound ?? { mode: "channelsOnly" }),
+        requirements: scenario.slack
+          ? [
+              {
+                source: "slack",
+                destinations: [
+                  { host: "slack.com", includeSubdomains: true },
+                  { host: "slack-edge.com", includeSubdomains: true },
+                ],
+              },
+            ]
+          : [],
+        denyCidrs: ["10.0.0.0/8"],
+      },
       configurationId: configuration.id,
       configurationKind: configuration.kind,
       configurationGeneration: configuration.generation,

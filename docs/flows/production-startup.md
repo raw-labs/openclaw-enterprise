@@ -49,6 +49,7 @@ graph TD
         O -->|Yes| G["Apply migrations, bootstrap administrators and write protected key output"]
         G --> H["Start private API Deployment"]
         G --> I["Start independent worker Deployment"]
+        G -->|Outbound proxy enabled| V["Start API-only proxy"]
         I --> R{"Repository credentials enabled?"}
         R -->|Yes| S["Sidecar copies protected inputs and starts private control"]
         S --> Q["Sidecar probe gates worker Pod readiness"]
@@ -76,7 +77,7 @@ Migration, bootstrap, API and worker use
 [password or Azure workload-identity authentication](../reference/settings/operations.md#postgresql-connection-authentication).
 Failover, maintenance restart, `idle_session_timeout` or proxy reset discards the
 idle client and logs only its error code to stderr as `database.idle-client-error`.
-The process continues; the next query opens a new connection.
+The next query opens a new connection.
 
 ### 1. Prepare native production inputs
 
@@ -264,18 +265,21 @@ no egress. Operators maintain addresses for
 [MCP tool discovery](../guides/topics/plugins-configure.md#configure-a-hosted-mcp-plugin)
 independently. Console model selection and Harness egress do not depend on these policies.
 
-When `api.channelDirectoryProxyUrl` names an approved HTTP(S) proxy at a
-literal IPv4 address and port, the chart passes it to the API and grants only
-that Pod egress to the proxy's exact `/32` and TCP port. The proxy must permit
-CONNECT to `slack.com:443`. The empty default renders no rule and leaves
-production Slack directory lookup unavailable with manual exact-ID entry.
+`outboundProxy.enabled` starts the proxy.
+`apps/controller/src/gateway/control-plane-outbound-proxy.mjs:controlPlaneOutboundPolicy`
+derives trusted Driver destinations; `runOutboundProxy` rejects private, reserved
+and infrastructure addresses (`denyCidrs`).
+
+Helm sets `OCC_CONTROL_PLANE_OUTBOUND_PROXY_URL` and grants API
+traffic. External `api.controlPlaneOutboundProxyUrl` grants IPv4 `/32` and port.
+[Gateway access](../reference/gateway-outbound.md) remains revision-owned.
 
 The Kubernetes Compute Driver queries the API server version and verifies
 authenticated Namespace access. Below the supported 1.35 baseline, the API logs
 `compute.preflight-warning` with both versions and continues. An invalid version
 response, unreachable API, or failed Namespace access fails preflight.
 
-The worker independently validates production settings, opens the same
+The worker validates production settings, opens the same
 application-role database, loads selected Drivers, validates IAM, runs Compute
 preflight with the same advisory warning, emits `worker.started`, and polls
 durable Namespace/AgentRevision work. Readiness requires fresh queue-health
@@ -357,6 +361,8 @@ until tenant deployment/TUI procedures run.
   administrator/IAM mismatch.
 - Changing an external startup Secret alone does not restart the API or worker;
   run an explicit rollout and repeat readiness plus authenticated proof.
+- `control_plane_outbound_proxy.startup_failed`: inspect proxy ConfigMap exclusions
+  and listener port. Check readiness.
 - `tests/integration/production-kubernetes-packaging.test.mjs` renders the
   chart; it does not prove deployment or model execution.
 - `tests/integration/installation-handoff-k3d-real.test.ts` exercises the CLI with
@@ -405,6 +411,10 @@ until tenant deployment/TUI procedures run.
 
 - 2026-10-30 14:36: Attempt every worker resource close in order after a close fails. (authoring-run/b8400fae-dc1a-49fd-be49-5d07e9dbb899 - 2b3b206b63525e31a6170e239991394b7909fc15)
 
+- 2026-10-14 16:02: Trace accompanying API-only proxy startup. (authoring-run/7bd4f79c-2e3a-40b6-b2e9-5e51b495a8f0 - bd8fe1f7b0b798dca84d6f90b7377ddda79d88a6)
+
+- 2026-10-13: Trace OIDC CA assembly and the database trust preload.
+- 2026-10-11 18:29: Validate database URL Secret keys. (authoring-run/a5a228f3-a952-4e1f-bbba-1a113599bb93 - 19304cadb9a8b8c6473a22b183055ff7b5852e02)
 - 2026-10-30 05:46: Attempt every PostgreSQL API resource close in order and preserve the original error. (authoring-run/3277ff6a-7559-43e6-842d-93513c8dd124 - 60b6beb56d038c012d318cc6249003707c7ec9d5)
 
 - 2026-10-30 03:58: Load the native repository transport only for explicit native delivery. (authoring-run/43b61103-4082-4fc2-b9a0-511a18ebc761 - 87ed6c37e543e5501eae6285450d01d03d8abe7d)

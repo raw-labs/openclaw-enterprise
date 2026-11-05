@@ -84,6 +84,7 @@ export function createNavigation({ getNamespaceId, isLoggingOut, loadPage }: Nav
     "configuration",
     "plugins",
     "channels",
+    "network",
     "repositories",
     "credentials",
     "workspace",

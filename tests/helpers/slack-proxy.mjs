@@ -7,8 +7,8 @@ import { reservedPortArgs, reservePort } from "./available-port.mjs";
 import { temporaryDirectory } from "./temporary-directory.mjs";
 
 /**
- * Starts the bundled Slack proxy (apps/controller/src/slack-proxy.mjs) as a child process and
- * resolves once it logs the port it bound. By default OCC_SLACK_PROXY_PORT is 0; with
+ * Starts the bundled Slack proxy (apps/controller/src/gateway/outbound-proxy.mjs) as a child process and
+ * resolves once it logs the port it bound. By default OCC_OUTBOUND_PROXY_PORT is 0; with
  * `fixedPort` the helper holds a free port with reservePort() until the proxy has bound it,
  * passes it, and requires the proxy to bind exactly that port. Without SO_REUSEPORT the
  * reservation holds nothing and another process can take the port first, so EADDRINUSE picks
@@ -41,18 +41,39 @@ export async function startSlackProxy(
       throw new Error(`Slack proxy exited before listening: ${proxy.stderr()}`);
     }
     if (fixedPort) {
-      assert.equal(proxy.port, port, "the proxy listens on OCC_SLACK_PROXY_PORT");
+      assert.equal(proxy.port, port, "the proxy listens on OCC_OUTBOUND_PROXY_PORT");
     }
     return proxy;
   }
 }
 
 async function spawnSlackProxy(t, preload, port) {
-  const child = spawn(process.execPath, [...preload, "apps/controller/src/slack-proxy.mjs"], {
-    cwd: new URL("../../", import.meta.url),
-    env: { ...process.env, OCC_SLACK_PROXY_PORT: String(port) },
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+  const directory = await temporaryDirectory(t, "oce-outbound-transport-");
+  const policyPath = join(directory, "policy.json");
+  await writeFile(
+    policyPath,
+    JSON.stringify({
+      mode: "restricted",
+      destinations: ["slack.com", "slack-edge.com", "slack-msgs.com"].map((host) => ({
+        host,
+        includeSubdomains: true,
+      })),
+      denyCidrs: [],
+    }),
+  );
+  const child = spawn(
+    process.execPath,
+    [...preload, "apps/controller/src/gateway/outbound-proxy.mjs"],
+    {
+      cwd: new URL("../../", import.meta.url),
+      env: {
+        ...process.env,
+        OCC_OUTBOUND_PROXY_PORT: String(port),
+        OCC_OUTBOUND_PROXY_POLICY_PATH: policyPath,
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
   t.after(() => child.kill());
   let stderr = "";
   child.stderr.setEncoding("utf8");
@@ -62,7 +83,7 @@ async function spawnSlackProxy(t, preload, port) {
     timer = setTimeout(() => reject(new Error(`Slack proxy did not start: ${stderr}`)), 30_000);
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
-      const match = /Slack proxy listening on (\d+)/.exec(stderr);
+      const match = /"event":"outbound_proxy.listening","port":(\d+)/.exec(stderr);
       if (match !== null) {
         resolve(Number(match[1]));
       }
@@ -79,27 +100,19 @@ async function writeDnsFixture(t, upstreamPort, upstreamHosts) {
   const path = join(directory, "dns-fixture.mjs");
   await writeFile(
     path,
-    `import dns from "node:dns";
+    `import dns from "node:dns/promises";
+import { syncBuiltinESMExports } from "node:module";
 const upstreamHosts = new Set(${JSON.stringify(upstreamHosts)});
 const originalLookup = dns.lookup;
-dns.lookup = (hostname, options, callback) => {
-  if (!upstreamHosts.has(hostname)) {
-    return originalLookup(hostname, options, callback);
-  }
-  if (typeof options === "function") {
-    options(null, "127.0.0.1", 4);
-    return;
-  }
-  if (options?.all) {
-    callback(null, [{ address: "127.0.0.1", family: 4 }]);
-    return;
-  }
-  callback(null, "127.0.0.1", 4);
+dns.lookup = async (hostname, options) => {
+  if (!upstreamHosts.has(hostname)) { return originalLookup(hostname, options); }
+  return options?.all ? [{ address: "93.184.216.34", family: 4 }] : { address: "93.184.216.34", family: 4 };
 };
+syncBuiltinESMExports();
 import net from "node:net";
 const originalConnect = net.connect;
 net.connect = (...args) => {
-  if (upstreamHosts.has(args[0]?.host) && args[0]?.port === 443) {
+  if ((upstreamHosts.has(args[0]?.host) || args[0]?.host === "93.184.216.34") && args[0]?.port === 443) {
     return originalConnect({ ...args[0], host: "127.0.0.1", port: ${upstreamPort} }, ...args.slice(1));
   }
   if (typeof args[0]?.host === "string") {

@@ -26,6 +26,7 @@ export function createTestKubernetesComputeDriver(
     // the controller reads Gateway private status and a Dedicated Codex Gateway applies its
     // workspace node at runtime.
     privateStatus = false,
+    gatewayOutbound,
     authentication = { mode: "inCluster" },
     gatewayTrustedProxyCidrs = ["127.0.0.1/32"],
     modelProvider,
@@ -90,7 +91,15 @@ export function createTestKubernetesComputeDriver(
               ...(modelProvider === undefined ? {} : { modelProvider }),
               gatewayStorageClassName: "local-path",
               ...(placed ? { gatewayNodeSelector: { "oce-role": "control" } } : {}),
-              ...(channelRuntime ? { channels: { proxyUrl: "http://10.42.0.15:3128" } } : {}),
+              ...(channelRuntime || gatewayOutbound !== undefined
+                ? {
+                    gatewayOutbound: gatewayOutbound ?? {
+                      enabled: true,
+                      image: "controller:local",
+                      denyCidrs: ["10.0.0.0/8"],
+                    },
+                  }
+                : {}),
             },
           }
         : {}),

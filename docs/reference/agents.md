@@ -8,7 +8,8 @@ Use a [Preset](presets.md) to copy launch settings into an Agent draft.
 
 [Set up an OpenShell Codex Agent](../guides/deploy/local-setup.md), choose
 [Compute](../guides/topics/agent-compute.md), manage
-[versions](../guides/topics/agent-revisions.md), or
+[versions](../guides/topics/agent-revisions.md), approve
+[Gateway outbound](gateway-outbound.md), or
 [troubleshoot deployment](../guides/topics/agent-troubleshoot.md).
 
 Creation saves identity and exact Namespace-owned Configuration with `active`

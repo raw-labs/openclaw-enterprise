@@ -19,8 +19,9 @@ import {
   nonAuthWriteRequests,
   pathRequests,
   waitForCondition,
-  waitForEnabled,
+  waitForInputValue,
   settlePageRequests,
+  waitForEnabled,
   expireSessionsWhenSettled,
 } from "./console-agents-browser-helpers.ts";
 import { trackSettledFetches } from "./console-fetch-accounting.ts";
@@ -36,6 +37,7 @@ import {
   nativeAdminValues,
 } from "./console-agents-test-support.ts";
 import { waitForLiveControls } from "./console-agents-ui-test-support.ts";
+import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import { STOP_REQUESTED, VERSION_READ_DENIED_HEADING } from "../helpers/refusal-text.mjs";
 import {
   registerDeletionAndNavigationCases,
@@ -1412,3 +1414,105 @@ test("Back refreshes sharing when a failed role catalog recovers", async (t) => 
 });
 
 registerSharingCredentialsAndChannelsCases(detailApp);
+
+// Network saves and explicit reloads use the shared editor refresh path. A full page
+// navigation loses the reader's scroll and focus even though the setting was saved.
+test("Network save and reload keep the editor in view with the saved Agent selection", async (t) => {
+  const fixture = await createConsoleAppFixture(t, {
+    channelRuntime: true,
+    gatewayOutbound: {
+      enabled: true,
+      allowPublicHttps: true,
+      image: "controller:local",
+      denyCidrs: ["10.0.0.0/8"],
+    },
+  });
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Network editor refresh", { ready: true });
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Network editor",
+    createHarnessConfiguration("codex", "gpt-5.1"),
+    { executionMode: "dedicated" },
+  );
+  const { page } = await newPage(t, fixture);
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await login(page, fixture, detailUrl(fixture, namespace.id, agent.id, "draft", "network"));
+  const mode = page.getByLabel("Additional Gateway access", { exact: true });
+  const hosts = page.getByLabel("Additional HTTPS hosts", { exact: true });
+  await page.getByRole("tab", { name: "Network", exact: true }).waitFor();
+  const savedStep = page.locator(".agent-draft-actions .checklist > li").first();
+  assert.equal(await savedStep.getAttribute("data-state"), "done");
+  await mode.selectOption("restricted");
+  await hosts.fill("api.example.com");
+  assert.equal(await savedStep.getAttribute("data-state"), "pending");
+  assert.match(await savedStep.textContent(), /Unsaved changes/);
+  await page.getByRole("button", { name: "Save network access", exact: true }).click();
+  await page
+    .getByText("Saved draft: Required channels and selected hosts", { exact: true })
+    .waitFor();
+  await page.waitForFunction(
+    () => !globalThis.document.querySelector("#gateway-outbound-mode").disabled,
+  );
+  assert.equal(await hosts.inputValue(), "api.example.com");
+  assert.equal(await savedStep.getAttribute("data-state"), "done");
+  assert.ok(
+    await page.evaluate(() => globalThis.scrollY > 100),
+    "saving must keep the Network editor in view",
+  );
+  assert.equal(
+    await page.evaluate(() => globalThis.document.activeElement.textContent),
+    "Reload Agent",
+  );
+  const saved = await fixture.request("GET", `/namespaces/${namespace.id}/agents/${agent.id}`);
+  assert.deepEqual(saved.data.gatewayOutbound, { mode: "restricted", hosts: ["api.example.com"] });
+
+  // Explicit reload discards only the unsaved host edit, without leaving the tab.
+  await hosts.fill("discard.example.com");
+  await page.getByRole("button", { name: "Reload Agent", exact: true }).click();
+  await waitForInputValue(hosts, "api.example.com");
+  await page.waitForFunction(
+    () => !globalThis.document.querySelector("#gateway-outbound-mode").disabled,
+  );
+  assert.ok(
+    await page.evaluate(() => globalThis.scrollY > 100),
+    "reloading must keep the Network editor in view",
+  );
+  assert.equal(new URL(page.url()).searchParams.get("tab"), "network");
+
+  // Hold a real successful PATCH response: leaving now would lose its save result.
+  const held = await holdRequests(
+    t,
+    page,
+    `${fixture.origin}/namespaces/${namespace.id}/agents/${agent.id}`,
+    { once: true, method: "PATCH", afterServer: true },
+  );
+  await hosts.fill("pending.example.com");
+  await page.getByRole("button", { name: "Save network access", exact: true }).click();
+  await held.requested;
+  assert.equal(await savedStep.getAttribute("data-state"), "pending");
+  assert.match(await savedStep.textContent(), /Saving…/);
+  const currentUrl = page.url();
+  try {
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("link", { name: "Agents", exact: true })
+      .click();
+    await settlePageRequests(page);
+    assert.equal(
+      page.url(),
+      currentUrl,
+      "sidebar navigation must wait for the Network save result",
+    );
+  } finally {
+    held.release();
+  }
+  await waitForInputValue(hosts, "pending.example.com");
+  await page.getByText("Network access saved.", { exact: true }).waitFor();
+  assert.equal(await savedStep.getAttribute("data-state"), "done");
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Agents", exact: true })
+    .click();
+  await page.waitForURL((url) => url.pathname === "/console/agents");
+});
