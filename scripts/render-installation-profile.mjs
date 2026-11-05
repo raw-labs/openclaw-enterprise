@@ -1658,12 +1658,21 @@ function buildRendered(profile, parsed, diagnostics) {
     diagnostics,
     false,
   );
-  const experimentalEmbeddedChannels = asBoolean(channels, ["channels", "experimentalEmbeddedChannels"], diagnostics, false);
+  const experimentalEmbeddedChannels = asBoolean(
+    channels,
+    ["channels", "experimentalEmbeddedChannels"],
+    diagnostics,
+    false,
+  );
   if (experimentalEmbeddedChannels) {
     if (!gatewayOutboundEnabled) {
-      diagnostics.errors.push("channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled: true.");
+      diagnostics.errors.push(
+        "channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled: true.",
+      );
     }
-    diagnostics.warnings.push("Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.");
+    diagnostics.warnings.push(
+      "Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.",
+    );
   }
   const managedOutboundProxyEnabled = asBoolean(
     controlPlaneOutbound,
@@ -2069,7 +2078,9 @@ function buildRendered(profile, parsed, diagnostics) {
                   ),
                 }
               : {}),
-            ...(channels.experimentalEmbeddedChannels === undefined ? {} : { channels: { experimentalEmbeddedChannels } }),
+            ...(channels.experimentalEmbeddedChannels === undefined
+              ? {}
+              : { channels: { experimentalEmbeddedChannels } }),
             ...(gatewayOutboundEnabled
               ? {
                   gatewayOutbound: {

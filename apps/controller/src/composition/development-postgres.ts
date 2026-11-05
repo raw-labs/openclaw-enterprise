@@ -256,7 +256,11 @@ export async function composePostgresDevelopment(
       {
         ...installationControllerOptions(drivers?.installation),
         state,
-        ...(config.nativeAdmin?.enabled === true ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! } : {}),
+        ...(config.nativeAdmin?.enabled === true
+          ? {
+              nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)!,
+            }
+          : {}),
         channelNetworkRequirements,
         ...(drivers?.tokenService && { preparedTokens: drivers.tokenService }),
         ...(drivers?.pluginSourceReader === undefined

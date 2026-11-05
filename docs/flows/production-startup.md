@@ -8,9 +8,9 @@ last_updated_session: "authoring-run/48787d5f-913a-4fa5-910a-2f9ec35e504a"
 
 ## Overview
 
-Prepare a fresh protected bootstrap PVC and install Helm with approved images,
-PostgreSQL/authentication credentials, trusted Installation YAML and policies.
-After private API/worker readiness, authenticate `/installation` with the service key.
+Install Helm with a fresh protected bootstrap PVC, approved images, PostgreSQL/authentication
+credentials, and trusted Installation YAML/policies. After readiness, authenticate
+`/installation` with the service key.
 
 [Deployment guide](../guides/deploy.md).
 
@@ -191,10 +191,9 @@ human/service administrators, IAM seed, audit evidence, and initial service key.
 Fresh bootstrap creates `default` via `OpenClawController.createNamespace`
 as the bootstrap Principal. Queued reconciliation commits with Installation/IAM
 state and audit. Existing Installations add no Namespace; this is not Kubernetes'
-`default`. The worker provisions Driver-owned infrastructure; operators provide
-tenant RoleBindings. The bootstrap container alone writes protected PVC password/service-key files.
+`default`. Workers provision Driver-owned infrastructure; operators provide tenant RoleBindings. The bootstrap container alone writes protected PVC password/service-key files.
 Existing output, unsafe permissions, or inconsistent accounts/IAM identity fail
-the Job. Helm failure does not imply database-hook rollback.
+the Job. Helm failure does not roll back database hooks.
 
 ### 4. Start private API and worker Deployments
 
@@ -208,10 +207,9 @@ IdP and Gateway roots for `NODE_EXTRA_CA_CERTS`;
 `deploy/helm/openclaw-enterprise/files/check-api-database-ca.mjs` preloads to refuse
 database TLS not pinned to that CA.
 
-After initialization, API readiness requires listener, Better Auth, database,
-Installation YAML, Driver, Backend membership, and Compute preflight validation. Private routes, `/healthz` and
-database-backed `/readyz` use the operator-managed endpoint. The startup probe
-allows 120 one-second failures: two minutes to listen, then readiness within a second.
+API readiness requires listener, authentication, database, Installation/Driver/Backend
+and Compute preflight validation. Private routes, `/healthz` and
+database-backed `/readyz` use the operator-managed endpoint. The startup probe allows 120 one-second failures; readiness then has a one-second deadline.
 The worker's exec probes start Node inside its CPU limit, so each has a 5-second
 timeout; its startup probe allows 24 five-second failures, the same two minutes.
 
@@ -330,8 +328,7 @@ use this marker to bind their OCC endpoint to the selected Installation.
 The quickstart's `docs/snippets/openshell-quickstart/operator-session.sh:upgrade_installation`
 checks Helm's deployed revision and API Pod binding, initializes missing annotations,
 patches using UID/resourceVersion preconditions, and sets `controlPlane.installationChecksum`.
-Agent runtime, Gateway WebSocket authentication and model calls remain unproven
-until tenant deployment/TUI procedures run.
+Tenant deployment/TUI procedures must prove runtime, Gateway authentication and model calls.
 
 ## Debugging and Verification
 

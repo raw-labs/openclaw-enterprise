@@ -67,10 +67,12 @@ async function spawnSlackProxy(t, preload, port, destinations) {
     policyPath,
     JSON.stringify({
       mode: "restricted",
-      destinations: (destinations ?? ["slack.com", "slack-edge.com", "slack-msgs.com"]).map((host) => ({
-        host,
-        includeSubdomains: destinations === undefined,
-      })),
+      destinations: (destinations ?? ["slack.com", "slack-edge.com", "slack-msgs.com"]).map(
+        (host) => ({
+          host,
+          includeSubdomains: destinations === undefined,
+        }),
+      ),
       denyCidrs: [],
     }),
   );

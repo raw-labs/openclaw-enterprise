@@ -350,6 +350,10 @@
                   {
                     "page": "guides/integrations/README",
                     "label": "Overview"
+                  },
+                  {
+                    "page": "guides/integrations/embedded-channel-trial",
+                    "label": "Embedded Channel Trial"
                   }
                 ]
               },
@@ -1284,7 +1288,9 @@
               "flows/credential-source-egress",
               "reference/sandbox-policies",
               "guides/topics/agent-sandbox-policy",
-              "flows/agent-sandbox-policy"
+              "flows/agent-sandbox-policy",
+              "contributing/downstream-integration",
+              "flows/agent-channel-runtime"
             ]
           }
         ]

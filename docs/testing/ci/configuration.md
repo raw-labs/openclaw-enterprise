@@ -28,8 +28,8 @@ the workflow defaults. Select ephemeral Linux runners with sufficient resources,
 enforcing NetworkPolicies for k3d and browser sandbox support.
 `CI_RUNNER_FILE_CONCURRENCY` bounds ordinary CI/advisory test-file concurrency
 from 1 through 32. `CI_SANDBOX_RUNNER` selects `images-runtime-startup` separately;
-otherwise it follows the large-runner selection. Ordinary CI and same-source
-qualification use the same selection.
+`CI_COMPAT_RUNNER` is the fallback for that lane and `postgres-auth`, before
+`CI_LARGE_RUNNER`. Ordinary CI and same-source qualification use the same selection.
 
 On AppArmor hosts, that lane installs the named
 [CI container profile](../../../scripts/ci/codex-bwrap.apparmor), then removes it

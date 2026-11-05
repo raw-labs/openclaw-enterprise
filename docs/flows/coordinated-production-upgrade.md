@@ -8,17 +8,15 @@ last_updated_session: "authoring-run/0f9e4fc6-9649-465a-8ab4-3fc3124417e2"
 
 ## Overview
 
-`scripts/upgrade-production-images` updates the OpenClaw Control Plane (OCC),
-Agent runtimes, or both. Controller-only upgrades stop after API/worker recovery.
-Runtime upgrades redeploy initially running Agents, then check ready Pods and
-read-only Doctor lint.
+`scripts/upgrade-production-images` upgrades OCC, runtimes or both. Controller-only upgrades stop after recovery. Runtime upgrades redeploy initially running
+Agents and check Pod readiness and read-only Doctor lint.
 
 ## Entry Points
 
 - Trigger: run `scripts/upgrade-production-images` with selected images, target,
   release, source revision and protected files.
 - Required: a healthy production Helm release and matching OCC and Kubernetes
-  Installation IDs. Runtime upgrades require complete authorized inventory and no deployment in progress.
+  Installation IDs. Runtime upgrades require authorized inventory and no concurrent deployment.
 - Source: `scripts/upgrade-production-images`,
   `packages/occ/src/index.ts:OpenClawController.getInstallationDeploymentInventory`,
   and `packages/occ/src/index.ts:OpenClawController.deployAgent`.
@@ -62,26 +60,21 @@ graph TD
 
 `scripts/upgrade-production-images:prepare_upgrade`
 
-Before protected reads, evidence writes or cluster access, the helper matches
-`HEAD` to `--source-revision`. It refuses changed/missing/extra stock chart files,
+Before reads, writes or cluster access, the helper verifies `HEAD` equals `--source-revision`. It refuses changed/missing/extra stock chart files,
 symlinks and baseline/evidence aliases inside the chart. Keep the checkout unchanged;
 other edits and image provenance remain unchecked.
 
-Resume binds the evidence directory's canonical path, device and inode; aliases
-share its lock. Any `completed` entry refuses resume before Kubernetes/OCC calls
-or evidence changes. Runtime upgrades also lock the private sibling dispatch
-journal for the frozen fleet. Restoring evidence leaves that journal intact.
+Resume locks the evidence directory by canonical path, device and inode. A `completed`
+entry refuses resume before calls or writes. Runtime upgrades separately lock the
+frozen fleet’s sibling dispatch journal; evidence restoration cannot replace it.
 
-Candidates match [baseline](../guides/deploy/upgrade-baseline.md#record-the-release-and-its-configuration)
-ordered YAML, including images. Validate both before protected-setting projections. `scripts/upgrade-production-images:matches_yaml`
+Candidates match [baseline](../guides/deploy/upgrade-baseline.md#record-the-release-and-its-configuration) YAML, including images. Both are validated before comparison. `scripts/upgrade-production-images:matches_yaml`
 compares checked conversions and exits on unusable inputs or unwritable
 evidence with `Cannot compare upgrade YAML`. Only the control-plane outbound proxy (`api.controlPlaneOutboundProxyUrl`) and
 curated Codex PluginDriver selection may change before image selection. An explicit
 candidate may also wrap the installed single plugin registration in an array.
-The comparison preserves configuration, except for the curated
-catalog choice; it does not rewrite the baseline. Startup checks still validate
-the candidate against the selected controller. Broker
-checks compare references, not ConfigMap or Secret contents.
+Comparison preserves other configuration and never rewrites the baseline. Startup
+checks validate the candidate. Broker checks compare references, not ConfigMap or Secret contents.
 
 Runtime upgrades require complete authorized inventory and baseline versions.
 Nonterminal deployments, missing versions or unready Namespaces stop preparation.

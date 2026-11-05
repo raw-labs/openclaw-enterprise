@@ -25,7 +25,6 @@ import {
   assertGatewayModelTurn,
   createKubernetesInstallationConfiguration,
   createRealKubernetesFixture,
-  deleteNamespaceExplained,
   kubernetesHash as hash,
   productionGatewayMemoryLimit,
   productionGatewayMemoryLimitGi,
@@ -43,7 +42,6 @@ import {
 } from "../helpers/logging-otel-observation.mjs";
 import { assertDedicatedSkillSourceLifecycle } from "./dedicated-skill-source-lifecycle.mjs";
 import { installPublicGithubReadFixture } from "./public-github-read-k3d.mjs";
-import { installManagedSlackProxyFixture } from "./managed-slack-proxy-k3d.mjs";
 
 const kubeconfigPath = process.env.OCC_TEST_KUBERNETES_KUBECONFIG;
 const kubernetesContext = process.env.OCC_TEST_KUBERNETES_CONTEXT;
@@ -1106,7 +1104,7 @@ function nativeConfiguration(harnessId, slack, options = {}) {
   return configuration;
 }
 
-async function captureCommand(command, args, options = {}) {
+async function _captureCommand(command, args, options = {}) {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -1906,6 +1904,7 @@ async function arrangeProductionTopology(testContext, mode, slack, options = {})
       return response;
     };
   }
+  let namespaceId;
   let adminRequest = await requestFactory(credentials);
   let request = adminRequest;
   let secretAssignmentPrincipalId;
@@ -6027,7 +6026,7 @@ async function assertCrossNamespaceSecretBindingDenied(context, topology) {
 
 async function assertMissingBackendSecretBindingFailsBounded(context, topology) {
   const secret = topology.secretApi.missingBackend;
-  const missingValue = topology.secretApi.missingBackendValue;
+  const _missingValue = topology.secretApi.missingBackendValue;
   const missing = await createUndeployedAgent(
     topology.request,
     topology.agent.namespaceId,

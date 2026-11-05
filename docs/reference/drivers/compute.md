@@ -132,8 +132,8 @@ See [interface](../../../packages/contracts/src/drivers/compute/index.ts).
 
 ### Model discovery
 
-For model discovery, OCC checks Agent creation permission in the Namespace.
-The bundled Docker and Kubernetes [model discovery client](../../../apps/controller/src/drivers/compute/model-discovery.ts)
+Model discovery requires Namespace Agent creation permission.
+The [bundled model discovery client](../../../apps/controller/src/drivers/compute/model-discovery.ts)
 uses a 10-second timeout and accepts up to 4 MiB per response, ten pages, and
 10,000 model IDs. It refuses redirects. See [model discovery and API egress](../console/create-and-deploy.md#create-an-agent).
 

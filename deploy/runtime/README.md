@@ -1,33 +1,28 @@
 # Runtime image recipe
 
-Build the OpenClaw Enterprise runtime image for the quickstart and integration tests.
-Entrypoints:
+Build the quickstart and integration runtime image. Entrypoints:
 
 - OpenClaw gateway: `node /app/openclaw.mjs`.
 - Dedicated OpenClaw node: `node /app/openclaw.mjs connect --target-file <private-file> --ephemeral --pair-or-reconnect`.
 - Dedicated Codex app-server: `codex app-server`.
 
-`NPM_CONFIG_UPDATE_NOTIFIER=false` disables npm background version checks; installs
-and explicit requests still follow network policy.
+`NPM_CONFIG_UPDATE_NOTIFIER=false` disables npm background version checks; explicit installs follow network policy.
 
 The Dockerfile builds a verified OpenClaw source archive with its pinned package
 manager, frozen lockfile and upstream assembly.
-For a package registry mirror, supply the separate Corepack and pnpm build
-secrets described in [the image build guide](../../docs/guides/deploy/production-installation.md#build-through-a-package-registry-mirror).
+For registry mirrors, supply Corepack and pnpm build secrets from [the image build guide](../../docs/guides/deploy/production-installation.md#build-through-a-package-registry-mirror).
 Both Codex entrypoints use stock `0.164.0` from the selected source and frozen
 lockfile without downgrades or binary patches. Seccomp rules remain unchanged;
 version admission does not replace native startup and sandbox verification.
-Codex, Slack, and Teams come from that same source. Its restricted workspace-node commands
-and persistent device identity support split storage; published `2026.9.5` packages
-do not contain that complete contract.
+Codex, Slack and Teams share this source. Its workspace-node commands and persistent
+device identity support split storage, unlike published `2026.9.5` packages.
 
 OCE builds an unreleased OpenClaw commit that supports Gateway managed mode
 and the separate tool policy for dedicated Harnesses. Managed mode restricts
 native config writes, Gateway-local terminals and Gateway-hosted command jobs.
 The tool policy limits model turns in both modes. When a child spawns, OpenClaw
 waits for placement started by session creation and rechecks the parent's
-authority before dispatch. The source also preserves shared host-module links
-during plugin capture and handles bundled WebAssembly and directory assets.
+authority before dispatch. Plugin capture preserves shared host-module links, WebAssembly and directory assets.
 Until [OpenClaw #158724](https://github.com/openclaw/openclaw/pull/158724) or
 an equivalent implementation is available upstream, the build applies its
 `readOnlyPaths` compatibility change as
@@ -68,8 +63,7 @@ Gateway tool policy covers core dispatch, automation authority and Codex
 dynamic tools. Older or unknown source images remain unready; source checks
 and configuration validation do not replace runtime qualification.
 
-The Codex adapter preserves namespaced IDs with an explicit native
-provider. For a custom endpoint, OCE compiles its private Gateway model references
+Codex preserves namespaced IDs with an explicit native provider. For a custom endpoint, OCE compiles its private Gateway model references
 to include that provider while keeping the admitted Configuration unchanged.
 See
 [native runtime selection](../../docs/reference/harness-execution.md#native-runtime-selection).

@@ -295,7 +295,7 @@ See [chart defaults](../../../deploy/helm/openclaw-enterprise/values.yaml) for
 credential, runtime-export, and workload isolation boundaries.
 
 The chart rejects obvious malformed quantities such as `foo`, `10MiB`, and
-`1K` in top-level `resources`, `slackProxy.resources`, Collector `resources`,
+`1K` in top-level `resources`, `outboundProxy.resources`, Collector `resources`,
 and Collector volume size limits, with an error naming the setting. It also
 rejects a value with a leading `-` (negative) and resource names Kubernetes
 refuses. Kubernetes remains responsible for complete quantity validation;

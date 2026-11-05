@@ -20209,7 +20209,9 @@ test("retirement preserves active storage and node routing and deletes exact own
           return peopleResources.has(kind) ? structuredClone(peopleResources.get(kind)) : missing();
         }
         if ([`${gatewayName}-node`, `${gatewayName}-msteams`].includes(metadata.name)) {
-          const resource = (metadata.name.endsWith("-node") ? nodeResources : teamsResources).get(kind);
+          const resource = (metadata.name.endsWith("-node") ? nodeResources : teamsResources).get(
+            kind,
+          );
           if (resource === undefined) {
             return missing();
           }
@@ -25000,7 +25002,11 @@ test("an active embedded revision whose stored Gateway tool policy predates the 
 });
 
 test("embedded channels require a trusted boolean and retain native provider selection", () => {
-  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path", gatewayOutbound };
+  const runtime = {
+    transportSecretPrefix: "transport",
+    gatewayStorageClassName: "local-path",
+    gatewayOutbound,
+  };
   const channels = {};
   const embedded = { id: "openclaw", version: "1.0.0", mode: "embedded" };
   const configuration = {

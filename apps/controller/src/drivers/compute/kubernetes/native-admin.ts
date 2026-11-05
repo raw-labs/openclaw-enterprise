@@ -44,7 +44,21 @@ export function configureNativeAdmin(
       "must be a boolean",
     );
   }
-  if (approval?.scopes !== undefined && !isDeepStrictEqual(approval.scopes, ["operator.admin"])) {
+  const approvalScopes = approval?.scopes;
+  if (
+    approvalScopes !== undefined &&
+    (!Array.isArray(approvalScopes) || !approvalScopes.every((scope) => typeof scope === "string"))
+  ) {
+    throw new ComputeGatewaySettingError(
+      "gateway.auth.trustedProxy.deviceAutoApprove.scopes",
+      "must be an array of scopes",
+    );
+  }
+  if (
+    gateway.roles === undefined &&
+    approval?.scopes !== undefined &&
+    !isDeepStrictEqual(approval.scopes, ["operator.admin"])
+  ) {
     throw new ComputeGatewaySettingError(
       "gateway.auth.trustedProxy.deviceAutoApprove.scopes",
       "must grant only operator.admin for native admin access; disable device approval to opt out",
@@ -107,7 +121,10 @@ export function configureNativeAdmin(
           deviceAutoApprove: {
             ...(approval as Values | undefined),
             enabled: true,
-            scopes: ["operator.admin"],
+            scopes:
+              gateway.roles === undefined || approvalScopes === undefined
+                ? ["operator.admin"]
+                : approvalScopes,
           },
         },
       },

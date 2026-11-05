@@ -32,7 +32,16 @@ if (selection.reconstruction) {
     ancestor(step.commit);
     git("merge-base", "--is-ancestor", base, step.commit);
     const parents = git("show", "-s", "--format=%P", step.commit).split(" ");
-    assert.deepEqual(parents, [base, step.input], "Reconstruction must record exact merge parents");
+    assert.equal(parents.length, 2, "Reconstruction steps must be two-parent merges");
+    assert.equal(parents[1], step.input, "Reconstruction must merge the exact selected input");
+    git("merge-base", "--is-ancestor", base, parents[0]);
+    if (parents[0] !== base) {
+      assert.equal(
+        step.reconciliationBase,
+        parents[0],
+        "Record intervening reconciliation explicitly",
+      );
+    }
     const feature = selection.features.find(({ number }) => number === step.pullRequest);
     assert.equal(step.input, feature?.commit);
     base = step.commit;
@@ -89,7 +98,11 @@ for (const mapping of selection.migrationMappings) {
   const feature = selection.features.find(({ number }) => number === mapping.pullRequest);
   const sourceCommit = mapping.sourceCommit ?? feature.commit;
   ancestor(sourceCommit);
-  git("merge-base", "--is-ancestor", sourceCommit, feature.commit);
+  git("merge-base", "--is-ancestor", sourceCommit, mapping.publishedAt ?? feature.commit);
+  if (mapping.publishedAt) {
+    assert.equal(mapping.publishedAt, selection.publishedMigrationPrefix.commit);
+    assert.ok(mapping.reason, "Historical migration provenance needs its preservation reason");
+  }
   const source = execFileSync("git", ["show", `${sourceCommit}:${mapping.source}`]);
   const integrated = readFileSync(mapping.integrated);
   assert.deepEqual(integrated, source, `Migration bytes changed: ${mapping.integrated}`);
@@ -97,7 +110,10 @@ for (const mapping of selection.migrationMappings) {
 }
 for (const mapping of selection.upstreamMigrationMappings ?? []) {
   ancestor(mapping.commit);
-  const source = execFileSync("git", ["show", `${selection.upstream.commit}:${mapping.source}`]);
+  const sourceCommit = mapping.sourceCommit ?? selection.upstream.commit;
+  ancestor(sourceCommit);
+  git("merge-base", "--is-ancestor", sourceCommit, selection.upstream.commit);
+  const source = execFileSync("git", ["show", `${sourceCommit}:${mapping.source}`]);
   const integrated = readFileSync(mapping.integrated);
   if (mapping.sourceSha256) {
     assert.equal(createHash("sha256").update(source).digest("hex"), mapping.sourceSha256);
@@ -152,6 +168,13 @@ if (selection.publishedMigrationPrefix) {
     current.entries.slice(0, prefix.entryCount),
     prior.entries,
     "Published migration journal changed",
+  );
+  // The obsolete public filename is a Drizzle snapshot candidate. Preserve its exact
+  // bytes under an ignored metadata filename, without changing SQL or receipt identity.
+  assert.deepEqual(
+    readFileSync("migrations/meta/_published-canonical-history.json"),
+    execFileSync("git", ["show", `${prefix.commit}:migrations/meta/canonical-history.json`]),
+    "Published canonical history metadata changed",
   );
   for (const entry of prior.entries) {
     const path = `migrations/${entry.tag}.sql`;

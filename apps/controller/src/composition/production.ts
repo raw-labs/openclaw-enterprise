@@ -297,6 +297,11 @@ export async function composeProduction(
       {
         ...installationControllerOptions(config.drivers.installation),
         state,
+        ...(config.nativeAdmin?.enabled === true
+          ? {
+              nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)!,
+            }
+          : {}),
         channelNetworkRequirements,
         ...(config.drivers.tokenService && { preparedTokens: config.drivers.tokenService }),
         ...(config.drivers.pluginSourceReader === undefined

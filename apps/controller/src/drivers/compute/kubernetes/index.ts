@@ -3350,7 +3350,14 @@ export class KubernetesComputeDriver implements ComputeDriver {
     if (input.selection.mode === "channelsOnly" && input.requirements.length === 0) {
       return undefined;
     }
-    if ((input.executionMode !== "dedicated" && !(input.selection.mode === "channelsOnly" && this.options.runtime?.channels?.experimentalEmbeddedChannels === true)) || !this.gatewayOutboundCapabilities.restricted) {
+    if (
+      (input.executionMode !== "dedicated" &&
+        !(
+          input.selection.mode === "channelsOnly" &&
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true
+        )) ||
+      !this.gatewayOutboundCapabilities.restricted
+    ) {
       throw new ResourceConflictError(
         "Gateway requirements need dedicated execution and enabled managed outbound.",
       );
@@ -3860,7 +3867,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
       if (options.runtime !== undefined) {
         const { transportSecretPrefix, gatewayOutbound, channels } = options.runtime;
         if (channels?.experimentalEmbeddedChannels === true && gatewayOutbound?.enabled !== true) {
-          throw configurationConstraintFailure("Experimental embedded channels require enabled managed Gateway outbound.", "/runtime/channels");
+          throw configurationConstraintFailure(
+            "Experimental embedded channels require enabled managed Gateway outbound.",
+            "/runtime/channels",
+          );
         }
         const runtimeProperties = asRecord(
           KubernetesComputeDriver.configurationSchema.properties.runtime.properties,
@@ -4623,7 +4633,13 @@ export class KubernetesComputeDriver implements ComputeDriver {
     const allowUsers = asRecord(
       asRecord(asRecord(configuration.gateway)?.auth)?.trustedProxy,
     )?.allowUsers;
-    if (allowUsers !== undefined && !isDeepStrictEqual(allowUsers, [TRUSTED_PROXY_IDENTITY])) {
+    if (
+      allowUsers !== undefined &&
+      !isDeepStrictEqual(
+        allowUsers,
+        hasRuntimeRoleConfiguration(configuration) ? [] : [TRUSTED_PROXY_IDENTITY],
+      )
+    ) {
       throw new ComputeGatewaySettingError(
         "gateway.auth.trustedProxy.allowUsers",
         `must contain only ${TRUSTED_PROXY_IDENTITY} for native admin access`,
@@ -4895,7 +4911,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
       {
         embedded: harness.mode === "embedded",
         channelRuntime: agentSave || this.options.runtime?.gatewayOutbound?.enabled === true,
-        experimentalEmbeddedChannels: this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
+        experimentalEmbeddedChannels:
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       callerSettingError,
     );
@@ -4987,19 +5004,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     admission = true,
   ): void {
     enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError);
-    const env = asRecord(configuration.env);
-    for (const values of [env, asRecord(env?.vars)]) {
-      if (
-        Object.keys(values ?? {}).some((key) =>
-          /^(?:https?_proxy|all_proxy|no_proxy|node_use_env_proxy)$/i.test(key),
-        )
-      ) {
-        throw callerSettingError(
-          "env",
-          "proxy transport is owned by Kubernetes Compute; use Agent gatewayOutbound",
-        );
-      }
-    }
+    requireChannelProxyEnvironment(configuration, callerSettingError);
 
     requireHarnessCredentialBinding(configuration, callerSettingError, options);
     // Every OpenClaw topology applies the tool policy, embedded too (findings 2688, 2689), and the
@@ -15826,7 +15831,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     await this.deleteOwnedNamespacedResource("ConfigMap", name, ownership, namespace);
   }
 
-  private enabledChannels(revision: Pick<AgentRevision, "configuration" | "harness">): readonly string[] {
+  private enabledChannels(
+    revision: Pick<AgentRevision, "configuration" | "harness">,
+  ): readonly string[] {
     const providers = enabledChannelProviders(
       revision.configuration,
       CHANNEL_PROVIDERS,
@@ -15837,7 +15844,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       {
         embedded: revision.harness.mode === "embedded",
         channelRuntime: this.options.runtime?.gatewayOutbound?.enabled === true,
-        experimentalEmbeddedChannels: this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
+        experimentalEmbeddedChannels:
+          this.options.runtime?.channels?.experimentalEmbeddedChannels === true,
       },
       preparationSettingError,
     );
@@ -15867,7 +15875,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       }
     }
     if (providers.includes("msteams") && this.options.gatewayRouting?.channels === undefined) {
-      throw new ConfigurationFailure("Microsoft Teams requires a dedicated public channel callback listener.");
+      throw new ConfigurationFailure(
+        "Microsoft Teams requires a dedicated public channel callback listener.",
+      );
     }
     return providers;
   }
@@ -17494,6 +17504,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           variables.push(
             { name: "HTTPS_PROXY", value: outboundTransport.proxyUrl },
             { name: "NODE_USE_ENV_PROXY", value: "1" },
+            { name: "OPENCLAW_PROXY_ACTIVE", value: "1" },
             { name: "NO_PROXY", value: noProxy },
           );
         }

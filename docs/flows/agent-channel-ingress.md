@@ -54,7 +54,8 @@ graph TD
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:enabledChannels`
 uses `configuration-rules.ts:enabledChannelProviders` and `requireChannelTopology`
-to require supported providers, a Dedicated workload and a channel proxy.
+to require supported providers and managed Gateway outbound. Embedded workloads
+need the explicit [trial option](../guides/integrations/embedded-channel-trial.md).
 It additionally requires channel routing for enabled Teams. An omitted `webhook.path`, including `webhook: {}`, uses the native
 `/api/messages` default. Non-object webhook values, custom paths, legacy
 listeners and sovereign clouds are refused.
@@ -65,10 +66,9 @@ bindings remain allowed; preparation repeats the requirements.
 `deployment` projects channel Secrets only into the Gateway and records whether
 that serving Deployment owns a Teams callback.
 `configuration-rules.ts:requireChannelProxyEnvironment` refuses Agent-authored
-proxy environment overrides. With an enabled channel, `deployment` supplies the
-selected proxy and, only when `runtime.channels.guardedFetchProxy` is true, the
-native `OPENCLAW_PROXY_ACTIVE=1` trust marker. That marker delegates guarded
-fetch DNS/IP enforcement throughout the Gateway to the reviewed proxy.
+proxy environment overrides. With a frozen outbound plan, `deployment` supplies the revision-owned proxy,
+`NODE_USE_ENV_PROXY` and `OPENCLAW_PROXY_ACTIVE=1`. The marker delegates guarded
+fetch DNS/IP enforcement to that proxy. No caller-owned environment can enable it.
 
 ### 2. Reconcile the serving revision's callback
 
@@ -102,7 +102,7 @@ refuses any nonpublic answer and opens the socket to the validated address.
 One deadline covers DNS and connection; late resolution cannot create a socket
 after cancellation or timeout. TLS remains between the native client and origin.
 Each redirect must pass the proxy policy independently. Proxy access does not
-grant bearer-token forwarding, and the shared proxy's host list is
+grant bearer-token forwarding, and the revision proxy's destination policy is
 Installation-wide.
 
 ### 5. Revoke the endpoint

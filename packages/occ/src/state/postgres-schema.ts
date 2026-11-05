@@ -776,7 +776,7 @@ export const agentRevisions = occSchema.table(
           - 'configuration_id' - 'configuration_kind' - 'configuration_generation'
           - 'draft_spec' - 'harness' - 'compute' - 'sandbox_driver_id' - 'sandbox_policy'
           - 'secret_driver_id' - 'secret_bindings' - 'harness_auth' - 'credential_sources' - 'plugins'
-          - 'plugin_approvers' - 'repository_credentials' - 'gateway_outbound' - 'egress_plan' - 'execution_admission') = '{}'::jsonb
+          - 'plugin_approvers' - 'repository_credentials' - 'egress_plan' - 'execution_admission' - 'gateway_outbound') = '{}'::jsonb
         AND jsonb_typeof(${table.admittedSpec}->'configuration_id') = 'string'
         AND (${table.admittedSpec}->>'configuration_id') ~ ${identifierPatterns.configuration}
         AND jsonb_typeof(${table.admittedSpec}->'configuration_kind') = 'string'
@@ -826,7 +826,6 @@ export const agentRevisions = occSchema.table(
           NOT (${table.admittedSpec} ? 'secret_bindings')
           OR occ.secret_bindings_are_valid(${table.admittedSpec}->'secret_bindings', ${table.namespaceId})
         )
-        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound') AND ${table.admittedSpec} #>> '{harness,mode}' = 'dedicated'))
         AND CASE WHEN jsonb_typeof(${table.admittedSpec}->'harness_auth') = 'object' THEN
           occ.harness_auth_is_valid((${table.admittedSpec}->'harness_auth') - 'protectedExecutionVersion', ${table.namespaceId}, true)
         ELSE false END
@@ -834,6 +833,7 @@ export const agentRevisions = occSchema.table(
           NOT (${table.admittedSpec} ? 'repository_credentials')
           OR occ.repository_credentials_are_valid(${table.admittedSpec}->'repository_credentials')
         )
+        AND (NOT (${table.admittedSpec} ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(${table.admittedSpec}->'gateway_outbound') AND (${table.admittedSpec} #>> '{harness,mode}' = 'dedicated' OR ${table.admittedSpec} #>> '{gateway_outbound,selection,mode}' = 'channelsOnly')))
         AND (
           NOT (${table.admittedSpec} ? 'plugins')
           OR jsonb_typeof(${table.admittedSpec}->'plugins') = 'object'

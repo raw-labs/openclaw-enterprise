@@ -80,7 +80,7 @@ const repository = fileURLToPath(new URL("../../", import.meta.url));
 const controllerRequire = createRequire(
   new URL("../../apps/controller/package.json", import.meta.url),
 );
-const { loadAllYaml, loadYaml } = controllerRequire("@kubernetes/client-node");
+const { loadYaml } = controllerRequire("@kubernetes/client-node");
 const productionExamples = new URL("../../deploy/examples/production/", import.meta.url);
 const helm = process.env.OCC_HELM_BIN ?? "helm";
 const chatgptValues = {
@@ -580,7 +580,6 @@ test("Teams callbacks opt into a separate TLS listener and scoped ingress", tool
     false,
   );
 });
-
 
 test("sandbox ingress uses a separate listener outside OCE cookie scope", tooling, async () => {
   const rendered = await resources((await render(sandboxValues)).stdout);

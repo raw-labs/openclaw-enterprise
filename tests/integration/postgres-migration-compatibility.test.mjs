@@ -279,7 +279,8 @@ test(
     assert.deepEqual(next.slice(0, -1), previous);
     const { tag, when } = next.at(-1);
     const last = previous.at(-1);
-    assert.equal(Number(tag.slice(0, 4)), Number(last.tag.slice(0, 4)) + 1);
+    assert.equal(Number(tag.slice(0, 4)), last.idx + 1);
+    assert.ok(!previous.some((entry) => entry.tag === tag), "The full migration tag must be new");
     assert.ok(when > last.when, "Drizzle must see the next migration as pending");
   },
 );
@@ -2091,8 +2092,8 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "externalchatgpt", { prefix: 56 });
-    const namespaceId = await seedCanonicalData(db);
+    const db = await historyDatabase(context, fixture, "externalchatgpt", { prefix: 59 });
+    const namespaceId = await seedCanonicalData(db, { computeAdmission: true });
     const sourceId = `cs_${randomUUID()}`;
     await db.app.query(
       `INSERT INTO occ.credential_sources(id,namespace_id,name,type,config,driver_id,state,created_at)
@@ -2803,24 +2804,24 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "proxypreview", { prefix: 59 });
+    const db = await historyDatabase(context, fixture, "proxypreview", { prefix: 62 });
     const manifest = JSON.parse(
       await readFile(join(migrationsDirectory, "meta/_canonical-history.json"), "utf8"),
     );
     assert.deepEqual(
-      manifest.entries.slice(58, 63).map(({ tag }) => tag),
+      manifest.entries.slice(61, 66).map(({ tag }) => tag),
       [
-        "0059_administrator_sandbox_policy_grants",
-        "0060_credential_proxy_admission",
-        "0061_repository_credential_authority",
-        "0062_credential_delivery_custody",
-        "0063_prepared_attempt_settlement",
+        "0062_administrator_sandbox_policy_grants",
+        "0063_credential_proxy_admission",
+        "0064_repository_credential_authority",
+        "0065_credential_delivery_custody",
+        "0066_prepared_attempt_settlement",
       ],
     );
     await seedCanonicalData(db, { preset: true, computeAdmission: true });
     const before = await historySnapshot(db);
     const data = await canonicalData(db);
-    assert.equal(before.receipts.length, 59);
+    assert.equal(before.receipts.length, 62);
     assert.deepEqual(await runHistoryMigration(db, "production", "--check"), {
       ok: true,
       history: "preCredentialProxy",
@@ -2856,9 +2857,9 @@ test(
         [preview.slice(start, end), 1787000000060 + start],
       );
       const receipts = await historyReceipts(db.migrator);
-      assert.deepEqual(receipts.slice(0, 59), before.receipts);
+      assert.deepEqual(receipts.slice(0, 62), before.receipts);
       assert.deepEqual(
-        receipts.slice(59).map(({ hash, created_at }) => [hash, Number(created_at)]),
+        receipts.slice(62).map(({ hash, created_at }) => [hash, Number(created_at)]),
         preview.slice(0, end).map((hash, index) => [hash, 1787000000060 + index]),
       );
       await assertHistoryRefused(db, receiptRefusal);
@@ -2885,8 +2886,8 @@ test(
     const upgradedData = await canonicalData(db);
     assert.deepEqual(upgradedData, upgradedCanonicalData(data));
     assert.deepEqual(
-      completed.receipts.slice(59).map(({ hash, created_at }) => [hash, Number(created_at)]),
-      manifest.entries.slice(59).map(({ sha256, when }) => [sha256, when]),
+      completed.receipts.slice(62).map(({ hash, created_at }) => [hash, Number(created_at)]),
+      manifest.entries.slice(62).map(({ sha256, when }) => [sha256, when]),
     );
 
     // A valid first and last receipt cannot vouch for the interior 0061 receipt.
@@ -2939,7 +2940,7 @@ test(
       /catalog objects or effective grants differ for preCredentialProxy/,
     );
     assert.deepEqual(await canonicalData(db), upgradedData);
-    for (const receipt of completed.receipts.slice(59)) {
+    for (const receipt of completed.receipts.slice(62)) {
       await db.migrator.query(
         "INSERT INTO drizzle.__drizzle_migrations(id,hash,created_at) VALUES($1,$2,$3)",
         [receipt.id, receipt.hash, receipt.created_at],
@@ -2986,7 +2987,7 @@ test(
       ["catalog-object", 25, "CREATE TABLE occ.unexplained(id integer)"],
       [
         "draft-pull-privilege",
-        62,
+        64,
         "GRANT DELETE ON occ.prepared_repository_draft_pulls TO occ_app",
       ],
       ["ledger-grant", 25, "GRANT SELECT ON drizzle.__drizzle_migrations TO occ_app"],
@@ -3489,12 +3490,12 @@ test(
     let pool;
     context.after(async () => pool?.end());
     const db = await historyDatabase(context, await migrationHistoryFixture(), "runtime_admin", {
-      prefix: 68,
+      prefix: 53,
     });
     const namespaceId = await seedCanonicalData(db, {
       preset: true,
-      computeAdmission: true,
-      executionAdmission: true,
+      computeAdmission: false,
+      executionAdmission: false,
     });
     const agentId = (
       await db.app.query("SELECT id FROM occ.agents WHERE namespace_id=$1", [namespaceId])
@@ -3629,12 +3630,12 @@ test(
       context,
       await migrationHistoryFixture(),
       "runtime_denied",
-      { prefix: 68 },
+      { prefix: 53 },
     );
     const deniedNamespace = await seedCanonicalData(denied, {
       preset: true,
-      computeAdmission: true,
-      executionAdmission: true,
+      computeAdmission: false,
+      executionAdmission: false,
     });
     await denied.app.query(
       "INSERT INTO occ.iam_identities(id,kind,issuer,subject) VALUES($1,'principal','runtime-upgrade',$1)",

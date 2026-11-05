@@ -1,3 +1,4 @@
+import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:https";
@@ -60,11 +61,20 @@ function nativeAdminHarnessConfiguration(nativeOrigin) {
   return nativeRolesGateway(createHarnessConfiguration("openclaw", "gpt-4.1"), nativeOrigin);
 }
 
-function nativeComputeDriver(upstreamPort, { exclusiveReplacement = false } = {}) {
+function nativeComputeDriver(
+  upstreamPort,
+  { exclusiveReplacement = false, automatic = false } = {},
+) {
+  const preparation = automatic
+    ? createTestKubernetesComputeDriver("native-admin-preparation", { gatewayRuntime: true })
+    : undefined;
   return createReadyComputeDriver("native-admin-compute", {
     // Kubernetes dedicated revisions stop their predecessors before they start.
     ...(exclusiveReplacement ? { requiresStoppedPredecessors: () => true } : {}),
     implementation: "native-admin-test-upstream",
+    ...(preparation === undefined
+      ? {}
+      : { configureAgent: preparation.configureAgent.bind(preparation) }),
     // The HTTPS upstream is no OC Gateway, so this Compute applies no managed mode.
     supportsGatewayManagedMode: undefined,
     validateHarnessAuth() {},
@@ -177,6 +187,7 @@ async function createNativeAdminFixture(t, options = {}) {
     agentGatewayManagedMode: false,
     computeDriver: nativeComputeDriver(upstream.port, {
       exclusiveReplacement: options.exclusiveReplacement,
+      automatic: options.automatic,
     }),
   });
   await fixture.bootstrap("Native admin access test");
@@ -215,11 +226,13 @@ async function createLiveNativeAgent(fixture, namespace, name, options = {}) {
     options.nativeDomain ?? nativeDomain,
     options.publicOrigin ?? publicOrigin,
   );
-  await fixture.updateConfiguration(
-    namespace.id,
-    agent.configurationId,
-    nativeAdminHarnessConfiguration(nativeOrigin),
-  );
+  const configuration = nativeAdminHarnessConfiguration(nativeOrigin);
+  if (options.automatic) {
+    // Reusable role policy enables the UI, but cannot contain the server-allocated origin.
+    delete configuration.gateway.publicOrigin;
+    configuration.gateway.controlUi.allowedOrigins = [];
+  }
+  await fixture.updateConfiguration(namespace.id, agent.configurationId, configuration);
   if (options.deployed === false) {
     return { agent };
   }
@@ -1865,4 +1878,32 @@ test("a browser Back to a denied Agent gateway stays 403 and links to the consol
   assert.match(api.headers["content-type"], /^application\/json/);
   // The JSON refusal names the grant but not the Agent, which the host named, not the caller.
   assert.deepEqual(api.json().error, { code: "FORBIDDEN", message: NATIVE_ADMIN_DENIED });
+});
+
+test("first deployment prepares the exact native UI origin without changing reusable role policy", async (t) => {
+  const { fixture, namespace, agent, revision } = await createNativeAdminFixture(t, {
+    automatic: true,
+  });
+  const origin = nativeOriginForAgent(fixture.controller.installation.id, namespace.id, agent.id);
+  assert.equal(revision.revision, 1);
+  assert.equal(revision.configuration.gateway.publicOrigin, origin);
+  assert.deepEqual(revision.configuration.gateway.controlUi.allowedOrigins, [origin]);
+  assert.deepEqual(revision.configuration.gateway.auth.trustedProxy.deviceAutoApprove.scopes, [
+    "operator.read",
+    "operator.write",
+    "operator.admin",
+  ]);
+  const saved = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/configurations/${agent.configurationId}`,
+  );
+  assert.equal(saved.status, 200);
+  assert.equal(saved.data.values.gateway.publicOrigin, undefined);
+  assert.deepEqual(saved.data.values.gateway.controlUi.allowedOrigins, []);
+  const status = await fixture.request(
+    "GET",
+    `/namespaces/${namespace.id}/agents/${agent.id}/native-admin`,
+  );
+  assert.equal(status.status, 200);
+  assert.equal(status.data.status, "available");
 });

@@ -229,26 +229,28 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 52) {
     return "preComputePreparationFailureEvidence";
   }
-  return {
-  "53": "preRuntimeRoles",
-  "54": "preHeldAuthenticationSession",
-  "55": "preGatewayOutbound",
-  "56": "preEmbeddedChannelOutbound",
-  "57": "preCredentialSourcePat",
-  "58": "preComputeRevisionAdmission",
-  "59": "preCanonicalHarnessAuth",
-  "60": "preSandboxPolicies",
-  "61": "preSandboxPolicyAdministrator",
-  "62": "preCredentialProxy",
-  "63": "preRepositoryCredentialAuthority",
-  "64": "preCredentialDeliveryCustody",
-  "65": "prePreparedAttemptSettlement",
-  "66": "preGatewayManagedMode",
-  "67": "preSelectedRepositorySet",
-  "68": "preAgentDeployIntent",
-  "69": "preAgentCredentialSourceLimit",
-  "70": "preAgentPluginDriver"
-}[count] ?? `migrationCount${count}`;
+  return (
+    {
+      53: "preRuntimeRoles",
+      54: "preHeldAuthenticationSession",
+      55: "preGatewayOutbound",
+      56: "preEmbeddedChannelOutbound",
+      57: "preCredentialSourcePat",
+      58: "preComputeRevisionAdmission",
+      59: "preCanonicalHarnessAuth",
+      60: "preSandboxPolicies",
+      61: "preSandboxPolicyAdministrator",
+      62: "preCredentialProxy",
+      63: "preRepositoryCredentialAuthority",
+      64: "preCredentialDeliveryCustody",
+      65: "prePreparedAttemptSettlement",
+      66: "preGatewayManagedMode",
+      67: "preSelectedRepositorySet",
+      68: "preAgentDeployIntent",
+      69: "preAgentCredentialSourceLimit",
+      70: "preAgentPluginDriver",
+    }[count] ?? `migrationCount${count}`
+  );
 }
 
 async function requireUnambiguousTerminologyData(client) {

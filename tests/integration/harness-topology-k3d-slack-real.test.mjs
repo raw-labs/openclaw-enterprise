@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { verifySingleSlackDelivery } from "../helpers/slack-delivery.mjs";

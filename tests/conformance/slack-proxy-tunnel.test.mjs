@@ -611,14 +611,27 @@ test("a stalled DNS lookup is bounded by the connection deadline", testOptions, 
 
 test("a disconnected client cannot open an upstream when DNS completes", async (t) => {
   let resolveLookup;
-  t.mock.method(dns, "lookup", () => new Promise((resolve) => { resolveLookup = resolve; }));
+  t.mock.method(
+    dns,
+    "lookup",
+    () =>
+      new Promise((resolve) => {
+        resolveLookup = resolve;
+      }),
+  );
   syncBuiltinESMExports();
   t.after(syncBuiltinESMExports);
   t.mock.method(net, "connect", () => assert.fail("late DNS opened an upstream"));
   const client = new net.Socket();
   const closed = new Promise((resolve) => client.once("close", resolve));
   t.after(() => client.destroy());
-  const proxy = createOutboundProxyServer({policy: {mode: "restricted", destinations: [{host: "slack.com", includeSubdomains: false}], denyCidrs: []}});
+  const proxy = createOutboundProxyServer({
+    policy: {
+      mode: "restricted",
+      destinations: [{ host: "slack.com", includeSubdomains: false }],
+      denyCidrs: [],
+    },
+  });
   proxy.emit("connect", { url: "slack.com:443" }, client, Buffer.alloc(0));
   assert.equal(typeof resolveLookup, "function");
   client.destroy();

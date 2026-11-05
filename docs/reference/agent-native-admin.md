@@ -33,19 +33,13 @@ no Agent `administer` permission.
 
 - `agentNativeAdmin.enabled: true` in Helm, which sets `OCC_AGENT_NATIVE_ADMIN_ENABLED=true` on the API and worker.
 - `agentNativeAdmin.domain` set to the Agent host suffix, such as `agents.oce.example.com`, without scheme, wildcard, port, or path. Helm passes it as `OCC_AGENT_NATIVE_ADMIN_DOMAIN`. Use a previously unused DNS suffix for the first pilot rollout; the proxy blocks new service-worker registration but does not evict service workers that a prior experiment registered on the same origin.
-- `agentNativeAdmin.sharedCookieDomain` set to the explicit shared OCE session cookie parent domain, such as `oce.example.com`. Helm passes it as `OCC_AUTH_COOKIE_DOMAIN` when `agentNativeAdmin.enabled` is true. The console host and Agent host suffix must both be inside this parent on DNS-label boundaries. Public suffixes, malformed domains, and DNS-label boundary violations fail closed. Helm has no public suffix list, so it renders a suffix such as `co.uk` or `github.io`; the installation profile renderer refuses it, and so does API startup (`AUTH_BASE_URL_INVALID`). The Agent suffix may equal the cookie domain; OCC excludes its configured Console hostname from native proxy routing.
+- Set `agentNativeAdmin.sharedCookieDomain` to a shared cookie parent containing the Console host and Agent suffix. Helm passes it as `OCC_AUTH_COOKIE_DOMAIN`. Follow [shared-session requirements](authentication.md#native-admin-shared-sessions) for DNS-label boundaries, public suffix rejection, cookie attributes, and disabled-feature behavior.
 - Private gateway routing (enabled by default). [Prepare its prerequisites](../guides/deploy/workspace-routing.md#requirements) before installation. Helm rejects native admin when routing is disabled; the API needs each Agent's private route.
 - `OCC_AUTH_BASE_URL` set to the public OCC origin that serves the console, for example `https://console.oce.example.com`.
-- Better Auth cookie configuration using the shared cookie parent domain while preserving `Secure`, `HttpOnly`, appropriate `SameSite`, CSRF, and trusted-origin protections. A domain-scoped cookie cannot use a host-only `__Host-` prefix. The shared-domain session uses the `openclaw_occ_shared` cookie prefix and clears prior host-only `openclaw_occ` and `openclaw_occ_shared` session-cookie names during sign-in/sign-out migration. When native admin is disabled, OCC ignores leftover shared-cookie-domain configuration and keeps the legacy host-only `openclaw_occ` session cookie scope.
 - The Agent must be running with a selected version owned by the selected Compute Driver: both Driver ID and implementation must match the version. Its `ComputeDriver.getGatewayEndpoint` value must map from private `wss:` to private `https:`.
 - The native Agent configuration must keep the trusted-proxy `occ-workspace-files` identity with `operator.admin`, enable native `controlUi`, allow the derived Agent origin, and enable trusted-proxy device auto-approval. The machine identity grant supplies admin authority; device auto-approval can stay limited to read/write. The support check rejects token auth, disabled device auth, and host-header origin fallback.
 
-The local Compose-control-plane profile enables this capability only when both
-Kubernetes Compute and OpenShell are selected. Its development proxy terminates
-HTTPS on host loopback for the installation's console and wildcard Agent hosts;
-the private Envoy route in k3d still carries OCC-to-gateway traffic. The
-first-Agent helper's `--control-ui` option supplies the exact per-Agent native
-configuration. Other Compose profiles do not expose this browser endpoint.
+For the supported local Kubernetes/OpenShell profile, follow [local native administration](../guides/deploy/native-admin.md#local-development). Other Compose profiles do not expose this browser endpoint.
 
 ## First-deployment configuration
 
@@ -122,7 +116,7 @@ In an already-open Gateway tab, the Control UI offers **Reconnect in browser** i
 
 ## Agent host identity
 
-OCC derives a stable browser host from the Installation ID, Namespace ID, Agent ID, and configured `agentNativeAdmin.domain`. The hostname is opaque and must not be reused for another Agent identity. The derived host is separate from the console origin, which gives each Agent UI its own browser origin.
+OCC derives a stable browser host from the Installation ID, Namespace ID, Agent ID, and configured `agentNativeAdmin.domain`. The hostname is opaque and must not be reused for another Agent identity. Each Agent UI has a separate browser origin.
 
 An Agent URL uses the derived host directly:
 
