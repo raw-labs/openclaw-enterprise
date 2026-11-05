@@ -11691,6 +11691,34 @@ test("native channel providers require Secret bindings and project guarded proxy
     },
   });
 
+  // Installation callback routing must be refused at deploy admission, before
+  // a dedicated redeploy can stop its working predecessor. Draft save still works.
+  const callbackOptions = structuredClone(driver.options);
+  delete callbackOptions.gatewayRouting.channels;
+  const withoutCallback = new KubernetesComputeDriver(callbackOptions, { nodeEnrollment: {} });
+  const teamsConfiguration = {
+    agents: { defaults: { model: "codex/gpt-5" } },
+    channels: { msteams: { enabled: true } },
+  };
+  assert.doesNotThrow(() =>
+    withoutCallback.validateHarnessAuth(
+      revision.harness,
+      revision.harnessAuth,
+      teamsConfiguration,
+      null,
+    ),
+  );
+  assert.throws(
+    () =>
+      withoutCallback.validateHarnessAuth(
+        revision.harness,
+        revision.harnessAuth,
+        teamsConfiguration,
+        secretBindings,
+      ),
+    /Microsoft Teams requires a dedicated public channel callback listener/,
+  );
+
   for (const [channels, expectedSecrets] of [
     [{ slack: {} }, ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]],
     [{ msteams: { enabled: true } }, ["MSTEAMS_APP_PASSWORD"]],

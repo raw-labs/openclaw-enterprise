@@ -4834,6 +4834,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
     this.requirePluginSecretInputs(configuration, topology, secretBindings);
     requireProviderApiKeys(configuration, openclaw, authentication);
     if (!agentSave) {
+      if (stage === "admission") {
+        // Refuse Installation channel requirements before a redeploy stops predecessors.
+        this.enabledChannels({ configuration, harness });
+      }
       this.validateChannelSecretBindings(configuration, secretBindings);
     }
   }
@@ -14964,7 +14968,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     };
   }
 
-  private enabledChannels(revision: AgentRevision): readonly ChannelRequirements[] {
+  private enabledChannels(
+    revision: Pick<AgentRevision, "configuration" | "harness">,
+  ): readonly ChannelRequirements[] {
     const providers = enabledChannelProviders(
       revision.configuration,
       CHANNEL_PROVIDERS,

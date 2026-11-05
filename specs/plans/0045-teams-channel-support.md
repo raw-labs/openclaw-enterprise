@@ -44,7 +44,43 @@ including denied requests and lifecycle cutover/cleanup. A missing test tenant
 or public endpoint leaves those checks pending and keeps the PR in draft.
 Synthetic SDK rejection and fixture Kubernetes tests cannot replace that proof.
 
-## Local verification record
+## Current refresh and admission repair (2026-11-05)
+
+The source refresh merges upstream `b891554203643c769f19d71860d03382bb9717bc`
+without rewriting published history. It retains the typed Console owners,
+serving-revision routing and current runtime source pin. Refresh commit
+`24ce51f702664d3f3fc450bb9b1b7c563664e267` records the initial delivery.
+
+The follow-up checks Teams callback routing at deployment admission, before a
+worker can stop a predecessor. Draft save remains allowed. The existing native
+channel Compute case fails before this repair with a missing expected exception;
+the full repaired Compute suite passes 405/405 without skips. The supported real
+PostgreSQL/K3d provisioning file passes 2/2 without skips, including refusal of
+Teams with missing Installation callback routing through the actual API's
+409 conflict contract, before provisioning admission. Its public message is
+intentionally generic. The initial assertion expected a private Driver diagnostic
+and was corrected to the existing public contract.
+
+An attempted additional callback-Pod case lacked Gateway API/Envoy CRDs in this
+fixture lane and was removed in favor of extending the existing supported case.
+These results do not prove live public callback delivery or preservation of a
+serving callback Pod in this PR's fixture run.
+
+Initial refresh evidence remains recorded in the PR: actual Chromium/WebKit
+channel browser checks 41/41; directory/runtime assets 26/26; API compatibility
+2/2; native image build checks 35 plus 99 Control UI cases and both type graphs;
+selected native Teams SDK rejection/guarded-media checks 2/2. The broad
+Compute/proxy/Helm run passed 529/530, then the repaired affected fixture passed
+1/1, not a single all-green 530-case run. The
+[Console gallery](https://gist.github.com/miguelbranco80/00cb9c549d8533c31eeb77935a9687e1)
+contains 14 states and a 21.44-second interaction recording using simulated state.
+Console and native image inputs are unchanged by this admission repair.
+
+Final refreshed-diff independent review remains pending. Exact-final-head native
+qualification on both architectures, approved live Teams messages/attachments,
+production public Envoy ingress and required CI remain before-merge holds.
+
+## Original local verification record
 
 On 2026-10-06, the regular console/API channel suite passed all 16 cases,
 including authorized Teams password binding and retained independent access

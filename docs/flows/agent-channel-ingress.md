@@ -1,7 +1,7 @@
 ---
 created: "2026-10-06"
 updated: "2026-11-05"
-last_updated_session: "authoring-run/eb325c8c-65eb-4385-a7c0-21c2839e6da6"
+last_updated_session: "authoring-run/d608e15a-be6e-41e1-8b09-5470f5abc4bc"
 ---
 
 # Agent channel callback flow
@@ -28,6 +28,9 @@ Slack Socket Mode uses an outbound connection and does not enter this flow.
 
 ```mermaid
 graph TD
+  I["Deploy request"] --> V["Compute checks channel prerequisites"]
+  V -->|"Missing callback routing"| E["Refuse before deployment work"]
+  V -->|"Admitted"| D
   D["Serving Gateway Deployment"] --> R["Compute-owned exact callback route"]
   M["Microsoft activity and bearer token"] --> L["Public channels HTTPS listener"]
   L --> R
@@ -55,6 +58,9 @@ to require supported providers, a Dedicated workload and a channel proxy.
 It additionally requires channel routing for enabled Teams. An omitted `webhook.path`, including `webhook: {}`, uses the native
 `/api/messages` default. Non-object webhook values, custom paths, legacy
 listeners and sovereign clouds are refused.
+`validateHarnessAuth` invokes these requirements during deployment admission,
+before the worker can stop a predecessor. Draft Agent saves with no resolved
+bindings remain allowed; preparation repeats the requirements.
 `validateChannelSecretBindings` requires matching admitted bindings.
 `deployment` projects channel Secrets only into the Gateway and records whether
 that serving Deployment owns a Teams callback.
@@ -131,6 +137,8 @@ by the serving revision.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-05 03:21: Document early channel prerequisite refusal before deployment work in the accompanying change. (authoring-run/d608e15a-be6e-41e1-8b09-5470f5abc4bc - 24ce51f702664d3f3fc450bb9b1b7c563664e267)
 
 - 2026-11-05 00:21: Refresh callback, provider transport, and typed Console owners against pinned upstream in the accompanying uncommitted merge. (authoring-run/eb325c8c-65eb-4385-a7c0-21c2839e6da6 - 93c1dc4f24b9f544b26a451b71a0cfeff34be4fc)
 

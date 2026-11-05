@@ -779,6 +779,33 @@ test(
       assert.ok(denied.body.error.message.includes(setting));
       assert.equal(denied.data, undefined);
     }
+    // An Installation without callback routing must refuse Teams at API admission,
+    // before provisioning creates an Agent or hands deployment to a worker.
+    const teams = structuredClone(body);
+    teams.configuration.values.channels = {
+      msteams: {
+        enabled: true,
+        appId: "00000000-0000-4000-8000-000000000001",
+        tenantId: "00000000-0000-4000-8000-000000000002",
+        appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+      },
+    };
+    teams.configuration.secretBindings = {
+      MSTEAMS_APP_PASSWORD: { source: slackBotSecret.data.ref, delivery: { type: "env" } },
+    };
+    const missingCallback = await fixture.request(
+      "POST",
+      `/namespaces/${namespaceOwner.id}/agents/provision`,
+      teams,
+    );
+    assert.equal(missingCallback.status, 409, JSON.stringify(missingCallback.body));
+    assert.equal(missingCallback.error.code, "RESOURCE_CONFLICT");
+    // Provisioning intentionally keeps Driver details out of the public diagnostic.
+    assert.equal(
+      missingCallback.error.message,
+      "The configured model, authentication, or channel bindings cannot be provisioned.",
+    );
+    assert.equal(missingCallback.data, undefined);
     const admitted = await fixture.request(
       "POST",
       `/namespaces/${namespaceOwner.id}/agents/provision`,
