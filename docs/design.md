@@ -5,6 +5,8 @@ authors:
 created: 2026-07-08
 last_updated: 2026-10-26
 tags: [human_verified]
+# Backfilled from the verification tag recorded in f90fbc2ef.
+last_verified: "2026-10-26"
 ---
 
 # OpenClaw Enterprise architecture
@@ -84,7 +86,7 @@ are implemented. Single-cluster Kubernetes execution places Gateway and Harness 
 namespace with separate Pods, identities and storage. External access-gateway admission, workload
 token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental.
-The [embedded-channel trial](../specs/rfcs/0029-temporary-embedded-channel-trial.md)
+The [embedded-channel trial](../specs/rfcs/0030-temporary-embedded-channel-trial.md)
 is a proposed, default-off evaluation exception to channel credential separation;
 it is unsupported for production and does not change the regular architecture.
 
