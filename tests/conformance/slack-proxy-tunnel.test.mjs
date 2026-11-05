@@ -147,6 +147,11 @@ test(
 async function heldClientTunnel(t, upstreamPort) {
   const created = Promise.withResolvers();
   const connect = net.connect;
+  // DNS supplies a public destination. Only its socket transport is redirected locally;
+  // production still has to validate the answer and connect to that numeric address.
+  t.mock.method(dns, "lookup", (_host, _options, callback) => {
+    callback(null, [{ address: "93.184.216.34", family: 4 }]);
+  });
   let upstreamSocket;
   const connector = t.mock.method(net, "connect", (options, ...rest) => {
     upstreamSocket = connect({ ...options, host: "127.0.0.1", port: upstreamPort }, ...rest);
@@ -452,4 +457,172 @@ test("the CONNECT allowlist matches whole Slack host names on port 443", testOpt
       target,
     );
   }
+});
+
+test(
+  "Teams destination policy is opt-in and limited to exact Public cloud hosts",
+  testOptions,
+  async (t) => {
+    const defaultProxy = await startSlackProxy(t);
+    assert.match(
+      await connectThroughProxy(defaultProxy.port, "login.microsoftonline.com:443"),
+      /^HTTP\/1\.1 403 Forbidden/,
+    );
+    const upstream = await listen(t, (socket) => socket.end("provider-tunnel-reply"));
+    // Redirect only the provider transport to loopback; authorization still runs
+    // in the actual proxy process. This does not prove Microsoft connectivity.
+    const teamsProxy = await startSlackProxy(t, {
+      destinations: ["login.microsoftonline.com", "smba.trafficmanager.net"],
+      upstreamPort: upstream.address().port,
+      upstreamHosts: ["smba.trafficmanager.net"],
+    });
+    const tunnel = await openTunnel(t, teamsProxy.port, "smba.trafficmanager.net:443");
+    assert.match(tunnel.head, established);
+    for (const target of [
+      "smba.trafficmanager.net:80",
+      "login.microsoftonline.com.evil.test:443",
+      "arbitrary.microsoft.com:443",
+      "127.0.0.1:443",
+    ]) {
+      assert.match(await connectThroughProxy(teamsProxy.port, target), /^HTTP\/1\.1 403 Forbidden/);
+    }
+  },
+);
+
+test("Teams file access admits only configured exact storage hosts", testOptions, async (t) => {
+  const hosts = [
+    "tenant.sharepoint.com",
+    "tenant.sharepoint-df.com",
+    "files.1drv.com",
+    "files.onedrive.com",
+    "files.blob.core.windows.net",
+    ...Array.from({ length: 27 }, (_, index) => `tenant${index}.sharepoint.com`),
+  ];
+  const upstream = await listen(t, (socket) => socket.end("file-tunnel"));
+  const proxy = await startSlackProxy(t, {
+    destinations: hosts,
+    upstreamPort: upstream.address().port,
+    upstreamHosts: hosts,
+  });
+  // The fixture rejects hostname connections: successful tunnels also prove that
+  // production connects to the approved DNS address rather than resolving again.
+  for (const host of hosts) {
+    const tunnel = await openTunnel(t, proxy.port, `${host}:443`);
+    assert.match(tunnel.head, established);
+    await within(tunnel.closed, "file tunnel close");
+    assert.equal(tunnel.body().toString(), "file-tunnel");
+  }
+  for (const target of [
+    "neighbor.sharepoint.com:443",
+    "child.tenant.sharepoint.com:443",
+    "tenant.sharepoint.com.evil.test:443",
+    "tenant.sharepoint.com:80",
+    "sharepoint.com:443",
+  ]) {
+    assert.match(await connectThroughProxy(proxy.port, target), /^HTTP\/1\.1 403 Forbidden/);
+  }
+  const disabled = await startSlackProxy(t);
+  assert.match(
+    await connectThroughProxy(disabled.port, "tenant.sharepoint.com:443"),
+    /^HTTP\/1\.1 403 Forbidden/,
+  );
+});
+
+test(
+  "allowed names resolving to private, reserved, mixed, or IPv6 addresses cannot open tunnels",
+  testOptions,
+  async (t) => {
+    const upstream = await listen(t, () =>
+      assert.fail("a rejected DNS answer reached the upstream"),
+    );
+    for (const addresses of [
+      [{ address: "127.0.0.1", family: 4 }],
+      [{ address: "10.2.3.4", family: 4 }],
+      [{ address: "100.64.0.1", family: 4 }],
+      [{ address: "169.254.169.254", family: 4 }],
+      [{ address: "172.16.0.1", family: 4 }],
+      [{ address: "192.168.0.1", family: 4 }],
+      [{ address: "192.0.2.1", family: 4 }],
+      [{ address: "198.18.0.1", family: 4 }],
+      [{ address: "198.51.100.1", family: 4 }],
+      [{ address: "203.0.113.1", family: 4 }],
+      [{ address: "224.0.0.1", family: 4 }],
+      [{ address: "240.0.0.1", family: 4 }],
+      [{ address: "0.0.0.1", family: 4 }],
+      [{ address: "192.0.0.1", family: 4 }],
+      [{ address: "2606:4700:4700::1111", family: 6 }],
+      [{ address: "::ffff:127.0.0.1", family: 6 }],
+      [
+        { address: "93.184.216.34", family: 4 },
+        { address: "10.0.0.1", family: 4 },
+      ],
+    ]) {
+      const proxy = await startSlackProxy(t, {
+        upstreamPort: upstream.address().port,
+        dnsAnswers: { "slack.com": addresses },
+      });
+      assert.match(
+        await connectThroughProxy(proxy.port, "slack.com:443"),
+        /^HTTP\/1\.1 403 Forbidden/,
+      );
+      assert.equal(proxy.child.exitCode, null, proxy.stderr());
+    }
+  },
+);
+
+test(
+  "failed or empty DNS answers return 502 without stopping the proxy",
+  testOptions,
+  async (t) => {
+    const upstream = await listen(t, () => assert.fail("a failed lookup reached the upstream"));
+    for (const answer of ["failure", []]) {
+      const proxy = await startSlackProxy(t, {
+        upstreamPort: upstream.address().port,
+        dnsAnswers: { "slack.com": answer },
+      });
+      assert.match(
+        await connectThroughProxy(proxy.port, "slack.com:443"),
+        /^HTTP\/1\.1 502 Bad Gateway/,
+      );
+      assert.match(
+        await connectThroughProxy(proxy.port, "127.0.0.1:443"),
+        /^HTTP\/1\.1 403 Forbidden/,
+      );
+      assert.equal(proxy.child.exitCode, null, proxy.stderr());
+    }
+  },
+);
+
+test("a stalled DNS lookup is bounded by the connection deadline", testOptions, async (t) => {
+  const upstream = await listen(t, () => assert.fail("a stalled lookup reached the upstream"));
+  const proxy = await startSlackProxy(t, {
+    upstreamPort: upstream.address().port,
+    dnsAnswers: { "slack.com": "pending" },
+  });
+  assert.match(
+    await within(connectThroughProxy(proxy.port, "slack.com:443"), "DNS deadline", 15_000),
+    /^HTTP\/1\.1 502 Bad Gateway/,
+  );
+  // A resolver which never calls back must not keep shutdown waiting for this request.
+  const closed = new Promise((resolve) => proxy.child.once("close", resolve));
+  proxy.child.kill();
+  assert.equal(await within(closed, "proxy shutdown"), 0);
+});
+
+test("a disconnected client cannot open an upstream when DNS completes", async (t) => {
+  let resolveLookup;
+  t.mock.method(dns, "lookup", () => new Promise((resolve) => { resolveLookup = resolve; }));
+  syncBuiltinESMExports();
+  t.after(syncBuiltinESMExports);
+  t.mock.method(net, "connect", () => assert.fail("late DNS opened an upstream"));
+  const client = new net.Socket();
+  const closed = new Promise((resolve) => client.once("close", resolve));
+  t.after(() => client.destroy());
+  const proxy = createOutboundProxyServer({mode: "restricted", destinations: [{host: "slack.com", includeSubdomains: false}], denyCidrs: []});
+  proxy.emit("connect", { url: "slack.com:443" }, client, Buffer.alloc(0));
+  assert.equal(typeof resolveLookup, "function");
+  client.destroy();
+  await closed;
+  resolveLookup([{ address: "93.184.216.34", family: 4 }]);
+  await nextTurn();
 });

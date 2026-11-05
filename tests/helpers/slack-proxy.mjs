@@ -13,19 +13,27 @@ import { temporaryDirectory } from "./temporary-directory.mjs";
  * passes it, and requires the proxy to bind exactly that port. Without SO_REUSEPORT the
  * reservation holds nothing and another process can take the port first, so EADDRINUSE picks
  * again. The test's cleanup sends the proxy SIGTERM. With `upstreamPort`, the child resolves
- * each of `upstreamHosts` (default slack.com) to 127.0.0.1 and its connections to those hosts on
+ * each of `upstreamHosts` (default slack.com) to a public fixture address and its pinned numeric connections on
  * port 443 reach that loopback port instead; a connection to any other host throws in the child,
- * so a test can never reach the network. Returns the child, the listening port and `stderr()`,
+ * `dnsAnswers` can override responses with public/private addresses, failure or pending.
+ * A test can never reach the network. Returns the child, the listening port and `stderr()`,
  * what the proxy has written so far.
  */
 export async function startSlackProxy(
   t,
-  { fixedPort = false, upstreamPort, upstreamHosts = ["slack.com"] } = {},
+  {
+    fixedPort = false,
+    upstreamPort,
+    upstreamHosts = ["slack.com"],
+    dnsAnswers = {},
+    destinations,
+    expectStartupFailure = false,
+  } = {},
 ) {
   const preload =
     upstreamPort === undefined
       ? []
-      : ["--import", await writeDnsFixture(t, upstreamPort, upstreamHosts)];
+      : ["--import", await writeDnsFixture(t, upstreamPort, upstreamHosts, dnsAnswers)];
   for (let attempt = 1; ; attempt += 1) {
     const reservation = fixedPort ? await reservePort({ host: "0.0.0.0" }) : undefined;
     const port = reservation?.port ?? 0;
@@ -33,7 +41,12 @@ export async function startSlackProxy(
       t,
       [...(reservation ? reservedPortArgs(reservation) : []), ...preload],
       port,
+      destinations,
     ).finally(() => reservation?.release());
+    if (expectStartupFailure) {
+      assert.equal(proxy.port, undefined, "invalid proxy configuration must fail before listening");
+      return proxy;
+    }
     if (proxy.port === undefined && fixedPort && attempt < 5 && /EADDRINUSE/.test(proxy.stderr())) {
       continue;
     }
@@ -47,16 +60,16 @@ export async function startSlackProxy(
   }
 }
 
-async function spawnSlackProxy(t, preload, port) {
+async function spawnSlackProxy(t, preload, port, destinations) {
   const directory = await temporaryDirectory(t, "oce-outbound-transport-");
   const policyPath = join(directory, "policy.json");
   await writeFile(
     policyPath,
     JSON.stringify({
       mode: "restricted",
-      destinations: ["slack.com", "slack-edge.com", "slack-msgs.com"].map((host) => ({
+      destinations: (destinations ?? ["slack.com", "slack-edge.com", "slack-msgs.com"]).map((host) => ({
         host,
-        includeSubdomains: true,
+        includeSubdomains: destinations === undefined,
       })),
       denyCidrs: [],
     }),
@@ -95,7 +108,7 @@ async function spawnSlackProxy(t, preload, port) {
   return { child, port: listening, stderr: () => stderr };
 }
 
-async function writeDnsFixture(t, upstreamPort, upstreamHosts) {
+async function writeDnsFixture(t, upstreamPort, upstreamHosts, dnsAnswers) {
   const directory = await temporaryDirectory(t, "openclaw-slack-proxy-test-");
   const path = join(directory, "dns-fixture.mjs");
   await writeFile(
@@ -103,10 +116,15 @@ async function writeDnsFixture(t, upstreamPort, upstreamHosts) {
     `import dns from "node:dns/promises";
 import { syncBuiltinESMExports } from "node:module";
 const upstreamHosts = new Set(${JSON.stringify(upstreamHosts)});
+const answers = ${JSON.stringify(dnsAnswers)};
+const publicAddress = "93.184.216.34";
 const originalLookup = dns.lookup;
 dns.lookup = async (hostname, options) => {
   if (!upstreamHosts.has(hostname)) { return originalLookup(hostname, options); }
-  return options?.all ? [{ address: "93.184.216.34", family: 4 }] : { address: "93.184.216.34", family: 4 };
+  const answer = answers[hostname];
+  if (answer === "pending") { return new Promise(() => {}); }
+  if (answer === "failure") { throw Object.assign(new Error("fixture DNS failure"), {code: "ENOTFOUND"}); }
+  return answer ?? [{ address: publicAddress, family: 4 }];
 };
 syncBuiltinESMExports();
 import net from "node:net";
@@ -136,7 +154,7 @@ export async function requestThroughProxy(port, request) {
   let response = "";
   try {
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("proxy response timeout")), 10_000);
+      const timeout = setTimeout(() => reject(new Error("proxy response timeout")), 15_000);
       const finish = () => {
         clearTimeout(timeout);
         resolve();

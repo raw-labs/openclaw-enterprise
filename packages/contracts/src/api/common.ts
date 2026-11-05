@@ -958,6 +958,16 @@ export const UpdateAgentBody = Type.Object(
 
 const ChannelDirectoryLookupFields = {
   secretId: SecretId,
+  provider: Type.Optional(
+    Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$" }),
+  ),
+  context: Type.Optional(
+    Type.Record(
+      Type.String({ pattern: "^[a-zA-Z][a-zA-Z0-9_]{0,63}$" }),
+      Type.String({ minLength: 1, maxLength: 200, pattern: "^[^\\u0000-\\u001f\\u007f]+$" }),
+      { maxProperties: 8 },
+    ),
+  ),
   kind: Type.Union([Type.Literal("users"), Type.Literal("channels")]),
   query: Type.Optional(Type.String({ maxLength: 200, pattern: "^[^\\u0000]*$" })),
   cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2048, pattern: "^[^\\u0000]*$" })),
@@ -965,6 +975,8 @@ const ChannelDirectoryLookupFields = {
 
 const ChannelDirectoryHydrationFields = {
   secretId: SecretId,
+  provider: ChannelDirectoryLookupFields.provider,
+  context: ChannelDirectoryLookupFields.context,
   kind: Type.Union([Type.Literal("users"), Type.Literal("channels")]),
   ids: Type.Array(
     Type.String({ minLength: 1, maxLength: 200, pattern: "^[^\\u0000-\\u001f\\u007f]+$" }),

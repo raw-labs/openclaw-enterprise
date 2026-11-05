@@ -1,7 +1,7 @@
 # Kubernetes networking and isolation
 
-Configure tenant network boundaries, private Agent routes, and existing
-namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
+Configure networking and private routes for the
+[Kubernetes Compute Driver](../kubernetes-compute.md).
 
 ## Networking
 
@@ -110,6 +110,8 @@ prepared Agent revision ID. Stop leaves it and the Agent's runtime and plugin-st
 policies, selecting no Pod, until the next preparation or Agent deletion.
 Supported channels and approved Gateway HTTPS use a per-revision proxy. Direct
 public access remains denied. See [Gateway outbound](../../gateway-outbound.md).
+
+Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
 
 ## Explicit network profiles
 
@@ -315,3 +317,8 @@ receive controller credentials.
 
 - [Driver configuration and troubleshooting](../kubernetes-compute.md)
 - [Kubernetes security controls](../../security.md)
+
+## Teams callbacks
+
+See [Teams setup](../../../guides/integrations/teams.md) for public callbacks,
+credentials, routing, cleanup, and verification.

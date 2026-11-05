@@ -42,6 +42,7 @@ type FixtureScenario = Parameters<typeof createConfigurationStore>[0] &
     namespaceStatus?: string;
     sessionUser?: unknown;
     extraSecrets?: readonly { id: string; name: string }[];
+    teamsBindings?: boolean;
     slackBindings?: boolean | "app" | readonly string[];
     slackGrantMissing?: string;
     auth?: null | string;
@@ -274,6 +275,7 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
     ref: secretRef(id),
   });
   for (const secret of [
+    secretMetadata("sec_demo_teams_password", "Teams app password (simulated)"),
     secretMetadata("sec_demo_model", "Demo model API key (simulated)"),
     secretMetadata("sec_demo_service_account", "Demo Service Accounts token (simulated)"),
     secretMetadata("sec_demo_slack_app_token", "Slack app token (simulated)"),
@@ -308,6 +310,12 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
   if (scenario.candidateDeploymentStatus) {
     config.generation = 2;
     config.values.agents.defaults.model = "codex/gpt-5.1";
+  }
+  if (scenario.teams && scenario.teamsBindings !== false) {
+    config.secretBindings.MSTEAMS_APP_PASSWORD = {
+      source: { ...secretRef("sec_demo_teams_password") },
+      delivery: { type: "env" },
+    };
   }
   if (scenario.slack && scenario.slackBindings !== false) {
     const keys =
