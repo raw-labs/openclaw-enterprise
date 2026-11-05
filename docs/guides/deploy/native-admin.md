@@ -141,11 +141,9 @@ names before testing Agent hosts. If `agentNativeAdmin.enabled` is false, OCC
 ignores the shared cookie-domain value and keeps the legacy host-only
 `openclaw_occ` session cookie behavior.
 
-Kubernetes Compute renders baseline gateway trust from Installation settings.
-Native admin availability still checks the explicit Agent policy below; keep
-its matching identity fields and opt-in settings in the saved Configuration.
+<a id="configure-each-agent"></a>
 
-## Configure each Agent
+## Deploy each Agent
 
 For a new Agent, use **Enable Native admin UI** on Create Agent. After deployment,
 assign your Principal ID through **Share Agent**. Kubernetes offers
@@ -157,7 +155,7 @@ Agents, enable the API feature and wildcard route, then obtain the exact origin
 from this status URL before the final compatible deployment:
 
 ```text
-https://occ.example.com/namespaces/<namespaceId>/agents/<agentId>/native-admin
+GET /namespaces/<namespaceId>/agents/<agentId>/native-admin
 ```
 
 For browser devtools, the same check is:
@@ -217,7 +215,7 @@ Keep existing model, Harness, channel, gateway, Secret reference, and allowed or
 
 The editor preserves Secret bindings. If someone saves a newer Configuration first, OCC refuses your stale save. Choose **Reload draft**, check your edits against the current values, then save only the changes you still intend. See [Configuration update conflicts](../../reference/configuration.md#create-read-update-and-delete) for the API contract.
 
-Do not set unsupported gateway authentication fields, `controlUi.dangerouslyDisableDeviceAuth`, or `controlUi.dangerouslyAllowHostHeaderOriginFallback`. Deploy the updated Agent revision, then call the status route again and expect `data.status: "available"` with the same `data.origin`. For `stopped` or `unavailable`, follow the [troubleshooting checks](#troubleshooting) before changing configuration.
+For uncertain saves, follow [Configuration editor recovery](../console/configuration-plugins-and-files.md#configuration-tab).
 
 Keep durable configuration changes in OCE. For compatible Kubernetes gateways,
 native edits affect a Pod-local copy and are discarded when the Pod is replaced

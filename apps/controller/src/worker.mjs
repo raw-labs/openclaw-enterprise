@@ -1,4 +1,5 @@
 import { unlink, writeFile } from "node:fs/promises";
+import { nativeAdminOriginResolver } from "./gateway/native-admin-origin.ts";
 import { createPostgresPool, PostgresPlatformState } from "@openclaw-enterprise/occ";
 import { startRepositoryReceiptServer } from "./backends/repository-credentials/receipt-server.ts";
 import {
@@ -26,6 +27,14 @@ import {
   startupListenerFailure,
 } from "./startup-failure.ts";
 import { metricsConfiguration, startMetricsListener } from "./metrics/listener.ts";
+
+function nativeAdminEnabled() {
+  const value = process.env.OCC_AGENT_NATIVE_ADMIN_ENABLED;
+  if (value !== undefined && value !== "true" && value !== "false") {
+    throw new Error("OCC_AGENT_NATIVE_ADMIN_ENABLED must be true or false.");
+  }
+  return value === "true";
+}
 
 function configuration() {
   const mode = process.env.NODE_ENV;
@@ -231,6 +240,13 @@ try {
     mode,
     ...options,
     emit: createWorkerLogEmitter(logger),
+    nativeAdminOrigin: nativeAdminOriginResolver(
+      {
+        enabled: nativeAdminEnabled(),
+        domain: process.env.OCC_AGENT_NATIVE_ADMIN_DOMAIN,
+      },
+      process.env.OCC_AUTH_BASE_URL,
+    ),
     ...(drivers === undefined ? { computeDriver } : { drivers }),
     // Native prepared Git: a deployment waits for its version's first GitHub token (finding 2415).
     ...(preparedRepositoryGit?.revisionMaterial === undefined

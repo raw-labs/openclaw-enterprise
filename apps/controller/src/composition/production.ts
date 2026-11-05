@@ -1,4 +1,5 @@
 import { closeResources } from "./close-resources.ts";
+import { nativeAdminOriginResolver } from "../gateway/native-admin-origin.ts";
 import { installEgressAuthority } from "./egress-authority.ts";
 import { installationControllerOptions } from "./installation-config.ts";
 import type { AuditEvent } from "@openclaw-enterprise/contracts";

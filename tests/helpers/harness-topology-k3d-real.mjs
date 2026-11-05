@@ -1,4 +1,5 @@
 import { defaultAgentModel } from "../../apps/controller/src/console/agents/starter-model.mts";
+import { nativeAdminOriginResolver } from "../../apps/controller/src/gateway/native-admin-origin.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -1932,6 +1933,10 @@ async function arrangeProductionTopology(testContext, mode, slack, options = {})
       mode: "production",
       pool: workerPool,
       drivers: workerDrivers,
+      nativeAdminOrigin: nativeAdminOriginResolver(
+        options.nativeAdmin === undefined ? undefined : { enabled: true, ...options.nativeAdmin },
+        controllerAuthBaseURL,
+      ),
       ...workerOptions,
       emit: (event) => events.push(event),
     });
