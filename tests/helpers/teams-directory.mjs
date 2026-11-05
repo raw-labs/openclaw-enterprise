@@ -13,6 +13,7 @@ export const teamsLink = `https://teams.microsoft.com/l/team/${encodeURIComponen
 export async function teamsDirectoryProvider(t) {
   const calls = [];
   const path = `/v1.0/teams/${teamsDirectoryContext.teamId}`;
+  /** @type {Map<string, { body: Record<string, unknown>, status?: number, wait?: Promise<void>, started?: () => void, completed?: () => void }>} */
   const routes = new Map([
     [
       `/${teamsDirectoryContext.tenantId}/oauth2/v2.0/token`,

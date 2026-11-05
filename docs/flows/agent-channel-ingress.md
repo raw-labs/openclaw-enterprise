@@ -1,7 +1,7 @@
 ---
 created: "2026-10-06"
-updated: "2026-10-15"
-last_updated_session: "authoring-run/d5112085-b889-44de-a3c9-3fc6420c77cb"
+updated: "2026-11-05"
+last_updated_session: "authoring-run/eb325c8c-65eb-4385-a7c0-21c2839e6da6"
 ---
 
 # Agent channel callback flow
@@ -76,7 +76,7 @@ API keys. Other paths have no callback route.
 
 ### 3. Authenticate and process the activity
 
-The [pinned native monitor](https://github.com/openclaw/openclaw/blob/90d30a1178a79dddd92e6190b66b95d89dfb3ca8/extensions/msteams/src/monitor.ts)
+The [pinned native monitor](https://github.com/openclaw/openclaw/blob/554f0b886bde6c089578c49967227f8b50d1cf16/extensions/msteams/src/monitor.ts)
 `extensions/msteams/src/monitor.ts:monitorMSTeamsProvider` registers
 `/api/messages` with plugin authentication. Its Express adapter and
 Microsoft Teams SDK reject unauthenticated activities before Agent execution.
@@ -85,7 +85,7 @@ sends the response using its admitted app credentials through provider egress.
 
 ### 4. Fetch remote attachment bytes
 
-The [pinned native attachment downloader](https://github.com/openclaw/openclaw/blob/90d30a1178a79dddd92e6190b66b95d89dfb3ca8/extensions/msteams/src/attachments/download.ts)
+The [pinned native attachment downloader](https://github.com/openclaw/openclaw/blob/554f0b886bde6c089578c49967227f8b50d1cf16/extensions/msteams/src/attachments/download.ts)
 `extensions/msteams/src/attachments/download.ts:downloadMSTeamsAttachments` retains its media-host admission,
 redirect and authentication-header policy. Its guarded fetch uses the Gateway's
 proxy transport when Compute supplies the reviewed-proxy declaration.
@@ -131,6 +131,8 @@ by the serving revision.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-05 00:21: Refresh callback, provider transport, and typed Console owners against pinned upstream in the accompanying uncommitted merge. (authoring-run/eb325c8c-65eb-4385-a7c0-21c2839e6da6 - 93c1dc4f24b9f544b26a451b71a0cfeff34be4fc)
 
 - 2026-10-15 13:12: Document reviewed proxy delegation and exact Teams storage destinations in the accompanying uncommitted change (authoring-run/d5112085-b889-44de-a3c9-3fc6420c77cb - 339aa5d26f4c)
 - 2026-10-10 22:48: Preserve the native Teams default callback path during deployment admission (authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9 - a2f7ad762117)

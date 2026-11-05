@@ -19,10 +19,13 @@ export class BundledChannelDriver implements ChannelDriver {
   constructor(
     request: ChannelRequest = globalThis.fetch,
     proxyUrl?: string,
-    options: { readonly managedProxyHosts?: readonly string[] } = {},
+    options: {
+      readonly managedProxyHosts?: readonly string[];
+      readonly expectProxy?: boolean;
+    } = {},
   ) {
     const transport = channelRequest(request, proxyUrl, options);
-    this.slack = new SlackChannelDriver(transport);
+    this.slack = new SlackChannelDriver(request, proxyUrl, options);
     this.teams = new TeamsChannelDriver(transport);
   }
 

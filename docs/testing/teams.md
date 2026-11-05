@@ -14,7 +14,7 @@ closure, native callback registration, rejection of missing and forged bearer
 tokens, and absence of the legacy webhook listener. They do not prove Microsoft
 tenant access, proxy connectivity, model execution, or replies.
 
-`tests/browser/console-agent-channels.test.mjs` exercises the regular console
+`tests/browser/console-agent-channels.test.ts` exercises the regular console
 workflow through the development HTTP API: save separate personal and channel
 access, bind a Namespace Secret, grant Agent access, and retain the native
 plugin selection. The same case saves the optional SharePoint upload site ID,
@@ -63,7 +63,7 @@ Microsoft network access, file permission or model turn.
 The conformance proxy cases separately cover private/mixed/unsupported DNS
 answers, exact storage-host admission and late DNS completion after the deadline.
 
-The Teams directory browser case in `tests/browser/console-agent-channels.test.mjs`
+The Teams directory browser case in `tests/browser/console-agent-channels.test.ts`
 runs in Chromium and WebKit. It checks mouse selection, selected chips and exact
 IDs, pagination, keyboard activation, dismissal, and saving/reopening through the
 Configuration API with a local Microsoft protocol fixture.

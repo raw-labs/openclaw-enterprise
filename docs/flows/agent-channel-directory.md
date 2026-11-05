@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
-updated: 2026-10-16
-last_updated_session: 01a1345f-9591-7c21-9306-c235c3bd6ee3
+updated: "2026-11-05"
+last_updated_session: "authoring-run/eb325c8c-65eb-4385-a7c0-21c2839e6da6"
 ---
 
 # Agent Channel Directory Lookup Flow
@@ -22,7 +22,7 @@ actionable error.
   authorized caller posts to the Namespace channel directory route.
 - Assumptions: the caller can create an Agent or update the exact Agent or
   Configuration, and can operate the selected same-Namespace Secret.
-- Source: `apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`,
+- Source: `apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`,
   `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`,
   and `apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`.
 
@@ -99,14 +99,21 @@ not participate in bot deployment credential admission.
 cancels an unused response body on a non-success HTTP status before returning
 the safe rate-limit or unavailable error. This releases occupied transport
 capacity even when the error body has not finished. The same request owner
-serves credential validation; no automatic retry is added. Successful responses
+serves credential validation; no automatic retry is added. Production
+composition sets `expectProxy`: with no proxy URL, a credential check whose
+fetch fails to connect, resolve, or answer within the time budget raises
+`SlackRouteNotConfiguredError` (`409`) instead of the unavailable error (finding
+2521). Its message names the Helm proxy settings and says to try again when the
+API has another approved route, since an open route can also time out (finding
+2531). Any other fetch rejection, such as a refused redirect, a TLS failure, or
+an invalid header value, stays unavailable (finding 2532). Successful responses
 have an 8,000,000-byte streaming cap before decoded JSON is checked against the
 existing limit of 2,000,000 UTF-16 code units. Overflow cancels the body read and returns `invalid_response`.
 
 ### 3. Display names and save IDs
 
 `apps/controller/src/console/channels/slack.mjs:appendFields`,
-`apps/controller/src/console/agents/slack-directory.mjs:createSlackDirectoryField`
+`apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`
 
 The Console presents bot-token selection before channel access and explains that
 name lookup needs that token. It debounces typing and shows each candidate's name,
@@ -126,7 +133,12 @@ search text remains separate from committed IDs. Plugin approver fields accept
 raw Slack user IDs when lookup is unavailable; directory-selected approvers
 remain workspace-qualified. Arrow keys and Enter select results, and Escape
 closes the list. It resolves saved IDs again when the editor opens or the
-selected Secret changes. A denied or failed lookup leaves manual exact-ID entry
+selected Secret changes. A view sends the first of these name lookups alone
+(`slack-directory.mjs:nameLookupInTurn`, `request-turns.mjs`); the others wait
+until one succeeds, then go at once. A `403` answers the lookups waiting behind
+it for the same Secret, unsent, so each field shows that refusal and the API
+audits one denial; once no lookup is pending, a later one asks again. A lookup
+still waiting when its page is left is not sent. A denied or failed lookup leaves manual exact-ID entry
 available; no directory result changes the saved Configuration until the
 operator saves the channel edit.
 
@@ -141,12 +153,12 @@ view.
 
 ### 4. Select Teams names without changing native access semantics
 
-`apps/controller/src/console/channels/teams.mjs:support` first keeps native
+`apps/controller/src/console/channels/teams.mts:support` first keeps native
 group access based only on sender allowlists outside the limited editor.
 Their JSON remains inspectable; no editor save can disable that existing policy.
 
-`apps/controller/src/console/channels/teams.mjs:appendFields`,
-`apps/controller/src/console/agents/teams-directory.mjs:createTeamsDirectoryField`
+`apps/controller/src/console/channels/teams.mts:appendFields`,
+`apps/controller/src/console/agents/teams-directory.mts:createTeamsDirectoryField`
 
 The Teams editor accepts a native Team ID for manual setup, or a Team link/group
 UUID for lookup. A successful lookup resolves a bare group UUID to the native
@@ -202,12 +214,18 @@ Manual IDs remain available after missing-consent or provider errors.
 
 ## Changelog
 
+- 2026-11-05 00:21: Refresh callback, provider transport, and typed Console owners against pinned upstream in the accompanying uncommitted merge. (authoring-run/eb325c8c-65eb-4385-a7c0-21c2839e6da6 - 93c1dc4f24b9f544b26a451b71a0cfeff34be4fc)
+
 - 2026-10-16 18:08: Expose the optional native Teams upload destination and preserve its save/clear semantics. (01a1345f-9591-7c21-9306-c235c3bd6ee3 - d279f3bcb15a)
 
 - 2026-10-16 11:37: Preserve Teams picker results until pointer selection completes; cover WebKit selection and saved IDs in the accompanying change. (authoring-run/f0d20376-2b63-4a3d-a149-2bf2e44da769 - 17445a8c66ef)
 
 - 2026-10-10 22:48: Keep sender-only native Teams policies outside the limited channel editor (authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9 - a2f7ad762117)
 - 2026-10-07 11:21: Add Team-scoped Graph lookup, native Team ID resolution and name selection alongside Slack in the accompanying implementation. (authoring-run/5acd9a8d-44df-4f9b-8daa-9269c2040340 - 948cb3e61636338be4692bd45114446d6c941890)
+- 2026-10-30: Send a view's first name lookup alone and the rest after it succeeds, so a revoked grant costs one audited denial. (2939)
+
+- 2026-10-25: Name the Slack proxy settings, and keep a retry for another approved route, when production credential validation cannot connect to Slack. (findings 2521, 2531, 2532)
+
 - 2026-10-14 12:23: Document streaming and decoded Slack response limits. (authoring-run/a404e7a3-9acf-4b50-9307-31e50b1b3582 - 4727e9b109a2127150e03e39e859d45e0668f82f)
 
 - 2026-10-05 19:32: Describe failed HTTP response cleanup and native connection recovery. (authoring-run/eb95c719-31db-483c-9db3-c9573329209d - 5a2dd43d2e524637e7173457def040fa79d42a93)

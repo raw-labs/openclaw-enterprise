@@ -1,3 +1,7 @@
+---
+kind: reference/driver
+---
+
 # ChannelDriver contract
 
 ## Overview
@@ -11,7 +15,7 @@ implementation for directory lookup; see [Driver selection](selection.md).
 
 ## Interface
 
-The [shared interface](../../../packages/contracts/src/index.ts) requires a
+The [shared interface](../../../packages/contracts/src/drivers/channel/index.ts) requires a
 Driver identity and `lookupDirectory({ token, provider, context?, kind, query?, cursor?, ids? })`. `kind`
 selects users or channels. `provider` selects a provider-owned adapter; optional
 `context` contains at most eight nonsecret strings of at most 200 characters.
