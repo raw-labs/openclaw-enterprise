@@ -45,8 +45,7 @@ test("native guarded attachment downloads use the reviewed channel proxy", async
   const proxy = await startSlackProxy(t, {
     upstreamPort: server.address().port,
     upstreamHosts: ["graph.microsoft.com", "tenant.sharepoint.com", "neighbor.sharepoint.com"],
-    teamsEnabled: true,
-    teamsFileHosts: JSON.stringify(["tenant.sharepoint.com"]),
+    destinations: ["graph.microsoft.com", "tenant.sharepoint.com"],
   });
   process.env.HTTPS_PROXY = `http://127.0.0.1:${proxy.port}`;
   process.env.NO_PROXY = "";

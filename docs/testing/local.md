@@ -74,7 +74,8 @@ pnpm exec playwright install chromium webkit
 pnpm test:console-browser
 ```
 
-Teams directory selection also runs in WebKit. Set `OCC_TEST_BROWSER_EXECUTABLE`
+Teams directory selection also runs in WebKit. CI prepares both engines;
+an external Chromium executable does not replace WebKit. Set `OCC_TEST_BROWSER_EXECUTABLE`
 to use an approved existing Chromium executable. The test
 fails if no browser is available; it does not install one. Do not change managed
 browser policies. Set `OCC_TEST_CONSOLE_ARTIFACT_DIR` to retain screenshots.

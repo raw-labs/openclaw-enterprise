@@ -2315,9 +2315,12 @@ test("Agent creation withholds Dedicated OpenClaw unless the Installation report
     "Runtime details · Embedded",
   );
   // Slack is simply unavailable for Embedded Agents, not an error.
-  const embeddedChannelNote = page.getByText(CHANNELS_NEED_DEDICATED);
-  await embeddedChannelNote.waitFor();
-  assert.equal(await embeddedChannelNote.getAttribute("class"), "hint");
+  for (const provider of ["slack", "msteams"]) {
+    const embeddedChannelNote = page.locator(`#channel-${provider}-unavailable`);
+    await embeddedChannelNote.waitFor();
+    assert.equal(await embeddedChannelNote.textContent(), CHANNELS_NEED_DEDICATED);
+    assert.equal(await embeddedChannelNote.getAttribute("class"), "hint");
+  }
   // Codex keeps Dedicated execution; only native OpenClaw depends on the runtime.
   await page.getByLabel("Harness", { exact: true }).selectOption("codex");
   // The select itself is unavailable with Codex (aria-disabled, finding 2945), so the option's own

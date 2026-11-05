@@ -682,6 +682,13 @@
         "commit": "81f16f4c33d58255ff7656b97b7c1e03bd273b01",
         "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42076588565",
         "notes": "The shared serving assertion also read the old Deployment immediately after the active-pointer commit. Observe the exact ready revision Pod and callback before checking projection and fencing at every cutover, including reenablement. Keep all real resource and credential assertions."
+      },
+      {
+        "commit": "cb956aa878915413e8c79f481cec2d31e49f914c",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42077755119",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42077755050",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42078677862",
+        "notes": "Database and Kubernetes lifecycle lanes passed. Three source lanes found stale single-provider UI/conformance expectations and missing WebKit preparation. The earlier native AMD64 run42074279022 passed246/247 cases; its Teams media fixture used host-only certificate permissions and obsolete shared-proxy options. Keep the runtime unprivileged, permit read-only synthetic certificate access and select exact Graph/SharePoint destinations with the generic proxy. The repaired targeted native media case passes locally; qualify the resulting final SHA on both architectures."
       }
     ],
     "localChecks": {

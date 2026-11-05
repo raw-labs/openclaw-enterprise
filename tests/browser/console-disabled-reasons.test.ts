@@ -417,7 +417,7 @@ test("Save channel Secrets names an unbound Slack token as its reason", async (t
   const save = page.getByRole("button", { name: "Save channel Secrets" });
   await save.waitFor();
   assert.equal(await save.isDisabled(), true);
-  const reason = "Choose a Secret for each Slack token to save.";
+  const reason = "Choose a Secret for each channel credential to save.";
   assert.equal(await page.getByText(reason, { exact: true }).isVisible(), true);
   await expectReachableReason(page, save, reason);
 });

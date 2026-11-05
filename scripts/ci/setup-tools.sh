@@ -222,6 +222,8 @@ install_browser_dependencies() {
     if [[ -z "${OCC_TEST_BROWSER_EXECUTABLE:-}" ]]; then
       pnpm exec playwright install --with-deps --only-shell chromium
     fi
+    # Teams directory selection also exercises WebKit, including when Chromium is external.
+    pnpm exec playwright install --with-deps webkit
     if [[ -n "${OCC_TEST_BROWSER_EXECUTABLE:-}" ]]; then
       if [[ ! -x "${OCC_TEST_BROWSER_EXECUTABLE}" ]]; then
         echo "Selected CI browser executable is unavailable." >&2

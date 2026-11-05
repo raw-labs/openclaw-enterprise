@@ -618,6 +618,7 @@ function directoryLookup() {
   return (input) =>
     controller.lookupChannelDirectory(administrator, "ns_directory", {
       secretId: "secret_directory",
+      provider: "slack",
       kind: "users",
       ...input,
     });

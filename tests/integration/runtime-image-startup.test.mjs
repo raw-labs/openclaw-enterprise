@@ -814,6 +814,12 @@ test(
       run: execute,
     });
     await rm(join(directory, "ca-key.pem"));
+    // The packaged runtime uses UID 1000, not the host runner's UID. These are
+    // shared fixture keys only; make this read-only test mount traversable/readable.
+    await chmod(directory, 0o755);
+    for (const name of ["key.pem", "cert.pem", "ca.pem"]) {
+      await chmod(join(directory, name), 0o444);
+    }
     const repository = fileURLToPath(new URL("../../", import.meta.url));
     const result = await runDocker([
       "run",

@@ -113,7 +113,7 @@ For channel files, the native plugin creates organization-scoped view links:
 people signed into the organization who obtain the link can access the file,
 including people outside the Team. Group chats use links for the resolved chat
 members; existing site/library permissions still apply. These are native
-[upload and sharing semantics](https://github.com/openclaw/openclaw/blob/554f0b886bde6c089578c49967227f8b50d1cf16/extensions/msteams/src/graph-upload.ts),
+[upload and sharing semantics](https://github.com/openclaw/openclaw/blob/513c12703ad9a9161cc123e0b8ed4ecb811aa6b3/extensions/msteams/src/graph-upload.ts),
 not additional restrictions enforced by the editor.
 
 Leave the destination empty when channel/group document sending is unnecessary.

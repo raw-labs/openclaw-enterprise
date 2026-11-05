@@ -1567,6 +1567,7 @@ test(
           ...process.env,
           TOPOLOGY_TEARDOWN_RECORD: record,
           OCC_TEST_SLACK_CHANNEL_ID: "C0",
+          OCC_TEST_SLACK_PROXY_URL: "http://192.0.2.10:3128",
           OCC_TEST_SLACK_SENDER_BOT_TOKEN: "xoxb-sender",
           SLACK_APP_TOKEN: "xapp-app",
           SLACK_BOT_TOKEN: "xoxb-gateway",
