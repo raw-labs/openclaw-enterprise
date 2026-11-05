@@ -44,12 +44,12 @@ Other database errors remain redacted as `MIGRATION_FAILED`.
 
 ## Migration history
 
-Set `OCC_MIGRATION_DATABASE_URL` privately for `occ_migrator`. `occ_app` is the
+Set `OCC_MIGRATION_DATABASE_URL` for `occ_migrator`. `occ_app` is the
 application login. Neither may be a superuser, create roles or databases,
 replicate, or bypass row security. The migrator needs database `CREATE` and owns
 `occ` and `drizzle`; `occ_app` must neither inherit it nor have database/schema `CREATE`.
 
-From the release checkout, inspect history without applying SQL:
+Inspect history without applying SQL:
 
 ```sh
 pnpm db:migrate --check
@@ -85,8 +85,9 @@ through `0049_codex_pat_sources`; `preCredentialWithdrawalRequester` has 50
 through `0050_agent_credential_sources`; later `pre*` shapes add one each, through
 `preCredentialProxy` (59) and `prePreparedAttemptSettlement` (62, through
 `0062_credential_delivery_custody`). After `0063_prepared_attempt_settlement`,
-63 receipts mean `preGatewayManagedMode`; `0064_gateway_managed_mode` is pending.
-Rerun `--check` after migration and require `completed` from the same release.
+63 receipts mean `preGatewayManagedMode`; 64 mean `preSelectedRepositorySet`,
+65 mean `preAgentDeployIntent`, and 66 mean `preRuntimeRoles`.
+After migration, require `completed` from this release’s `--check`.
 The [canonical manifest](../../../migrations/meta/_canonical-history.json) records
 accepted source and catalog hashes. Never delete or relabel unsupported preview
 receipts. Empty schemas may be absent or owner-only, with no objects or

@@ -1859,6 +1859,7 @@ assert.equal(execFileSync("codex", ["--version"], {encoding: "utf8"}).trim(), ${
 assert.equal(execFileSync(process.execPath, [bundledCommand, "--version"], {encoding: "utf8"}).trim(), ${JSON.stringify(`codex-cli ${stagingCodexVersion}`)});
 const provenance = JSON.parse(readFileSync("/opt/oce/runtime/provenance.json", "utf8"));
 assert.equal(provenance.source, "https://github.com/openclaw/openclaw");
+assert.equal(provenance.openclawTrustedProxyRolePatchSha256, "2d9f3d89d7881cfa7bc330c9fa73e10c7f503a34442d088e31c6374120ad17e0");
 const expectedSource = JSON.parse(process.argv[2]);
 assert.equal(provenance.commit, expectedSource.commit);
 assert.equal(provenance.sourceArchiveSha256, expectedSource.sourceArchiveSha256);
@@ -1875,6 +1876,7 @@ assert.equal(provenance.openclawRequiredWorkerAuthorityRegressionPatchSha256, ${
         : "5939c62bd62c323c93cd3aa6a96fbb6f4cf9d5df8f5eafffada25a58fe727494",
     )});
 assert.deepEqual(provenance.patches, {
+  "openclaw-trusted-proxy-role.patch": provenance.openclawTrustedProxyRolePatchSha256,
   "openclaw-codex-read-only-paths.patch": provenance.openclawBridgePatchSha256,
   "openclaw-codex-full-access-profile.patch": ${historicalCodex} ? "7c95a5a3727bd4c73bb9ccf3022eb4b33d182cd7f6b761dc93ecfe08ef08e27a" : "e942e1804475a8e828859c5ba81c20de944105a7dbe00bbba6c2275b32c0944b",
   "openclaw-required-worker-authority-regression.patch": provenance.openclawRequiredWorkerAuthorityRegressionPatchSha256,
