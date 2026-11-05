@@ -37,7 +37,7 @@ graph TD
         D --> E["Reload exact resources and current IAM state"]
         E --> F{"Authorized and valid?"}
         F -->|yes| G["Invoke Compute while renewing the claim lease"]
-        F -->|no| H["Persist failure after required cleanup"]
+        F -->|no| H["Persist permanent failure under the live claim"]
         G --> I{"Observed result"}
         G -->|rejected| R["Emit validated Driver diagnostic"]
     end
@@ -326,19 +326,21 @@ Driver interval, including closing sessions and failed runtime retirement,
 releasing the claim without consuming retries. Obligations survive; lease loss
 aborts the pass.
 
-Terminal rows store `reason_code` and optional `result_data`; see
-[terminal results](../reference/controller/reconciliation.md#terminal-results)
-and [deployment status](../reference/agents.md#deployment-status). For
+Terminal rows store `reason_code` and optional `result_data`, shaped as the
+[terminal results reference](../reference/controller/reconciliation.md#terminal-results)
+and [deployment status](../reference/agents.md#deployment-status) define. For
 `runtimeFailure`, Compute reads cached startup results from its private status
 path, including unready Harnesses without plugins, and verifies runtime
 incarnation without repeating the model probe. Missing or invalid evidence
 leaves the cause unspecified.
 
-`packages/occ/src/state/controller-work.ts:validateFailureData` rejects invalid
-reads and writes; PostgreSQL enforces the stored shape.
+`packages/occ/src/state/controller-work.ts:validateFailureData` validates reads
+and writes and rejects data for other failure reasons; the PostgreSQL constraint
+enforces the persisted shape.
 `PostgresWorkQueue.complete` and `PostgresWorkQueue.fail` publish only under the
 live claim; [deployment status](../reference/agents.md#deployment-status) derives
-`error` and `warnings` from that result. Completion needs no acknowledgment/cleanup; maintenance cannot rewrite warnings.
+`error` and `warnings` from that result. Completion needs no acknowledgment or
+post-commit cleanup; maintenance cannot rewrite deployment warnings.
 
 Indexed `workId` scopes progress to work; maintenance and unbound history cannot
 supply it. `getDeploymentStatus` reads
@@ -349,11 +351,10 @@ Legacy terminal rows derive `reason_code` from matching activation or terminal
 reconcile audit evidence, otherwise `LEGACY_OUTCOME_UNKNOWN`, with `NULL` `result_data`.
 
 If Compute declares maintenance, activation schedules observations for this version.
-Incomplete observations, Compute bindings, and exhausted dependency retries or claims
-queue another item. The version stays selected within its credential deadline; outages
-never retire it. Each claim reauthorizes its actor. Successor time buckets increase despite clock skew.
-[Gateway/reader withdrawal](gateway-outbound.md#5-persist-withdrawal-before-terminal-maintenance)
-precedes terminal maintenance.
+Incomplete observations, Compute bindings, and dependency retries or expired claims
+exhausting attempts close the item and schedule another while the version stays
+selected and running within its credential deadline; outages never retire it. Each
+claim reauthorizes its actor. Successor keys use strictly later time buckets despite clock skew.
 
 `worker.completed` reports the target, outcome, and code. On `namespace.ensure`,
 it can also report a [Kubernetes access hint](../reference/drivers/kubernetes-compute.md#failure-conditions)
@@ -407,7 +408,7 @@ a failed retry keeps the active runtime) or whose predecessor stop yielded
 
 ## Related docs
 
-- [Repository sessions and cleanup](agent-repository-credentials.md)
+- [Agent repository session preparation and durable cleanup](agent-repository-credentials.md)
 - [Backend-managed credential delivery](service-account-driver-credential-delivery.md)
 - [Controller settings](../reference/settings.md)
 - [IAM authorization](../reference/authorization.md)
@@ -425,11 +426,5 @@ a failed retry keeps the active runtime) or whose predecessor stop yielded
 - 2026-11-03 21:08: Reject directory markers. (01a12074-7896-7f63-99fe-9f42e9041d02 - b627f0997c12d10aaa87f764eac1019c67199d2f)
 
 - 2026-10-30 17:22: Shutdown stops the loop before readiness and parts close. (fix-2997)
-
-- 2026-10-16 13:09: Compose Gateway/reader withdrawal. (authoring-run/523fa03e-fd48-4e90-a757-e4c83a1e2b53 - 792afad4f9e8bd4323fc197a102ebde7961484c9)
-
-- 2026-10-14 17:45: Persist removal-only Gateway withdrawal before terminal maintenance (authoring-run/068ea9ef-c548-4e2e-86e6-a75b33ec5ae3 - 27562ebf56a8315a663583731a303ca362cbfc5d)
-
-- 2026-10-11 11:30: Predecessor stops yield their Gateway drain. (fix-1090)
 
 [Controller worker documentation history](controller-worker/history.md) preserves the older dated entries.

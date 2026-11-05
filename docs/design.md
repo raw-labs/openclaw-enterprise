@@ -87,11 +87,6 @@ namespace with separate Pods, identities and storage. External access-gateway ad
 token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental. Human Gateway entry now uses exact OCE person/Agent assignments and native role enforcement through the Kubernetes Driver and patched runtime; broader checkpoint 3 permission mediation remains planned. See [Agent OpenClaw access](reference/agent-native-admin.md).
 
-The proposed [Gateway outbound transport](reference/gateway-outbound.md) adds
-revision-isolated destination policy for trusted dedicated Gateway code. It does
-not mediate credentials or change Harness/Sandbox network ownership; trust
-adoption and native qualification remain pending.
-
 <a id="current-limitations"></a>
 <a id="near-term-future-work"></a>
 

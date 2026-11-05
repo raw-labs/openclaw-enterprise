@@ -25,49 +25,49 @@ pnpm cli:build
 OCC_TEST_DEV_UP_K3D_REAL=1 node --test tests/integration/dev-up-k3d-real.test.mjs
 ```
 
-Tests cover installation, cleanup, workspace boundaries, NetworkPolicy, sandboxing
-and Keycloak with fixture model responses. Failed cleanup retains state for
-`occ dev down`. See [hosted execution](README.md#run-the-hosted-local-installation-lane).
+The tests cover installation, cleanup, workspace boundaries, NetworkPolicy,
+sandboxing, and Keycloak. Model responses are fixtures. Failed cleanup retains
+state for `occ dev down`. See [hosted execution](README.md#run-the-hosted-local-installation-lane).
 
 ## Kubernetes HTTP fixture
 
-Install Docker, k3d and `kubectl`; use Kubernetes 1.35+. CI preparation creates
-an owned enforcing cluster, images and migrated limited-role
-PostgreSQL databases. It preserves default kubeconfig and unrelated resources.
-Run these fixture lanes: `k3d-fixture-configuration`,
-`k3d-fixture-state` and `k3d-fixture-plugins`.
+Use Kubernetes 1.35+, Docker, k3d, `kubectl`, and a
+[dedicated migrated database](postgresql.md#other-postgresql-suites). Choose a new
+cluster name if `oce` exists. These commands preserve the default kubeconfig and context.
 
 ```sh
-(
-  set -eu
-  K8S_FIXTURE_LANE=k3d-fixture-state
-  K8S_FIXTURE_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/oce-k3d-fixture.XXXXXX")"
-  trap 'node scripts/ci/cleanup.mjs --state "$K8S_FIXTURE_RUN_DIR/state.json"' EXIT
-  node scripts/ci/prepare.mjs --lane "$K8S_FIXTURE_LANE" \
-    --state "$K8S_FIXTURE_RUN_DIR/state.json"
-  node scripts/ci/run-tests.mjs run "$K8S_FIXTURE_LANE" \
-    --state "$K8S_FIXTURE_RUN_DIR/state.json" \
-    --results "$K8S_FIXTURE_RUN_DIR/results.json"
-)
+mkdir -m 700 -p /tmp/oce-k3d
+k3d cluster create oce \
+  --image +v1.35 \
+  --api-port 127.0.0.1:6443 \
+  --kubeconfig-update-default=false \
+  --kubeconfig-switch-context=false
+k3d kubeconfig get oce > /tmp/oce-k3d/kubeconfig
+chmod 600 /tmp/oce-k3d/kubeconfig
+
+docker build --pull=false -t oce-fixture:local tests/fixtures/kubernetes
+k3d image import oce-fixture:local -c oce
+
+OCC_TEST_KUBERNETES_KUBECONFIG=/tmp/oce-k3d/kubeconfig \
+OCC_TEST_KUBERNETES_CONTEXT=k3d-oce \
+OCC_TEST_KUBERNETES_IMAGE=oce-fixture:local \
+OCC_TEST_DATABASE_URL=postgresql://occ_app:occ-app-local@127.0.0.1:55432/openclaw_k8s_local \
+  node --test --test-concurrency=1 tests/integration/kubernetes-compute-real.test.mjs \
+    tests/integration/kubernetes-compute-provisioning-real.test.mjs \
+    tests/integration/kubernetes-compute-driver-real.test.mjs
 ```
 
-Selected cases must pass without skips. Lanes check API/worker lifecycle,
-RBAC, storage, revision replacement and enforced network isolation. Enabled Slack
-provisioning uses the actual controller proxy with simulated provider/runtime
-responses; it proves policy and Secret delivery, not native Slack connectivity.
-See [CI image preparation](ci/configuration.md#shared-settings).
+Run all cases sequentially against the shared database and require zero skips.
+Absent selectors or database skip their cases. Partial selectors fail. Coverage
+includes API, worker, Driver, RBAC, storage, lifecycle and network isolation.
+Cloud volume detach and node fencing require separate proof.
 
-Missing selectors skip; partial selectors fail. A missing database skips its cases.
-Run files sequentially: they share a database. Fixtures do not prove live OAuth/models,
-cloud volume detach or node fencing.
+For live OAuth, use the [OpenShell OAuth](openshell-oauth.md) and
+[credentialed runtime](openshell.md) suites. Delete only your disposable cluster:
 
-For live refresh, use the [OpenShell OAuth proof](openshell-oauth.md) and
-[credentialed runtime lane](openshell.md).
-
-An imported immutable `OCC_TEST_KUBERNETES_RUNTIME_IMAGE` extends the API/worker
-case through runtime Secret and private-state deletion without a model turn.
-Replacement retains the Harness PVC UID and files written before a failed
-candidate. Local storage checks do not qualify cloud CSI detach or node fencing.
+```sh
+k3d cluster delete oce
+```
 
 ### Installation handoff
 
@@ -104,34 +104,36 @@ are required.
 
 ## Kubernetes model turns and Secrets
 
-Real-runtime tests need authorized model credentials, real Gateway/Codex images,
-an owned enforcing cluster and migrated `openclaw_k8s_*` database.
-Fixtures do not prove model turns. Follow
+The real-runtime suite needs an authorized model credential, real gateway and
+Codex images, a disposable cluster with enforcing NetworkPolicies, and a
+migrated `openclaw_k8s_*` database. A fixture pass is not a model turn. Follow
 [Codex sandbox setup](../guides/deploy/codex-sandbox.md) for seccomp prerequisites.
 
 ### Develop with local containers and k3d
 
 Install k3d, `kubectl`, Helm, OpenSSL, and Docker Compose or `podman-compose`.
-Start the engine API and set `OPENAI_API_KEY` privately. The helper builds
-images and prepares its cluster/database:
+Start the engine's API socket and set `OPENAI_API_KEY` privately. The helper
+builds the images and prepares its own cluster and database:
 
 ```sh
 ./scripts/k3d --model-id gpt-6-astra
 ```
 
-The demo completes a model turn, prints a password-copy command, and serves
-Control UI at `http://127.0.0.1:18888` and OCC at `http://127.0.0.1:18889`
-while running. Without `OPENAI_API_KEY`, it prompts privately; `test` requires
-the variable. For a custom Codex Responses endpoint:
+The demo completes a model turn and serves Control UI at
+`http://127.0.0.1:18888` and OCC at `http://127.0.0.1:18889`. It prints a
+password-copy command. Keep the process running to use the interfaces. Without
+`OPENAI_API_KEY`, the interactive demo prompts without echo; `test` requires
+the variable. For a custom Codex Responses endpoint, use:
 
 ```sh
 ./scripts/k3d test --harness codex \
   --base-url https://openrouter.ai/api/v1 --model-id z-ai/glm-5.3-flash
 ```
 
-Use `./scripts/k3d info` for connections, `./scripts/k3d reset` for test data,
-and `./scripts/k3d down` for cleanup, including failed preparation. Default
-kubeconfig, context and unrelated resources stay unchanged. `OCC_K3D_CONTAINER_ENGINE`
+Use `./scripts/k3d info` for connections and `./scripts/k3d reset` to reset
+its test data. Run `./scripts/k3d down` to remove helper-owned resources,
+including after a failed preparation. The helper leaves the default kubeconfig,
+active context, and unrelated resources unchanged. `OCC_K3D_CONTAINER_ENGINE`
 selects `docker` or `podman`; `OCC_K3D_STATE_DIR` overrides its state directory.
 For image upgrades see [local k3d image upgrades](../guides/deploy/local-k3d-image-upgrade.md).
 
@@ -174,12 +176,14 @@ suite does not install OCC with Helm. Credentials belong only in the selected
 runtime Pods, not controllers, logs, or shell history. For private workspace
 routing, run the separate [gateway routing suite](#private-gateway-routing).
 
-See [provider/image settings](../../tests/integration/harness-topology-k3d-real.test.mjs)
-and [network setup](../reference/drivers/kubernetes-compute/networking-and-isolation.md#networking).
-Transcript persistence requires SQLite transcript support, not just a version number.
+For custom provider and image settings see the test's
+[source](../../tests/integration/harness-topology-k3d-real.test.mjs) and
+[network setup](../reference/drivers/kubernetes-compute/networking-and-isolation.md#networking).
+Transcript persistence requires a runtime with SQLite transcripts. A version
+number alone does not establish storage support.
 
-Gateway and Harness use separate managed namespaces; fixture placement does not
-prove production node-pool isolation. Use the separate
+Gateway and Harness resources use separate managed namespaces. Default fixture
+placement does not prove production node-pool isolation. Use the separate
 [Slack](slack.md) and [observability](local.md#kubernetes-observability-acceptance)
 suites for those outcomes.
 

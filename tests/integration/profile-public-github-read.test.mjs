@@ -57,8 +57,9 @@ function baseInput(overrides = {}) {
       gatewayNodeSelector: { "oce-role": "control" },
       transportSecretPrefix: "openclaw-agent-transport",
     },
-    gatewayOutbound: { enabled: true, denyCidrs: ["192.0.2.12/32"] },
-    controlPlaneOutbound: { managedProxy: true, denyCidrs: ["192.0.2.12/32"] },
+    channels: {
+      managedSlackProxy: true,
+    },
     ...overrides,
   };
 }

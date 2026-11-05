@@ -52,11 +52,7 @@ export async function createConsoleRepositoryLaunchFixture(
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
         gatewayNodeSelector: { "oce-role": "control" },
-        gatewayOutbound: {
-          enabled: true,
-          image: "controller:local",
-          denyCidrs: ["10.0.0.0/8"],
-        },
+        channels: { proxyUrl: "http://10.42.0.15:3128" },
       },
     },
     { id: "console-launch-compute", nodeEnrollment: {} },

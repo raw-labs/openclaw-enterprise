@@ -45,12 +45,8 @@ export interface DeploymentStatusResult {
 export interface ControllerWorkAttempt {
   readonly at: Date;
   readonly code: string;
-  /** The refusal whose candidate stop or revision access withdrawal remains pending. */
+  /** The refusal a `REFUSED_CANDIDATE_STOP_PENDING` deferral waits to publish. */
   readonly refusal?: string;
-  /** Validated terminal failure evidence preserved while the refusal is pending. */
-  readonly refusalData?: Readonly<Record<string, unknown>>;
-  /** Terminal preparation still requires durable runtime retirement after withdrawal. */
-  readonly cleanupFailedPreparation?: true;
 }
 
 const FAILURE_CODE = /^[A-Z0-9_]{1,64}$/u;
@@ -66,11 +62,6 @@ export function deploymentProgressForWork(
   let code = "RECONCILIATION_PENDING";
   let message = "Deployment has not completed. Another reconciliation is pending.";
   switch (attempt?.code) {
-    case "REVISION_ACCESS_WITHDRAWAL_PENDING":
-      code = attempt.code;
-      message =
-        "Revision network access is being withdrawn before recording this version's failure. The controller will retry removal; deploy a new version to restore access.";
-      break;
     case "REVISION_INCOMPLETE":
       code = attempt.code;
       message = "Waiting for the runtime to become ready.";
@@ -344,12 +335,8 @@ export interface RetryableFailure {
 }
 
 export interface DeferredWork extends RetryableFailure {
-  /** A refusal waiting on its candidate stop or outbound withdrawal, recorded in evidence. */
+  /** A refusal waiting on its candidate's stop; recorded in the deferral's evidence. */
   readonly refusal?: string;
-  /** Existing terminal failure evidence, validated against `refusal`. */
-  readonly refusalData?: unknown;
-  /** Preserve the existing terminal preparation retirement obligation. */
-  readonly cleanupFailedPreparation?: true;
   /** That stop yielded to other Work rather than failing; recorded as `stopYielded: true`. */
   readonly stopYielded?: boolean;
 }

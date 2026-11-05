@@ -3,8 +3,7 @@
     "OCC_TEST_KUBERNETES_KUBECONFIG",
     "OCC_TEST_KUBERNETES_CONTEXT",
     "OCC_TEST_KUBERNETES_IMAGE",
-    "OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS",
-    "OCC_TEST_PRODUCTION_CONTROLLER_IMAGE"
+    "OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS"
   ],
   "env": {
     "OCC_TEST_KUBERNETES_CONFIGURATION": "1"
@@ -12,14 +11,7 @@
   "prepare": {
     "postgres": true,
     "k3d": true,
-    "requiresPreparedStateForFile": true,
-    "controllerImage": true,
-    "defaultEnv": {
-      "NODE_BASE_IMAGE": "docker.io/library/node:24.22.1-bookworm@sha256:d862bb5d082c5ae0210ac07e8c0344cb8cf7bef6d78e9b8c50c179da923108ea"
-    },
-    "requireEnv": ["NODE_BASE_IMAGE"],
-    "nodeBaseImage": true,
-    "immutableOptionalEnvImages": ["OCC_TEST_PRODUCTION_CONTROLLER_IMAGE"]
+    "requiresPreparedStateForFile": true
   },
   "fileConcurrency": 2,
   "parallelFiles": [

@@ -50,10 +50,7 @@ in every slot OpenClaw marks sensitive, channel and plugin secrets included
 ([list](../../reference/configuration/secrets.md#secret-boundaries)), and in a
 plugin secret input also OpenClaw's whole `$NAME` shorthand, checked in
 [the credential rules](../../../apps/controller/src/drivers/configuration/model-auth.ts),
-which a Preset save runs too. Credential checks list each keyed map once,
-without allocating pairs for absent settings. Harness resolution checks every
-Agent but retains only model selections or policies that override defaults.
-The Driver owns backing document
+which a Preset save runs too. The Driver owns backing document
 storage and checks storage-specific identity and ownership. When the bundled
 Kubernetes implementation is selected, `KubernetesConfigurationDriver` in
 [the Kubernetes Configuration implementation](../../../apps/controller/src/drivers/configuration/kubernetes/index.ts)
@@ -154,7 +151,7 @@ checks the Harness authentication binding (Kubernetes Compute also runs the shar
 `requireOpenClawRoster`, the dedicated OpenClaw and Codex `main` Agent rules, and
 [the rules](../../../apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts)
 preparation and the Gateway entrypoint apply after a dedicated deployment stops its
-predecessors: enabled channels need a dedicated workload and `runtime.gatewayOutbound`, a
+predecessors: enabled channels need a dedicated workload and `runtime.channels`, a
 Gateway hosting a workspace node needs the file-transfer plugin, and a Dedicated Codex
 Gateway needs its codex plugin left on) and, through optional
 `validateGatewaySettings`, the native gateway settings: Kubernetes and Docker Compute

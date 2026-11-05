@@ -174,7 +174,7 @@ them. Whether the Installation supplies
 what a method needs (OAuth needs no Sandbox Driver; a credential source needs
 its paired Sandbox) stays a fixed `409`.
 The channel runtime rule stays at deployment: it depends on the execution mode
-and the Installation's `runtime.gatewayOutbound`.
+and the Installation's `runtime.channels`.
 With `runtime` set, `validateHarnessAuth` refuses `dedicated` without
 `gatewayRouting` (and node enrollment) or `runtime.gatewayNodeSelector`,
 naming the setting, at Agent save too: the execution mode is the Agent's.
@@ -183,8 +183,6 @@ it names the planned `harnessAuth`, before the caller saves a Secret or
 Configuration. Agent provisioning runs it for a Secret binding before its plan
 check (`validateAgentProvisioning`), so it answers the same `400`. A save that skips `validateHarnessAuth` (no model selected, or
 another binding, such as a credential source) leaves it to deployment.
-Additional Agent access is independently approved and frozen through
-[Gateway outbound](../gateway-outbound.md).
 
 [SSH Compute](ssh-compute.md) runs only embedded OpenClaw (other topologies get
 a fixed `409`) and names `harnessAuth.method` for any method but `runtime`,

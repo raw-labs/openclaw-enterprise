@@ -105,6 +105,9 @@ function productionInstallation(adminKeyPath) {
           runtime: {
             transportSecretPrefix: "agent-transport",
             gatewayStorageClassName: "sqlite-block",
+            channels: {
+              proxyUrl: "http://198.51.100.10:8080",
+            },
           },
         },
       },

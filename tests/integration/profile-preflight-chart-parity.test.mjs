@@ -67,8 +67,7 @@ function input(controlPlane) {
       gatewayNodeSelector: { "oce-role": "control" },
       transportSecretPrefix: "openclaw-agent-transport",
     },
-    gatewayOutbound: { enabled: true, denyCidrs: ["192.0.2.12/32"] },
-    controlPlaneOutbound: { managedProxy: true, denyCidrs: ["192.0.2.12/32"] },
+    channels: { managedSlackProxy: true },
   };
 }
 
@@ -377,11 +376,8 @@ fieldParity("directory proxy URLs get the same verdict from the preflight and th
     ["https://0.0.0.0:443", false, /must not use host 0\.0\.0\.0, which names no proxy address/],
   ],
   controlPlane: () => ({}),
-  extraInput: (url) => ({ controlPlaneOutbound: { managedProxy: false, proxyUrl: url } }),
-  values: (url) => ({
-    outboundProxy: { enabled: false },
-    api: { controlPlaneOutboundProxyUrl: url },
-  }),
+  extraInput: (url) => ({ channels: { managedSlackProxy: false, directoryProxyUrl: url } }),
+  values: (url) => ({ slackProxy: { enabled: false }, api: { channelDirectoryProxyUrl: url } }),
 });
 
 // The chart's clientAddressHeader refusal, in its order. generic still accepts a plain

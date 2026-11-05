@@ -84,8 +84,9 @@ function isLiteralIpv4ProxyUrl(value) {
   const port = Number(match[2]);
   return Number.isInteger(port) && port <= 65535;
 }
-// The control-plane proxy must identify an actual endpoint.
-function controlPlaneProxyUrl(value) {
+// Compute and the API's Slack directory also refuse the unspecified address, which names
+// no proxy.
+function channelProxyUrl(value) {
   if (!isLiteralIpv4ProxyUrl(value)) {
     return false;
   }
@@ -1206,25 +1207,12 @@ function buildInput(rawInput, diagnostics) {
   closed(
     input,
     "input",
-    [
-      "controlPlane",
-      "runtime",
-      "gatewayOutbound",
-      "channels",
-      "controlPlaneOutbound",
-      "codex",
-      "repository",
-      "publicGithubRead",
-      "presets",
-    ],
+    ["controlPlane", "runtime", "channels", "codex", "repository", "publicGithubRead", "presets"],
     diagnostics,
   );
   const controlPlane = section(input, "controlPlane", diagnostics);
   const runtime = section(input, "runtime", diagnostics);
-  const gatewayOutbound = section(input, "gatewayOutbound", diagnostics, false);
   const channels = section(input, "channels", diagnostics, false);
-  closed(channels, "channels", ["experimentalEmbeddedChannels"], diagnostics);
-  const controlPlaneOutbound = section(input, "controlPlaneOutbound", diagnostics, false);
   const codex = section(input, "codex", diagnostics, false);
   const repository = section(input, "repository", diagnostics, false);
   const publicGithubRead = section(input, "publicGithubRead", diagnostics, false);
@@ -1287,15 +1275,9 @@ function buildInput(rawInput, diagnostics) {
     diagnostics,
   );
   closed(
-    gatewayOutbound,
-    "gatewayOutbound",
-    ["enabled", "allowPublicHttps", "denyCidrs"],
-    diagnostics,
-  );
-  closed(
-    controlPlaneOutbound,
-    "controlPlaneOutbound",
-    ["managedProxy", "proxyUrl", "denyCidrs"],
+    channels,
+    "channels",
+    ["runtimeProxyUrl", "directoryProxyUrl", "managedSlackProxy"],
     diagnostics,
   );
   closed(codex, "codex", ["managedServiceAccounts", "modelDiscoveryCidrs"], diagnostics);
@@ -1382,9 +1364,7 @@ function buildInput(rawInput, diagnostics) {
   return {
     controlPlane,
     runtime,
-    gatewayOutbound,
     channels,
-    controlPlaneOutbound,
     codex,
     repository,
     publicGithubRead,
@@ -1549,9 +1529,7 @@ function buildRendered(profile, parsed, diagnostics) {
   const {
     controlPlane,
     runtime,
-    gatewayOutbound,
     channels,
-    controlPlaneOutbound,
     codex,
     repository,
     publicGithubRead,
@@ -1652,53 +1630,12 @@ function buildRendered(profile, parsed, diagnostics) {
     optionalString(controlPlane, ["controlPlane", "envoyNamespace"], diagnostics, namespaceRule) ??
     "envoy-gateway-system";
   const repositoryEnabled = asBoolean(repository, ["repository", "enabled"], diagnostics, false);
-  const gatewayOutboundEnabled = asBoolean(
-    gatewayOutbound,
-    ["gatewayOutbound", "enabled"],
-    diagnostics,
-    false,
-  );
-  const experimentalEmbeddedChannels = asBoolean(
+  const managedSlackProxyEnabled = asBoolean(
     channels,
-    ["channels", "experimentalEmbeddedChannels"],
+    ["channels", "managedSlackProxy"],
     diagnostics,
-    false,
   );
-  if (experimentalEmbeddedChannels) {
-    if (!gatewayOutboundEnabled) {
-      diagnostics.errors.push(
-        "channels.experimentalEmbeddedChannels requires gatewayOutbound.enabled: true.",
-      );
-    }
-    diagnostics.warnings.push(
-      "Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.",
-    );
-  }
-  const managedOutboundProxyEnabled = asBoolean(
-    controlPlaneOutbound,
-    ["controlPlaneOutbound", "managedProxy"],
-    diagnostics,
-    false,
-  );
-  const networkDenyCidrs = (section, name) =>
-    stringArray(section, [name, "denyCidrs"], diagnostics, {
-      validate: (value) => isIpv4Cidr(value),
-      description: "an IPv4 infrastructure CIDR",
-    });
-  const gatewayDenyCidrs = gatewayOutboundEnabled
-    ? networkDenyCidrs(gatewayOutbound, "gatewayOutbound")
-    : [];
-  const controlPlaneDenyCidrs = managedOutboundProxyEnabled
-    ? networkDenyCidrs(controlPlaneOutbound, "controlPlaneOutbound")
-    : [];
-  const databaseCidrs = stringArray(controlPlane, ["controlPlane", "databaseCidrs"], diagnostics, {
-    validate: (value) => isIpv4Cidr(value, 32),
-    description: "an IPv4 /32 CIDR",
-  });
-  const clusterCidrs = stringArray(controlPlane, ["controlPlane", "clusterCidrs"], diagnostics, {
-    validate: (value) => isIpv4Cidr(value, 32),
-    description: "an IPv4 /32 CIDR",
-  });
+  const managedSlackProxyHost = `openclaw-enterprise-slack-proxy.${namespace}.svc`;
   if (profile.name === "openclaw" && Object.keys(codex).length > 0) {
     diagnostics.errors.push("codex inputs are only consumed by the codex profile.");
   }
@@ -1712,16 +1649,15 @@ function buildRendered(profile, parsed, diagnostics) {
       "repository fields other than enabled are only consumed when repository.enabled is true.",
     );
   }
-  if (managedOutboundProxyEnabled && controlPlaneOutbound.proxyUrl !== undefined) {
+  if (managedSlackProxyEnabled && channels.directoryProxyUrl !== undefined) {
     diagnostics.errors.push(
-      "controlPlaneOutbound.proxyUrl is not consumed when managedProxy enables the chart-managed proxy.",
+      "channels.directoryProxyUrl is not consumed when channels.managedSlackProxy enables the chart-managed Slack proxy.",
     );
   }
-  if (!managedOutboundProxyEnabled && controlPlaneOutbound.denyCidrs !== undefined) {
-    diagnostics.errors.push("controlPlaneOutbound.denyCidrs requires managedProxy: true.");
-  }
-  if (!gatewayOutboundEnabled && Object.keys(gatewayOutbound).some((key) => key !== "enabled")) {
-    diagnostics.errors.push("gatewayOutbound fields other than enabled require enabled: true.");
+  if (managedSlackProxyEnabled && channels.runtimeProxyUrl !== undefined) {
+    diagnostics.errors.push(
+      "channels.runtimeProxyUrl is not consumed when channels.managedSlackProxy enables the chart-managed Slack proxy.",
+    );
   }
   if (
     codex.managedServiceAccounts !== undefined &&
@@ -1822,7 +1758,10 @@ function buildRendered(profile, parsed, diagnostics) {
       },
     },
     database: {
-      cidrs: databaseCidrs,
+      cidrs: stringArray(controlPlane, ["controlPlane", "databaseCidrs"], diagnostics, {
+        validate: (value) => isIpv4Cidr(value, 32),
+        description: "an IPv4 /32 CIDR",
+      }),
       ...(Object.keys(databaseCa).length === 0
         ? {}
         : {
@@ -1849,15 +1788,15 @@ function buildRendered(profile, parsed, diagnostics) {
     },
     api: {
       clients: clientSelectors(controlPlane, diagnostics),
-      ...(managedOutboundProxyEnabled || controlPlaneOutbound.proxyUrl === undefined
+      ...(managedSlackProxyEnabled || channels.directoryProxyUrl === undefined
         ? {}
         : {
-            controlPlaneOutboundProxyUrl: asString(
-              controlPlaneOutbound,
-              ["controlPlaneOutbound", "proxyUrl"],
+            channelDirectoryProxyUrl: asString(
+              channels,
+              ["channels", "directoryProxyUrl"],
               diagnostics,
               {
-                validate: controlPlaneProxyUrl,
+                validate: channelProxyUrl,
                 description: "an HTTP(S) literal IPv4 endpoint with an explicit port",
               },
             ),
@@ -1875,7 +1814,10 @@ function buildRendered(profile, parsed, diagnostics) {
         : { trustedProxy: renderTrustedProxy(trustedProxy, diagnostics) }),
     },
     cluster: {
-      cidrs: clusterCidrs,
+      cidrs: stringArray(controlPlane, ["controlPlane", "clusterCidrs"], diagnostics, {
+        validate: (value) => isIpv4Cidr(value, 32),
+        description: "an IPv4 /32 CIDR",
+      }),
     },
     controlPlane: {
       ...(controlPlane.nodeSelector === undefined
@@ -1934,11 +1876,10 @@ function buildRendered(profile, parsed, diagnostics) {
     repositoryCredentials: {
       enabled: repositoryEnabled,
     },
-    ...(managedOutboundProxyEnabled
+    ...(managedSlackProxyEnabled
       ? {
-          outboundProxy: {
+          slackProxy: {
             enabled: true,
-            denyCidrs: [...new Set([...controlPlaneDenyCidrs, ...databaseCidrs, ...clusterCidrs])],
           },
         }
       : {}),
@@ -2078,30 +2019,32 @@ function buildRendered(profile, parsed, diagnostics) {
                   ),
                 }
               : {}),
-            ...(channels.experimentalEmbeddedChannels === undefined
-              ? {}
-              : { channels: { experimentalEmbeddedChannels } }),
-            ...(gatewayOutboundEnabled
+            ...(managedSlackProxyEnabled
               ? {
-                  gatewayOutbound: {
-                    enabled: true,
-                    allowPublicHttps: asBoolean(
-                      gatewayOutbound,
-                      ["gatewayOutbound", "allowPublicHttps"],
-                      diagnostics,
-                      false,
-                    ),
-                    image: controllerImage,
-                    denyCidrs: [
-                      ...new Set([
-                        ...gatewayDenyCidrs,
-                        ...values.database.cidrs,
-                        ...values.cluster.cidrs,
-                      ]),
-                    ],
+                  channels: {
+                    proxyUrl: `http://${managedSlackProxyHost}:3128`,
+                    managedProxy: {
+                      hostname: managedSlackProxyHost,
+                      namespace,
+                      podLabels: {
+                        "app.kubernetes.io/name": "openclaw-enterprise",
+                        "app.kubernetes.io/instance": releaseName,
+                        "app.kubernetes.io/component": "slack-proxy",
+                      },
+                      port: 3128,
+                    },
                   },
                 }
-              : {}),
+              : channels.runtimeProxyUrl === undefined
+                ? {}
+                : {
+                    channels: {
+                      proxyUrl: asString(channels, ["channels", "runtimeProxyUrl"], diagnostics, {
+                        validate: channelProxyUrl,
+                        description: "an HTTP(S) literal IPv4 endpoint with an explicit port",
+                      }),
+                    },
+                  }),
           },
         },
       },
@@ -2341,17 +2284,21 @@ function buildRendered(profile, parsed, diagnostics) {
       );
     }
   }
-  if (gatewayOutboundEnabled) {
+  if (
+    channels.runtimeProxyUrl !== undefined ||
+    channels.directoryProxyUrl !== undefined ||
+    managedSlackProxyEnabled
+  ) {
     diagnostics.prerequisites.push(
-      "Gateway outbound access is admitted per Agent; enabled supported channels contribute their required destinations.",
+      "Slack consumers remain inactive until Agent channel configuration and credentials are supplied.",
     );
   }
-  if (managedOutboundProxyEnabled) {
+  if (managedSlackProxyEnabled) {
     diagnostics.prerequisites.push(
-      "The managed control-plane proxy permits selected trusted Driver destinations and rejects infrastructure, private and reserved destinations.",
+      "The managed Slack proxy permits Slack hostnames on HTTPS and public IPv4 egress, excluding private and reserved ranges.",
     );
     diagnostics.nextSteps.push(
-      `The managed control-plane proxy Service is openclaw-enterprise-outbound-proxy.${namespace}.svc:3128; Agent Gateways use separately owned proxy instances.`,
+      `The managed Slack proxy Service is openclaw-enterprise-slack-proxy.${namespace}.svc:3128; keep Agent Slack channel consumers disabled until credentials and channel policy are configured.`,
     );
   }
   if (repositoryEnabled) {

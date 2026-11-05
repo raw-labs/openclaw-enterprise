@@ -60,23 +60,26 @@ graph TD
 
 `scripts/upgrade-production-images:prepare_upgrade`
 
-Before reads, writes or cluster access, the helper verifies `HEAD` equals `--source-revision`. It refuses changed/missing/extra stock chart files,
-symlinks and baseline/evidence aliases inside the chart. Keep the checkout unchanged;
-other edits and image provenance remain unchecked.
+Before protected reads, evidence writes or cluster access, the helper matches
+`HEAD` to `--source-revision`. It rejects changed, extra or missing stock chart files, symlinks,
+and baseline/evidence paths or aliases inside the chart. Keep the checkout
+unchanged; other local edits and image provenance remain unchecked.
 
 Resume locks the evidence directory by canonical path, device and inode. A `completed`
 entry refuses resume before calls or writes. Runtime upgrades separately lock the
 frozen fleet’s sibling dispatch journal; evidence restoration cannot replace it.
 
-Candidates match [baseline](../guides/deploy/upgrade-baseline.md#record-the-release-and-its-configuration) YAML, including images. Both are validated before comparison. `scripts/upgrade-production-images:matches_yaml`
+Candidates match the [baseline](../guides/deploy/upgrade-baseline.md#record-the-release-and-its-configuration)
+as ordered YAML mappings, including images. Validate both candidates before
+protected-setting projections. `scripts/upgrade-production-images:matches_yaml`
 compares checked conversions and exits on unusable inputs or unwritable
-evidence with `Cannot compare upgrade YAML`. Only the control-plane outbound proxy (`api.controlPlaneOutboundProxyUrl`) and
+evidence with `Cannot compare upgrade YAML`. Only the Slack directory proxy and
 curated Codex PluginDriver selection may change before image selection. An explicit
 candidate may also wrap the installed single plugin registration in an array.
 Comparison preserves other configuration and never rewrites the baseline. Startup
 checks validate the candidate. Broker checks compare references, not ConfigMap or Secret contents.
 
-Runtime upgrades require complete authorized inventory and baseline versions.
+Runtime upgrades require a complete authorized inventory and baseline versions.
 Nonterminal deployments, missing versions or unready Namespaces stop preparation.
 Stopped or deleting Agents are excluded; pending repository cleanup does not block.
 
@@ -225,10 +228,11 @@ remain stable across that check and before dispatch and completion.
 `scripts/upgrade-production-images:confirmed_deployment_status` and
 `scripts/upgrade-dispatch-state.py:transition`
 
-The helper persists intent, starts the eligible batch, then collects replies.
-Unresolved intent blocks later sends on resume. The journal retains accepted
-revisions, definite refusals and superseded receipts. Resume can retry refusals;
-a replacement receipt must name the current failed revision. If an outcome
+The helper flushes intent before each deploy and starts the eligible batch
+before collecting replies. An unresolved intent blocks later sends on resume.
+The journal records accepted revisions and definite refusals. Resume can retry
+a refusal. It keeps superseded receipts and uses the journal's current revision.
+A new replacement receipt must name the current failed revision. If an outcome
 is unknown or the journal may be stale, use the
 [recovery guide](../guides/deploy/production-upgrade-recovery.md).
 
@@ -355,14 +359,6 @@ saved mapping, exact-name reuse requires a Namespace without Agents or Secrets.
 - 2026-10-23 09:50: Document preflight-only rehearsal and fresh checks at deployment. (authoring-run/3c1a4d88-d619-47e3-9eba-dbaf0988d2e9 - 4e9f5935d5fa4878a719e82db5e504ec6ae55d64)
 - 2026-10-20 01:48: Preserve field diagnostics before quiescence. (authoring-run/9d1ff825-b9f4-492a-9420-1e316d820e28 - e7e5f3321cb0a8471d74964eba56ddd069a4e4c5)
 - 2026-10-19 22:34: Document that pending repository cleanup does not block upgrade preparation. (authoring-run/d59b973b-1f0b-46bb-b16f-d67bd24ed6d3 - 57acafe81482a890b02ae530793246f2c2e7be79)
-- 2026-10-19 13:31: Retain proxy ownership alongside upstream upgrade preflight. (authoring-run/40820368-0ee7-4901-9224-041654014ae4 - b10157ca9)
-
 - 2026-10-18: The initialization hook checks the Installation before migration.
-
-- 2026-10-15 10:01: Name the canonical control-plane outbound proxy in candidate protection. (authoring-run/903d04fd-a3a7-4825-aca7-f94d828ab2d8 - 313a70262e432192306a2db431bf0b6f0459a957)
-
-- 2026-10-12 15:14: Record bootstrap Job grants required by the two-cluster upgrade preflight alongside the fixture correction. (authoring-run/ebb1c629-97b2-4b9a-aa67-a5e750346031 - 9578f6f7aaff9b8545346f43043cbc5b9bcf674e)
-- 2026-10-10 03:30: Say that the worker's next preparation of an existing version applies the new controller's Pod templates and rolls changed Pods once. (fix-990-991)
-- 2026-10-10 02:10: Require complete successful API responses before publishing the split-layout export bundle. (authoring-run/35b00357-b0c6-459f-aec1-b4fb63620dff - 0886f47d05fdeb2fa4359f4840fb77378d643bac)
 
 [Production image upgrade flow documentation history](coordinated-production-upgrade/history.md) preserves the older dated entries.

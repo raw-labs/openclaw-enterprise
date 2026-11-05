@@ -137,10 +137,3 @@ These process environment variables are optional. First Agent Smoke has its own
 Cleanup timeout/grace overrides that are not positive numbers use defaults.
 Deadlines include pipe drain; a wait timeout does not prove deletion. Preparation
 verifies imported image references on every node and fails on import timeout.
-
-The `k3d-fixture-state` lane imports an actual controller image as
-`OCC_TEST_PRODUCTION_CONTROLLER_IMAGE` for enabled Slack provisioning through
-the managed Gateway proxy. Preparation builds it if none was selected; file
-preparation reuses its recorded immutable reference. Gateway/provider responses
-remain fixtures. This proves proxy lifecycle and Secret projection, not native
-Slack connectivity; see the [fixture procedure](../kubernetes.md#kubernetes-http-fixture).

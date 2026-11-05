@@ -4,9 +4,7 @@ import net from "node:net";
 import { Duplex } from "node:stream";
 import test from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import { createOutboundProxyServer } from "../../apps/controller/src/gateway/outbound-proxy.mjs";
-import dns from "node:dns/promises";
-import { syncBuiltinESMExports } from "node:module";
+import { createSlackProxyServer } from "../../apps/controller/src/slack-proxy.mjs";
 import { refusingPort } from "../helpers/available-port.mjs";
 import { listen as listenServer } from "../helpers/listen.mjs";
 import { connectThroughProxy, startSlackProxy } from "../helpers/slack-proxy.mjs";
@@ -139,13 +137,12 @@ test(
   },
 );
 
-// Drives createOutboundProxyServer in this process with a client socket whose writes complete only
+// Drives createSlackProxyServer in this process with a client socket whose writes complete only
 // when the test says so, as writes do behind a full TCP send buffer. A real slow client only
 // reaches that state when the kernel buffers happen to be full, so the loopback test above
 // rarely catches a proxy that drops queued bytes; this one does every time. `upstreamSocket()`
 // is the proxy's own socket to the upstream, redirected to `upstreamPort`.
-async function heldClientTunnel(t, upstreamPort) {
-  const created = Promise.withResolvers();
+function heldClientTunnel(t, upstreamPort, serverOptions) {
   const connect = net.connect;
   // DNS supplies a public destination. Only its socket transport is redirected locally;
   // production still has to validate the answer and connect to that numeric address.
@@ -153,9 +150,8 @@ async function heldClientTunnel(t, upstreamPort) {
     callback(null, [{ address: "93.184.216.34", family: 4 }]);
   });
   let upstreamSocket;
-  const connector = t.mock.method(net, "connect", (options, ...rest) => {
+  t.mock.method(net, "connect", (options, ...rest) => {
     upstreamSocket = connect({ ...options, host: "127.0.0.1", port: upstreamPort }, ...rest);
-    created.resolve();
     return upstreamSocket;
   });
   const chunks = [];
@@ -173,7 +169,6 @@ async function heldClientTunnel(t, upstreamPort) {
       callback();
     },
   });
-  client.setTimeout = () => client;
   // A net.Socket closes with a TCP reset here; record it.
   client.resetAndDestroy = () => {
     reset = true;
@@ -182,24 +177,8 @@ async function heldClientTunnel(t, upstreamPort) {
   client.on("error", () => {});
   t.after(() => client.destroy());
   const closed = new Promise((resolve) => client.once("close", resolve));
-  const resolver = t.mock.method(dns, "lookup", async () => [
-    { address: "93.184.216.34", family: 4 },
-  ]);
-  syncBuiltinESMExports();
-  t.after(() => {
-    resolver.mock.restore();
-    connector.mock.restore();
-    syncBuiltinESMExports();
-  });
-  const server = createOutboundProxyServer({
-    policy: {
-      mode: "restricted",
-      destinations: [{ host: "slack.com", includeSubdomains: true }],
-      denyCidrs: [],
-    },
-  });
+  const server = createSlackProxyServer(serverOptions);
   server.emit("connect", { url: "slack.com:443" }, client, Buffer.alloc(0));
-  await created.promise;
   return {
     client,
     closed,
@@ -222,7 +201,7 @@ test(
       socket.on("error", () => {});
       socket.end(reply);
     });
-    const tunnel = await heldClientTunnel(t, upstream.address().port);
+    const tunnel = heldClientTunnel(t, upstream.address().port);
 
     await within(
       new Promise((resolve) => tunnel.upstreamSocket().once("close", resolve)),
@@ -258,7 +237,7 @@ test(
       socket.on("error", () => {});
       socket.end(reply);
     });
-    const tunnel = await heldClientTunnel(t, upstream.address().port);
+    const tunnel = heldClientTunnel(t, upstream.address().port);
     // The client sends a byte just as the upstream's EOF has ended the proxy's upstream socket,
     // so piping it upstream fails (EPIPE) after the whole reply has arrived.
     const upstreamErrors = [];
@@ -294,7 +273,7 @@ test(
       socket.on("error", () => {});
       socket.end("never-read");
     });
-    const tunnel = await heldClientTunnel(t, upstream.address().port);
+    const tunnel = heldClientTunnel(t, upstream.address().port, { clientDrainTimeoutMs: 1_000 });
 
     await within(
       new Promise((resolve) => tunnel.upstreamSocket().once("close", resolve)),
@@ -302,7 +281,7 @@ test(
     );
     await nextTurn();
     assert.equal(tunnel.client.destroyed, false, "the client gets time to read");
-    await within(tunnel.closed, "client close after the drain timeout", 15_000);
+    await within(tunnel.closed, "client close after the drain timeout");
     assert.equal(tunnel.finished(), false, "the stuck client never got a clean EOF");
     assert.ok(tunnel.reset(), "a cut reply ends in a reset, not a clean close");
   },

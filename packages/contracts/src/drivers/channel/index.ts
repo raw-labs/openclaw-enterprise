@@ -1,5 +1,3 @@
-import type { GatewayOutboundRequirement } from "../../gateway-outbound.ts";
-import type { OpenClawConfigurationDocument } from "../../index.ts";
 import type { Driver } from "../index.ts";
 
 export interface ChannelDirectoryLookupInput {
@@ -32,13 +30,6 @@ export type ChannelCredentialReader = (
 ) => Promise<void>;
 
 export interface ChannelDriver extends Driver {
-  /** Side-effect-free requirements of supported enabled native channels. */
-  gatewayNetworkRequirements?(
-    configuration: Readonly<OpenClawConfigurationDocument>,
-  ): readonly GatewayOutboundRequirement[];
-  /** Installation-local provider management transport; independent of Agent revisions. */
-  controlPlaneNetworkRequirements?(): readonly GatewayOutboundRequirement[];
-
   readonly capability: "channel";
   validateCredentials?(
     values: Readonly<Record<string, unknown>>,

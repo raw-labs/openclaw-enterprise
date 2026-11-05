@@ -54,7 +54,6 @@ function clientAgent(agent: Readonly<AgentRead>): Record<string, unknown> {
     pluginApprovers: agent.pluginApprovers,
     repositoryBindings: agent.repositoryBindings,
     repositoryAccess: agent.repositoryAccess,
-    gatewayOutbound: agent.gatewayOutbound,
     harnessAuth: agent.harnessAuth,
     ...(agent.credentialSources === undefined || agent.credentialSources.length === 0
       ? {}
@@ -105,7 +104,6 @@ function clientRevision(revision: Readonly<AgentRevisionRead>): Record<string, u
     backendId: revision.backendId,
     gatewayManagedMode: revision.gatewayManagedMode,
     configuration: revision.configuration,
-    gatewayOutbound: revision.gatewayOutbound,
     harness: revision.harness,
     compute: { id: revision.compute.id, implementation: revision.compute.implementation },
     sandboxDriverId: revision.sandboxDriverId,
@@ -376,21 +374,6 @@ export function createAgentHandlers(options: AgentHandlerOptions) {
         ),
         meta: { requestId: request.id },
       });
-    },
-    async getAgentGatewayOutboundCapabilities({
-      controller,
-      context,
-      request,
-      reply,
-      params,
-      namespaceId,
-    }) {
-      const capabilities = await controller.getAgentGatewayOutboundCapabilities(
-        context.actorId,
-        namespaceId,
-        params.agentId!,
-      );
-      reply.send({ data: capabilities, meta: { requestId: request.id } });
     },
     async updateAgent({
       controller,

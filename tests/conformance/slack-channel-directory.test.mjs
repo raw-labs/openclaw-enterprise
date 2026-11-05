@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import net from "node:net";
 import { createRequire } from "node:module";
 import test from "node:test";
-import net from "node:net";
 import { SlackChannelDriver } from "../../apps/controller/src/drivers/channel/slack.ts";
 import { ChannelDirectoryError } from "../../packages/occ/src/index.ts";
 import { syntheticCredentialUrl } from "../fixtures/synthetic-credential-url.mjs";
@@ -21,42 +21,6 @@ const { Agent, fetch: undiciFetch } = createRequire(
 )("undici");
 
 const token = "xoxb-fixture";
-
-test("Slack contributes Gateway destinations only for an enabled native account", () => {
-  const driver = new SlackChannelDriver();
-  for (const configuration of [
-    {},
-    { channels: { slack: { enabled: false, accounts: { default: { enabled: true } } } } },
-    { channels: { slack: { accounts: { disabled: { enabled: false } } } } },
-  ]) {
-    assert.deepEqual(driver.gatewayNetworkRequirements(configuration), []);
-  }
-  const expected = [
-    {
-      source: "slack",
-      destinations: [
-        { host: "slack.com", includeSubdomains: true },
-        { host: "slack-edge.com", includeSubdomains: true },
-        { host: "slack-msgs.com", includeSubdomains: true },
-      ],
-    },
-  ];
-  for (const configuration of [
-    { channels: { slack: { enabled: true } } },
-    { channels: { slack: { accounts: { enabled: {} } } } },
-    // Named disabled accounts do not remove OpenClaw's implicit top-level default.
-    {
-      channels: {
-        slack: { botToken: "bound", appToken: "bound", accounts: { disabled: { enabled: false } } },
-      },
-    },
-  ]) {
-    assert.deepEqual(driver.gatewayNetworkRequirements(configuration), expected);
-  }
-  assert.deepEqual(driver.controlPlaneNetworkRequirements(), [
-    { source: "slack/management", destinations: [{ host: "slack.com", includeSubdomains: false }] },
-  ]);
-});
 
 test("Slack directory sends HTTPS requests through its selected CONNECT proxy", async (t) => {
   const targets = [];
@@ -85,23 +49,23 @@ test("Slack directory accepts only literal IP or managed Service proxy endpoints
     () =>
       new SlackChannelDriver(
         globalThis.fetch,
-        "http://openclaw-enterprise-outbound-proxy.openclaw-system.svc:3128",
-        { managedProxyHosts: ["openclaw-enterprise-outbound-proxy.openclaw-system.svc"] },
+        "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+        { managedProxyHosts: ["openclaw-enterprise-slack-proxy.openclaw-system.svc"] },
       ),
   );
   for (const proxyUrl of [
-    "http://openclaw-enterprise-outbound-proxy.openclaw-system.svc:3128",
-    "http://outbound-proxy:3128",
-    "http://outbound-proxy.openclaw-system.svc.cluster.local:3128",
+    "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+    "http://slack-proxy:3128",
+    "http://slack-proxy.openclaw-system.svc.cluster.local:3128",
     syntheticCredentialUrl({
       protocol: "http",
       username: "user",
       password: "pass",
-      host: "openclaw-enterprise-outbound-proxy.openclaw-system.svc",
+      host: "openclaw-enterprise-slack-proxy.openclaw-system.svc",
       port: 3128,
     }),
-    "http://openclaw-enterprise-outbound-proxy.openclaw-system.svc:3128/path",
-    "http://openclaw-enterprise-outbound-proxy.openclaw-system.svc:65536",
+    "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128/path",
+    "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:65536",
   ]) {
     assert.throws(() => new SlackChannelDriver(globalThis.fetch, proxyUrl), /managed Kubernetes/);
   }
@@ -109,7 +73,7 @@ test("Slack directory accepts only literal IP or managed Service proxy endpoints
   for (const proxyUrl of ["http://0.0.0.0:3128", "https://0.0.0.0:8443"]) {
     assert.throws(
       () => new SlackChannelDriver(globalThis.fetch, proxyUrl),
-      /^Error: Control-plane outbound proxy must not use host 0\.0\.0\.0, which names no proxy address\.$/,
+      /^Error: Slack directory proxy must not use host 0\.0\.0\.0, which names no proxy address\.$/,
     );
   }
 });

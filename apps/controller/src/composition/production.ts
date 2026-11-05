@@ -26,8 +26,8 @@ import {
   type PreparedAuthAccount,
 } from "../auth/index.ts";
 import { createFastifyApp } from "../index.ts";
-import { createBundledChannelCapabilities } from "./channel.ts";
 import type { ConsoleTheme } from "../console-theme.ts";
+import { SlackChannelDriver } from "../drivers/channel/slack.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -68,8 +68,8 @@ export interface ProductionConfig {
   readonly serviceAccountDriverFactory?: ServiceAccountDriverFactory;
   readonly workspaceFilesAccess?: ControllerWorkspaceFilesAccess;
   readonly gatewayApiKeyPath?: string;
-  readonly controlPlaneOutboundProxyUrl?: string;
-  readonly controlPlaneOutboundProxyManagedHost?: string;
+  readonly channelDirectoryProxyUrl?: string;
+  readonly channelDirectoryManagedProxyHost?: string;
   /**
    * OCC_API_HTTPS_EGRESS_OPEN: a sign-in egress rule lets the API reach any address on TCP 443,
    * so Slack can answer without a proxy. Default: closed.
@@ -283,15 +283,19 @@ export async function composeProduction(
     }
 
     phaseCompleted("computePreflight");
-    const { driver: channelDriver, channelNetworkRequirements } = createBundledChannelCapabilities({
-      ...(config.controlPlaneOutboundProxyUrl === undefined
-        ? {}
-        : { proxyUrl: config.controlPlaneOutboundProxyUrl }),
-      ...(config.controlPlaneOutboundProxyManagedHost === undefined
-        ? {}
-        : { managedProxyHost: config.controlPlaneOutboundProxyManagedHost }),
-      expectProxy: config.apiHttpsEgressOpen !== true,
-    });
+    const channelDriver = new SlackChannelDriver(
+      globalThis.fetch,
+      config.channelDirectoryProxyUrl,
+      {
+        managedProxyHosts:
+          config.channelDirectoryManagedProxyHost === undefined
+            ? []
+            : [config.channelDirectoryManagedProxyHost],
+        // A closed egress reaches Slack only through a proxy; an open one may reach it
+        // directly, so a timeout there stays a retryable outage (finding 2533).
+        expectProxy: config.apiHttpsEgressOpen !== true,
+      },
+    );
     const controller = OpenClawController.forInstallation(
       persistedInstallation,
       {
@@ -302,7 +306,6 @@ export async function composeProduction(
               nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)!,
             }
           : {}),
-        channelNetworkRequirements,
         ...(config.drivers.tokenService && { preparedTokens: config.drivers.tokenService }),
         ...(config.drivers.pluginSourceReader === undefined
           ? {}

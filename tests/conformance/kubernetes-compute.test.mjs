@@ -138,13 +138,6 @@ import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 import { ControllerWorker } from "../../apps/controller/src/worker.ts";
 
 const { kubeconfigPath, context: contextName } = conformanceKubeconfig;
-const gatewayOutbound = {
-  enabled: true,
-  allowPublicHttps: true,
-  image: "controller:local",
-  denyCidrs: ["10.0.0.0/8"],
-};
-
 test("Kubernetes peer Pod selectors and node selectors reject labels the API refuses before provisioning", () => {
   // Node selectors reach the API server only in a deployment's Deployment, after a dedicated
   // deployment stopped its predecessors (finding 2357).
@@ -186,6 +179,24 @@ test("Kubernetes peer Pod selectors and node selectors reject labels the API ref
           podLabels,
           address: "127.0.0.1",
           port: 8443,
+        };
+      },
+    ],
+    [
+      "Managed channel proxy",
+      (configured, podLabels) => {
+        configured.runtime = {
+          transportSecretPrefix: "transport",
+          gatewayStorageClassName: "local-path",
+          channels: {
+            proxyUrl: "http://proxy.controller.svc:3128",
+            managedProxy: {
+              namespace: "controller",
+              podLabels,
+              hostname: "proxy.controller.svc",
+              port: 3128,
+            },
+          },
         };
       },
     ],
@@ -602,11 +613,6 @@ test("retiring an upgraded revision removes its legacy node Secret and keeps the
   ]);
   const deleted = [];
   driver.apiClients = Promise.resolve({
-    networking: {
-      async readNamespacedNetworkPolicy() {
-        throw Object.assign(new Error("not found"), { statusCode: 404 });
-      },
-    },
     core: {
       async readNamespacedSecret({ name }) {
         if (!secrets.has(name)) {
@@ -1068,8 +1074,6 @@ function dedicatedFirstDeployFixture({
   namespace = kubernetesNamespaceName(tenant.id),
   clock,
   modelEndpoint,
-  outbound,
-  publicReader,
   modelProtocol = "openai-responses",
   standaloneWebSearch,
   sandboxDriver,
@@ -1120,14 +1124,10 @@ function dedicatedFirstDeployFixture({
                   : { supportsStandaloneWebSearch: standaloneWebSearch }),
               },
             }),
-        ...(outbound === undefined ? {} : { gatewayOutbound: outbound }),
       },
       // The API server proxy can reach private status, so activation reads the
       // node OpenClaw applied.
-      network: {
-        ...(statusProxy ? { pluginStatusProxySourceCidrs: ["192.0.2.20/32"] } : {}),
-        ...(publicReader === undefined ? {} : { publicGithubRead: publicReader }),
-      },
+      ...(statusProxy ? { network: { pluginStatusProxySourceCidrs: ["192.0.2.20/32"] } } : {}),
     }),
     {
       sandboxDriver,
@@ -1228,23 +1228,7 @@ function dedicatedFirstDeployFixture({
       auth: { trustedProxy: { requiredHeaders: ["x-real-ip"], allowLoopback: false } },
     },
   };
-  if (publicReader !== undefined) {
-    operatorSuppliedConfiguration.plugins = {
-      entries: {
-        codex: {
-          config: {
-            appServer: {
-              networkProxy: { enabled: true, domains: { [publicReader.address]: "allow" } },
-            },
-          },
-        },
-      },
-    };
-  }
   revision.configuration = admitLoggingConfiguration(operatorSuppliedConfiguration, "info");
-  if (publicReader !== undefined) {
-    revision.compute.admission = driver.admitRevision(revision);
-  }
   const gatewayName = `gateway-${digest(revision.agentId)}`;
   const agentName = `agent-${digest(revision.agentId)}-rev-${digest(revision.id)}`;
   const objects = new Map();
@@ -1391,11 +1375,6 @@ function dedicatedFirstDeployFixture({
       api[`patchNamespaced${kind}`] = write;
       api[`createNamespaced${kind}`] = write;
       api[`replaceNamespaced${kind}`] = (request) => write(request, { replace: true });
-      api[`deleteNamespaced${kind}`] = async ({ name, namespace: target, body }) => {
-        const observed = read(kind, name, target);
-        assert.equal(body.preconditions.uid, observed.metadata.uid);
-        objects.delete(key(kind, name, target));
-      };
     }
   }
   clients.core.listNamespace = async ({ labelSelector }) => ({
@@ -1428,12 +1407,6 @@ function dedicatedFirstDeployFixture({
     const role = labels["openclaw.dev/workload-role"];
     if (role === "agent" && sandboxDriver !== undefined) {
       return { items: state.providerPod === undefined ? [] : [structuredClone(state.providerPod)] };
-    }
-    if (
-      role === "gateway-outbound" &&
-      !objects.has(key("Deployment", labels["app.kubernetes.io/name"], requestedNamespace))
-    ) {
-      return { items: [] };
     }
     return {
       items: [
@@ -1571,365 +1544,6 @@ function dedicatedFirstDeployFixture({
     markReady,
   };
 }
-
-test("dedicated preparation gates Gateway launch on its isolated revision proxy and withdraws a tightened ceiling", async () => {
-  const fixture = dedicatedFirstDeployFixture({ outbound: gatewayOutbound });
-  const { driver, revision, objects, key, namespace } = fixture;
-  revision.gatewayOutbound = driver.admitGatewayOutbound({
-    selection: { mode: "publicHttps" },
-    executionMode: "dedicated",
-    requirements: [
-      { source: "channel/slack", destinations: [{ host: "slack.com", includeSubdomains: true }] },
-    ],
-  });
-  // A reconciled proxy is not ready until Kubernetes observes its healthy process.
-  assert.equal((await fixture.prepare()).ready, false);
-  assert.equal(objects.has(key("Deployment", fixture.gatewayName, namespace)), false);
-  const name = driver.gatewayOutboundName(revision);
-  const proxy = objects.get(key("Deployment", name, namespace));
-  assert.equal(proxy.spec.template.spec.automountServiceAccountToken, false);
-  assert.equal(proxy.spec.template.spec.containers[0].image, gatewayOutbound.image);
-  assert.deepEqual(proxy.spec.template.spec.containers[0].volumeMounts, [
-    { name: "policy", mountPath: "/etc/oce-gateway-outbound", readOnly: true },
-  ]);
-  const policy = objects.get(key("NetworkPolicy", name, namespace));
-  assert.deepEqual(policy.spec.ingress[0].from[0].podSelector.matchLabels, {
-    "openclaw.dev/namespace": revision.namespaceId,
-    "openclaw.dev/agent": revision.agentId,
-    "openclaw.dev/revision": revision.id,
-    "openclaw.dev/workload-role": "gateway",
-    "openclaw.dev/network-profile": "broad-egress-v1",
-  });
-  assert.equal(
-    policy.spec.podSelector.matchLabels["openclaw.dev/network-profile"],
-    "gateway-outbound-v1",
-  );
-  assert.deepEqual(policy.spec.egress[1].ports, [{ protocol: "TCP", port: 443 }]);
-  assert.ok(policy.spec.egress[1].to[0].ipBlock.except.includes("169.254.0.0/16"));
-  assert.equal(
-    policy.spec.egress.some((rule) => rule.to.some((peer) => peer.ipBlock?.cidr === "::/0")),
-    false,
-  );
-  // Generic HTTPS works without any channel enabling, using the exact revision-owned endpoint.
-  fixture.markReady(name);
-  await fixture.prepare();
-  const gateway = objects.get(key("Deployment", fixture.gatewayName, namespace));
-  const environment = Object.fromEntries(
-    gateway.spec.template.spec.containers[0].env.map((entry) => [entry.name, entry.value]),
-  );
-  assert.equal(environment.HTTPS_PROXY, `http://${name}.${namespace}.svc:3128`);
-  assert.equal(environment.NODE_USE_ENV_PROXY, "1");
-  assert.ok(
-    environment.NO_PROXY.split(",").includes(`agent-${digest(revision.agentId)}.${namespace}.svc`),
-  );
-  assert.equal(environment.OPENAI_API_KEY, undefined);
-  const harness = objects.get(key("Deployment", fixture.agentName, namespace));
-  assert.equal(
-    harness.spec.template.spec.containers[0].env.some((entry) => entry.name === "HTTPS_PROXY"),
-    false,
-  );
-  const unrelated = structuredClone(revision);
-  unrelated.id = "another-revision";
-  assert.notEqual(driver.gatewayOutboundName(unrelated), name);
-  // Current Installation policy is checked before native channel validation or startup effects.
-  const tightened = new KubernetesComputeDriver(
-    routedOptions({
-      runtime: {
-        transportSecretPrefix: "transport",
-        gatewayStorageClassName: "local-path",
-        gatewayOutbound: { ...gatewayOutbound, allowPublicHttps: false },
-      },
-    }),
-    { id: driver.id },
-  );
-  tightened.apiClients = Promise.resolve(fixture.clients);
-  await assert.rejects(
-    tightened.prepareRevision(revision, authContext(revision)),
-    /Public Gateway HTTPS is disabled/,
-  );
-  for (const kind of ["Deployment", "Service", "ServiceAccount", "ConfigMap", "NetworkPolicy"]) {
-    assert.equal(objects.has(key(kind, name, namespace)), false, kind);
-  }
-  assert.equal(objects.has(key("NetworkPolicy", `${name}-gateway`, namespace)), false);
-  assert.deepEqual(objects.get(key("Deployment", fixture.gatewayName, namespace)), gateway);
-});
-
-test("revision access withdrawal closes both admitted routes independently and preserves a successor", async (t) => {
-  for (const blocked of ["gateway-outbound", "agent"]) {
-    await t.test(`a denied ${blocked} delete does not retain the other route`, async () => {
-      const publicReader = {
-        namespace: "controller",
-        podLabels: { app: "public-github-read" },
-        address: "10.43.0.55",
-      };
-      const fixture = dedicatedFirstDeployFixture({ outbound: gatewayOutbound, publicReader });
-      const { driver, revision, objects, key, namespace, clients, templates } = fixture;
-      driver.waitBeforeRetry = async () => {};
-      revision.gatewayOutbound = driver.admitGatewayOutbound({
-        selection: { mode: "publicHttps" },
-        executionMode: "dedicated",
-        requirements: [],
-      });
-      assert.match(revision.compute.admission, /^public-github-read:v1:/);
-      assert.equal(driver.revisionAccessStatus(revision), "current");
-      const unselected = structuredClone(revision);
-      delete unselected.gatewayOutbound;
-      delete unselected.compute.admission;
-      assert.equal(driver.revisionAccessStatus(unselected), "none");
-      await fixture.prepare();
-      fixture.markReady(driver.gatewayOutboundName(revision));
-      await fixture.prepare();
-
-      // A second admitted candidate has its own Harness and proxy. Old cleanup must not delete either.
-      const successor = { ...structuredClone(revision), id: "access-successor", revision: 2 };
-      await driver.prepareRevision(successor, authContext(successor));
-      fixture.markReady(driver.gatewayOutboundName(successor));
-      await driver.prepareRevision(successor, authContext(successor));
-      const successorResources = [...objects].filter(
-        ([, object]) => object.metadata.labels?.["openclaw.dev/revision"] === successor.id,
-      );
-      assert.ok(
-        successorResources.some(
-          ([, object]) =>
-            object.kind === "Deployment" &&
-            object.spec.template.metadata.labels["openclaw.dev/workload-role"] === "agent",
-        ),
-      );
-      assert.ok(objects.has(key("Deployment", driver.gatewayOutboundName(successor))));
-      const preserved = structuredClone(successorResources);
-      clients.core.listNamespacedPod = async ({ labelSelector, namespace: target }) => {
-        const labels = Object.fromEntries(
-          labelSelector.split(",").map((entry) => entry.split("=")),
-        );
-        return {
-          items: [...objects.values()]
-            .filter(
-              (object) =>
-                object.kind === "Deployment" &&
-                object.metadata.namespace === target &&
-                selectorMatches({ matchLabels: labels }, object.spec.template.metadata.labels),
-            )
-            .map((object) => ({
-              apiVersion: "v1",
-              kind: "Pod",
-              metadata: {
-                ...object.spec.template.metadata,
-                name: `${object.metadata.name}-pod`,
-                namespace: target,
-                uid: `${object.metadata.uid}-pod`,
-              },
-            })),
-        };
-      };
-      const names = {
-        "gateway-outbound": driver.gatewayOutboundName(revision),
-        agent: fixture.agentName,
-      };
-      const removeDeployment = clients.apps.deleteNamespacedDeployment;
-      clients.apps.deleteNamespacedDeployment = async (request) => {
-        if (request.name === names[blocked]) {
-          throw Object.assign(new Error("Deployment deletion denied"), { statusCode: 403 });
-        }
-        return removeDeployment(request);
-      };
-      // The immutable admission survives both Installation permissions disappearing.
-      driver.options.runtime.gatewayOutbound = { ...gatewayOutbound, enabled: false };
-      driver.options.network.publicGithubRead = undefined;
-      assert.equal(driver.revisionAccessStatus(revision), "withdrawn");
-      await assert.rejects(driver.prepareRevision(revision, authContext(revision)), {
-        message: "Deployment deletion denied",
-        statusCode: 403,
-      });
-      const other = blocked === "agent" ? "gateway-outbound" : "agent";
-      assert.equal(objects.has(key("Deployment", names[blocked])), true);
-      assert.equal(
-        objects.has(key("Deployment", names[other])),
-        false,
-        "failure of one removal must not prevent the other removal",
-      );
-      assert.equal(
-        objects.has(key("NetworkPolicy", driver.publicGithubReadNetworkPolicyName(revision))),
-        false,
-      );
-      const starts = templates.length;
-      clients.apps.deleteNamespacedDeployment = removeDeployment;
-      driver.options.runtime.gatewayOutbound = gatewayOutbound;
-      driver.options.network.publicGithubRead = publicReader;
-      assert.equal(driver.revisionAccessStatus(revision), "current");
-      await driver.withdrawRevisionAccess(revision);
-      await driver.withdrawRevisionAccess(revision);
-      assert.equal(
-        templates.length,
-        starts,
-        "replay with restored settings must never start a workload",
-      );
-      assert.equal(objects.has(key("Deployment", names.agent)), false);
-      for (const kind of [
-        "Deployment",
-        "Service",
-        "ServiceAccount",
-        "ConfigMap",
-        "NetworkPolicy",
-      ]) {
-        assert.equal(objects.has(key(kind, names["gateway-outbound"])), false, kind);
-      }
-      assert.equal(
-        objects.has(key("NetworkPolicy", `${names["gateway-outbound"]}-gateway`)),
-        false,
-      );
-      assert.deepEqual(
-        preserved.map(([resourceKey]) => [resourceKey, objects.get(resourceKey)]),
-        preserved,
-        "repeated removal of the refused revision must preserve every successor resource",
-      );
-      assert.ok(objects.has(key("Deployment", fixture.gatewayName, namespace)));
-    });
-  }
-});
-
-test("retired shared proxy grants remain until their Gateway terminates and cannot delete a successor", async () => {
-  const f = dedicatedFirstDeployFixture({ outbound: gatewayOutbound });
-  const { driver, revision, namespace, objects, key, clients } = f;
-  driver.waitBeforeRetry = async () => {};
-  revision.gatewayOutbound = driver.admitGatewayOutbound({
-    selection: { mode: "publicHttps" },
-    executionMode: "dedicated",
-    requirements: [],
-  });
-  await f.prepare();
-  f.markReady(driver.gatewayOutboundName(revision));
-  await f.prepare();
-  const originalGateway = structuredClone(objects.get(key("Deployment", f.gatewayName)));
-  const legacyName = `allow-gateway-channels-${digest(revision.agentId)}`;
-  // This is the Agent-wide policy an upstream controller wrote for an external proxy.
-  const legacy = {
-    ...driver.manifest(
-      "networking.k8s.io/v1",
-      "NetworkPolicy",
-      legacyName,
-      { namespaceId: revision.namespaceId, agentId: revision.agentId },
-      { name: namespace, plane: "execution" },
-    ),
-    spec: {
-      podSelector: {
-        matchLabels: {
-          "openclaw.dev/network-profile": "broad-egress-v1",
-          "openclaw.dev/workload-role": "gateway",
-          "openclaw.dev/agent": revision.agentId,
-        },
-      },
-      policyTypes: ["Egress"],
-      egress: [
-        { to: [{ ipBlock: { cidr: "192.0.2.55/32" } }], ports: [{ protocol: "TCP", port: 3128 }] },
-      ],
-    },
-  };
-  legacy.metadata.uid = "retired-policy-uid";
-  legacy.metadata.resourceVersion = "1";
-  f.save(legacy);
-  const removeDeployment = clients.apps.deleteNamespacedDeployment;
-  let denied = true;
-  clients.apps.deleteNamespacedDeployment = async (request) => {
-    if (request.name === f.gatewayName && denied) {
-      throw Object.assign(new Error("Gateway delete denied"), { statusCode: 403 });
-    }
-    if (request.name === f.gatewayName) {
-      assert.equal(
-        request.body.preconditions.resourceVersion,
-        originalGateway.metadata.resourceVersion,
-      );
-    }
-    return removeDeployment(request);
-  };
-  await assert.rejects(driver.withdrawRevisionAccess(revision), /Gateway delete denied/);
-  assert.ok(
-    objects.has(key("NetworkPolicy", legacyName)),
-    "failed deletion must retain the cleanup obligation",
-  );
-  assert.ok(objects.has(key("Deployment", f.gatewayName)));
-
-  let observed;
-  let release;
-  const waiting = new Promise((resolve) => {
-    observed = resolve;
-  });
-  const held = new Promise((resolve) => {
-    release = resolve;
-  });
-  let podReads = 0;
-  clients.core.listNamespacedPod = async ({ labelSelector }) => {
-    if (
-      labelSelector.includes("openclaw.dev/workload-role=gateway") &&
-      !labelSelector.includes("openclaw.dev/workload-role=gateway-outbound")
-    ) {
-      if (podReads++ === 0) {
-        return {
-          items: [
-            {
-              apiVersion: "v1",
-              kind: "Pod",
-              metadata: {
-                ...originalGateway.spec.template.metadata,
-                name: "retired-gateway-pod",
-                namespace,
-                uid: "retired-gateway-pod-uid",
-              },
-            },
-          ],
-        };
-      }
-      observed();
-      await held;
-    }
-    return { items: [] };
-  };
-  denied = false;
-  const withdrawal = driver.withdrawRevisionAccess(revision);
-  try {
-    await Promise.race([
-      waiting,
-      withdrawal.then(() => {
-        throw new Error("withdrawal must wait for the retired Gateway Pod");
-      }),
-    ]);
-    assert.ok(
-      objects.has(key("NetworkPolicy", legacyName)),
-      "a terminating Pod must keep its durable obligation",
-    );
-    assert.equal(objects.has(key("Deployment", f.gatewayName)), false);
-    assert.ok(objects.has(key("Service", f.gatewayName)));
-    assert.ok(objects.has(key("ServiceAccount", f.gatewayName)));
-  } finally {
-    release();
-  }
-  await withdrawal;
-  assert.equal(objects.has(key("NetworkPolicy", legacyName)), false);
-
-  // A delayed old revision cannot fence a newer Gateway that already owns the shared name.
-  const successor = structuredClone(originalGateway);
-  successor.metadata.annotations["openclaw.dev/agent-revision"] = "2";
-  successor.metadata.annotations["openclaw.dev/agent-revision-id"] = "newer-gateway";
-  successor.spec.template.metadata.labels["openclaw.dev/revision"] = "newer-gateway";
-  f.save(successor);
-  const successorRoute = structuredClone(objects.get(key("HTTPRoute", f.gatewayName)));
-  successorRoute.metadata.annotations["openclaw.dev/agent-revision-id"] = "newer-gateway";
-  f.save(successorRoute);
-  f.save(legacy);
-  await assert.rejects(driver.withdrawRevisionAccess(revision), {
-    name: "DependencyUnavailableError",
-    message: "A newer Gateway must retire its channel grant.",
-  });
-  assert.deepEqual(objects.get(key("Deployment", f.gatewayName)), successor);
-  assert.ok(objects.has(key("NetworkPolicy", legacyName)));
-  // Historical cleanup must reach the owning revision in the ascending stop sweep.
-  // It preserves the newer Gateway's grant; only that revision can fence its live flows.
-  await driver.stopRevision(revision);
-  assert.deepEqual(objects.get(key("Deployment", f.gatewayName)), successor);
-  assert.ok(objects.has(key("NetworkPolicy", legacyName)));
-  await driver.retireRevision(revision);
-  assert.deepEqual(objects.get(key("Deployment", f.gatewayName)), successor);
-  assert.ok(objects.has(key("NetworkPolicy", legacyName)));
-});
 
 test("shared providers render OpenClaw adapters and refuse unsupported Codex protocols", async () => {
   for (const protocol of ["openai-responses", "openai-completions"]) {
@@ -8827,89 +8441,126 @@ test("Kubernetes drivers require explicit authentication, images, and production
   );
 });
 
-test("the canonical Kubernetes runtime validates managed Gateway outbound authority", () => {
-  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
+test("the canonical Kubernetes runtime validates channel proxy configuration", () => {
+  const runtime = {
+    transportSecretPrefix: "transport",
+    gatewayStorageClassName: "local-path",
+  };
   assert.doesNotThrow(() => createKubernetesComputeDriver(options({ runtime })));
-  const driver = createKubernetesComputeDriver(
-    options({ runtime: { ...runtime, gatewayOutbound } }),
-  );
-  assert.deepEqual(driver.gatewayOutboundCapabilities, { restricted: true, publicHttps: true });
-  assert.throws(
-    () => driver.validateGatewayOutbound({ mode: "publicHttps" }, "embedded"),
-    /dedicated execution/,
-  );
-  for (const [configuration, expected] of [
-    [
-      { gatewayOutbound: { enabled: true } },
-      {
-        path: "/runtime/gatewayOutbound/image",
-        code: "REQUIRED",
-        message: "Gateway outbound proxy image must be explicitly configured.",
-      },
-    ],
-    [
-      { gatewayOutbound: { ...gatewayOutbound, denyCidrs: [] } },
-      {
-        path: "/runtime/gatewayOutbound/denyCidrs",
-        code: "INVALID_VALUE",
-        message: "Configuration does not satisfy minItems.",
-      },
-    ],
-    [
-      { gatewayOutbound: { ...gatewayOutbound, denyCidrs: ["not-a-cidr"] } },
-      {
-        path: "/runtime/gatewayOutbound/denyCidrs/0",
-        code: "INVALID_FORMAT",
-        message: "Gateway outbound exclusion must be a valid IPv4 or IPv6 CIDR.",
-      },
-    ],
-    [
-      { channels: { proxyUrl: "http://10.42.0.15:3128" } },
-      {
-        path: "/runtime/channels",
-        code: "UNKNOWN_FIELD",
-        message: "Configuration does not satisfy additionalProperties.",
-      },
-    ],
+
+  for (const proxyUrl of [
+    "http://10.42.0.15:3128",
+    "http://127.0.0.1:8080",
+    " http://192.0.2.10:8080 ",
+    // URL parsing lowercases the scheme; the written IPv4 host is still 10.42.0.15.
+    "HTTP://10.42.0.15:3128",
+    "https://[2001:db8::15]:8443",
   ]) {
-    assert.throws(
-      () => createKubernetesComputeDriver(options({ runtime: { ...runtime, ...configuration } })),
-      (error) => {
-        assert.ok(error instanceof SharedConfigurationValidationError);
-        assert.deepEqual(error.error.details, [expected]);
-        return true;
-      },
+    const channels = { proxyUrl };
+    assert.doesNotThrow(() =>
+      createKubernetesComputeDriver(options({ runtime: { ...runtime, channels } })),
     );
   }
-  const restricted = createKubernetesComputeDriver(
-    options({
-      runtime: { ...runtime, gatewayOutbound: { ...gatewayOutbound, allowPublicHttps: false } },
-    }),
-  );
-  assert.throws(
-    () => restricted.validateGatewayOutbound({ mode: "publicHttps" }, "dedicated"),
-    /disabled/,
-  );
-  assert.deepEqual(
-    restricted.admitGatewayOutbound({
-      selection: { mode: "restricted", hosts: ["api.example.com"] },
-      executionMode: "dedicated",
-      requirements: [],
-    }),
-    {
-      selection: { mode: "restricted", hosts: ["api.example.com"] },
-      requirements: [],
-      denyCidrs: gatewayOutbound.denyCidrs,
+  const managedProxy = {
+    hostname: "openclaw-enterprise-slack-proxy.openclaw-system.svc",
+    namespace: "openclaw-system",
+    podLabels: {
+      "app.kubernetes.io/name": "openclaw-enterprise",
+      "app.kubernetes.io/instance": "oce",
+      "app.kubernetes.io/component": "slack-proxy",
     },
+    port: 3128,
+  };
+  assert.doesNotThrow(() =>
+    createKubernetesComputeDriver(
+      options({
+        runtime: {
+          ...runtime,
+          channels: {
+            proxyUrl: "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+            managedProxy,
+          },
+        },
+      }),
+    ),
   );
-  assert.equal(
-    driver.admitGatewayOutbound({
-      selection: { mode: "channelsOnly" },
-      executionMode: "dedicated",
-      requirements: [],
+  for (const proxyUrl of [
+    "http://proxy.internal:3128",
+    "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+    "https://192.0.2.15",
+    syntheticCredentialUrl({
+      username: "operator",
+      password: "secret",
+      host: "10.42.0.15",
+      port: 3128,
     }),
-    undefined,
-  );
+    "socks5://10.42.0.15:3128",
+    "http://10.42.0.15:3128/unreviewed",
+    "http://10.42.0.15:3128?token=secret",
+  ]) {
+    const channels = { proxyUrl };
+    assert.throws(
+      () => createKubernetesComputeDriver(options({ runtime: { ...runtime, channels } })),
+      SharedConfigurationValidationError,
+    );
+  }
+  for (const proxyUrl of [
+    "http://0177.0.0.1:8080",
+    "http://192.168.1:8080",
+    "http://2130706433:8080",
+    "http://127.1:8080",
+    "http://10.42.0.015:3128",
+  ]) {
+    assert.throws(
+      () =>
+        createKubernetesComputeDriver(options({ runtime: { ...runtime, channels: { proxyUrl } } })),
+      SharedConfigurationValidationError,
+    );
+  }
+  // An unspecified host reaches the gateway Pod itself, and an IPv4-mapped host leaves as
+  // IPv4 traffic that the IPv6 egress ipBlock never matches.
+  for (const proxyUrl of [
+    "http://0.0.0.0:3128",
+    "http://[::]:3128",
+    "http://[0:0:0:0:0:0:0:0]:3128",
+    "https://[::ffff:10.42.0.15]:8443",
+    "https://[::FFFF:0A2A:000F]:8443",
+    "https://[0:0:0:0:0:ffff:10.42.0.15]:8443",
+    "https://[::ffff:0:0]:8443",
+  ]) {
+    assert.throws(
+      () =>
+        createKubernetesComputeDriver(options({ runtime: { ...runtime, channels: { proxyUrl } } })),
+      SharedConfigurationValidationError,
+      proxyUrl,
+    );
+  }
+  for (const proxyUrl of ["https://[::ffff:1:2:3]:8443", "https://[::1]:8443"]) {
+    assert.doesNotThrow(
+      () =>
+        createKubernetesComputeDriver(options({ runtime: { ...runtime, channels: { proxyUrl } } })),
+      proxyUrl,
+    );
+  }
+  for (const channels of [
+    {
+      proxyUrl: "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+      managedProxy: { ...managedProxy, hostname: "other.openclaw-system.svc" },
+    },
+    {
+      proxyUrl: "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3129",
+      managedProxy,
+    },
+    {
+      proxyUrl: "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+      managedProxy: { ...managedProxy, podLabels: {} },
+    },
+  ]) {
+    assert.throws(
+      () => createKubernetesComputeDriver(options({ runtime: { ...runtime, channels } })),
+      SharedConfigurationValidationError,
+    );
+  }
 });
 
 test("the canonical Kubernetes runtime validates the dedicated Codex model endpoint", async () => {
@@ -9114,6 +8765,7 @@ test("the canonical Kubernetes runtime validates the dedicated Codex model endpo
 test("every NetworkPolicy peer namespace must be a Kubernetes namespace name", () => {
   const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
   const base = options({ runtime });
+  const proxyHost = "openclaw-enterprise-slack-proxy.openclaw-system.svc";
   const peers = {
     "DNS peer": (namespace) => ({
       network: { ...base.network, dns: { ...base.network.dns, namespace } },
@@ -9138,6 +8790,20 @@ test("every NetworkPolicy peer namespace must be a Kubernetes namespace name", (
           podLabels: { app: "openshell-gateway" },
           address: "10.43.0.50",
           port: 8080,
+        },
+      },
+    }),
+    "Managed channel proxy": (namespace) => ({
+      runtime: {
+        ...base.runtime,
+        channels: {
+          proxyUrl: `http://${proxyHost}:3128`,
+          managedProxy: {
+            hostname: proxyHost,
+            namespace,
+            podLabels: { "app.kubernetes.io/component": "slack-proxy" },
+            port: 3128,
+          },
         },
       },
     }),
@@ -9337,7 +9003,7 @@ test("dedicated Codex projects the account-owned token through the common PAT lo
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
-        gatewayOutbound,
+        channels: { proxyUrl: "http://10.42.0.15:3128" },
       },
     }),
   );
@@ -9390,7 +9056,7 @@ test("dedicated Codex projects the account-owned token through the common PAT lo
   assert.equal(agentEnvironment.SLACK_BOT_TOKEN, undefined);
   assert.equal(agentEnvironment.MSTEAMS_APP_PASSWORD, undefined);
 
-  driver.enabledChannels({
+  const channels = driver.enabledChannels({
     configuration: { channels: { slack: {}, msteams: {} } },
     harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
     harnessAuth: apiKeyAuth,
@@ -9412,7 +9078,7 @@ test("dedicated Codex projects the account-owned token through the common PAT lo
     false,
     undefined,
     undefined,
-    undefined,
+    channels,
   );
   const gatewayEnvironment = new Set(
     gateway.spec.template.spec.containers[0].env.map(({ name }) => name),
@@ -10855,7 +10521,7 @@ test("deployment admission refuses Gateway breakers before a dedicated deploymen
     ),
   );
   const withChannels = new KubernetesComputeDriver(
-    routedOptions({ runtime: { ...runtime, gatewayOutbound } }),
+    routedOptions({ runtime: { ...runtime, channels: { proxyUrl: "http://10.42.0.15:3128" } } }),
     { nodeEnrollment: {} },
   );
   assert.throws(
@@ -11981,7 +11647,7 @@ test("dedicated OpenClaw gateway receives Agent plugin approvers without plugin 
     false,
     undefined,
     undefined,
-    undefined,
+    [],
     [],
     snapshot,
   );
@@ -12364,7 +12030,7 @@ test("dedicated OpenClaw renders an enrolled Harness without exposing model cred
     false,
     undefined,
     undefined,
-    undefined,
+    [],
     [],
     undefined,
     [],
@@ -12382,7 +12048,7 @@ test("dedicated OpenClaw renders an enrolled Harness without exposing model cred
     false,
     undefined,
     driver.harnessAuthForRevision(revision, authContext(revision, namespace), namespaceAddress),
-    undefined,
+    [],
     [],
     undefined,
     [],
@@ -12578,7 +12244,7 @@ test("native channel providers require Secret bindings and project guarded proxy
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
-        gatewayOutbound,
+        channels: { proxyUrl: "http://10.42.0.15:3128" },
       },
     }),
     { nodeEnrollment: {} },
@@ -12699,19 +12365,6 @@ test("native channel providers require Secret bindings and project guarded proxy
       configuration: { agents: { defaults: { model: "codex/gpt-5" } }, channels },
       secretBindings,
       secretDriverId: "secret-kubernetes",
-      gatewayOutbound: driver.admitGatewayOutbound({
-        selection: { mode: "channelsOnly" },
-        executionMode: "dedicated",
-        requirements:
-          expectedSecrets.length === 0
-            ? []
-            : [
-                {
-                  source: "test/channel",
-                  destinations: [{ host: "api.example.com", includeSubdomains: false }],
-                },
-              ],
-      }),
     };
     assert.doesNotThrow(() =>
       driver.validateHarnessAuth(
@@ -12721,11 +12374,7 @@ test("native channel providers require Secret bindings and project guarded proxy
         configuredRevision.secretBindings,
       ),
     );
-    driver.enabledChannels(configuredRevision);
-    const transport = driver.gatewayOutboundTransport(configuredRevision, {
-      name: namespace,
-      plane: "execution",
-    });
+    const enabled = driver.enabledChannels(configuredRevision);
     const expectedSecretEnvironment = expectedSecrets.map((name) =>
       secretEnvironment.find((item) => item.name === name),
     );
@@ -12746,7 +12395,7 @@ test("native channel providers require Secret bindings and project guarded proxy
       false,
       undefined,
       undefined,
-      transport,
+      enabled,
       expectedSecretEnvironment,
     );
     const environment = gateway.spec.template.spec.containers[0].env;
@@ -12775,7 +12424,25 @@ test("native channel providers require Secret bindings and project guarded proxy
     const proxy = environment.filter(({ name }) => name === "HTTPS_PROXY");
     assert.deepEqual(
       proxy,
-      expectedSecrets.length === 0 ? [] : [{ name: "HTTPS_PROXY", value: transport.proxyUrl }],
+      expectedSecrets.length === 0
+        ? []
+        : [{ name: "HTTPS_PROXY", value: "http://10.42.0.15:3128" }],
+    );
+
+    const policy = driver.channelNetworkPolicy(configuredRevision, enabled, {
+      name: namespace,
+      plane: "execution",
+    });
+    assert.deepEqual(
+      policy.spec.egress,
+      expectedSecrets.length === 0
+        ? []
+        : [
+            {
+              to: [{ ipBlock: { cidr: "10.42.0.15/32" } }],
+              ports: [{ protocol: "TCP", port: 3128 }],
+            },
+          ],
     );
 
     // Dedicated Agents never receive gateway-owned channel credentials or their network proxy.
@@ -12797,7 +12464,7 @@ test("native channel providers require Secret bindings and project guarded proxy
       undefined,
       undefined,
       preparedAuth(driver, namespace, false),
-      undefined,
+      [],
       [],
     );
     const agentEnvironment = agent.spec.template.spec.containers[0].env;
@@ -12807,6 +12474,138 @@ test("native channel providers require Secret bindings and project guarded proxy
         false,
       );
     }
+  }
+
+  const managedProxy = {
+    hostname: "openclaw-enterprise-slack-proxy.openclaw-system.svc",
+    namespace: "openclaw-system",
+    podLabels: {
+      "app.kubernetes.io/name": "openclaw-enterprise",
+      "app.kubernetes.io/instance": "oce",
+      "app.kubernetes.io/component": "slack-proxy",
+    },
+    port: 3128,
+  };
+  const managedDriver = createKubernetesComputeDriver(
+    options({
+      runtime: {
+        transportSecretPrefix: "transport",
+        gatewayStorageClassName: "local-path",
+        channels: {
+          proxyUrl: "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+          managedProxy,
+        },
+      },
+    }),
+  );
+  const managedRevision = {
+    ...revision,
+    configuration: { agents: { defaults: { model: "codex/gpt-5" } }, channels: { slack: {} } },
+    secretBindings,
+    secretDriverId: "secret-kubernetes",
+  };
+  const managedEnabled = managedDriver.enabledChannels(managedRevision);
+  const managedGateway = managedDriver.deployment(
+    `gateway-${suffix}`,
+    { namespaceId: tenant.id, agentId },
+    { name: namespace, plane: "execution" },
+    "openclaw-enterprise/gateway-fixture:local",
+    `gateway-${suffix}`,
+    "gateway",
+    {},
+    "info",
+    managedDriver.gatewayConfiguration(
+      routedRevision(managedDriver, { agentId: { namespaceId: tenant.id, agentId }.agentId }),
+      undefined,
+      { name: namespace, plane: "execution" },
+    ),
+    false,
+    undefined,
+    undefined,
+    managedEnabled,
+    secretEnvironment.filter(({ name }) => name.startsWith("SLACK_")),
+  );
+  assert.deepEqual(
+    managedGateway.spec.template.spec.containers[0].env.filter(
+      ({ name }) => name === "HTTPS_PROXY",
+    ),
+    [
+      {
+        name: "HTTPS_PROXY",
+        value: "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+      },
+    ],
+  );
+  const managedPolicy = managedDriver.channelNetworkPolicy(managedRevision, managedEnabled, {
+    name: namespace,
+    plane: "execution",
+  });
+  assert.deepEqual(managedPolicy.spec.egress, [
+    {
+      to: [
+        {
+          namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "openclaw-system" } },
+          podSelector: { matchLabels: managedProxy.podLabels },
+        },
+      ],
+      ports: [{ protocol: "TCP", port: 3128 }],
+    },
+  ]);
+
+  // Removing channel runtime must revoke the exact existing grant without needing its old proxy.
+  const activeRevision = {
+    ...revision,
+    configuration: {
+      agents: { defaults: { model: "codex/gpt-5" } },
+      channels: { slack: {} },
+      logging: {
+        level: "info",
+        consoleLevel: "info",
+        consoleStyle: "json",
+      },
+      diagnostics: { otel: { logs: false } },
+    },
+  };
+  const previouslyGranted = driver.channelNetworkPolicy(
+    activeRevision,
+    driver.enabledChannels(activeRevision),
+    { name: namespace, plane: "execution" },
+  );
+  for (const runtime of [
+    {
+      transportSecretPrefix: "transport",
+      gatewayStorageClassName: "local-path",
+    },
+    undefined,
+  ]) {
+    const removed = createKubernetesComputeDriver(
+      options(runtime === undefined ? {} : { runtime }),
+    );
+    const disabledRevision = {
+      ...revision,
+      compute: { id: removed.id, implementation: removed.implementation },
+      configuration: {
+        agents: { defaults: { model: "codex/gpt-5" } },
+        channels: { slack: { enabled: false } },
+        logging: {
+          level: "info",
+          consoleLevel: "info",
+          consoleStyle: "json",
+        },
+        diagnostics: { otel: { logs: false } },
+      },
+    };
+    const revoked = removed.channelNetworkPolicy(
+      disabledRevision,
+      removed.enabledChannels(disabledRevision),
+      { name: namespace, plane: "execution" },
+    );
+    assert.equal(revoked.metadata.name, previouslyGranted.metadata.name);
+    assert.deepEqual(revoked.metadata.labels, previouslyGranted.metadata.labels);
+    assert.deepEqual(revoked.metadata.annotations, previouslyGranted.metadata.annotations);
+    assert.deepEqual(revoked.spec.podSelector, previouslyGranted.spec.podSelector);
+    assert.deepEqual(revoked.spec.policyTypes, ["Egress"]);
+    assert.deepEqual(revoked.spec.egress, []);
   }
 
   await assert.rejects(
@@ -13028,6 +12827,40 @@ test("native channel providers require Secret bindings and project guarded proxy
   for (const name of ["$OPS", "${x}", "${OPS_NAME:-ops}"]) {
     driver.validateHarnessAuth(revision.harness, revision.harnessAuth, slackAccount({ name }), {});
   }
+
+  const ipv6 = createKubernetesComputeDriver(
+    options({
+      runtime: {
+        transportSecretPrefix: "transport",
+        gatewayStorageClassName: "local-path",
+        channels: { proxyUrl: "https://[2001:db8::15]:8443" },
+      },
+    }),
+  );
+  const teamsRevision = {
+    ...revision,
+    compute: { id: ipv6.id, implementation: ipv6.implementation },
+    configuration: {
+      agents: { defaults: { model: "codex/gpt-5" } },
+      channels: { msteams: {} },
+      logging: {
+        level: "info",
+        consoleLevel: "info",
+        consoleStyle: "json",
+      },
+      diagnostics: { otel: { logs: false } },
+    },
+  };
+  const ipv6Policy = ipv6.channelNetworkPolicy(teamsRevision, ipv6.enabledChannels(teamsRevision), {
+    name: namespace,
+    plane: "execution",
+  });
+  assert.deepEqual(ipv6Policy.spec.egress, [
+    {
+      to: [{ ipBlock: { cidr: "2001:db8::15/128" } }],
+      ports: [{ protocol: "TCP", port: 8443 }],
+    },
+  ]);
 });
 
 test("Kubernetes runtime diagnostics read exact private Pod status without native sends", async () => {
@@ -16545,7 +16378,7 @@ test("provider Harness public trust rejects invalid material and composes with e
         false,
         undefined,
         undefined,
-        undefined,
+        [],
         [],
         undefined,
         [],
@@ -16846,7 +16679,7 @@ test("revision lifecycle rejects invalid ownership and unsupported workloads bef
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
-        gatewayOutbound,
+        channels: { proxyUrl: "http://10.42.0.15:3128" },
       },
       servicePrincipalCredentials: {
         mode: "projectedServiceAccountToken",
@@ -18562,11 +18395,6 @@ test("stopping a containment-only Kubernetes revision removes its workload befor
   };
   const notFound = () => Object.assign(new Error("Not found"), { code: 404 });
   driver.apiClients = Promise.resolve({
-    networking: {
-      async readNamespacedNetworkPolicy() {
-        throw Object.assign(new Error("not found"), { statusCode: 404 });
-      },
-    },
     core: {
       async readNamespacedConfigMap() {
         throw notFound();
@@ -18716,11 +18544,6 @@ function stopOrderFixture(id) {
   };
   const notFound = () => Object.assign(new Error("Not found"), { code: 404 });
   driver.apiClients = Promise.resolve({
-    networking: {
-      async readNamespacedNetworkPolicy() {
-        throw Object.assign(new Error("not found"), { statusCode: 404 });
-      },
-    },
     core: {
       async readNamespacedConfigMap() {
         throw notFound();
@@ -18967,11 +18790,6 @@ test("stopping a provider-owned Kubernetes revision waits for Sandbox workload t
   };
   const notFound = () => Object.assign(new Error("Not found"), { code: 404 });
   driver.apiClients = Promise.resolve({
-    networking: {
-      async readNamespacedNetworkPolicy() {
-        throw Object.assign(new Error("not found"), { statusCode: 404 });
-      },
-    },
     core: {
       async readNamespacedConfigMap() {
         throw notFound();
@@ -19194,7 +19012,7 @@ test("retiring a running embedded revision waits for gateway Pods and removes ow
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
-        gatewayOutbound,
+        channels: { proxyUrl: "http://192.0.2.10:3128" },
       },
     }),
   );
@@ -19279,6 +19097,7 @@ test("retiring a running embedded revision waits for gateway Pods and removes ow
     ...driver
       .agentNetworkPolicies(revision, { name: namespace, plane: "execution" })
       .map(({ resource }) => resource),
+    driver.channelNetworkPolicy(revision, [], { name: namespace, plane: "execution" }),
   ];
   for (const policy of policies) {
     save(policy);
@@ -19500,6 +19319,7 @@ for (const stopped of [false, true]) {
       ...driver
         .agentNetworkPolicies(revision, target, {}, [supervisorPeerLabels(revision.id)])
         .map(({ resource }) => resource),
+      driver.channelNetworkPolicy(revision, [], target),
       // An earlier controller's supervisor egress policy (finding 1127).
       driver.manifest(
         "networking.k8s.io/v1",
@@ -19871,7 +19691,12 @@ test("activating a revision that leaves OpenShell deletes the Agent policies it 
     .filter((name) => name.startsWith(`NetworkPolicy:${namespace}:`) && name.endsWith(suffix))
     .map((name) => name.slice(`NetworkPolicy:${namespace}:`.length));
   assert.deepEqual(
-    remaining.filter((name) => !written.has(name) && name !== `allow-agent-auth-${suffix}`),
+    remaining.filter(
+      (name) =>
+        !written.has(name) &&
+        name !== `allow-agent-auth-${suffix}` &&
+        name !== `allow-gateway-channels-${suffix}`,
+    ),
     [],
   );
   const gatewayAgent = objects.get(policyKey(`allow-gateway-agent-${suffix}`));
@@ -19930,7 +19755,7 @@ test("activating an embedded revision deletes a dedicated predecessor's Gateway 
     .filter((name) => name.startsWith(`NetworkPolicy:${namespace}:`) && name.endsWith(suffix))
     .map((name) => name.slice(`NetworkPolicy:${namespace}:`.length));
   assert.deepEqual(
-    remaining.filter((name) => !written.has(name)),
+    remaining.filter((name) => !written.has(name) && name !== `allow-gateway-channels-${suffix}`),
     [],
   );
   // The embedded Gateway keeps the model egress it writes under the shared name.
@@ -22730,7 +22555,11 @@ for (const embedded of [true, false]) {
           name === "allow-agent-auth",
         );
       }
-      for (const name of ["allow-gateway-agent", "allow-plugin-status-gateway"]) {
+      for (const name of [
+        "allow-gateway-agent",
+        "allow-gateway-channels",
+        "allow-plugin-status-gateway",
+      ]) {
         save("NetworkPolicy", `${name}-${suffix}`, oldTarget);
       }
       const preserved = new Map(
@@ -22757,7 +22586,11 @@ for (const embedded of [true, false]) {
           surviving === "Deployment",
         );
       }
-      for (const name of ["allow-gateway-agent", "allow-plugin-status-gateway"]) {
+      for (const name of [
+        "allow-gateway-agent",
+        "allow-gateway-channels",
+        "allow-plugin-status-gateway",
+      ]) {
         assert.equal(
           objects.has(`NetworkPolicy:${oldTarget}:${name}-${suffix}`),
           surviving === "Deployment",
@@ -22939,7 +22772,7 @@ function profileNetworkDriver() {
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
-        gatewayOutbound,
+        channels: { proxyUrl: "http://192.0.2.15:3128" },
       },
     }),
   );
@@ -23081,6 +22914,7 @@ test("every allow policy requires an explicit approved network profile", () => {
       .map(({ resource }) => [resource, dedicated]),
     ...driver.agentNetworkPolicies(embedded, execution).map(({ resource }) => [resource, embedded]),
     [driver.agentAuthenticationNetworkPolicy(dedicated, execution), dedicated],
+    [driver.channelNetworkPolicy(dedicated, [], control), dedicated],
   ];
   const d = digest(dedicated.agentId);
   const e = digest(embedded.agentId);
@@ -23097,6 +22931,7 @@ test("every allow policy requires an explicit approved network profile", () => {
     `${execution.name}/allow-agent-runtime-${e}`,
     `${execution.name}/allow-plugin-status-proxy-${e}`,
     `${execution.name}/allow-agent-auth-${d}`,
+    `${control.name}/allow-gateway-channels-${d}`,
   ];
   const checked = [];
   let workloadPeers = 0;

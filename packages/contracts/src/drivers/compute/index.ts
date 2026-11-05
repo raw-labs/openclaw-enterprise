@@ -1,8 +1,3 @@
-import type {
-  GatewayOutboundSelection,
-  GatewayOutboundSnapshot,
-  GatewayOutboundRequirement,
-} from "../../gateway-outbound.ts";
 import type { ConfigurationValidationOptions } from "../configuration/index.ts";
 import type { CredentialAttachmentStatus } from "../credential-gateway/index.ts";
 import type {
@@ -225,31 +220,6 @@ export interface ComputePreflightResult {
 }
 
 export interface ComputeDriver extends Driver {
-  readonly gatewayOutboundCapabilities?: {
-    readonly restricted: boolean;
-    readonly publicHttps: boolean;
-  };
-  validateGatewayOutbound?(
-    selection: GatewayOutboundSelection,
-    executionMode: HarnessExecutionMode,
-  ): void;
-  admitGatewayOutbound?(input: {
-    readonly selection: GatewayOutboundSelection;
-    readonly executionMode: HarnessExecutionMode;
-    readonly requirements: readonly GatewayOutboundRequirement[];
-  }): GatewayOutboundSnapshot | undefined;
-  /**
-   * Pure status of immutable access admission against current Installation approval.
-   * `withdrawn` must be observed before effects; restored approval cannot cancel recorded cleanup.
-   */
-  revisionAccessStatus?(revision: Readonly<AgentRevision>): "none" | "current" | "withdrawn";
-  /**
-   * Withdraw the access identified by revisionAccessStatus, attempting independent closures
-   * even when another fails. Return only after required backing workloads and connections end.
-   * Use immutable ownership, never current approval to omit cleanup; do not start or repair.
-   */
-  withdrawRevisionAccess?(revision: Readonly<AgentRevision>): Promise<void>;
-
   /**
    * Read only the selected revision's existing Harness. Never prepare, adopt, attach,
    * repair, release or authorize an execution. Missing support provides no assurance.

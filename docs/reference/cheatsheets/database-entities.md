@@ -45,7 +45,6 @@ Stores Agent drafts, their desired runtime state, and the selected version refer
 - `backend_id`
 - `execution_mode`
 - `gateway_managed_mode`
-- `gateway_outbound`
 - `plugins`
 - `plugin_driver` (registered ID and implementation that admitted the saved selections)
 - `plugin_approvers`
