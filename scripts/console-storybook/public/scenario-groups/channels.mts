@@ -250,6 +250,7 @@ export function channelsScenarios({
       group: "Components/Channels",
       name: "Teams deployed version",
       path: revision + "&tab=channels",
+      deployed: true,
       teams: true,
       description: "Deployed versions expose immutable Teams settings.",
     },

@@ -171,9 +171,9 @@ Kubernetes runtime can initialize its own bundled Skill assets. Gateway and
 Harness do not share a runtime-assets volume. Do not flatten `/app/dist`; OpenClaw resolves
 package-local runtime dependencies from its installed package root.
 
-Codex and Slack are packaged under `/app/dist/extensions/` with their runtime
+Codex, Slack, and Teams are packaged under `/app/dist/extensions/` with their runtime
 dependencies. They must load from a fresh runtime home without downloading or
-installing packages at gateway startup. Slack credentials remain operator-owned
+installing packages at gateway startup. Channel credentials remain operator-owned
 runtime Secrets; do not put them in the image.
 
 The `matrix-sdk-crypto` stage fetches the Matrix crypto library with the retrying,
@@ -324,7 +324,7 @@ tmpfs-backed runtime directories. The private broker endpoint smoke requires the
 reviewed Codex 0.164.0 seccomp profile above so the nested bubblewrap sandbox can
 start without broadening to an unconfined Docker seccomp profile.
 Passing means an embedded OpenClaw gateway reaches `/readyz` from a fresh home,
-the bundled Codex and Slack plugins load without missing package dependencies,
+the bundled Codex, Slack, and Teams plugins load without missing dependencies,
 the installed Codex plugin successfully initializes the image's real Codex
 app-server, and the Kubernetes dedicated-gateway startup path publishes the
 bundled skills directory into `/home/node/openclaw-runtime-assets`. These checks
@@ -332,7 +332,7 @@ run without external network access or provider credentials. The smoke also
 enrolls a real restricted workspace node, checks its exact seven-command inventory,
 and restarts it with the redeemed setup code and saved identity. It requires the
 original bootstrap completion to remain unchanged. These checks do not exercise
-all workspace command payloads, make a model call, or establish a Slack connection.
+all workspace command payloads, make a model call, or establish a live Slack or Teams connection.
 When running this suite from inside another container that talks to a host Docker
 daemon, mount the repository and any temporary fixture directory at the same
 absolute host path and set `TMPDIR` inside that shared path; otherwise nested
