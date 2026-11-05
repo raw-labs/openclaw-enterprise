@@ -2501,6 +2501,32 @@ test("Teams editor persists separate personal and channel access with an authori
   await credentialsPassword.waitFor();
   assert.equal(await credentialsPassword.isDisabled(), false);
   await page.getByRole("button", { name: "Deploy new version" }).waitFor();
+
+  // An imported Teams draft can need its first binding, not only a replacement.
+  const path = `/namespaces/${namespace.id}/configurations/${agent.configurationId}`;
+  const beforeUnbind = await fixture.request("GET", path);
+  assert.equal(
+    (
+      await fixture.request("PATCH", path, {
+        body: {
+          values: beforeUnbind.data.values,
+          secretBindings: {},
+          expectedGeneration: beforeUnbind.data.generation,
+        },
+      })
+    ).status,
+    200,
+  );
+  await page.reload();
+  await page.getByLabel("Teams app password", { exact: true }).waitFor();
+  await selectSecret(page, "Teams app password", password);
+  await page.getByRole("button", { name: "Save channel Secrets", exact: true }).click();
+  await page.getByText(CHANNEL_SECRETS_SAVED_DEPLOY).waitFor();
+  const rebound = await fixture.request("GET", path);
+  assert.deepEqual(rebound.data.secretBindings.MSTEAMS_APP_PASSWORD, {
+    source: password.ref,
+    delivery: { type: "env" },
+  });
 });
 
 // Real Console/Fastify/OCC/Drivers and HTTP Microsoft protocol fixture: not live RSC proof.

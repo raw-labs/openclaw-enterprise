@@ -879,8 +879,22 @@ export function createChannelSecretsPanel({
   // Retry Secret access is offered only to a reader who may save the bindings. After a Retry,
   // the warning does not say the Configuration saved (finding 3023).
   function slackGrantWarning() {
-    const subject = state.grantRetried ? { ...SLACK_GRANT, saved: null } : SLACK_GRANT;
-    return grantWarning(state.grantProblem, subject, !readOnly());
+    const teamsSecret = secretIdForBinding(
+      state.configuration.secretBindings?.MSTEAMS_APP_PASSWORD,
+    );
+    const subject = pendingSecretGrants().some(({ id }) => id === teamsSecret)
+      ? {
+          ...SLACK_GRANT,
+          credential: "the saved channel Secret",
+          refusal: "this Agent cannot use the saved channel Secret until it is granted access",
+          bound: "a bound channel Secret",
+        }
+      : SLACK_GRANT;
+    return grantWarning(
+      state.grantProblem,
+      state.grantRetried ? { ...subject, saved: null } : subject,
+      !readOnly(),
+    );
   }
 
   function updateGrantWarning(secretBindings = state.configuration.secretBindings ?? {}) {
@@ -1676,6 +1690,7 @@ export function createChannelSecretsPanel({
     grantWarning: () => (state.saving || !pendingSecretGrants().length ? "" : slackGrantWarning()),
     section:
       channelEnabled(values, "slack") ||
+      channelEnabled(values, "msteams") ||
       state.carriedNote ||
       boundSecrets(configuration.secretBindings).length
         ? section
