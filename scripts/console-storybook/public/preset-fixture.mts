@@ -25,6 +25,7 @@ type PresetScenario = {
   presetModelKeyVariable?: boolean;
   noDefaultPreset?: boolean;
   presetNameTie?: boolean;
+  nativePluginSettings?: OpenClawConfigurationDocument;
 };
 
 // These fields are mutable draft projections, not an admitted Agent or a
@@ -146,6 +147,9 @@ export function createPresetFixtures(
             : standardCodexPreset,
       ),
     );
+  }
+  if (scenario.nativePluginSettings) {
+    preset.template.configuration.values.plugins = structuredClone(scenario.nativePluginSettings);
   }
   if (scenario.modelFallbackSelection) {
     const ids = ["primary-model", "fallback-one", "fallback-two"];
