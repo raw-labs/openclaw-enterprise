@@ -1,9 +1,10 @@
 # Verify Teams channel support
 
-Build the runtime and run its Teams startup test:
+From the repository root, resolve the [source build arguments](../../deploy/runtime/README.md#resolve-openclaw-build-arguments)
+in Bash, then build the runtime and run its Teams startup test:
 
-```sh
-docker build -f deploy/runtime/Dockerfile -t oce-runtime:teams .
+```bash
+docker build -f deploy/runtime/Dockerfile -t oce-runtime:teams "${openclaw_build_args[@]}" .
 OCC_TEST_RUNTIME_IMAGE=oce-runtime:teams node --test \
   --test-name-pattern='bundled Teams' tests/integration/runtime-image-startup.test.mjs
 ```
