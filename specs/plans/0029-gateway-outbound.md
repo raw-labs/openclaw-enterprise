@@ -77,11 +77,14 @@ Proposed; source delivery does not approve its trust model or qualify production
   four-action recording inspected. [Screenshots and recording](https://gist.github.com/miguelbranco80/f49a2c9525105015abb899b36b22ab99)
   use simulated API/runtime state. Before comparison uses exact pinned-upstream
   detail/navigation owners with candidate fixtures, not a complete baseline build.
-- Profile/renderer/generated-reference checks passed 129 cases; eight unselected
-  native Collector cases are not included in that proof. Final format and eight
-  standalone flow structures passed; the Configuration persistence companion
-  retains its parent flow structure. Full Helm packaging, native Collector and
-  independent refreshed-diff review remain pending.
+- Profile/renderer/generated-reference checks passed 129 cases; its eight
+  unselected Collector cases then ran in the selected native suite, which passed
+  11/11 without skips. Committed-head Helm packaging passed 108/108; CI
+  preparation contracts passed 116/116. Workflow actionlint passed. Final format
+  and eight standalone flow structures passed; the Configuration persistence
+  companion retains its parent flow structure.
+- Preserved merge commit: `5db345c0b969187a966b6886bf7bc2df2290475d`.
+  Independent review of the complete refreshed diff is the remaining delivery step.
 
 Required acceptance gaps remain open: native installed Gateway/plugin and
 model execution, both image architectures, full Helm-installed/Envoy paths,
