@@ -2,8 +2,9 @@ import type {
   ConfigurationValidationOptions,
   OpenClawConfigurationDocument,
 } from "@openclaw-enterprise/contracts";
-import { asRecord } from "@openclaw-enterprise/utils";
+import { asRecord, numericLastLabel } from "@openclaw-enterprise/utils";
 
+import { environmentReference, environmentReferenceNames } from "./environment-references.ts";
 import {
   ConfigurationHarnessError,
   configurationSettingMessage,
@@ -11,11 +12,12 @@ import {
   ModelProviderSettingError,
   quotedSettingKey,
 } from "./errors.ts";
+import { providerKeyVariantProblem } from "./stored-configuration-rules.ts";
 
 /**
  * Model API adapter ids the pinned OpenClaw runtime accepts: `MODEL_DATA_APIS` in
- * openclaw/openclaw `packages/llm-core/src/model-data.ts` at the `OPENCLAW_COMMIT` in
- * `deploy/runtime/Dockerfile`. Update this list when that pin changes.
+ * openclaw/openclaw `packages/llm-core/src/model-data.ts` at the commit in
+ * `deploy/runtime/openclaw-source.json`. Update this list when that pin changes.
  */
 const RUNTIME_MODEL_APIS: readonly string[] = Object.freeze([
   "openai-completions",
@@ -37,16 +39,8 @@ const pointer = (...segments: readonly (string | number)[]): string =>
     .map((segment) => `/${String(segment).replaceAll("~", "~0").replaceAll("/", "~1")}`)
     .join("");
 
-// The runtime resolves `${VAR}` and `${VAR:-fallback}` environment references (uppercase
-// names) before it validates its configuration, so a value that holds one is left to it. Its
-// `$${VAR}` escape renders a literal `${VAR}` and resolves nothing, so text that holds only
-// escapes is checked as written. This follows OpenClaw's `containsEnvVarReference`
-// (`src/config/env-substitution.ts`).
-export const environmentReference = /\$(\$)?\{[A-Z_][A-Z0-9_]*(?::-([^${}]*))?\}/g;
-
 const holdsEnvironmentReference = (value: unknown): boolean =>
-  typeof value === "string" &&
-  [...value.matchAll(environmentReference)].some(([, escaped]) => escaped === undefined);
+  typeof value === "string" && environmentReferenceNames(value).length > 0;
 
 // Text its writer fills in later: `unresolved` locates an unfilled Preset variable's text.
 type Unresolved = NonNullable<ConfigurationValidationOptions["unresolved"]>;
@@ -81,6 +75,41 @@ function writesSchemeSlashes(literals: readonly string[]): boolean {
 // keeps the general message.
 const missesSchemeSlashes = (first: string): boolean =>
   /^[\0- ]*https?:(?![/\\]{2})/i.test(first.replaceAll(/[\t\n\r]/g, ""));
+
+/**
+ * Whether a refused baseUrl fails only because its host ends in a numeric or 0x label, which the
+ * URL parser reads as an IPv4 address and refuses unless the host is one (`https://api.123/v1`,
+ * `https://999.1.2.3/v1`), so its refusal can say so (finding 1346): with that label a name, the
+ * same text is accepted. `literals` is the text around a Preset's unfilled variables, each filled
+ * as `fillsAsRuntimeUrl` fills it with a name. Other refusals keep the general message.
+ */
+function refusedForNumericLastLabel(literals: readonly string[]): boolean {
+  const [first = "", ...rest] = literals.map((literal) => literal.replaceAll(/[\t\n\r]/g, ""));
+  const start = first.slice(first.search(/[^\0- ]|$/));
+  const scheme = /^https?:/i.exec(start)?.[0];
+  if (scheme === undefined) {
+    return false;
+  }
+  // The URL parser also trims trailing C0 controls and spaces.
+  let text = scheme + fillUrl([start.slice(scheme.length), ...rest], "x");
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) <= 0x20) {
+    end -= 1;
+  }
+  text = text.slice(0, end);
+  // An http(s) authority ends at a slash, backslash, query or fragment; its host follows the last
+  // `@` and ends at the port's colon.
+  const [, before = "", host = ""] =
+    /^(https?:[/\\]{2}(?:[^/\\?#]*@)?)([^/\\?#:]*)/i.exec(text) ?? [];
+  const name = host.endsWith(".") ? host.slice(0, -1) : host;
+  const label = name.slice(name.lastIndexOf(".") + 1);
+  return (
+    numericLastLabel(host) &&
+    isRuntimeUrl(
+      `${before}${name.slice(0, name.length - label.length)}x${host.slice(name.length)}${text.slice(before.length + host.length)}`,
+    )
+  );
+}
 
 // Where a variable sits in a baseUrl with a literal http(s) scheme, and the one token it stands
 // for there: a host name or number, an empty port (or `:port` after an IPv6 address), an IPv6
@@ -333,7 +362,13 @@ function validateSettings(
       const [first = typeof baseUrl === "string" ? baseUrl : ""] = literals ?? [];
       throw new ModelProviderSettingError(
         pointer(...path, "baseUrl"),
-        missesSchemeSlashes(first) ? "baseUrlSlashes" : "baseUrl",
+        missesSchemeSlashes(first)
+          ? "baseUrlSlashes"
+          : typeof baseUrl === "string" &&
+              !environment(baseUrl) &&
+              refusedForNumericLastLabel(literals ?? [baseUrl])
+            ? "baseUrlNumericHost"
+            : "baseUrl",
       );
     }
   }
@@ -346,6 +381,16 @@ function validateSettings(
     if (typeof api !== "string" || !RUNTIME_MODEL_APIS.includes(api)) {
       throw new ModelProviderSettingError(pointer(...path, "api"), "api");
     }
+  }
+}
+
+/** Refuses a models.providers key that providerKeyVariantProblem names. */
+export function refuseProviderKeyVariants(values: Readonly<OpenClawConfigurationDocument>): void {
+  const problem = providerKeyVariantProblem(values);
+  if (problem !== undefined) {
+    throw new ConfigurationHarnessError(
+      configurationSettingMessage(problem.setting, problem.requirement),
+    );
   }
 }
 

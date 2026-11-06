@@ -1,0 +1,145 @@
+{{- if .Values.outboundProxy.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-enterprise-outbound-proxy
+  labels:
+    {{- include "openclaw.labels" (dict "root" . "component" "outbound-proxy") | nindent 4 }}
+data:
+  config.json: {{ dict "denyCidrs" .Values.outboundProxy.denyCidrs | toJson | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw-enterprise-outbound-proxy
+  labels:
+    {{- include "openclaw.labels" (dict "root" . "component" "outbound-proxy") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openclaw-enterprise
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+      app.kubernetes.io/component: outbound-proxy
+  template:
+    metadata:
+      labels:
+        {{- include "openclaw.labels" (dict "root" . "component" "outbound-proxy") | nindent 8 }}
+      annotations:
+        openclaw.dev/outbound-proxy-checksum: {{ .Values.outboundProxy.denyCidrs | toJson | sha256sum | quote }}
+        {{- with .Values.controlPlane.installationChecksum }}
+        openclaw.dev/installation-checksum: {{ . | quote }}
+        {{- end }}
+    spec:
+      serviceAccountName: openclaw-enterprise-outbound-proxy
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "openclaw.podSecurity" . | nindent 8 }}
+      {{- with .Values.controlPlane.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: outbound-proxy
+          image: {{ .Values.images.controller | quote }}
+          args:
+            - apps/controller/src/gateway/control-plane-outbound-proxy.mjs
+          securityContext:
+            {{- include "openclaw.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.outboundProxy.resources | nindent 12 }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: OCC_OUTBOUND_PROXY_PORT
+              value: {{ .Values.outboundProxy.port | quote }}
+            - name: OCC_CONTROL_PLANE_OUTBOUND_PROXY_CONFIG_PATH
+              value: /etc/openclaw/outbound-proxy/config.json
+          volumeMounts:
+            - name: configuration
+              mountPath: /etc/openclaw/outbound-proxy
+              readOnly: true
+          ports:
+            - name: proxy
+              containerPort: {{ .Values.outboundProxy.port }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: proxy
+            periodSeconds: 2
+      volumes:
+        - name: configuration
+          configMap:
+            name: openclaw-enterprise-outbound-proxy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openclaw.outboundProxy.serviceName" . | quote }}
+  labels:
+    {{- include "openclaw.labels" (dict "root" . "component" "outbound-proxy") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: openclaw-enterprise
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/component: outbound-proxy
+  ports:
+    - name: proxy
+      port: {{ .Values.outboundProxy.port }}
+      targetPort: proxy
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openclaw-enterprise-outbound-proxy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openclaw-enterprise
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+      app.kubernetes.io/component: outbound-proxy
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openclaw-enterprise
+              app.kubernetes.io/instance: {{ .Release.Name | quote }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: {{ .Values.outboundProxy.port }}
+  egress:
+    {{- include "openclaw.networkPolicy.dnsEgress" . | nindent 4 }}
+    - to:
+        # Driver-owned hostname checks and destination-IP checks run in the proxy.
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.0.2.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 198.51.100.0/24
+              - 203.0.113.0/24
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+              {{- range .Values.outboundProxy.denyCidrs }}
+              - {{ . | quote }}
+              {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+{{- end }}

@@ -1,3 +1,4 @@
+import { keycloakRealmAdmin } from "../helpers/ci-keycloak-realm.mjs";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -20,7 +21,7 @@ import {
 } from "../helpers/production-sign-in.mjs";
 
 // Real Keycloak, prepared by scripts/ci/prepare.mjs for the keycloak-oidc lane
-// (docs/testing/keycloak.md): it imports tests/fixtures/keycloak/realm-oce.json and serves
+// (docs/testing/kubernetes.md#keycloak-oidc-tests): it imports tests/fixtures/keycloak/realm-oce.json and serves
 // https://keycloak.oce.localhost on 127.0.0.1:443 under a per-run CA that this process
 // trusts through NODE_EXTRA_CA_CERTS. Nothing here is stubbed: the browser fills Keycloak's
 // own login form, and the controller reaches the real token and JWKS endpoints with its
@@ -40,7 +41,7 @@ const missing =
   !process.env.NODE_EXTRA_CA_CERTS;
 // The lane fails on a skip; outside it, this names what is missing.
 const requiresKeycloak = missing
-  ? "requires the keycloak-oidc lane's prepared Keycloak (docs/testing/keycloak.md)"
+  ? "requires the keycloak-oidc lane's prepared Keycloak (docs/testing/kubernetes.md#keycloak-oidc-tests)"
   : false;
 
 function modulusBits(n) {
@@ -363,36 +364,8 @@ async function signInAlice(opened) {
   return session;
 }
 
-/** Calls the Keycloak admin API as the lane's bootstrap administrator. */
-async function keycloakAdmin(prepared, method, path, body) {
-  const base = new URL(issuer).origin;
-  const token = await fetch(`${base}/realms/master/protocol/openid-connect/token`, {
-    method: "POST",
-    body: new URLSearchParams({
-      grant_type: "password",
-      client_id: "admin-cli",
-      username: prepared.secrets.admin.username,
-      password: prepared.secrets.admin.password,
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  assert.equal(token.status, 200, "the lane administrator signs in to Keycloak");
-  const response = await fetch(`${base}/admin/realms/oce${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${(await token.json()).access_token}`,
-      ...(body === undefined ? {} : { "content-type": "application/json" }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) {
-    assert.fail(
-      `Keycloak ${method} ${path} answered HTTP ${response.status}: ${await response.text()}`,
-    );
-  }
-  return response.status === 200 ? response.json() : response;
-}
+const keycloakAdmin = (prepared, method, path, body) =>
+  keycloakRealmAdmin(issuer, prepared.secrets.admin, method, path, body);
 
 /** The kid Keycloak signs RS256 tokens with: its highest-priority active RS256 key. */
 async function activeSigningKid(prepared) {
@@ -537,8 +510,8 @@ test(
     // Console sign-out deletes exactly this OCE session; Keycloak's session is untouched
     // (RP-initiated logout is a non-goal).
     const signOut = nextResponse(page, "/api/auth/sign-out");
-    await page.getByRole("button", { name: "OpenClaw Enterprise", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Logout" }).click();
+    await page.locator(".account-toggle").click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
     assert.equal((await signOut).status(), 200);
     const again = page.getByRole("button", { name: "Continue with Keycloak" });
     await again.waitFor();

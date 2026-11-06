@@ -1,10 +1,20 @@
 import {
   type AgentRevision,
+  assertExecutionAdmission,
+  CODEX_PLUGIN_DRIVER_IMPLEMENTATION,
+  OPENCLAW_PLUGIN_DRIVER_IMPLEMENTATION,
   type PluginDesiredState,
+  pluginRuntimeHarnessRequirement,
   validPluginRevisionState,
   validPluginApprovers,
 } from "@openclaw-enterprise/contracts";
 import { codexApprovalPolicy } from "@openclaw-enterprise/occ";
+import {
+  type CodexPublicGithubRead,
+  PUBLIC_GITHUB_READ_SKILL,
+  publicGithubReadSkill,
+} from "../repo/github/public-read/codex.ts";
+import { harnessEgressEnrollment, type HarnessEgressEnrollment } from "./egress-enrollment.ts";
 
 export const PLUGIN_RUNTIME_DIRECTORY = "/etc/openclaw/plugin-runtime";
 export const PLUGIN_RUNTIME_MANIFEST = "runtime.json";
@@ -45,6 +55,7 @@ export interface CodexRepositoryBrokerNetworkPolicy {
 export interface CodexModelEndpoint {
   readonly baseUrl: string;
   readonly modelProvider: "openai-compatible";
+  readonly supportsStandaloneWebSearch?: true;
 }
 
 export type PluginRuntimeSpec =
@@ -59,35 +70,30 @@ export type PluginRuntimeSpec =
       readonly approvalPolicy?: string | undefined;
       readonly pluginApprovers?: AgentRevision["pluginApprovers"];
       readonly repositoryBrokerNetworkPolicy?: CodexRepositoryBrokerNetworkPolicy;
+      readonly publicGithubRead?: CodexPublicGithubRead;
       readonly modelEndpoint?: CodexModelEndpoint;
+      readonly providerTools?: "none";
+      readonly egressEnrollment?: HarnessEgressEnrollment;
     };
 
 function validateDriverMatchesRuntime(
   revision: Readonly<AgentRevision>,
   runtime: PluginRuntimeSpec,
 ): void {
-  if (runtime.kind === "codex") {
-    if (!(
-      (revision.harness.id === "codex" && revision.harness.mode === "dedicated") ||
-      (revision.harness.id === "openclaw" && revision.harness.mode === "embedded")
-    )) {
-      throw new Error(
-        "Codex plugin runtime artifacts require a dedicated Codex Harness or embedded OpenClaw Harness.",
-      );
-    }
-    if (revision.plugins?.driver.implementation !== "occ/codex-plugin") {
-      throw new Error("Codex plugin runtime artifacts require the Codex PluginDriver.");
-    }
-    return;
+  const [implementation, artifacts, driver] =
+    runtime.kind === "codex"
+      ? [CODEX_PLUGIN_DRIVER_IMPLEMENTATION, "Codex plugin runtime artifacts", "Codex PluginDriver"]
+      : [
+          OPENCLAW_PLUGIN_DRIVER_IMPLEMENTATION,
+          "OpenClaw plugin runtime artifacts",
+          "OpenClaw PluginDriver",
+        ];
+  const harness = pluginRuntimeHarnessRequirement(implementation, revision.harness);
+  if (harness !== undefined) {
+    throw new Error(`${artifacts} require ${harness}.`);
   }
-  if (
-    revision.harness.id !== "openclaw" ||
-    (revision.harness.mode !== "embedded" && revision.harness.mode !== "dedicated")
-  ) {
-    throw new Error("OpenClaw plugin runtime artifacts require an OpenClaw Harness.");
-  }
-  if (revision.plugins?.driver.implementation !== "occ/openclaw-plugin") {
-    throw new Error("OpenClaw plugin runtime artifacts require the OpenClaw PluginDriver.");
+  if (revision.plugins?.driver.implementation !== implementation) {
+    throw new Error(`${artifacts} require the ${driver}.`);
   }
 }
 
@@ -95,6 +101,7 @@ function pluginFreeRuntimeForRevision(
   revision: Readonly<AgentRevision>,
   repositoryBrokerNetworkPolicy?: CodexRepositoryBrokerNetworkPolicy,
   openaiBaseUrl?: string,
+  publicGithubRead?: CodexPublicGithubRead,
 ): PluginRuntimeSpec | undefined {
   if (!validPluginApprovers(revision.pluginApprovers)) {
     throw new Error("AgentRevision plugin approvers are invalid.");
@@ -104,6 +111,12 @@ function pluginFreeRuntimeForRevision(
       kind: "codex",
       selections: {},
       approvalPolicy: codexSessionApprovalPolicy(revision),
+      ...(revision.egressPlan === undefined
+        ? {}
+        : {
+            providerTools: protectedProviderTools(revision),
+            egressEnrollment: harnessEgressEnrollment(revision.egressPlan),
+          }),
       ...(revision.pluginApprovers === undefined
         ? {}
         : { pluginApprovers: revision.pluginApprovers }),
@@ -111,6 +124,7 @@ function pluginFreeRuntimeForRevision(
         ? {}
         : { modelEndpoint: { baseUrl: openaiBaseUrl, modelProvider: "openai-compatible" } }),
       ...(repositoryBrokerNetworkPolicy === undefined ? {} : { repositoryBrokerNetworkPolicy }),
+      ...(publicGithubRead === undefined ? {} : { publicGithubRead }),
     };
   }
   if (repositoryBrokerNetworkPolicy !== undefined) {
@@ -130,10 +144,20 @@ export function pluginRuntimeSpecForRevision(
   revision: Readonly<AgentRevision>,
   repositoryBrokerNetworkPolicy?: CodexRepositoryBrokerNetworkPolicy,
   openaiBaseUrl?: string,
+  publicGithubRead?: CodexPublicGithubRead,
 ): PluginRuntimeSpec | undefined {
+  assertExecutionAdmission(revision);
+  if (publicGithubRead !== undefined && revision.executionAdmission.mode !== "unprotected") {
+    throw new Error("The public GitHub reader cannot be selected for protected execution.");
+  }
   const state = revision.plugins;
   if (state === undefined) {
-    return pluginFreeRuntimeForRevision(revision, repositoryBrokerNetworkPolicy, openaiBaseUrl);
+    return pluginFreeRuntimeForRevision(
+      revision,
+      repositoryBrokerNetworkPolicy,
+      openaiBaseUrl,
+      publicGithubRead,
+    );
   }
   if (!validPluginRevisionState(state) || !validPluginApprovers(revision.pluginApprovers)) {
     throw new Error("AgentRevision plugin selections are invalid.");
@@ -150,15 +174,39 @@ export function pluginRuntimeSpecForRevision(
           kind: "codex",
           selections: state.plugins,
           approvalPolicy: codexSessionApprovalPolicy(revision),
+          ...(revision.egressPlan === undefined
+            ? {}
+            : {
+                providerTools: protectedProviderTools(revision),
+                egressEnrollment: harnessEgressEnrollment(revision.egressPlan),
+              }),
           pluginApprovers: revision.pluginApprovers,
           ...(openaiBaseUrl === undefined
             ? {}
             : { modelEndpoint: { baseUrl: openaiBaseUrl, modelProvider: "openai-compatible" } }),
           ...(repositoryBrokerNetworkPolicy === undefined ? {} : { repositoryBrokerNetworkPolicy }),
+          ...(publicGithubRead === undefined ? {} : { publicGithubRead }),
         }
       : { kind: "openclaw", selections: state.plugins, pluginApprovers: revision.pluginApprovers };
   validateDriverMatchesRuntime(revision, runtime);
   return runtime;
+}
+
+function protectedProviderTools(revision: Readonly<AgentRevision>): "none" {
+  const routes = revision.egressPlan?.routes;
+  if (
+    routes === undefined ||
+    routes.some(({ binding: { grant } }) =>
+      grant.kind === "inference"
+        ? grant.providerTools !== "none"
+        : grant.kind !== "prepared_scope" &&
+          grant.kind !== "github_repository_metadata" &&
+          grant.kind !== "credential_free_repository_metadata",
+    )
+  ) {
+    throw new Error("Unsupported protected inference tool grant.");
+  }
+  return "none";
 }
 
 // The admission rule (codexApprovalPolicy), checked again on the revision being prepared.
@@ -180,13 +228,21 @@ function codexToml(
       : CODEX_SELECTED_PLUGIN_FEATURES_TOML
   }${pluginDefaults ? CODEX_PLUGIN_DEFAULTS_TOML : ""}`;
   const configuration =
-    approvalPolicy === undefined
+    (runtime.providerTools === "none" ? 'web_search = "disabled"\n\n' : "") +
+    (approvalPolicy === undefined
       ? plugins
-      : `approval_policy = ${JSON.stringify(approvalPolicy)}\n\n${plugins}`;
+      : `approval_policy = ${JSON.stringify(approvalPolicy)}\n\n${plugins}`);
   const endpoint = runtime.modelEndpoint;
+  if (
+    runtime.providerTools === "none" &&
+    runtime.egressEnrollment?.inference === true &&
+    endpoint === undefined
+  ) {
+    throw new Error("Protected inference requires an explicit normalized model endpoint.");
+  }
   return endpoint === undefined
     ? configuration
-    : `model_provider = ${JSON.stringify(endpoint.modelProvider)}\n\n${configuration}\n[model_providers.${endpoint.modelProvider}]\nname = "OpenAI-compatible"\nbase_url = ${JSON.stringify(endpoint.baseUrl)}\nwire_api = "responses"\nrequires_openai_auth = true\nsupports_websockets = false\n`;
+    : `model_provider = ${JSON.stringify(endpoint.modelProvider)}\n\n${configuration}\n[model_providers.${endpoint.modelProvider}]\nname = "OpenAI-compatible"\nbase_url = ${JSON.stringify(endpoint.baseUrl)}\nwire_api = "responses"\nrequires_openai_auth = true\nsupports_websockets = false\n${endpoint.supportsStandaloneWebSearch === true && runtime.providerTools !== "none" ? "supports_standalone_web_search = true\n" : ""}${runtime.providerTools === "none" ? "request_max_retries = 0\nstream_max_retries = 0\n" : ""}`;
 }
 
 /**
@@ -213,6 +269,9 @@ function configMapData(
   return Object.freeze({
     [PLUGIN_RUNTIME_MANIFEST]: JSON.stringify(runtimeManifest(runtime)),
     ...(codexConfig === undefined ? {} : { [PLUGIN_RUNTIME_CODEX_CONFIG]: codexConfig }),
+    ...(runtime.kind === "codex" && runtime.publicGithubRead !== undefined
+      ? { [PUBLIC_GITHUB_READ_SKILL]: publicGithubReadSkill(runtime.publicGithubRead) }
+      : {}),
   });
 }
 
@@ -267,12 +326,21 @@ function runtimeManifest(runtime: PluginRuntimeSpec): Readonly<Record<string, un
   return {
     kind: runtime.kind,
     selections: runtime.selections,
+    ...(runtime.kind === "codex" && runtime.egressEnrollment !== undefined
+      ? { egressEnrollment: runtime.egressEnrollment }
+      : {}),
+    ...(runtime.kind === "codex" && runtime.providerTools !== undefined
+      ? { providerTools: runtime.providerTools }
+      : {}),
     ...(runtime.kind === "codex" && runtime.modelEndpoint !== undefined
       ? { modelEndpoint: runtime.modelEndpoint }
       : {}),
     ...(runtime.pluginApprovers === undefined ? {} : { pluginApprovers: runtime.pluginApprovers }),
     ...(runtime.kind === "codex" && runtime.repositoryBrokerNetworkPolicy !== undefined
       ? { repositoryBrokerNetworkPolicy: runtime.repositoryBrokerNetworkPolicy }
+      : {}),
+    ...(runtime.kind === "codex" && runtime.publicGithubRead !== undefined
+      ? { publicGithubRead: runtime.publicGithubRead }
       : {}),
   };
 }
