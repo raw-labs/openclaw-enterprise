@@ -10,6 +10,7 @@ import { KubernetesComputeDriver } from "../../apps/controller/src/drivers/compu
  *   routed?: boolean, privateStatus?: boolean, gatewayTrustedProxyCidrs?: string[],
  *   gatewayRouting?: import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesGatewayRoutingOptions,
  *   modelProvider?: import("../../apps/controller/src/drivers/compute/model-provider.ts").ModelProviderConfiguration,
+ *   servicePrincipalCredentials?: import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesComputeDriverOptions["servicePrincipalCredentials"],
  * }} [options]
  */
 export function createTestKubernetesComputeDriver(
@@ -30,6 +31,7 @@ export function createTestKubernetesComputeDriver(
     gatewayTrustedProxyCidrs = ["127.0.0.1/32"],
     modelProvider,
     gatewayRouting,
+    servicePrincipalCredentials = { mode: "disabled" },
     sandboxDriver,
     credentialGatewayDriver,
     protectedDriver,
@@ -83,7 +85,7 @@ export function createTestKubernetesComputeDriver(
             }
           : {}),
       },
-      servicePrincipalCredentials: { mode: "disabled" },
+      servicePrincipalCredentials,
       ...(runtime
         ? {
             runtime: {
