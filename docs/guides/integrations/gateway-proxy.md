@@ -99,7 +99,8 @@ Direct Helm users set `api.channelDirectoryProxyUrl`. Leave it empty to inherit
 the selected Gateway proxy; empty does not disable directory requests. With no
 override and no Gateway proxy, directory behavior remains unchanged. A failed
 selected endpoint does not cause fallback to the other proxy. Both clients need
-CONNECT access to the services they use; directory lookup requires `slack.com:443`.
+CONNECT access to the services they use. Slack lookup requires `slack.com:443`;
+Teams lookup needs the Microsoft endpoints listed in the [Teams guide](teams.md).
 
 ## Apply and verify
 

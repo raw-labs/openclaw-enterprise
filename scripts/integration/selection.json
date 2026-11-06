@@ -7,22 +7,17 @@
     "commit": "324fbad6f248bce4606e175fbb67ac506cd824ff"
   },
   "batch": {
-    "startingIntegration": "35ec11e43de7ea2de94354db26b774610ede22d7",
+    "startingIntegration": "35b12b4b282c3eb3ef533269b03614dc5d9bbee4",
     "steps": [
       {
-        "operation": "Retire PR18 behavior while preserving published SQL and other selected features",
-        "commit": "580db852ce142be8b54ca4f643fb24aaa729b0bf",
-        "input": "dfeb2e3060a5d95718af0f90766e601932ce04fa"
-      },
-      {
-        "operation": "Merge PR36 exact head and reconcile Teams, embedded trial and canonical persistence",
-        "commit": "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
-        "input": "891b0d704af01e49d3f6a809476383ef2474050b"
+        "operation": "Advance PR36; retain Teams dispatch and embedded-channel profile configuration",
+        "commit": "3de37f3bfeb5499ecfb26faabdff6de7a4464096",
+        "input": "7056ecf30c2189f4a09f94b6bef6a3fcbcaac421"
       }
     ],
     "preservedMigrationPrefix": {
-      "commit": "35ec11e43de7ea2de94354db26b774610ede22d7",
-      "entryCount": 71
+      "commit": "35b12b4b282c3eb3ef533269b03614dc5d9bbee4",
+      "entryCount": 72
     }
   },
   "features": [
@@ -123,7 +118,7 @@
       "title": "One bundled or external Gateway outbound proxy",
       "author": "miguelbranco80",
       "headRef": "openclaw/delta-claw",
-      "commit": "891b0d704af01e49d3f6a809476383ef2474050b",
+      "commit": "7056ecf30c2189f4a09f94b6bef6a3fcbcaac421",
       "status": "included",
       "comparisonBase": "324fbad6f248bce4606e175fbb67ac506cd824ff",
       "headRepository": "raw-labs/openclaw-enterprise",
@@ -280,7 +275,10 @@
     {
       "id": "embedded-profile-admission",
       "pullRequests": [11, 17, 36],
-      "commits": ["82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e"],
+      "commits": [
+        "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
+        "3de37f3bfeb5499ecfb26faabdff6de7a4464096"
+      ],
       "paths": [
         "scripts/render-installation-profile.mjs",
         "tests/integration/profile-renderer.test.mjs",
@@ -732,7 +730,7 @@
     }
   },
   "qualification": {
-    "policy": "User requested publishing this integration replacement before subsequent combined/runtime testing. Source PRs and fork main remain read-only; this is not a source PR merge or release.",
+    "policy": "Refresh PR36 in the integration branch only; source PRs and fork main remain read-only. Exact-head CI follows publication.",
     "previousTestedCommit": "35ec11e43de7ea2de94354db26b774610ede22d7",
     "requiredChecks": [
       "combined source CI",
@@ -741,9 +739,44 @@
       "disposable real OCE lifecycle and proxy behavior"
     ],
     "limits": [
-      "Updated integration not yet real-instance qualified. Existing running test instance remains on35ec11e43.",
-      "Raw SQL fresh migration and two Compute proxy regressions passed locally; these do not prove populated upgrade or model execution.",
-      "No source PR merge, image publication, deployment or existing-instance cleanup performed."
-    ]
-  }
+      "The latest PR36 fixes are integrated; combined runtime-image startup and real-instance verification remain separate checks.",
+      "No image publication, deployment, source PR merge or existing-instance cleanup performed."
+    ],
+    "localChecks": {
+      "commands": [
+        "pnpm typecheck",
+        "pnpm lint",
+        "pnpm format:check",
+        "pnpm docs:check",
+        "pnpm check:workspace",
+        "node scripts/ci/run-tests.mjs audit",
+        "node scripts/integration/check-selection.mjs",
+        "node --test tests/integration/profile-renderer.test.mjs tests/integration/profile-preflight-chart-parity.test.mjs tests/integration/production-kubernetes-packaging.test.mjs",
+        "node --test tests/conformance/gateway-proxy-reset.test.mjs tests/conformance/gateway-proxy-tunnel.test.mjs tests/integration/teams-directory.test.mjs"
+      ],
+      "results": "Selected Helm/profile suites: 243 passed, one stale Codex warning assertion corrected and full profile suite rerun successfully. Proxy/Teams checks: 13 passed, zero skipped. Types, lint, format, docs, workspace, CI inventory and selection passed.",
+      "proofLimits": "Rendered Helm and profile configuration, local proxy transport and authorized Teams directory behavior; not live Microsoft delivery or built-image runtime startup."
+    }
+  },
+  "previousBatches": [
+    {
+      "startingIntegration": "35ec11e43de7ea2de94354db26b774610ede22d7",
+      "steps": [
+        {
+          "operation": "Retire PR18 behavior while preserving published SQL and other selected features",
+          "commit": "580db852ce142be8b54ca4f643fb24aaa729b0bf",
+          "input": "dfeb2e3060a5d95718af0f90766e601932ce04fa"
+        },
+        {
+          "operation": "Merge PR36 exact head and reconcile Teams, embedded trial and canonical persistence",
+          "commit": "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
+          "input": "891b0d704af01e49d3f6a809476383ef2474050b"
+        }
+      ],
+      "preservedMigrationPrefix": {
+        "commit": "35ec11e43de7ea2de94354db26b774610ede22d7",
+        "entryCount": 71
+      }
+    }
+  ]
 }

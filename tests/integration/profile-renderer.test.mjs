@@ -402,7 +402,10 @@ test("renderer supports exactly the openclaw and codex profiles", () => {
     codex.preflight.prerequisites.join("\n"),
     /bundled Gateway proxy permits only configured hostnames/,
   );
-  assert.match(codex.preflight.warnings.join("\n"), /existing codex_pat token/);
+  assert.match(
+    codex.preflight.prerequisites.join("\n"),
+    /Codex runtime credentials configured per Agent/,
+  );
 });
 
 // Tenant runtimes may burst to four cores; 100m requests keep the scheduling
