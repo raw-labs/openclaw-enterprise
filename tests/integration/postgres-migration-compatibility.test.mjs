@@ -1401,7 +1401,7 @@ function receiptsMatchEntries(receipts, entries) {
 
 async function seedCanonicalData(
   db,
-  { preset = false, computeAdmission = false, executionAdmission = false } = {},
+  { preset = false, computeAdmission = false, executionAdmission = false, plugins } = {},
 ) {
   const installation = `ins_${randomUUID()}`;
   const namespace = `ns_${randomUUID()}`;
@@ -1443,6 +1443,7 @@ async function seedCanonicalData(
           configuration_id: configuration,
           configuration_kind: "agent",
           configuration_generation: 1,
+          ...(plugins === undefined ? {} : { plugins }),
           draft_spec: {},
           harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
           harness_auth: { method: "runtime" },
@@ -1512,6 +1513,146 @@ async function seedCanonicalData(
   }
   return namespace;
 }
+
+test(
+  "Canonical plugin-driver upgrade preserves selections and published receipts",
+  requiresHistoryPostgres,
+  async (context) => {
+    const fixture = await migrationHistoryFixture();
+    const driver = { id: "custom-catalog", implementation: "example/plugin" };
+    const plugins = { "custom-catalog:sample": { enabled: true } };
+    for (const [label, selection, expectedDriver] of [
+      ["unset", null, null],
+      ["empty", {}, null],
+      ["selected", plugins, driver],
+    ]) {
+      await context.test(label, async (child) => {
+        const db = await historyDatabase(child, fixture, "pluginupgrade", { prefix: 67 });
+        await seedCanonicalData(db, {
+          computeAdmission: true,
+          executionAdmission: true,
+          plugins: { driver, plugins },
+        });
+        // The old API persists a selection without an Agent-level Driver identity.
+        // Keep a running revision so the upgrade must preserve deployed ownership too.
+        await db.app.query(
+          `UPDATE occ.agents a SET plugins=$1, active_revision_id=r.id, desired_runtime_state='running'
+           FROM occ.agent_revisions r WHERE r.agent_id=a.id`,
+          [selection],
+        );
+        const agents = (
+          await db.app.query("SELECT to_jsonb(a) AS data FROM occ.agents a ORDER BY id")
+        ).rows;
+        const revisions = (await db.app.query("SELECT * FROM occ.agent_revisions ORDER BY id"))
+          .rows;
+        const receipts = await historyReceipts(db.migrator);
+        assert.deepEqual(await runHistoryCommand(db, "production"), {
+          ok: true,
+          history: "preAgentPluginDriver",
+        });
+        await assertCompletedHistory(db, receipts);
+        assert.deepEqual(
+          (await db.app.query("SELECT plugins,plugin_driver FROM occ.agents")).rows,
+          [
+            {
+              plugins: selection,
+              plugin_driver: expectedDriver,
+            },
+          ],
+        );
+        assert.deepEqual(
+          (
+            await db.app.query(
+              "SELECT to_jsonb(a) - 'plugin_driver' AS data FROM occ.agents a ORDER BY id",
+            )
+          ).rows,
+          agents,
+        );
+        assert.deepEqual(
+          (await db.app.query("SELECT * FROM occ.agent_revisions ORDER BY id")).rows,
+          revisions,
+        );
+        assert.deepEqual(await runHistoryCommand(db, "production", "--check"), {
+          ok: true,
+          history: "completed",
+        });
+      });
+    }
+    for (const ownership of ["missing", "mismatched", "ambiguous"]) {
+      await context.test(
+        `${ownership} ownership rolls back without clearing selections`,
+        async (child) => {
+          const db = await historyDatabase(child, fixture, "pluginmissing", { prefix: 67 });
+          await seedCanonicalData(db, {
+            computeAdmission: true,
+            executionAdmission: true,
+            ...(ownership === "missing"
+              ? {}
+              : {
+                  plugins: {
+                    driver:
+                      ownership === "mismatched" ? { ...driver, id: "other-catalog" } : driver,
+                    plugins:
+                      ownership === "mismatched"
+                        ? { "other-catalog:sample": { enabled: true } }
+                        : plugins,
+                  },
+                }),
+          });
+          if (ownership === "ambiguous") {
+            // An Installation can change a Driver implementation between deployments.
+            // Conflicting historical owners must not silently choose an implementation.
+            await db.app.query(
+              `INSERT INTO occ.agent_revisions(id,namespace_id,agent_id,revision_number,admitted_spec,backend_id,admitted_at)
+             SELECT $1,namespace_id,agent_id,2,jsonb_set(admitted_spec,'{plugins,driver,implementation}','"example/other-plugin"'),backend_id,now()
+             FROM occ.agent_revisions`,
+              [`rev_${randomUUID()}`],
+            );
+          }
+          await db.app.query("UPDATE occ.agents SET plugins=$1", [plugins]);
+          const before = await historySnapshot(db);
+          assert.deepEqual(await runHistoryCommand(db, "production"), {
+            ok: false,
+            code: "MIGRATION_FAILED",
+          });
+          assert.deepEqual(await historySnapshot(db), before);
+          assert.deepEqual((await db.app.query("SELECT plugins FROM occ.agents")).rows, [
+            { plugins },
+          ]);
+        },
+      );
+    }
+    await context.test(
+      "original applied SQL remains recognized without rewriting receipts",
+      async (child) => {
+        const db = await historyDatabase(child, fixture, "pluginoriginal", { prefix: 67 });
+        const source = await readFile(
+          join(
+            repositoryRoot,
+            "tests/fixtures/migrations/plugin-driver-original/0068_agent_plugin_driver.sql",
+          ),
+          "utf8",
+        );
+        // Execute the published SQL before recording its real hash, rather than inventing
+        // a receipt for a schema that was never installed.
+        await db.migrator.query(source);
+        const manifest = JSON.parse(
+          await readFile(join(migrationsDirectory, "meta/_canonical-history.json"), "utf8"),
+        );
+        await db.migrator.query(
+          "INSERT INTO drizzle.__drizzle_migrations(hash,created_at) VALUES($1,$2)",
+          [createHash("sha256").update(source).digest("hex"), manifest.entries.at(-1).when],
+        );
+        const receipts = await historyReceipts(db.migrator);
+        assert.deepEqual(await runHistoryCommand(db, "production"), {
+          ok: true,
+          history: "completed",
+        });
+        assert.deepEqual(await historyReceipts(db.migrator), receipts);
+      },
+    );
+  },
+);
 
 async function seedProviderCompletedData(db) {
   const installation = `ins_${randomUUID()}`;
