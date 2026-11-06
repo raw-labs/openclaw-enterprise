@@ -61,10 +61,23 @@ export type {
   PreparedTokenGrant,
   PreparedTokenSource,
   PreparedTokenSelection,
+  ResolvedToken,
   PreparedTokenEvidence,
   PreparedTokenCurrentProof,
   PreparedTokenIssuer,
-  PreparedTokenService,
+  OAuthConnectionAccessToken,
+  OAuthConnectionGrant,
+  OAuthRefreshTokenRegistration,
+  OAuthRefreshTokenIssuer,
+  OAuthConnectionClient,
+  OAuthConnectionRegistration,
+  OAuthConnectionStatus,
+  OAuthAccountRef,
+  PreparedTokenKind,
+  PreparedTokenRegistration,
+  PreparedTokenRef,
+  TokenResolveOptions,
+  TokenService,
 } from "./prepared-token.ts";
 export {
   preparedGitHubType,
@@ -140,6 +153,26 @@ export {
   sandboxNetworkGrantsWithinCeiling,
 } from "./sandbox-policy.ts";
 
+export type {
+  OAuthClient,
+  OAuthClientAuthMethod,
+  McpAuthorizationMetadata,
+  ConnectionEndpoint,
+  ConnectionTemplate,
+  ConnectionTemplateValues,
+  OAuthConnectionTemplateVersion,
+  ConnectionSession,
+  SavedConnection,
+} from "./connection-templates.ts";
+export {
+  ConnectionTemplateValidationError,
+  connectionValuesChanged,
+  isFlowOwnedOAuthParameter,
+  isOAuthScopeToken,
+  normalizeConnectionDestinations,
+  validateConnectionTemplateAuthorization,
+  validateConnectionTemplateDestinations,
+} from "./connection-templates.ts";
 export type { ComputePreparationFailureEvidence } from "./compute-preparation.ts";
 export { isComputePreparationFailureEvidence } from "./compute-preparation.ts";
 
@@ -513,11 +546,18 @@ export interface CredentialSourceType {
 /** `registering` is recorded before the gateway write, so an uncertain outcome stays visible. */
 export type CredentialSourceState = "registering" | "ready" | "deleting";
 
-/** Driver IDs are scoped to a capability. Both parts of a source owner are immutable. */
-export type CredentialSourceOwnerCapability = "credential_gateway" | "credential_proxy";
+/** Driver-owned sources pin the selected Driver. The Token Service owns saved accounts directly. */
+type CredentialSourceOwner =
+  | {
+      readonly ownerCapability: "credential_gateway" | "credential_proxy";
+      readonly driverId: string;
+    }
+  | { readonly ownerCapability: "token_service"; readonly driverId?: never };
+
+export type CredentialSourceOwnerCapability = CredentialSourceOwner["ownerCapability"];
 
 /** OCC source admission, including its owner and Secret references, never credential values. */
-export interface CredentialSource {
+export type CredentialSource = CredentialSourceOwner & {
   readonly egress?: ProtectedEgressSource;
   readonly id: string;
   readonly namespaceId: string;
@@ -525,11 +565,9 @@ export interface CredentialSource {
   readonly type: string;
   readonly config: Readonly<Record<string, string>>;
   readonly secrets: Readonly<Record<string, SecretReference>>;
-  readonly ownerCapability: CredentialSourceOwnerCapability;
-  readonly driverId: string;
   readonly state: CredentialSourceState;
   readonly createdAt: string;
-}
+};
 
 export interface CredentialSourceMetadata {
   readonly ownerCapability: CredentialSourceOwnerCapability;
@@ -599,6 +637,9 @@ export function credentialSourceMatchesSnapshot(
     return false;
   }
   switch (source.ownerCapability) {
+    case "token_service":
+      // A saved account has no runnable sender until a consumer receives its own binding.
+      return false;
     case "credential_gateway":
       return (
         snapshot.credentialProxyId === undefined && snapshot.credentialGatewayId === source.driverId
@@ -1201,6 +1242,7 @@ export const PERMISSION_ACTIONS = Object.freeze([
   "administer",
   "read_logs",
   "manage_policy",
+  "use",
 ] as const);
 
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
@@ -1231,6 +1273,7 @@ export const SUPPORTED_PERMISSION_ACTIONS: Readonly<
     "administer",
     "read_logs",
     "manage_policy",
+    "use",
   ] as const),
   agent_revision: Object.freeze(["read"] as const),
 });
@@ -1265,12 +1308,49 @@ export interface GroupMembership extends Scope {
 
 export type AccessBindingSubjectKind = "identity" | "group";
 
+/** Runtime role names are opaque to IAM; the selected Compute Driver owns their meaning. */
+export interface RuntimeAccessDecision extends AuthorizationDecision {
+  readonly runtimeRole?: string;
+}
+
+/** Explicit full runtime access, including upgrades from Agent administer grants. Compute owns its policy. */
+export const ADMINISTRATOR_RUNTIME_ROLE = "platform-administrator";
+
+export interface AgentRuntimeRole {
+  readonly id: string;
+  readonly permissions: Readonly<Record<string, unknown>>;
+}
+
+export interface AgentRuntimeRoleCatalog {
+  readonly configuration: Pick<Configuration, "id" | "generation">;
+  readonly roles: readonly AgentRuntimeRole[];
+  readonly desiredRuntimeState: AgentDesiredRuntimeState;
+  readonly activeRevision?: {
+    readonly id: string;
+    readonly roles: readonly AgentRuntimeRole[];
+  };
+}
+
+export type AgentRuntimeAccessUnavailableReason =
+  "role_unavailable" | "device_approval_required" | "transport_unsupported";
+
+export interface AgentRuntimeAccessUnavailable {
+  readonly reason: AgentRuntimeAccessUnavailableReason;
+}
+
+export interface AgentRuntimeAccess {
+  readonly endpoint: string;
+  readonly headers: Readonly<Record<string, string>>;
+}
+
 export interface AccessBinding extends Scope {
   readonly id: string;
   readonly namespaceId?: string;
   readonly subjectKind: AccessBindingSubjectKind;
   readonly subjectId: string;
   readonly roleId: string;
+  /** Exact human/Agent runtime assignment, separate from the OCE Role. */
+  readonly runtimeRole?: string;
   readonly resourceKind?: ResourceKind;
   readonly resourceId?: string;
 }
@@ -1374,7 +1454,11 @@ export type {
   IAMManagedServicePrincipalInput,
 } from "./drivers/iam/index.ts";
 export type { ServiceAccountDriver } from "./drivers/service-account/index.ts";
-export type { SecretDriver } from "./drivers/secret/index.ts";
+export type {
+  InstallationSecretRef,
+  InstallationSecretStore,
+  SecretDriver,
+} from "./drivers/secret/index.ts";
 export type {
   CredentialGatewayDriver,
   CredentialGatewayContext,
@@ -1464,6 +1548,10 @@ export type JSONSchema = Readonly<Record<string, unknown>>;
 export { isAllowedSecretBindingDestination, normalizeSecretBindings } from "./secret-bindings.ts";
 
 export * from "./api/common.ts";
+export {
+  ConnectionTemplateSchema,
+  OAuthConnectionTemplateVersionSchema,
+} from "./api/connection-templates.ts";
 export * from "./api/resources.ts";
 export * from "./api/routes.ts";
 

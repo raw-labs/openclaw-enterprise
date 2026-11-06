@@ -35,7 +35,7 @@ import {
   fieldError,
   focusSaveOutcome,
   isUnavailable,
-  jsonObjectProblem,
+  jsonObjectDiagnostic,
   revealStatus,
   setHidden,
   setStatusTone,
@@ -54,7 +54,7 @@ import {
   renderHarnessAuthSummary,
 } from "./harness-auth.mjs";
 import { renderAgentAccess } from "./access.mjs";
-import { renderNativeAdminAccess } from "./native-admin.mjs";
+import { renderRuntimeAccess } from "./runtime-access.mjs";
 import { createAgentDeletion } from "./deletion.mjs";
 import { createAgentStop } from "./stop.mjs";
 import { gatewaySafetyControls } from "./gateway-safety.mjs";
@@ -517,10 +517,10 @@ const NEUTRAL_VERSION_NOTICES: Record<NeutralOutcome, string> = {
   stopped:
     "Stopped version · read-only admitted snapshot. The Agent was stopped before its deployment finished.",
 };
-// Versions this tab's own Deploy created, keyed like failedVersions, with their version numbers.
+// Version numbers accepted by this tab's Deploy, indexed by Agent path and revision ID.
 // The API accepted each, so a deployer who cannot read one is told it exists and was accepted,
 // not that a link may name a version that does not exist (finding D751).
-const deployedVersions = new Map<string, number>();
+const deployedVersions = new Map<string, Map<string, number>>();
 
 // A recovery link opens a version tab far below the banner it sits in. Only the URL changed and
 // the page stayed at the top, so the link looked dead (finding 1586). The page the link opens,
@@ -1213,8 +1213,7 @@ export async function renderAgentDetail(
     // Until every page is loaded, an unlisted version may simply be older than those shown.
     return unlisted(revisionId) && olderCursor === null;
   }
-  const deployedHere = (revisionId: string) =>
-    deployedVersions.has(failedVersionKey(path, revisionId));
+  const deployedHere = (revisionId: string) => deployedVersions.get(path)?.has(revisionId) ?? false;
   // Versions this page showed as selected for service. Each exists, so a viewed one the reader
   // cannot read is named in words once a stop or another version takes its place (finding 3000).
   const formerCurrent = new Set<string>();
@@ -1224,14 +1223,8 @@ export async function renderAgentDetail(
   // fully loaded (finding 2615).
   function acceptedHiddenVersion(newestListed: number) {
     let accepted: { id: string; revision: number } | undefined;
-    for (const [key, revision] of deployedVersions) {
-      const [agentPath, id] = JSON.parse(key) as [string, string];
-      if (
-        agentPath === path &&
-        revision > newestListed &&
-        revision > (accepted?.revision ?? 0) &&
-        unlisted(id)
-      ) {
+    for (const [id, revision] of deployedVersions.get(path) ?? []) {
+      if (revision > newestListed && revision > (accepted?.revision ?? 0) && unlisted(id)) {
         accepted = { id, revision };
       }
     }
@@ -1619,26 +1612,21 @@ export async function renderAgentDetail(
   if (selected !== "draft") {
     detailPane.append(pageDisclosure);
   }
-  const nativeAdmin = renderNativeAdminAccess(
-    context,
-    path,
-    () => latestPermissionsRead.then((permissions) => permissions?.administer),
-    {
-      // One the caller cannot read is not named by its ID (finding D791).
-      versionLabel: () =>
-        unreadableCurrentLabel() === null ? currentVersionLabel() : "current version",
-      recovery: (status) => {
-        if (status === "stopped" || status === "unsupported") {
-          return versionLink("Open draft", "draft", "configuration");
-        }
-        const latest = visibleRevisions[0];
-        return status === "unavailable" && latest
-          ? versionLink("View deployment", latest.id, "deployment")
-          : null;
-      },
+  const runtimeAccess = renderRuntimeAccess(context, path, {
+    // One the caller cannot read is not named by its ID (finding D791).
+    versionLabel: () =>
+      unreadableCurrentLabel() === null ? currentVersionLabel() : "current version",
+    recovery: (status) => {
+      if (status === "stopped" || status === "unsupported") {
+        return versionLink("Open draft", "draft", "configuration");
+      }
+      const latest = visibleRevisions[0];
+      return status === "unavailable" && latest
+        ? versionLink("View deployment", latest.id, "deployment")
+        : null;
     },
-  );
-  headerActions.append(nativeAdmin.launch, nativeAdmin.unavailable);
+  });
+  headerActions.append(runtimeAccess.launch, runtimeAccess.unavailable);
   const recovery = createDeploymentRecovery(context, {
     path,
     selected,
@@ -1654,7 +1642,7 @@ export async function renderAgentDetail(
   );
   view.replaceChildren(
     recovery.section,
-    nativeAdmin.section,
+    runtimeAccess.section,
     deploymentAttention,
     overviewStatus,
     versionLayout,
@@ -2328,7 +2316,7 @@ export async function renderAgentDetail(
         }
       }
       // Native admin access depends on the serving version, so a finished deployment rereads it.
-      nativeAdmin.refresh();
+      runtimeAccess.refresh();
     }
     if (revisionResult) {
       renderOverview(revisionResult, snapshot);
@@ -2480,7 +2468,7 @@ export async function renderAgentDetail(
     markVersionOutcomes();
     // An unreadable current version is newer beside a succeeded deployment (finding D791).
     renderCurrentVersion();
-    nativeAdmin.updateTarget();
+    runtimeAccess.updateTarget();
     const versionContextLine = selector.querySelector(".agent-version-context");
     if (versionContextLine) {
       setText(versionContextLine, versionContext());
@@ -2840,7 +2828,7 @@ export async function renderAgentDetail(
         labels.get(id) ?? (id === currentRevisionId ? unreadableCurrentLabel() : null) ?? undefined,
     );
     renderCurrentVersion();
-    nativeAdmin.updateTarget();
+    runtimeAccess.updateTarget();
     renderVersions(revisions, snapshot, revisionResult);
     const mostRecent = revisions[0];
     if (activityRevisionId !== (mostRecent?.id ?? null)) {
@@ -2866,7 +2854,7 @@ export async function renderAgentDetail(
           activityPanel.replaceWith(panel);
           activityPanel = panel;
         }
-        void Promise.all([nativeAdmin.ready, failed ? callerPermissionsRead : null]).then(
+        void Promise.all([runtimeAccess.ready, failed ? callerPermissionsRead : null]).then(
           revealDetail,
         );
       };
@@ -3028,7 +3016,7 @@ export async function renderAgentDetail(
   // caller may not read: the list returns only readable versions, newest first, and it is newer
   // than each listed one. Its read would only be refused and audited (finding D758).
   async function deployedVersionUnlisted() {
-    const deployed = deployedVersions.get(failedVersionKey(path, selected));
+    const deployed = deployedVersions.get(path)?.get(selected);
     if (deployed === undefined) {
       return false;
     }
@@ -3571,7 +3559,11 @@ export async function renderAgentDetail(
       ).trustedProxy;
       const proxy =
         trustedProxy !== null && typeof trustedProxy === "object" && !Array.isArray(trustedProxy)
-          ? trustedProxyIdentitiesProblem(trustedProxy as Readonly<Record<string, unknown>>)
+          ? trustedProxyIdentitiesProblem(
+              trustedProxy as Readonly<Record<string, unknown>>,
+              undefined,
+              responseFields(responseFields(checked).gateway).roles !== undefined,
+            )
           : undefined;
       if (proxy !== undefined) {
         refusals.set(
@@ -3952,7 +3944,12 @@ export async function renderAgentDetail(
           ) {
             throw new Error("The admitted version could not be confirmed for this Configuration.");
           }
-          deployedVersions.set(failedVersionKey(path, revision.id), revision.revision);
+          let deployedForPath = deployedVersions.get(path);
+          if (deployedForPath === undefined) {
+            deployedForPath = new Map<string, number>();
+            deployedVersions.set(path, deployedForPath);
+          }
+          deployedForPath.set(revision.id, revision.revision);
           if (context.isCurrent()) {
             deployInFlight = false;
             content.toggleAttribute("inert", false);
@@ -6193,13 +6190,13 @@ export async function renderAgentDetail(
     }
 
     function parseEditor(reportInvalid = false) {
-      const problem = jsonObjectProblem(editor.value);
-      if (problem === undefined) {
-        return JSON.parse(editor.value) as OpenClawConfigurationDocument;
+      const diagnostic = jsonObjectDiagnostic(editor.value);
+      if (diagnostic.kind === "valid") {
+        return diagnostic.value;
       }
       if (reportInvalid) {
         // One message, under the editor, which keeps focus so the JSON can be fixed in place.
-        editorError.show(problem);
+        editorError.show(diagnostic.message);
         feedback.textContent = "";
         feedbackLocked = true;
         editor.focus();
@@ -6377,9 +6374,20 @@ export async function renderAgentDetail(
         if (context.isCurrent()) {
           pending = false;
           updateState();
-          render();
+          // A conflict keeps the same editor. Rebuilding it detaches a reader's focused
+          // textarea and deactivates its selection before recovery can check focus.
+          if (reloadRequired && body.contains(editor)) {
+            cancel.after(reload);
+          } else {
+            render();
+          }
           const refused = feedback.dataset.tone === "danger";
           feedback.setAttribute("role", refused ? "alert" : "status");
+          const focusMoved =
+            reloadRequired &&
+            document.activeElement?.isConnected &&
+            document.activeElement !== document.body &&
+            document.activeElement !== feedback;
           if (refusedInEditor && container.isConnected) {
             editor.focus({ preventScroll: true });
             editor.scrollIntoView({ block: "nearest" });
@@ -6387,7 +6395,7 @@ export async function renderAgentDetail(
             // A refusal Reload cannot fix (a 403, say) is an alert that takes focus and comes
             // into view; under the fold, nothing seemed to happen (finding 1991).
             revealStatus(feedback, container);
-          } else if (container.isConnected) {
+          } else if (container.isConnected && !focusMoved) {
             // A conflict or failure leaves Reload draft (or Save again) as the next step
             // (finding 1481).
             focusSaveOutcome(container, [reload, save], feedback);

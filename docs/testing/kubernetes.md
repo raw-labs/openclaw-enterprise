@@ -15,14 +15,13 @@ Use disposable local k3d with enforcing NetworkPolicies. Fixtures exclude real g
 Install k3d, kubectl, Helm, `certutil`, and Chromium with sandbox support.
 Use a disposable container engine with image-build capacity. The
 Keycloak cases need free, bindable loopback port 443 and must not run beside
-the standalone Keycloak lane. From the root of a trusted repository checkout,
-install the dependencies and build the CLI before running:
+the standalone Keycloak lane. Run these commands from the trusted checkout root:
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm exec playwright install chromium
 pnpm cli:build
-OCC_TEST_DEV_UP_K3D_REAL=1 node --test tests/integration/dev-up-k3d-real.test.mjs
+OCC_TEST_DEV_UP_K3D_REAL=1 node --test --test-concurrency=1 tests/integration/dev-up-k3d-real.test.mjs tests/integration/dev-up-k3d-refusals-real.test.ts tests/integration/dev-up-k3d-keycloak-real.test.ts
 ```
 
 The tests cover installation, cleanup, workspace boundaries, NetworkPolicy,
@@ -293,12 +292,11 @@ routing policies, PostgreSQL or worker execution. Selecting only one image fails
 
 ### Native Gateway sharing
 
-The `gateway-routing` lane selects `tests/integration/native-admin-k3d-real.test.mjs`.
-The Dedicated case provisions native access on the first revision. Sharing cases
-check model turns, read/operate-only denial, and WebSocket closure after Agent
-permission withdrawal or session expiry, with device enrollment retained.
-Envoy logs verify denial before upstream I/O. These cases do not qualify
-account enrollment, per-chat authority, Git, or OpenShell.
+`gateway-routing` selects `tests/integration/native-admin-k3d-real.test.mjs`.
+It checks cookies, grants, sibling/Configuration denials, Console launch,
+model turns and WebSocket revocation within 30 seconds. Others continue. Role assignment before deployment, changes while stopped and
+redeployment are covered; account enrollment, per-chat authority, Git and
+OpenShell are not.
 
 ## Production TUI tests
 

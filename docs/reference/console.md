@@ -39,14 +39,14 @@ colors with a mounted [theme bundle](console/theming.md). See
 
 ## Identify the control-plane build
 
-With `debug=true`, the sidebar wordmark shows the first eight characters of the
+With **Debug mode** enabled in Settings, the sidebar wordmark shows the first eight characters of the
 running OCC image's source commit, or **dev** for builds without metadata; hover
 for the full commit. Published images bake their source commit into the console
 HTML.
 
 ## Browse and select a Namespace
 
-The sidebar opens **Agents**, **Secrets**, or **Namespaces**; **Refresh** repeats the read.
+The sidebar opens **Agents**, **Credentials**, or **Namespaces**. **Credentials** opens the Secrets tab for the selected Namespace. Installation administrators can also open [Connection templates](connection-templates.md). **Refresh** repeats the read.
 Configure models during creation. [Experimental Backends](backends.md) stay
 hidden. Namespace rows open their Agents.
 
@@ -82,8 +82,9 @@ Opening an Agent shows its details page immediately. While it loads, **Back to
 Agents** returns to your place. A slow return to a retained page says **Still
 checking…** after one second. Refresh rebuilds; refocusing an unchanged page preserves edits,
 Slack searches, focus, and the Namespace selector; at phone width, focus in the open drawer moves to
-**Open navigation**. Views belong to one account, session, route,
-and Namespace. Sign-out, session changes, exit, or Backend denial clear them.
+**Open navigation**. A retained page revalidates completed read outcomes; matching
+outcomes restore it, while changed outcomes rebuild it. Views belong to one
+account, session, route, and Namespace. Sign-out, session changes, exit, or Backend denial clear them.
 
 A previously shown Configuration denial can leave Agent metadata visible after
 reload and refocus. Refocus still checks current access. If the read before a
@@ -108,12 +109,11 @@ scope; global pages stay open. The selector cannot broaden API authorization.
 
 ## Inspect build and runtime images
 
-Append `debug=true` to the console URL, for example
-`/console/agents?debug=true` (or `&debug=true` after an existing query).
+Open **Settings → Browser preferences** and turn on **Debug mode**.
 The sidebar shows the full OCE source commit and per-container image
-observations for readable Agents in the selected Namespace. Navigation preserves
-the flag; remove it to hide diagnostics and stop these reads. **Refresh**
-retries unavailable metadata and updates the snapshot.
+observations for readable Agents in the selected Namespace. Turn it off in
+Settings to hide diagnostics and stop new image reads. **Refresh** retries
+unavailable metadata and updates the snapshot.
 [Debug sidebar fields](console/debug-fields.md) defines every field, Docker and
 Kubernetes differences, inspection scope, and unavailable states.
 
@@ -259,9 +259,8 @@ For an unavailable gateway, follow the
 
 ## Open the native admin UI
 
-When [Agent native admin UI access](agent-native-admin.md) is enabled, all Agent
-detail tabs, including Configuration and Workspace files, show **Open Agent UI**
-in the header and its availability information to callers with exact Agent `administer`.
+When [Agent native admin UI access](agent-native-admin.md) is enabled, all
+Agent detail tabs include an **OpenClaw** panel for people with Agent `use` and a runtime assignment.
 It is hidden otherwise, when the Installation disables the feature, and until
 the next sign-in or new tab after a denial. The panel reports a stopped Agent
 (including before first deployment) as needing to be started, asks you to check
@@ -269,7 +268,7 @@ deployment and refresh access when a desired-running Agent has no selected versi
 administrators can [share an Agent](console/agent-sharing.md) with an existing
 person.
 
-**Open Agent UI** opens the Agent's selected version in a new tab, even
+**Open OpenClaw** opens the Agent's selected version in a new tab, even
 from a draft or older version. Its visible warning explains that Gateway managed mode restricts
 administrative changes by default. OCE deployments can overwrite changes made
 while managed mode is off. Use OCE for durable configuration. The tab shares

@@ -35,6 +35,23 @@ type PermissionSnapshot =
 
 type AgentDetailScenario = {
   group: "Pages/Agent detail";
+  runtimeRolePolicyChanged?: true;
+  runtimeRolesUnavailable?: true;
+  sharingRoles?: readonly {
+    id: string;
+    namespaceId: string;
+    permissions: readonly { action: string; resourceKind: string }[];
+  }[];
+  sharingBindings?: readonly {
+    id: string;
+    namespaceId: string;
+    subjectKind: string;
+    subjectId: string;
+    roleId: string;
+    resourceKind: string;
+    resourceId: string;
+    runtimeRole: string;
+  }[];
   name: string;
   path: string;
   description: string;
@@ -131,6 +148,40 @@ export function createAgentDetailScenarios({
   currentVersion: string;
   candidateVersion: string;
 }) {
+  const configurationConflictDraft = {
+    group: "Pages/Agent detail",
+    path: draft,
+    configurationChangedElsewhere: {
+      values: {
+        gateway: { bind: "loopback" },
+        agents: { defaults: { model: "codex/gpt-5.1" } },
+      },
+    },
+    actions: [
+      click("Edit Configuration"),
+      {
+        selector: "#configuration-json",
+        value: JSON.stringify(
+          {
+            gateway: { mode: "local", bind: "lan" },
+            agents: {
+              defaults: {
+                model: "codex/gpt-4.1",
+                models: { "codex/gpt-4.1": { agentRuntime: { id: "codex" } } },
+              },
+            },
+            channels: {},
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  } satisfies Pick<
+    AgentDetailScenario,
+    "group" | "path" | "configurationChangedElsewhere" | "actions"
+  >;
+
   const runtimeLogsPage = {
     group: "Pages/Agent detail",
     path: `${candidateVersion}&tab=logs`,
@@ -179,7 +230,7 @@ export function createAgentDetailScenarios({
   };
 
   const shareExistingPerson = [
-    { selector: "#share-principal-id", value: "prn_person-demo" },
+    { selector: "#share-principal-id", value: "prn_00000000-0000-4000-8000-000000000003" },
     { selector: ".agent-access-consent input", click: true },
     click("Share Agent"),
   ] satisfies StoryAction[];
@@ -389,12 +440,47 @@ export function createAgentDetailScenarios({
         name: "Share an Agent",
         path: `${draft}&tab=access`,
         description:
-          "Grant an existing person access to this Agent's full native Gateway. Other Agents and OCE administration remain separate.",
+          "Choose an OpenClaw role for an existing person. Administrators also assign themselves a role to open OpenClaw.",
         steps: [
-          "Enter prn_person-demo as the existing Principal ID.",
-          "Review the native-access disclosure, acknowledge it, and share.",
+          "Check the hint explaining that administrators assign themselves a role to open OpenClaw.",
+          "Enter prn_00000000-0000-4000-8000-000000000003 as the existing Principal ID.",
+          "Choose an OpenClaw role, review its permissions, acknowledge shared access, and share.",
           "Remove the direct binding with the red-edged destructive Remove binding button (it acts at once, with no confirmation); Namespace discovery remains available.",
         ],
+      },
+      agentSharingBeforeDeployment: {
+        group: "Pages/Agent detail",
+        name: "Share before first deployment",
+        path: `${draft}&tab=access`,
+        actions: [
+          ...shareExistingPerson,
+          { selector: ".agent-access details > summary", click: true },
+        ],
+        description:
+          "Save an assignment before deployment. The role has no deployed permissions yet; native access awaits deployment. Simulated UI proof.",
+      },
+      agentSharingStopped: {
+        group: "Pages/Agent detail",
+        name: "Share while stopped",
+        path: `${draft}&tab=access`,
+        deployed: true,
+        stopped: true,
+        actions: [
+          ...shareExistingPerson,
+          { selector: ".agent-access-grant select", value: "reviewer" },
+        ],
+        description:
+          "Change a saved assignment while stopped. OpenClaw access resumes after deployment. Simulated UI proof.",
+      },
+      agentSharingPolicyChanged: {
+        group: "Pages/Agent detail",
+        name: "Configured and deployed role permissions",
+        path: `${draft}&tab=access`,
+        deployed: true,
+        runtimeRolePolicyChanged: true,
+        actions: [{ selector: ".agent-access details > summary", click: true }],
+        description:
+          "The configured researcher role has fewer permissions than the deployed version. Saving assignments does not deploy edited policy. Simulated UI proof.",
       },
       agentSharingGranted: {
         group: "Pages/Agent detail",
@@ -402,7 +488,7 @@ export function createAgentDetailScenarios({
         path: `${draft}&tab=access`,
         actions: shareExistingPerson,
         description:
-          "Namespace discovery and the selected Agent grant are present. Removing the direct grant does not remove other effective access.",
+          "Namespace discovery and the selected Agent grant are present. Removing the runtime assignment revokes OpenClaw entry; other grants may still provide OCE management access.",
       },
       agentSharingHoldsNavigation: {
         group: "Pages/Agent detail",
@@ -472,6 +558,51 @@ export function createAgentDetailScenarios({
         actions: [...shareExistingPerson, click("Remove binding")],
         description:
           "The selected direct Agent binding was removed. Namespace discovery and unrelated grants are preserved.",
+      },
+      agentSharingRoleChanged: {
+        group: "Pages/Agent detail",
+        name: "Change OpenClaw role",
+        path: `${draft}&tab=access`,
+        actions: [
+          ...shareExistingPerson,
+          { selector: ".agent-access-grant select", value: "reviewer" },
+        ],
+        description:
+          "Change the selected role and inspect the success feedback. This simulated preview does not verify backend atomicity or native connection closure.",
+      },
+      agentSharingRolesUnavailable: {
+        group: "Pages/Agent detail",
+        name: "OpenClaw roles unavailable",
+        path: `${draft}&tab=access`,
+        runtimeRolesUnavailable: true,
+        sharingRoles: [
+          {
+            id: "role-demo-entry",
+            namespaceId: "ns_00000000-0000-4000-8000-000000000001",
+            permissions: [
+              { action: "read", resourceKind: "agent" },
+              { action: "use", resourceKind: "agent" },
+            ],
+          },
+        ],
+        sharingBindings: [
+          {
+            id: "binding-demo-entry",
+            namespaceId: "ns_00000000-0000-4000-8000-000000000001",
+            subjectKind: "identity",
+            subjectId: "prn_00000000-0000-4000-8000-000000000003",
+            roleId: "role-demo-entry",
+            resourceKind: "agent",
+            resourceId: "agt_00000000-0000-4000-8000-000000000001",
+            runtimeRole: "reviewer",
+          },
+        ],
+        description:
+          "Sharing remains disabled while the configured role catalog is unavailable; existing assignments can be removed.",
+        steps: [
+          "Open Namespaces, then use Back. Confirm role choices remain disabled and the existing assignment can still be removed.",
+          "Remove the binding and confirm Namespace discovery remains available.",
+        ],
       },
       agentSharingDenied: {
         group: "Pages/Agent detail",
@@ -558,6 +689,11 @@ export function createAgentDetailScenarios({
         actions: [{ selector: "#agent-plugins", value: "[]" }, click("Save plugin selections")],
         description:
           "Save with Plugin selections JSON that is not an object: the error shows under the JSON and focus moves to it, with no browser bubble.",
+        steps: [
+          "Confirm the array error appears below the raw JSON editor and the editor has focus.",
+          'Replace the draft with {"sample":{"enabled":true,"driverPolicy":{"destructiveEnabled":1e400}}}. Collapse the JSON editor and choose Save plugin selections. The editor opens and takes focus with a number-range error; no save request starts.',
+          "Open Configure plugins. The existing invalid-JSON guidance appears, focus stays in the dialog, and the raw draft remains unchanged. Correct the number before using policy controls.",
+        ],
       },
       agentAuthenticationRequiredFields: {
         group: "Pages/Agent detail",
@@ -1238,6 +1374,12 @@ export function createAgentDetailScenarios({
         ],
         description:
           "Invalid JSON is reported under the editor with its line and column. The editor keeps its contents and sends no Configuration write.",
+        steps: [
+          "Check the initial syntax error, then Cancel and reopen Edit Configuration. Expand Advanced settings to restore a complete Configuration JSON draft.",
+          'Set plugins.entries.knowledge to {"enabled":true,"config":{"thresholds":[1,1e400,3]}}, preserving the rest of the document. This is valid JSON syntax, but the middle number is outside the supported range. Select Save Configuration.',
+          "Read the error under the editor: A number is too large or too small to save. Use a number closer to zero. Check that the editor has focus, its exact text is unchanged, and no Configuration write occurs.",
+          "Change only 1e400 to 2 and save again. Reopen the editor and check that thresholds is [1,2,3], with no null substituted. This is simulated UI evidence only.",
+        ],
       },
       invalidConfigurationInvisibleCharacters: {
         group: "Pages/Agent detail",
@@ -1276,34 +1418,10 @@ export function createAgentDetailScenarios({
         ],
       },
       configurationChangedElsewhereMerged: {
-        group: "Pages/Agent detail",
+        ...configurationConflictDraft,
         name: "Configuration edits merged over another browser's save",
-        path: draft,
-        configurationChangedElsewhere: {
-          values: {
-            gateway: { bind: "loopback" },
-            agents: { defaults: { model: "codex/gpt-5.1" } },
-          },
-        },
         actions: [
-          click("Edit Configuration"),
-          {
-            selector: "#configuration-json",
-            value: JSON.stringify(
-              {
-                gateway: { mode: "local", bind: "lan" },
-                agents: {
-                  defaults: {
-                    model: "codex/gpt-4.1",
-                    models: { "codex/gpt-4.1": { agentRuntime: { id: "codex" } } },
-                  },
-                },
-                channels: {},
-              },
-              null,
-              2,
-            ),
-          },
+          ...configurationConflictDraft.actions,
           click("Save Configuration"),
           click("Reload draft"),
         ],
@@ -1312,6 +1430,29 @@ export function createAgentDetailScenarios({
         steps: [
           "Check the note names /gateway/bind with the saved value, and the editor keeps the other browser's model with this reader's bind.",
         ],
+      },
+      configurationConflictFocus: {
+        ...configurationConflictDraft,
+        name: "Configuration conflict preserves moved focus",
+        rules: [
+          {
+            method: "GET",
+            suffix: "/configurations/cfg_00000000-0000-4000-8000-000000000001",
+            skip: 1,
+            once: true,
+            // Leave time for a person to move focus during the simulated preflight.
+            delayMs: 10000,
+          },
+        ],
+        description:
+          "The first save waits 10 seconds for its simulated preflight read, then reports a conflict. Compare recovery focus with focus moved to the editor or navigation.",
+        steps: [
+          "Focus Save Configuration and press Enter. Stay on Checking Configuration: the conflict moves focus to Reload draft and announces an alert.",
+          "Reset. Save, then click Configuration JSON and use Select All during the 10-second check. The conflict keeps focus and active selection in the read-only editor without scrolling to the alert.",
+          "Reset and repeat, moving focus to the Agents link during the check. Focus stays on that link.",
+          "Choose Reload draft to merge the edits. Check that the saved model and this reader's bind remain, with a note naming /gateway/bind.",
+        ],
+        gap: "Simulated preflight conflict only; the browser regression checks a real Controller PATCH race.",
       },
       admitted: {
         group: "Pages/Agent detail",

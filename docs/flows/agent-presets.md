@@ -1,7 +1,7 @@
 ---
 created: 2026-09-21
-updated: 2026-10-29
-last_updated_session: authoring-run/1839d93c-8cde-4ebb-b994-4b1333cc7ada
+updated: 2026-11-05
+last_updated_session: authoring-run/1a621287-125a-41d1-baae-06e4b9f829f7
 ---
 
 # Agent Presets flow
@@ -149,13 +149,12 @@ path records mutations and denials without template or variable contents.
 `apps/controller/src/console/agents/presets.mts:createPresetFields`
 
 [`createPresetFields`](../../apps/controller/src/console/agents/presets.mts)
-lists readable Preset summaries, requiring Namespace read, then reads the selection
-once. **Start with default Preset** reads the listed `default-codex` resource.
-Variable-free templates apply immediately; customized variables keep the chooser
-and its shortcut origin. Missing defaults or failed reads do not open a hardcoded
-starter; other readable Presets remain selectable. **Start without Preset** opens
-the form without a Preset read, not as a fallback for a denied selection. Normal
-creation authorization applies.
+lists Namespace-readable summaries and reads the selection once with
+`revalidate: false`. **Start with default Preset** reads `default-codex`.
+Variable-free templates apply immediately; otherwise chooser and shortcut origin remain.
+Missing defaults or failed reads never open hardcoded starters; readable Presets remain selectable. **Start without Preset** opens
+the form without a Preset read, not as a fallback for denial.
+Creation authorization applies.
 
 `console-assets.ts:readConsoleAsset` serves the public
 [`default-codex`](../../deploy/presets/default-codex.json) as
@@ -175,6 +174,13 @@ The user then selects **Use Preset**. The shared
 [`renderPresetTemplate`](../../packages/contracts/src/preset-variables.mjs)
 walks JSON once, rejects missing or mistyped inputs and duplicate rendered native
 keys, and preserves runtime placeholders and unresolved SecretRefs.
+
+An older stored Preset can contain a non-null, non-text primary model that current
+Controller admission refuses. `agents/create.mts:renderAgentForm` rejects that
+selected primary before opening the form. The chooser explains that it must be
+text and keeps entered variables. Select another Preset or ask a Preset editor
+to fix the template. A null primary remains unset so the user can choose a model.
+Partial Presets and valid roster-only selections still open.
 
 Rendering makes no requests. Success opens the Agent form with rendered settings
 and optional ephemeral Secret metadata for grants. The alphabetic chooser moves
@@ -306,6 +312,8 @@ or an immutable saved version.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-11-05 21:30: Explain the non-text primary refusal and retained chooser recovery. (authoring-run/1a621287-125a-41d1-baae-06e4b9f829f7 - 516f7563fffa2e2d3f626cbe21a81367281ba1a1)
 
 - 2026-10-29 11:06: Clear Secret recovery when credential context changes and group its notice with choices. (authoring-run/1839d93c-8cde-4ebb-b994-4b1333cc7ada - 6e83f6e7409fb4fa238cd4230f1136d278794926)
 

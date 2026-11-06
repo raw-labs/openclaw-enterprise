@@ -1,5 +1,10 @@
 import { Check } from "typebox/value";
-import { ConfigurationValues, JsonValue } from "../../packages/contracts/src/api/common.ts";
+import {
+  ConfigurationValues,
+  CreatePresetBody,
+  JsonValue,
+} from "../../packages/contracts/src/api/common.ts";
+import { validatePresetTemplate } from "../../packages/contracts/src/index.ts";
 import { AgentDeploymentStatusSchema } from "../../packages/contracts/src/api/resources.ts";
 import {
   deploymentErrorForWork,
@@ -639,7 +644,10 @@ export async function expectNoText(page: Page, pattern: string | RegExp, settled
 }
 
 export async function revealNativeConfiguration(page: Page, label: string) {
-  await page.getByText(label).click();
+  const summary = page.getByText(label, { exact: true });
+  if ((await summary.locator("..").getAttribute("open")) === null) {
+    await summary.click();
+  }
 }
 
 export function detailUrl(
@@ -771,13 +779,19 @@ export async function waitForCondition(
   }
 }
 
-// A Preset the product ships in deploy/presets, by file name without ".json" ("default-codex",
-// "standard-codex"): for createConsoleAppFixture's defaultPresets or a Preset create. Each call
-// reads the file again, so callers never share one object.
+// Read a fresh shipped draft by file name without ".json". The wire shape and template
+// syntax are checked; concrete launch fields and credential admission remain downstream.
 export async function shippedPreset(name: string) {
   const preset: unknown = JSON.parse(
     await readFile(new URL(`../../deploy/presets/${name}.json`, import.meta.url), "utf8"),
   );
+  assert.ok(
+    Check({ SafeJsonValue: JsonValue }, CreatePresetBody, preset),
+    `Expected shipped Preset ${name} to match the create wire shape`,
+  );
+  // Discard the validator's broader return type: tokenized approvers are valid drafts but
+  // need not satisfy the concrete Agent approver schema until rendered.
+  validatePresetTemplate(preset.template);
   return preset;
 }
 

@@ -1,3 +1,4 @@
+import { workspaceSetupFixture } from "../helpers/kubernetes-workspace-setup.ts";
 import { checkComputeCredentialCatalog } from "../helpers/compute-credential-catalog.ts";
 import { DEDICATED_OPENCLAW_SUPPORT } from "../helpers/sandbox-driver.ts";
 import { runOpenClawRuntimeHelper } from "../helpers/plugin-runtime.mjs";
@@ -7,6 +8,7 @@ import {
   ConfigurationValidationError as SharedConfigurationValidationError,
 } from "../../packages/contracts/src/index.ts";
 import assert from "node:assert/strict";
+import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -36,6 +38,7 @@ import {
   withoutLineComments,
 } from "../../apps/controller/src/drivers/compute/node-program.ts";
 import {
+  ADMINISTRATOR_RUNTIME_ROLE,
   admitLoggingConfiguration,
   presetTemplateDefaultsWithPlaceholders,
 } from "../../packages/contracts/src/index.ts";
@@ -6977,6 +6980,11 @@ test("gateway routing derives stable endpoints and exact Envoy HTTPRoutes", asyn
           // The machine identity's exact grant: required by the Gateway once humans are
           // admitted, and never left to a client header (finding 2183).
           { name: "x-openclaw-scopes", value: "operator.admin" },
+          { name: "x-occ-role", value: "oce-service" },
+          {
+            name: "x-occ-role-policy",
+            value: "251a4173dcbf68d2945df11ddf0871a93ae357269ae7bf2b00846fd4173d7677",
+          },
           { name: "x-real-ip", value: "%DOWNSTREAM_DIRECT_REMOTE_ADDRESS_WITHOUT_PORT%" },
         ],
         remove: ["authorization", "cookie", "forwarded", "x-forwarded-for"],
@@ -6992,6 +7000,216 @@ test("gateway routing derives stable endpoints and exact Envoy HTTPRoutes", asyn
     },
     route.spec.rules[0].filters[1],
   ]);
+
+  // Explicit administrator assignments retain the old transport without roles or
+  // a role-admission patch. A configured restricted role never takes this route.
+  const administratorRevision = structuredClone(revision);
+  administratorRevision.configuration.gateway = {
+    auth: { trustedProxy: { deviceAutoApprove: { enabled: true, scopes: ["operator.admin"] } } },
+  };
+  assert.deepEqual(
+    driver.getAgentRuntimeAccess(
+      administratorRevision,
+      "prn_00000000-0000-4000-8000-000000000003",
+      ADMINISTRATOR_RUNTIME_ROLE,
+    ),
+    {
+      endpoint: driver.getGatewayEndpoint(revision),
+      headers: { "x-occ-identity": "occ-workspace-files", "x-openclaw-scopes": "operator.admin" },
+    },
+  );
+  // A malformed declaration is not a role-free Gateway and must not grant legacy administrator entry.
+  for (const roles of [null, [], false, "administrator"]) {
+    const malformedRevision = structuredClone(administratorRevision);
+    malformedRevision.configuration.gateway.roles = roles;
+    assert.deepEqual(
+      driver.getAgentRuntimeAccess(
+        malformedRevision,
+        "prn_00000000-0000-4000-8000-000000000003",
+        ADMINISTRATOR_RUNTIME_ROLE,
+      ),
+      { reason: "transport_unsupported" },
+    );
+  }
+  assert.ok(
+    driver
+      .listAgentRuntimeRoles(revision.configuration)
+      .some((role) => role.id === ADMINISTRATOR_RUNTIME_ROLE),
+  );
+  assert.deepEqual(
+    driver.getAgentRuntimeAccess(revision, "prn_00000000-0000-4000-8000-000000000003", "reviewer"),
+    { reason: "role_unavailable" },
+  );
+
+  // Human ingress preserves only OCC's verified role descriptor; service ingress overwrites it.
+  const humanRevision = {
+    ...revision,
+    configuration: nativeRolesGateway(revision.configuration, "https://native.example.test"),
+  };
+  const human = driver.getAgentRuntimeAccess(
+    humanRevision,
+    "prn_00000000-0000-4000-8000-000000000003",
+    "researcher",
+  );
+  assert.ok(human);
+  // With no human route installed, neither its root nor any suffix can match
+  // the service route and acquire the privileged service identity.
+  const admittedHumanPath = new URL(human.endpoint).pathname;
+  for (const rule of route.spec.rules) {
+    for (const { path } of rule.matches) {
+      const servicePath = path.value.replace(/\/$/u, "");
+      assert.notEqual(admittedHumanPath, servicePath);
+      assert.deepEqual(`${admittedHumanPath}/`.startsWith(`${servicePath}/`), false);
+    }
+  }
+  const humanPath = `/people/namespaces/${tenant.id}/agents/${revision.agentId}`;
+  assert.deepEqual(human.endpoint, `wss://${gatewayRouting.hostname}${humanPath}`);
+  assert.deepEqual(human.headers["x-occ-identity"], "oce:prn_00000000-0000-4000-8000-000000000003");
+  assert.deepEqual(human.headers["x-occ-role"], "researcher");
+  const managedConfiguration = driver.kubernetesGatewayConfigurationDocument(
+    humanRevision.configuration,
+  );
+  assert.deepEqual(managedConfiguration.gateway.auth.trustedProxy.managedIdentityPrefixes, [
+    "oce:",
+  ]);
+  assert.deepEqual(managedConfiguration.gateway.auth.trustedProxy.managedIdentities, [
+    "occ-workspace-files",
+  ]);
+  // An empty allow-list is safe only with role/digest enforcement and a bounded
+  // managed identity scope. Start without proxy fields so the Driver must supply them.
+  const generatedProxy = driver.kubernetesGatewayConfigurationDocument({
+    gateway: { roles: humanRevision.configuration.gateway.roles },
+  }).gateway.auth.trustedProxy;
+  assert.deepEqual(
+    {
+      allowUsers: generatedProxy.allowUsers,
+      roleHeader: generatedProxy.roleHeader,
+      rolePolicyHashHeader: generatedProxy.rolePolicyHashHeader,
+      managedIdentityPrefixes: generatedProxy.managedIdentityPrefixes,
+      managedIdentities: generatedProxy.managedIdentities,
+    },
+    {
+      allowUsers: [],
+      roleHeader: "x-occ-role",
+      rolePolicyHashHeader: "x-occ-role-policy",
+      managedIdentityPrefixes: ["oce:"],
+      managedIdentities: ["occ-workspace-files"],
+    },
+  );
+
+  // The Driver supplies omitted selectors but rejects a conflicting identity boundary.
+  const implicitScope = structuredClone(humanRevision.configuration);
+  delete implicitScope.gateway.auth.trustedProxy.managedIdentityPrefixes;
+  delete implicitScope.gateway.auth.trustedProxy.managedIdentities;
+  assert.deepEqual(
+    driver.getAgentRuntimeAccess(
+      { ...humanRevision, configuration: implicitScope },
+      "prn_00000000-0000-4000-8000-000000000003",
+      "researcher",
+    ),
+    human,
+  );
+  for (const scope of [
+    { managedIdentityPrefixes: [] },
+    { managedIdentityPrefixes: ["other:"] },
+    { managedIdentities: ["other-service"] },
+  ]) {
+    const configuration = structuredClone(humanRevision.configuration);
+    Object.assign(configuration.gateway.auth.trustedProxy, scope);
+    assert.throws(
+      () =>
+        driver.getAgentRuntimeAccess(
+          { ...humanRevision, configuration },
+          "prn_00000000-0000-4000-8000-000000000003",
+          "researcher",
+        ),
+      /must match the Driver's managed identities/u,
+    );
+  }
+  // Native device pairing intersects these scope names literally. An admin-only
+  // approval cap cannot admit a fresh browser with the researcher's read/write cap.
+  for (const approval of [
+    undefined,
+    { enabled: false, scopes: ["operator.read", "operator.write", "operator.admin"] },
+    { enabled: true },
+    { enabled: true, scopes: ["operator.admin"] },
+    { enabled: true, scopes: ["operator.read"] },
+  ]) {
+    const configuration = structuredClone(humanRevision.configuration);
+    configuration.gateway.auth.trustedProxy.deviceAutoApprove = approval;
+    assert.deepEqual(
+      driver.getAgentRuntimeAccess(
+        { ...humanRevision, configuration },
+        "prn_00000000-0000-4000-8000-000000000003",
+        "researcher",
+      ),
+      { reason: "device_approval_required" },
+    );
+  }
+  // Matching approval scopes do not make malformed HTTP header values transportable.
+  // Reject before proxy handoff, rather than leaving a hijacked browser request open.
+  for (const invalidScope of ["operator.read\r\nx-injected: yes", "operator.\u0100"]) {
+    const configuration = structuredClone(humanRevision.configuration);
+    configuration.gateway.roles.definitions.researcher.scopes = [invalidScope];
+    configuration.gateway.auth.trustedProxy.deviceAutoApprove.scopes = [invalidScope];
+    assert.deepEqual(
+      driver.getAgentRuntimeAccess(
+        { ...humanRevision, configuration },
+        "prn_00000000-0000-4000-8000-000000000003",
+        "researcher",
+      ),
+      { reason: "role_unavailable" },
+    );
+  }
+  const administratorOnly = structuredClone(humanRevision.configuration);
+  administratorOnly.gateway.auth.trustedProxy.deviceAutoApprove.scopes = ["operator.admin"];
+  assert.deepEqual(
+    driver.getAgentRuntimeAccess(
+      { ...humanRevision, configuration: administratorOnly },
+      "prn_00000000-0000-4000-8000-000000000003",
+      "administrator",
+    ).headers["x-openclaw-scopes"],
+    "operator.admin",
+  );
+  assert.deepEqual(
+    driver.getAgentRuntimeAccess(
+      humanRevision,
+      "prn_00000000-0000-4000-8000-000000000003",
+      "oce-service",
+    ),
+    { reason: "role_unavailable" },
+  );
+  const humanRoute = driver.gatewayRoute(
+    humanRevision,
+    ownership,
+    { name: namespace, plane: "execution" },
+    service,
+    "people",
+  );
+  assert.equal(humanRoute.metadata.name, `${name}-people`);
+  assert.deepEqual(humanRoute.spec.rules[0].matches, [
+    { path: { type: "Exact", value: humanPath } },
+  ]);
+  assert.deepEqual(humanRoute.spec.rules[1].matches, [
+    { path: { type: "PathPrefix", value: `${humanPath}/` } },
+  ]);
+  assert.equal(
+    alternateEndpointDriver.getAgentRuntimeAccess(
+      { ...humanRevision, compute: alternateEndpointRevision.compute },
+      "prn_00000000-0000-4000-8000-000000000003",
+      "researcher",
+    ).endpoint,
+    `wss://${gatewayRouting.hostname}:18443${humanPath}`,
+  );
+  const humanFilter = humanRoute.spec.rules[0].filters[1].requestHeaderModifier;
+  assert.equal(
+    humanFilter.set.some(
+      (header) => header.name === "x-occ-identity" || header.name === "x-occ-role",
+    ),
+    false,
+  );
+  assert.equal(humanFilter.remove.includes("cookie"), true);
+  assert.equal(humanFilter.remove.includes("x-openclaw-scopes"), false);
 
   // Node enrollment and worker admission authenticate inside OpenClaw, while
   // worker bundles use their own one-time bearer token instead of the administrative API key.
@@ -19669,6 +19887,7 @@ test("retirement preserves active storage and node routing and deletes exact own
   route.metadata.resourceVersion = "route-version-2";
   let observedRoute = route;
   const nodeResources = new Map();
+  const peopleResources = new Map();
   const claims = [
     driver.gatewayPrivateStateClaim(agentId, ownership, { name: namespace, plane: "execution" }),
     driver.harnessWorkspaceClaim(agentId, ownership, {
@@ -19748,6 +19967,9 @@ test("retirement preserves active storage and node routing and deletes exact own
     },
     objects: {
       async read({ kind, metadata }) {
+        if (metadata.name === `${gatewayName}-people`) {
+          return peopleResources.has(kind) ? structuredClone(peopleResources.get(kind)) : missing();
+        }
         if (metadata.name === `${gatewayName}-node`) {
           const resource = nodeResources.get(kind);
           if (resource === undefined) {
@@ -19768,6 +19990,13 @@ test("retirement preserves active storage and node routing and deletes exact own
         return structuredClone(observedRoute);
       },
       async patch(body) {
+        if (body.metadata.name === `${gatewayName}-people`) {
+          peopleResources.set(body.kind, {
+            ...structuredClone(body),
+            metadata: { ...body.metadata, uid: "people-route-uid", resourceVersion: "1" },
+          });
+          return;
+        }
         if (body.metadata.name === gatewayName) {
           observedRoute = {
             ...structuredClone(body),
@@ -19791,6 +20020,9 @@ test("retirement preserves active storage and node routing and deletes exact own
         body,
       ) {
         deletions.push([spec.kind, { spec, body }]);
+        if (spec.metadata.name === `${gatewayName}-people`) {
+          peopleResources.delete(spec.kind);
+        }
       },
     },
   });
@@ -20009,360 +20241,69 @@ test("retirement preserves active storage and node routing and deletes exact own
       ["SecurityPolicy", `${gatewayName}-node`, "SecurityPolicy-node-uid"],
     ],
   );
-});
-
-// These fixtures substitute Kubernetes transport only. Preparation, ownership, private delivery,
-// redaction, readiness, and completed-payload retention run through the production driver.
-function workspaceSetupFixture(
-  embedded,
-  runtime = true,
-  network = undefined,
-  computeOptions = {},
-  driverDependencies = {},
-  { adopted = false } = {},
-) {
-  const state = {
-    ready: false,
-    secretFailure: false,
-    failedInitializer: false,
-  };
-  const driver = new KubernetesComputeDriver(
-    routedOptions({
-      ...(network === undefined ? {} : { network }),
-      resources: {
-        gateway: {
-          requests: { cpu: "200m", memory: "256Mi" },
-          limits: { cpu: "1", memory: "1Gi" },
-        },
-        agent: {
-          requests: { cpu: "100m", memory: "128Mi" },
-          limits: { cpu: "500m", memory: "512Mi" },
-        },
-        namespace: options().resources.namespace,
-      },
-      ...(runtime
-        ? { runtime: { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" } }
-        : {}),
-      ...computeOptions,
-    }),
-    {
-      ...driverDependencies,
-      nodeEnrollment: {
-        async createSetup() {
-          return { setupId: "setup-1", setupCode: "setup-code", expiresAtMs: Date.now() + 60000 };
-        },
-        async observeSetup() {
-          return state.ready
-            ? { deviceId: "node-1", connected: true, delivery: "confirmed" }
-            : undefined;
-        },
-        async isConnected() {
-          return state.ready;
-        },
-      },
-    },
+  // A role-free successor does not acquire the predecessor's human route.
+  // Retirement must remove it before preserving the replacement's Gateway.
+  deletions.length = 0;
+  observedGateway = structuredClone(gateway);
+  observedService = gatewayService;
+  observedServiceAccount = gatewayAccount;
+  observedGateway.metadata.annotations["openclaw.dev/agent-revision"] = String(active.revision);
+  const administratorConfiguration = nativeRolesGateway(
+    active.configuration,
+    "https://native.example.test",
   );
-  const revision = routedRevision(driver, {
-    configuration: {
-      gateway: routedRevision(driver).configuration.gateway,
-      agents: { defaults: { model: embedded ? "openai/gpt-5" : "codex/gpt-5" } },
-      logging: { level: "info", consoleLevel: "info", consoleStyle: "json" },
-      diagnostics: { otel: { logs: false } },
-    },
-    harness: embedded
-      ? { id: "openclaw", version: "1.0.0", mode: "embedded" }
-      : { id: "codex", version: "1.0.0", mode: "dedicated" },
-  });
-  // An adopted Installation keeps its released storage namespace as the tenant namespace.
-  const namespace = adopted
-    ? kubernetesGatewayNamespaceName(tenant.id)
-    : kubernetesNamespaceName(tenant.id);
-  const control =
-    computeOptions.executionCluster === undefined
-      ? namespace
-      : kubernetesGatewayNamespaceName(tenant.id);
-  const objects = new Map();
-  const records = [];
-  const key = (kind, name, target = namespace) =>
-    `${kind}:${kind === "Namespace" ? "" : target}:${name}`;
-  const save = (body) => {
-    const existing = objects.get(key(body.kind, body.metadata.name, body.metadata.namespace));
-    const object = structuredClone(body);
-    if (object.stringData) {
-      object.data = Object.fromEntries(
-        Object.entries(object.stringData).map(([key, value]) => [
-          key,
-          Buffer.from(value).toString("base64"),
-        ]),
-      );
-      delete object.stringData;
-    }
-    object.metadata = {
-      ...object.metadata,
-      uid: existing?.metadata.uid ?? body.metadata.uid ?? `${body.metadata.name}-uid`,
-      resourceVersion: String(Number(existing?.metadata.resourceVersion ?? 0) + 1),
-      generation: 1,
-    };
-    objects.set(key(body.kind, body.metadata.name, body.metadata.namespace), object);
-    return object;
-  };
-  const tenantNamespace = driver.manifest("v1", "Namespace", namespace, {
-    namespaceId: tenant.id,
-  });
-  if (adopted) {
-    tenantNamespace.metadata.labels["openclaw.dev/gateway-namespace"] = tenant.id;
-  }
-  save({ ...tenantNamespace, status: { phase: "Active" } });
-  if (!adopted) {
-    save({
-      ...driver.gatewayNamespaceManifest({ namespaceId: tenant.id }),
-      status: { phase: "Active" },
-    });
-  }
-  save({
-    ...driver.manifest(
-      "v1",
-      "Secret",
-      `transport-${digest(revision.agentId)}`,
-      { namespaceId: tenant.id, agentId: revision.agentId },
-      { name: embedded ? namespace : control, plane: "control" },
-    ),
-    type: "Opaque",
-    metadata: {
-      ...driver.manifest(
-        "v1",
-        "Secret",
-        `transport-${digest(revision.agentId)}`,
-        { namespaceId: tenant.id, agentId: revision.agentId },
-        {
-          name: embedded ? namespace : control,
-          plane: "control",
-        },
-      ).metadata,
-      uid: "transport-uid",
-      resourceVersion: "1",
-    },
-    data: {
-      "app-server-token": Buffer.from("test-transport").toString("base64"),
-      ...(embedded ? { "gateway-password": Buffer.from("test-password").toString("base64") } : {}),
-    },
-  });
-  save({
-    apiVersion: "v1",
-    kind: "Secret",
-    metadata: {
-      name: "occ-model-key",
-      namespace: control,
-      uid: "model-secret-uid",
-    },
-    data: { value: Buffer.from("fixture-model-key").toString("base64") },
-  });
-  for (const target of [
-    { name: namespace, plane: "execution" },
-    { name: control, plane: "control" },
-  ]) {
-    for (const policy of driver.networkPolicies({ namespaceId: tenant.id }, target)) {
-      save(policy);
-    }
-  }
-  const read =
-    (kind) =>
-    async ({ name, namespace: target }) => {
-      const object = objects.get(key(kind, name, target));
-      if (object === undefined) {
-        throw Object.assign(new Error("Not found"), { statusCode: 404 });
-      }
-      const observed = structuredClone(object);
-      if (kind === "Deployment" && state.ready) {
-        observed.status = {
-          observedGeneration: 1,
-          replicas: 1,
-          updatedReplicas: 1,
-          readyReplicas: 1,
-        };
-      }
-      if (kind === "Job") {
-        observed.status = {
-          conditions: state.jobFailure
-            ? [{ type: "Failed", status: "True", reason: state.jobFailure }]
-            : state.ready
-              ? [{ type: "Complete", status: "True" }]
-              : [],
-        };
-      }
-      return observed;
-    };
-  const write = async ({ body }) => {
-    if (body.kind === "Secret" && state.secretFailure) {
-      throw Object.assign(new Error(`Rejected ${JSON.stringify(body)}`), { statusCode: 403 });
-    }
-    records.push(structuredClone(body));
-    return save(body);
-  };
-  const remove =
-    (kind) =>
-    async ({ name, namespace: target, body }) => {
-      const existing = objects.get(key(kind, name, target));
-      assert.equal(body.preconditions.uid, existing.metadata.uid);
-      objects.delete(key(kind, name, target));
-    };
-  const core = {
-    async listNamespace() {
-      // Without a labelled namespace the resolver falls back to the canonical tenant name.
-      return { items: adopted ? [structuredClone(objects.get(key("Namespace", namespace)))] : [] };
-    },
-    readNamespace: read("Namespace"),
-    async listNamespacedPod({ namespace: target, labelSelector }) {
-      const labels = labelSelectorLabels(labelSelector);
-      const gateway = objects.get(key("Deployment", `gateway-${digest(revision.agentId)}`, target));
-      const revisionId = labels["openclaw.dev/revision"];
-      if (
-        !embedded &&
-        labels["openclaw.dev/workload-role"] === "gateway" &&
-        gateway?.metadata.annotations?.["openclaw.dev/agent-revision-id"] === revisionId
-      ) {
-        // The running dedicated Gateway; its wrapper reports the applied node.
-        return {
-          items: [
-            {
-              apiVersion: "v1",
-              kind: "Pod",
-              metadata: {
-                name: `gateway-pod-${revisionId}`,
-                namespace: target,
-                uid: `gateway-uid-${revisionId}`,
-                labels,
-              },
-              status: { phase: "Running", podIP: "10.42.0.14" },
-            },
-          ],
-        };
-      }
-      if (state.jobPods !== undefined && labels["openclaw.dev/namespace"] === undefined) {
-        // Job-owned pods; the termination wait (namespace-labelled selector) sees none.
-        return { items: structuredClone(state.jobPods) };
-      }
-      return {
-        items:
-          state.failedInitializer &&
-          labels["openclaw.dev/workload-role"] === (embedded ? "gateway" : "agent")
-            ? [
-                {
-                  apiVersion: "v1",
-                  kind: "Pod",
-                  metadata: {
-                    name: "failed-initializer",
-                    namespace,
-                    labels,
-                  },
-                  status: {
-                    initContainerStatuses: [
-                      {
-                        name: "initialize-workspace",
-                        state: {
-                          terminated: {
-                            exitCode: state.initializerExitCode ?? 1,
-                            finishedAt: "2026-09-22T00:00:00Z",
-                            message: "private-content-must-not-escape",
-                          },
-                        },
-                      },
-                    ],
-                  },
-                },
-              ]
-            : [],
-      };
-    },
-    async deleteNamespacedSecret({ name, body }) {
-      const existing = objects.get(key("Secret", name));
-      assert.equal(body.preconditions.uid, existing.metadata.uid);
-      objects.delete(key("Secret", name));
-    },
-    async patchNamespacedPod({ body }) {
-      return body;
-    },
-    async connectGetNamespacedPodProxyWithPath({ name, path }) {
-      const revisionId = name.replace(/^gateway-pod-/u, "").replace(/:\d+$/u, "");
-      if (path !== "openclaw/runtime/status") {
-        throw Object.assign(new Error("not found"), { statusCode: 404 });
-      }
-      return {
-        revisionId,
-        container: "gateway",
-        podUid: `gateway-uid-${revisionId}`,
-        workspaceNodeId: "node-1",
-      };
-    },
-  };
-  for (const kind of [
-    "ConfigMap",
-    "ServiceAccount",
-    "Service",
-    "PersistentVolumeClaim",
-    "Secret",
-  ]) {
-    core[`readNamespaced${kind}`] = read(kind);
-    core[`patchNamespaced${kind}`] = write;
-    core[`deleteNamespaced${kind}`] = remove(kind);
-  }
-  core.createNamespacedSecret = write;
-  core.replaceNamespacedSecret = write;
-  driver.apiClients = Promise.resolve({
-    core,
-    apps: {
-      readNamespacedDeployment: read("Deployment"),
-      patchNamespacedDeployment: write,
-      deleteNamespacedDeployment: remove("Deployment"),
-    },
-    batch: {
-      readNamespacedJob: read("Job"),
-      createNamespacedJob: write,
-      deleteNamespacedJob: remove("Job"),
-    },
-    objects: {
-      read: async (object) =>
-        read(object.kind)({ name: object.metadata.name, namespace: object.metadata.namespace }),
-      patch: async (body) => write({ body }),
-      delete: async (object, _pretty, _dryRun, _grace, _orphan, _propagation, body) =>
-        remove(object.kind)({
-          name: object.metadata.name,
-          namespace: object.metadata.namespace,
-          body,
-        }),
-    },
-    networking: {
-      readNamespacedNetworkPolicy: read("NetworkPolicy"),
-      patchNamespacedNetworkPolicy: write,
-      deleteNamespacedNetworkPolicy: remove("NetworkPolicy"),
-    },
-    discovery: {
-      async listNamespacedEndpointSlice({ labelSelector }) {
-        const name = labelSelector.split("=")[1];
-        return {
-          items: [
-            {
-              metadata: {
-                labels: { "kubernetes.io/service-name": name },
-                ownerReferences: [{ kind: "Service", name, uid: `${name}-uid` }],
-              },
-              endpoints: [{ conditions: { ready: state.ready } }],
-            },
-          ],
-        };
+  administratorConfiguration.gateway.roles = {
+    default: ADMINISTRATOR_RUNTIME_ROLE,
+    definitions: {
+      [ADMINISTRATOR_RUNTIME_ROLE]: {
+        sessions: { others: "write" },
+        agents: "*",
+        scopes: ["operator.admin"],
       },
     },
-  });
-  const setup = {
-    id: "setup-private",
-    namespaceId: tenant.id,
-    agentId: revision.agentId,
-    files: { "AGENTS.md": "private-create-documents", "USER.md": "" },
-    completed: false,
   };
-  const context = { ...authContext(revision, control), workspaceSetup: setup };
-  return { driver, revision, namespace, objects, records, state, setup, context };
-}
+  const roleful = {
+    ...active,
+    configuration: nativeRolesGateway(active.configuration, "https://native.example.test"),
+  };
+  await driver.reconcileGatewayRoute(roleful, ownership, { name: namespace, plane: "execution" });
+  assert.equal(
+    peopleResources.get("HTTPRoute").metadata.annotations["openclaw.dev/agent-revision-id"],
+    active.id,
+  );
+  const rolefulCandidate = { ...candidate, configuration: roleful.configuration };
+  await driver.reconcileGatewayRoute(rolefulCandidate, ownership, {
+    name: namespace,
+    plane: "execution",
+  });
+  assert.equal(
+    peopleResources.get("HTTPRoute").metadata.annotations["openclaw.dev/agent-revision-id"],
+    active.id,
+  );
+  await driver.removeRetiredGateway(rolefulCandidate, {
+    name: harnessNamespace,
+    plane: "execution",
+  });
+  assert.equal(
+    peopleResources.size,
+    1,
+    "a failed candidate must not withdraw the serving revision's human route",
+  );
+  assert.deepEqual(deletions, []);
+  observedGateway.metadata.annotations["openclaw.dev/agent-revision-id"] = candidate.id;
+  observedGateway.metadata.annotations["openclaw.dev/agent-revision"] = String(candidate.revision);
+  await driver.reconcileGatewayRoute(candidate, ownership, { name: namespace, plane: "execution" });
+  assert.equal(
+    peopleResources.get("HTTPRoute").metadata.annotations["openclaw.dev/agent-revision-id"],
+    active.id,
+  );
+  await driver.removeRetiredGateway(roleful, { name: harnessNamespace, plane: "execution" });
+  assert.equal(peopleResources.size, 0);
+  assert.deepEqual(
+    deletions.map(([kind, { spec, body }]) => [kind, spec.metadata.name, body.preconditions.uid]),
+    [["HTTPRoute", `${gatewayName}-people`, "people-route-uid"]],
+  );
+});
 
 test("external ChatGPT source preparation delivers the exact placeholder and account only to its Harness", async (t) => {
   const account = {
