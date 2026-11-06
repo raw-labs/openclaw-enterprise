@@ -52,13 +52,12 @@ Compute Driver configuration, set `gatewayRouting.channels.hostname` to the
 same hostname and select the matching `runtime.proxy` endpoint. For profiles,
 use the [shared Gateway proxy](gateway-proxy.md) inputs.
 
-Enabling Teams automatically declares its exact Microsoft Public cloud hosts:
-`login.microsoftonline.com`, `login.botframework.com`, `api.botframework.com`,
-`smba.trafficmanager.net`, and `graph.microsoft.com`. Deployment freezes these
-requirements in the revision and prepares its isolated Gateway proxy. Slack can
-be enabled alongside Teams; both providers' requirements are retained. The Agent
-needs no additional manually approved hosts for these channel destinations.
-The API-only management proxy uses a separate restricted policy.
+Configure the proxy allowlist explicitly for Teams. Enabling Teams does not add
+Microsoft destinations automatically. The example above permits the Microsoft
+Public cloud authentication, Bot Framework, and Graph hosts. If you also use
+Slack, include its hosts in the same list: a custom list replaces the defaults.
+See [Gateway outbound access](gateway-proxy.md) for the shared proxy and optional
+directory-only override.
 
 ## Configure and deploy the Agent
 

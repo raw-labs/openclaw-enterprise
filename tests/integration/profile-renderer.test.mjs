@@ -3096,3 +3096,49 @@ test("profile proxy selection shares one endpoint and limits bundled policy inpu
     /requires proxy.bundled/,
   );
 });
+
+test("directory proxy overrides leave Gateway selection unchanged in both profiles", async (t) => {
+  for (const profile of ["openclaw", "codex"]) {
+    for (const proxy of [{}, { url: "http://192.0.2.10:3128" }, { bundled: true }]) {
+      const input = profile === "codex" ? codexInput({ proxy }) : baseInput({ proxy });
+      const baseline = await render(profile, input);
+      t.after(() => rmSync(baseline.directory, { recursive: true, force: true }));
+      const directoryUrl = "https://192.0.2.20:8443";
+      const overridden = await render(profile, {
+        ...input,
+        channels: { directoryProxyUrl: directoryUrl },
+      });
+      t.after(() => rmSync(overridden.directory, { recursive: true, force: true }));
+      assert.equal(loadYaml(overridden.values).api.channelDirectoryProxyUrl, directoryUrl);
+      assert.deepEqual(
+        loadYaml(overridden.values).gatewayProxy,
+        loadYaml(baseline.values).gatewayProxy,
+      );
+      // Directory-only configuration must not create or change Gateway permissions.
+      assert.deepEqual(
+        loadYaml(overridden.installation).drivers.compute.configuration,
+        loadYaml(baseline.installation).drivers.compute.configuration,
+      );
+      assert.equal(loadYaml(baseline.values).api.channelDirectoryProxyUrl, undefined);
+      if (profile === "openclaw" && (proxy.bundled || proxy.url)) {
+        // The trusted channel trial and directory override are independent inputs.
+        // Merging the two channel sections must not drop either configuration.
+        const trial = await render(profile, {
+          ...input,
+          channels: { directoryProxyUrl: directoryUrl, experimentalEmbeddedChannels: true },
+        });
+        t.after(() => rmSync(trial.directory, { recursive: true, force: true }));
+        assert.equal(loadYaml(trial.values).api.channelDirectoryProxyUrl, directoryUrl);
+        assert.equal(
+          loadYaml(trial.installation).drivers.compute.configuration.runtime.channels
+            .experimentalEmbeddedChannels,
+          true,
+        );
+        assert.deepEqual(
+          loadYaml(trial.installation).drivers.compute.configuration.runtime.proxy,
+          loadYaml(baseline.installation).drivers.compute.configuration.runtime.proxy,
+        );
+      }
+    }
+  }
+});

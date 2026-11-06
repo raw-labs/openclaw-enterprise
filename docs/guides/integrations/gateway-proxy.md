@@ -1,7 +1,7 @@
 # Configure Gateway outbound access
 
-Choose one proxy for Gateway HTTPS and WebSocket clients and OCE's channel-directory
-requests. Use the bundled proxy or supply an existing external proxy. This is
+Choose one proxy for Gateway HTTPS and WebSocket clients. OCE's channel-directory
+requests share it by default. Use the bundled proxy or supply an existing external proxy. This is
 operator configuration; there is no new Console editor or per-Agent selector.
 
 ## Bundled proxy
@@ -43,7 +43,7 @@ NetworkPolicy. Direct Helm users set `gatewayProxy.allowedHosts: ["*"]`.
 
 [Render and apply the profile](../deploy/installation-profiles.md). Rendering
 sets Helm `gatewayProxy.enabled`, its `allowedHosts`, the API directory route,
-and Compute `runtime.proxy` together. Do not configure a second proxy for Slack.
+and Compute `runtime.proxy` together. A directory-only override is optional.
 Direct Helm users must also set the matching Compute `runtime.proxy` Service
 endpoint and selector in their protected Installation configuration.
 
@@ -69,7 +69,7 @@ an explicit port:
 { "proxy": { "url": "http://198.51.100.25:3128" } }
 ```
 
-Replace the example address. The same endpoint feeds Gateway and directory
+Replace the example address. By default, the same endpoint feeds Gateway and directory
 clients. The external operator owns its destination policy; OCE does not deploy
 the bundled server in this mode. `url` and `bundled: true` are mutually exclusive.
 For direct Helm use, set `gatewayProxy.url` and the same Compute
@@ -77,18 +77,44 @@ For direct Helm use, set `gatewayProxy.url` and the same Compute
 Use an external endpoint reachable from both clusters for embedded execution in
 the experimental two-cluster topology; the bundled control-cluster Service is not routable there.
 
+## Directory proxy override (optional)
+
+Use a separate endpoint only when the API directory client needs different
+network access or destination policy. Keep the shared default otherwise.
+
+```json
+{
+  "proxy": { "url": "http://198.51.100.25:3128" },
+  "channels": { "directoryProxyUrl": "https://203.0.113.20:8443" }
+}
+```
+
+Replace both example addresses. `channels.directoryProxyUrl` accepts the same
+endpoint format as the external Gateway proxy. It sets Helm
+`api.channelDirectoryProxyUrl` and changes only the API's directory route and
+proxy egress grant. Gateways keep their selected endpoint. The override also
+works with a bundled Gateway proxy or without any Gateway proxy.
+
+Direct Helm users set `api.channelDirectoryProxyUrl`. Leave it empty to inherit
+the selected Gateway proxy; empty does not disable directory requests. With no
+override and no Gateway proxy, directory behavior remains unchanged. A failed
+selected endpoint does not cause fallback to the other proxy. Both clients need
+CONNECT access to the services they use; directory lookup requires `slack.com:443`.
+
 ## Apply and verify
 
 Reload the protected Installation configuration and roll out the control-plane
 processes. Deploy replacement Agent revisions to apply Gateway configuration;
 restarting OCC alone does not update running Gateways. A host-list-only change
 rolls out the bundled proxy and may reconnect existing tunnels.
+A directory-only override change needs an API rollout, not Agent replacement.
 
 Verify a permitted HTTPS request, internal Harness connectivity, and no direct
 fallback while the proxy is unavailable. With a host allowlist, also verify an
 unlisted destination denial; with `"*"`, verify private-network denial instead.
 For Slack, also verify directory lookup and Socket Mode separately, following
-the [Slack guide](slack.md). Keep TLS verification enabled.
+the [Slack guide](slack.md). With an override, verify lookup through its endpoint
+and Gateway traffic through the Gateway endpoint. Keep TLS verification enabled.
 
 With no proxy selected, existing networking behavior is unchanged. This setting
 covers native Gateway routing, not arbitrary Harness subprocesses or all
