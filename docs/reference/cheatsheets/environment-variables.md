@@ -52,6 +52,7 @@ console uses the current origin and has no separate environment settings.
 - `OCC_AGENT_NATIVE_ADMIN_DOMAIN` — Agent hostname suffix; required when the pilot is enabled.
 - `OCC_AUTH_COOKIE_DOMAIN` — Shared parent domain for console and Agent cookies; required when the pilot is enabled.
 - `OCC_GATEWAY_API_KEY_PATH` — API/worker absolute path to the private gateway service-key file for operator RPCs and dedicated node enrollment.
+- `OCC_INSTALLATION_SECRET_NAMESPACE` — Kubernetes namespace for private OAuth client secrets on the selected Secret Driver. Helm provisions it and sets the name for the API and worker. For standalone Kubernetes, provision a dedicated namespace (default `oce-installation-secrets`) and grant the controller access to its Secrets.
 - `OCC_PREPROVISIONED_NAMESPACE` — API/worker JSON `{"namespaceId", "uid"}` binding one operator-created tenant namespace; set by Helm `preprovisionedNamespace`. See [preprovisioned namespace](../drivers/kubernetes-compute/preprovisioned-namespace.md).
 - `OCC_CHANNEL_DIRECTORY_PROXY_URL` — Optional API-only HTTP(S) proxy endpoint for production Slack directory lookup and credential validation; set by Helm `slackProxy.enabled` or `api.channelDirectoryProxyUrl`.
 - `OCC_API_HTTPS_EGRESS_OPEN` — `true` when API egress allows TCP 443 to any address, so a Slack check without a proxy can succeed; default: `false`. Set by the chart from sign-in `egressCidrs`.
@@ -178,3 +179,9 @@ Collector or local Docker log forwarding. See [Observability](../../guides/obser
 - `OCC_DOCKER_LOGGING_ADDRESS` — Docker Compute log destination; local override default: `127.0.0.1:24224`.
 - `OCE_WORKER_OBSERVATIONS_FILE` — Exact private JSONL input read by the worker termination Collector; required. See [Worker termination observations](../../guides/observability/worker-terminations.md).
 - `OCE_WORKER_STATE_DIR` — Private persistent directory for worker termination Collector offsets and export queue; required. See [Worker termination observations](../../guides/observability/worker-terminations.md).
+
+## Channel proxy
+
+- `OCC_SLACK_PROXY_PORT` — CONNECT proxy TCP port; Helm sets it from `slackProxy.port`.
+- `OCC_CHANNEL_PROXY_TEAMS_ENABLED` — `true` admits the exact Microsoft Public cloud messaging hosts in the existing channel proxy; defaults to disabled. Helm sets it from `slackProxy.teamsEnabled`. See [Teams setup](../../guides/integrations/teams.md).
+- `OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS` — JSON list of at most 32 exact lowercase Microsoft storage hosts; defaults to an empty list and requires Teams to be enabled when nonempty. Helm sets it from `slackProxy.teamsFileHosts`. See [Teams attachment setup](../../guides/integrations/teams.md#prepare-attachment-downloads) for hostname families, address enforcement and shared scope.

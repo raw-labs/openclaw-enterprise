@@ -1,7 +1,7 @@
 # Kubernetes networking and isolation
 
-Configure tenant network boundaries, private Agent routes, and existing
-namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
+Configure networking and private routes for the
+[Kubernetes Compute Driver](../kubernetes-compute.md).
 
 ## Networking
 
@@ -112,6 +112,8 @@ Channels require an approved HTTP(S) proxy in `runtime.channels`: a literal IP
 endpoint, or the exact
 Helm-managed proxy Service URL paired with `runtime.channels.managedProxy`.
 Direct public channel-provider access is denied.
+
+Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
 
 ## Explicit network profiles
 
@@ -311,3 +313,8 @@ receive controller credentials.
 
 - [Driver configuration and troubleshooting](../kubernetes-compute.md)
 - [Kubernetes security controls](../../security.md)
+
+## Teams callbacks
+
+See [Teams setup](../../../guides/integrations/teams.md) for public callbacks,
+credentials, routing, cleanup, and verification.

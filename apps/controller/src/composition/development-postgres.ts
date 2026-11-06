@@ -1,3 +1,4 @@
+import { OAuthAccountTokens } from "../backends/token-service/oauth-connection.ts";
 import { closeResources } from "./close-resources.ts";
 import { installEgressAuthority } from "./egress-authority.ts";
 import { installationControllerOptions } from "./installation-config.ts";
@@ -31,7 +32,7 @@ import { createDockerDevelopmentComputeDriverFromEnv } from "../drivers/compute/
 import { createFilesystemDevelopmentConfigurationDriverFromEnv } from "../drivers/configuration/filesystem/index.ts";
 import { createFastifyApp } from "../index.ts";
 import type { ConsoleTheme } from "../console-theme.ts";
-import { SlackChannelDriver } from "../drivers/channel/slack.ts";
+import { BundledChannelDriver } from "../drivers/channel/index.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -248,7 +249,7 @@ export async function composePostgresDevelopment(
     };
 
     const loggingLevel = config.logging?.level ?? drivers?.installation.logging.level;
-    const channelDriver = new SlackChannelDriver();
+    const channelDriver = new BundledChannelDriver();
     const controller = OpenClawController.forInstallation(
       persistedInstallation,
       {
@@ -292,6 +293,13 @@ export async function composePostgresDevelopment(
       controller.selectDriver("configuration", configurationDriver.id);
     }
     if (drivers?.secretDriver !== undefined) {
+      drivers.tokenService?.registerIssuer(
+        new OAuthAccountTokens(
+          state,
+          drivers.secretDriver,
+          controller.resolveConnectionClient.bind(controller),
+        ),
+      );
       controller.registerDriver(drivers.secretDriver);
       controller.selectDriver("secret", drivers.secretDriver.id);
     }

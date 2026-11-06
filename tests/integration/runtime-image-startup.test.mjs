@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { createModelProbeCertificates } from "../helpers/runtime-model-probe-certificates.mjs";
 import { readOpenclawSource } from "../../scripts/lib/openclaw-source.mjs";
 import {
   cpuScaledImageTimeoutMs,
@@ -46,7 +48,7 @@ import {
   reviewedCodexSeccompSecurityOptions,
   assertGatewayLogEntry,
 } from "../helpers/runtime-image-startup.mjs";
-import { relaySockets } from "../helpers/socket-relay.mjs";
+import { relaySockets } from "../helpers/socket-relay.ts";
 import { pluginRuntimeEnvironment } from "../../apps/controller/src/drivers/compute/plugin-runtime.ts";
 
 // Only the trusted staging verifier selects the reviewed historical expectations.
@@ -735,6 +737,89 @@ test(
 );
 
 test(
+  "runtime image serves the bundled Teams callback with SDK authentication and no legacy listener",
+  imageTestOptions,
+  async (t) => {
+    // Synthetic credentials never leave the network-disabled container. This proves
+    // packaging and JWT rejection, not Microsoft tenant access or a model reply.
+    const { logs, containerName, pluginList } = await runGatewaySmoke(t, "openclaw", {
+      collectPlugins: true,
+      configuration: createAdmittedRuntimeImageConfiguration("openclaw", { enableTeams: true }),
+      extraEnvironment: ["MSTEAMS_APP_PASSWORD=synthetic-teams-password"],
+    });
+    const plugin = assertBundledPluginLoaded(pluginList, "msteams");
+    assert.equal(plugin.dependencyStatus?.requiredInstalled, true);
+    assert.deepEqual(plugin.dependencyStatus?.missing, []);
+    // Wait for the asynchronous channel to register its route after gateway readiness.
+    const probe = String.raw`
+const deadline = Date.now() + 20000;
+let response;
+while (Date.now() < deadline) {
+  response = await fetch("http://127.0.0.1:8080/api/messages", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  if (response.status === 401) break;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+if (response.status !== 401) throw new Error("Teams callback is not protected: " + response.status);
+const forged = await fetch("http://127.0.0.1:8080/api/messages", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer not-a-jwt", "x-occ-identity": "occ-workspace-files" }, body: "{}" });
+if (![401, 403].includes(forged.status)) throw new Error("Teams SDK accepted an invalid token: " + forged.status);
+const socket = await import("node:net");
+await new Promise((resolve, reject) => {
+  const client = socket.connect(3978, "127.0.0.1");
+  client.once("connect", () => { client.destroy(); reject(new Error("Legacy Teams listener is exposed")); });
+  client.once("error", (error) => error.code === "ECONNREFUSED" ? resolve() : reject(error));
+});
+`;
+    await runDocker(["exec", containerName, "node", "--input-type=module", "-e", probe]);
+    assertNoPackagingFailure(logs);
+  },
+);
+
+test(
+  "runtime image downloads native guarded Teams media through the channel proxy",
+  imageTestOptions,
+  async (t) => {
+    const directory = await temporaryDirectory(t, "oce-teams-attachment-certificates-");
+    await createModelProbeCertificates({
+      directory,
+      caName: "Teams attachment transport test CA",
+      dnsNames: ["graph.microsoft.com", "tenant.sharepoint.com"],
+      run: execute,
+    });
+    await rm(join(directory, "ca-key.pem"));
+    const repository = fileURLToPath(new URL("../../", import.meta.url));
+    const result = await runDocker([
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--tmpfs",
+      "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+      "--mount",
+      `type=bind,source=${repository},target=/checkout,readonly`,
+      "--mount",
+      `type=bind,source=${directory},target=/certificates,readonly`,
+      "--env",
+      "NODE_EXTRA_CA_CERTS=/certificates/ca.pem",
+      "--env",
+      "OPENCLAW_STATE_DIR=/tmp/openclaw",
+      "--entrypoint",
+      "node",
+      image,
+      "--test",
+      "--test-reporter=tap",
+      "/checkout/tests/fixtures/teams-attachment-download.mjs",
+    ]);
+    assert.match(result.stdout, /# pass 1/);
+    assert.match(result.stdout, /# fail 0/);
+  },
+);
+
+test(
   "runtime image discovers the bundled Codex plugin from a fresh gateway home",
   imageTestOptions,
   async (t) => {
@@ -1192,8 +1277,51 @@ try {
   if (!${historicalCodex}) {
     // Managed read-only requirements also refuse a workspace profile. Check the native
     // response before exposing that silently substituted thread to the Gateway caller.
-    await assert.rejects(client.request("thread/start", { ...request, permissions: ":workspace" }),
-      /thread.start: Codex did not grant the requested permission profile/);
+    for (const [selection, source, selectors] of [
+      [{ permissions: ":workspace" }, "permissions", "single"],
+      [{ config: { default_permissions: ":workspace" } }, "configDefault", "single"],
+      [{ permissions: ":workspace", config: { default_permissions: ":workspace" } }, "permissions", "both-equal"],
+      [{ permissions: ":workspace", config: { default_permissions: ":read-only" } }, "permissions", "both-different"],
+    ]) {
+      await assert.rejects(client.request("thread/start", { ...request, ...selection }), (error) => {
+        // The real managed read-only response has activePermissionProfile: null.
+        // Exact text also excludes arbitrary profile values from the diagnostic.
+        assert.equal(error.message, "thread/start: Codex did not grant the requested permission profile (requestSource=" +
+          source + ", selectors=" + selectors + ", comparison=field-null). " +
+          "Ask your workspace administrator to verify profile availability and runtime compatibility before retrying.");
+        return true;
+      });
+    }
+    // Malformed-peer metadata coverage through the actual bundled client, not native
+    // Codex proof: preserve the real control response except for the omitted field.
+    const peerSource = [
+      'const { createInterface } = require("node:readline");',
+      'const result = JSON.parse(process.argv[1]);',
+      'delete result.activePermissionProfile;',
+      'setTimeout(() => process.exit(1), 10000).unref();',
+      'createInterface({ input: process.stdin }).on("line", (line) => {',
+      '  const request = JSON.parse(line);',
+      '  if (request.id === undefined) return;',
+      '  if (request.method !== "initialize" && request.method !== "thread/start") process.exit(1);',
+      '  const response = request.method === "initialize"',
+      '    ? { userAgent: "codex-cli/" + process.argv[2], codexHome: "/home/node/.codex" } : result;',
+      '  process.stdout.write(JSON.stringify({ id: request.id, result: response }) + "\\n");',
+      '});',
+    ].join("\n");
+    const peer = await Client.start({ transport: "stdio", commandSource: "config",
+      command: process.execPath, args: ["-e", peerSource, JSON.stringify(control), client.getServerVersion()] });
+    try {
+      await peer.initialize();
+      await assert.rejects(peer.request("thread/start", { ...request, permissions: ":workspace" },
+        { timeoutMs: 5000 }), (error) => {
+        assert.equal(error.message, "thread/start: Codex did not grant the requested permission profile " +
+          "(requestSource=permissions, selectors=single, comparison=field-absent). " +
+          "Ask your workspace administrator to verify profile availability and runtime compatibility before retrying.");
+        return true;
+      });
+    } finally {
+      await peer.closeAndWait({ exitTimeoutMs: 2000, forceKillDelayMs: 500 });
+    }
   }
 } finally {
   client.close();
@@ -1876,7 +2004,7 @@ assert.equal(provenance.openclawRequiredWorkerAuthorityRegressionPatchSha256, ${
     )});
 assert.deepEqual(provenance.patches, {
   "openclaw-codex-read-only-paths.patch": provenance.openclawBridgePatchSha256,
-  "openclaw-codex-full-access-profile.patch": ${historicalCodex} ? "7c95a5a3727bd4c73bb9ccf3022eb4b33d182cd7f6b761dc93ecfe08ef08e27a" : "e942e1804475a8e828859c5ba81c20de944105a7dbe00bbba6c2275b32c0944b",
+  "openclaw-codex-full-access-profile.patch": ${historicalCodex} ? "7c95a5a3727bd4c73bb9ccf3022eb4b33d182cd7f6b761dc93ecfe08ef08e27a" : "5112e56cf2e436abf794ad538774d72327eb2a95e111b7400db4caa970328ebe",
   "openclaw-required-worker-authority-regression.patch": provenance.openclawRequiredWorkerAuthorityRegressionPatchSha256,
   "openclaw-google-worker-placeholder.patch": "55be2c531b9335da06799f934200bb34a4fbc98608d4433ca6e955bbe966af31",
   ...(${historicalCodex} ? {

@@ -54,8 +54,8 @@ verify both paths. A browser-only module needs no forwarder.
 
 ## Appearance review
 
-Use **Pages/Agents → Populated** to review the shared shell and controls at
-desktop (1440 × 1000), tablet (768 × 1024), and mobile (390 × 844).
+Review **Pages/Agents → Populated** at desktop (1440 × 1000), tablet
+(768 × 1024), and mobile (390 × 844).
 Check keyboard focus, search, navigation, an open dialog, and empty, loading,
 error, permission-denied, and missing-credential stories. The console stays light
 under either system appearance.
@@ -186,7 +186,8 @@ Moved to [Agent workflows](console-storybook-agent-workflows.md#delete).
 In **Pages/Settings → Nested Driver values**, expand a Driver and switch between
 **Fields** and **JSON**. Confirm that nesting, arrays, empty values, and redaction
 stay intact and the open groups remain open. Scroll the long page to verify that
-the sidebar and account control reach the bottom. Repeat on a phone and open the
+the account control stays at the viewport bottom. Open its menu at both ends of
+the page, with Debug mode off and on. Repeat on a phone and open the
 navigation drawer; the page must not scroll horizontally.
 
 When changing the Settings Driver access stories, build and serve the preview
@@ -264,8 +265,12 @@ messages and UI markup.
 Open **Pages / Navigation / Debug runtime images**, expand an Agent, and inspect
 the gateway image reference, digest, Enterprise source commit, and upstream
 OpenClaw commit. The sidecar has unknown provenance for both commits.
-Navigate to Namespaces, confirm `debug=true` persists, and repeat in the mobile
-drawer. **Debug metadata unavailable** covers a failed read; ordinary navigation
+Navigate to Namespaces, confirm diagnostics stay enabled, and repeat in the mobile
+drawer. In **Pages / Settings / Account**, turn **Debug mode** on and off.
+**Debug mode enabled** starts with the saved preference enabled; **Browser storage
+unavailable** shows a refused save without enabling diagnostics. Use the live
+Console to verify that the preference survives a reload; each Storybook frame
+starts with its scenario's preference. **Debug metadata unavailable** covers a failed read; ordinary navigation
 stories hide diagnostics. Docker image inspection and the Kubernetes API/worker
 integration suite, not these fixtures, verify Driver behavior.
 
@@ -281,6 +286,15 @@ shows organization-wide policy restrictions. Missing-credential, read-only, and
 save-failure stories cover surrounding states. Capture final interactions and
 native values outside the repository; attach screenshots and video to the task
 and PR.
+
+### Teams editor checks
+
+Follow the [Teams workflow](../../scripts/console-storybook/teams-workflow.md)
+with **Components/Channels → Teams Editor**. Save personal and channel access
+independently; disable channel conversations, reopen and check native JSON and
+Secret controls. Related stories cover missing credentials, advanced settings,
+read-only, loading, denied and pending saves. Backend/live-provider proof:
+[Teams verification](../testing/teams.md).
 
 For policy-denial states and the reviewed-addition walkthrough, follow the
 [Agent policy storyboard](../../scripts/console-storybook/policy-workflow.md).

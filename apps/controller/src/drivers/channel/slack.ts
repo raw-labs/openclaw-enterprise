@@ -11,19 +11,13 @@ import {
   wholeEnvironmentReferenceName,
 } from "@openclaw-enterprise/occ";
 import { asRecord, readCappedBody } from "@openclaw-enterprise/utils";
-import { isIP } from "node:net";
-import { fetch as undiciFetch, ProxyAgent, type Response as UndiciResponse } from "undici";
+import { channelRequest, type ChannelRequest } from "./transport.ts";
 
 const SLACK_API = "https://slack.com/api/";
 const PAGE_SIZE = 100;
 const SEARCH_PAGES = 3;
 const REQUEST_TIMEOUT_MS = 8_000;
 const INFO_BATCH_SIZE = 5;
-const PROXY_ENDPOINT =
-  /^https?:\/\/((?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}):([1-9][0-9]{0,4})$/;
-const MANAGED_SERVICE_PROXY_ENDPOINT =
-  /^https?:\/\/([a-z]([-a-z0-9]*[a-z0-9])?\.[a-z0-9]([-a-z0-9]*[a-z0-9])?\.svc):([1-9][0-9]{0,4})$/;
-
 type SlackRecord = Record<string, unknown>;
 
 /**
@@ -118,49 +112,19 @@ export class SlackChannelDriver implements ChannelDriver {
   readonly capability = "channel" as const;
   readonly id = "slack-channel";
   readonly implementation = "occ/slack-channel";
-  private readonly request: typeof fetch;
-  private readonly proxy?: ProxyAgent;
-  // Production sets expectProxy unless Helm reports open HTTPS egress: its default-deny API
-  // egress reaches Slack through a configured proxy. Without one, an unanswered check names that
-  // setting; a route an operator approved instead still works.
+  private readonly request: ChannelRequest;
   private readonly proxyMissing: boolean;
 
   constructor(
-    request: typeof fetch = globalThis.fetch,
+    request: ChannelRequest = globalThis.fetch,
     proxyUrl?: string,
     options: {
       readonly managedProxyHosts?: readonly string[];
       readonly expectProxy?: boolean;
     } = {},
   ) {
-    this.request = request;
+    this.request = channelRequest(request, proxyUrl, options);
     this.proxyMissing = options.expectProxy === true && proxyUrl === undefined;
-    if (proxyUrl !== undefined) {
-      const endpoint = PROXY_ENDPOINT.exec(proxyUrl);
-      const managedEndpoint = MANAGED_SERVICE_PROXY_ENDPOINT.exec(proxyUrl);
-      const address = endpoint?.[1];
-      const managedHost = managedEndpoint?.[1];
-      const managedService =
-        managedHost !== undefined && (options.managedProxyHosts ?? []).includes(managedHost);
-      const port = endpoint?.[2] ?? managedEndpoint?.[4];
-      if (port === undefined || Number(port) > 65535) {
-        throw new Error(
-          "Slack directory proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
-        );
-      }
-      if (!managedService && (address === undefined || isIP(address) !== 4)) {
-        throw new Error(
-          "Slack directory proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
-        );
-      }
-      // Like Compute's channel proxy rule: the unspecified address names no proxy.
-      if (address === "0.0.0.0") {
-        throw new Error(
-          "Slack directory proxy must not use host 0.0.0.0, which names no proxy address.",
-        );
-      }
-      this.proxy = new ProxyAgent(proxyUrl);
-    }
   }
 
   async validateCredentials(
@@ -261,7 +225,7 @@ export class SlackChannelDriver implements ChannelDriver {
     if (method !== "auth.test") {
       url.search = parameters.toString();
     }
-    let response: Response | UndiciResponse;
+    let response: Awaited<ReturnType<ChannelRequest>>;
     try {
       const options = {
         method: method === "auth.test" ? "POST" : "GET",
@@ -273,11 +237,7 @@ export class SlackChannelDriver implements ChannelDriver {
             ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
             : AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
       };
-      // Node's built-in fetch does not use an external Undici dispatcher.
-      response =
-        this.proxy === undefined
-          ? await this.request(url, options)
-          : await undiciFetch(url, { ...options, dispatcher: this.proxy });
+      response = await this.request(url, options);
     } catch (error) {
       throw neverAnswered(error)
         ? new SlackUnansweredError()

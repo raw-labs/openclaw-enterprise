@@ -1,5 +1,10 @@
 import { Check } from "typebox/value";
-import { ConfigurationValues, JsonValue } from "../../packages/contracts/src/api/common.ts";
+import {
+  ConfigurationValues,
+  CreatePresetBody,
+  JsonValue,
+} from "../../packages/contracts/src/api/common.ts";
+import { validatePresetTemplate } from "../../packages/contracts/src/index.ts";
 import { AgentDeploymentStatusSchema } from "../../packages/contracts/src/api/resources.ts";
 import {
   deploymentErrorForWork,
@@ -16,6 +21,7 @@ import type { TestContext } from "node:test";
 import type {
   APIResponse,
   Browser,
+  BrowserType,
   BrowserContext,
   ElementHandle,
   Locator,
@@ -290,14 +296,17 @@ async function artifactDirectory(t: TestContext) {
   return directory;
 }
 
-async function launchBrowser(options: { args?: string[] } = {}) {
+async function launchBrowser(options: { args?: string[]; browserType?: BrowserType } = {}) {
+  const browserType = options.browserType ?? chromium;
   const browserExecutable =
     process.env.OCC_TEST_BROWSER_EXECUTABLE === undefined ||
     process.env.OCC_TEST_BROWSER_EXECUTABLE.length === 0
       ? undefined
       : process.env.OCC_TEST_BROWSER_EXECUTABLE;
-  const browser = await chromium.launch({
-    ...(browserExecutable === undefined ? {} : { executablePath: browserExecutable }),
+  const browser = await browserType.launch({
+    ...(browserType !== chromium || browserExecutable === undefined
+      ? {}
+      : { executablePath: browserExecutable }),
     headless: true,
     ...(options.args === undefined ? {} : { args: options.args }),
   });
@@ -306,8 +315,8 @@ async function launchBrowser(options: { args?: string[] } = {}) {
 
 // One Chromium for every test in a file (CI runs each file in its own process), launched on
 // first use and closed after the file's last test: `after` here runs when the module loads, so it
-// attaches to the root test. newPage uses it unless a test passes launch arguments, which need a
-// browser of their own. Each test still gets its own context (cookies, storage, viewport,
+// attaches to the root test. An explicit browser type or launch arguments use a separate browser.
+// Each test still gets its own context (cookies, storage, viewport,
 // routes); this only saves the launch and close, about 0.2 CPU-s a test. A failed launch, or a
 // browser that has crashed or disconnected, is launched again for the next caller.
 let sharedLaunch: Promise<Browser> | undefined;
@@ -359,16 +368,18 @@ export async function newPage(
   fixture: PageFixture,
   options: {
     args?: string[];
+    browserType?: BrowserType;
     browser?: () => Promise<Browser>;
     context?: Parameters<Browser["newContext"]>[0];
   } = {},
 ) {
   const artifacts = await artifactDirectory(t);
   assert.ok(
-    options.browser === undefined || options.args === undefined,
-    "pass a shared browser or launch arguments, not both",
+    options.browser === undefined ||
+      (options.args === undefined && options.browserType === undefined),
+    "pass a shared browser or browser type/launch arguments, not both",
   );
-  const shared = options.args === undefined;
+  const shared = options.args === undefined && options.browserType === undefined;
   const browser = shared
     ? await (options.browser ?? sharedBrowser)()
     : await launchBrowser(options);
@@ -771,13 +782,19 @@ export async function waitForCondition(
   }
 }
 
-// A Preset the product ships in deploy/presets, by file name without ".json" ("default-codex",
-// "standard-codex"): for createConsoleAppFixture's defaultPresets or a Preset create. Each call
-// reads the file again, so callers never share one object.
+// Read a fresh shipped draft by file name without ".json". The wire shape and template
+// syntax are checked; concrete launch fields and credential admission remain downstream.
 export async function shippedPreset(name: string) {
   const preset: unknown = JSON.parse(
     await readFile(new URL(`../../deploy/presets/${name}.json`, import.meta.url), "utf8"),
   );
+  assert.ok(
+    Check({ SafeJsonValue: JsonValue }, CreatePresetBody, preset),
+    `Expected shipped Preset ${name} to match the create wire shape`,
+  );
+  // Discard the validator's broader return type: tokenized approvers are valid drafts but
+  // need not satisfy the concrete Agent approver schema until rendered.
+  validatePresetTemplate(preset.template);
   return preset;
 }
 

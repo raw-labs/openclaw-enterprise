@@ -1,10 +1,11 @@
 import type { CredentialPolicyWithdrawalOptions } from "@openclaw-enterprise/contracts";
+import type { OpenShellCredentialAttachments } from "../../sandbox/openshell-credential-attachments.ts";
 import { networkPolicySpecToJson } from "../../kubernetes/network-policy.ts";
 import {
   assertExecutionAdmission,
   codexProxiesRepositoryBroker,
   codexRepositoryBrokerNetworkProxy,
-  type PreparedTokenService,
+  type TokenService,
 } from "@openclaw-enterprise/contracts";
 import {
   harnessEgressEnrollment,
@@ -202,6 +203,7 @@ import {
   enabledChannelProviders,
   OPENCLAW_GATEWAY_PASSWORD,
   requireChannelTopology,
+  requireChannelProxyEnvironment,
   requireCodexPlugin,
   refuseInvalidTrustedProxyIdentities,
   refuseKubernetesPluginEntryKeyVariants,
@@ -339,9 +341,11 @@ type ReadableResourceKind = ManagedResourceKind | "Pod" | "Secret" | "Job";
 
 const CHANNEL_REQUIREMENTS = {
   slack: {
+    webhook: false,
     egress: "https-proxy",
   },
   msteams: {
+    webhook: true,
     egress: "https-proxy",
   },
 } as const;
@@ -376,6 +380,9 @@ export interface KubernetesGatewayRoutingOptions {
   readonly gatewayNamespace: string;
   readonly envoyNamespace: string;
   readonly envoyHttpsTargetPort?: number;
+  readonly channels?: {
+    readonly hostname: string;
+  };
   readonly sandbox?: {
     readonly domain: string;
     readonly publicPort?: number;
@@ -550,6 +557,8 @@ export interface KubernetesComputeDriverOptions {
     readonly modelProvider?: ModelProviderConfiguration;
     readonly channels?: {
       readonly proxyUrl: string;
+      /** The operator attests that this proxy validates and pins public destination addresses. */
+      readonly guardedFetchProxy?: boolean;
       readonly managedProxy?: KubernetesWorkloadPeer & {
         readonly hostname: string;
         readonly port: number;
@@ -3294,13 +3303,11 @@ function gatewayDocumentBeforeLanBind(
 
 /** Compute observes prepared-source readiness; it does not resolve warm credentials. */
 type PreparedTokenReadinessIssuer = Pick<
-  NonNullable<ReturnType<PreparedTokenService["issuer"]>>,
+  NonNullable<ReturnType<TokenService["issuer"]>>,
   "sourceFromRoute" | "ready"
 >;
 type PreparedTokenReadinessService = {
-  issuer(
-    ...args: Parameters<PreparedTokenService["issuer"]>
-  ): PreparedTokenReadinessIssuer | undefined;
+  issuer(...args: Parameters<TokenService["issuer"]>): PreparedTokenReadinessIssuer | undefined;
 };
 
 function preparedTokenReadiness(
@@ -3521,6 +3528,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
             additionalProperties: false,
             properties: {
               proxyUrl: { type: "string" },
+              guardedFetchProxy: { type: "boolean", default: false },
               managedProxy: {
                 type: "object",
                 required: ["hostname", "namespace", "podLabels", "port"],
@@ -3547,6 +3555,12 @@ export class KubernetesComputeDriver implements ComputeDriver {
           gatewayNamespace: { type: "string" },
           envoyNamespace: { type: "string" },
           envoyHttpsTargetPort: { type: "integer", minimum: 1, maximum: 65535 },
+          channels: {
+            type: "object",
+            required: ["hostname"],
+            additionalProperties: false,
+            properties: { hostname: { type: "string" } },
+          },
           sandbox: {
             type: "object",
             required: ["domain"],
@@ -3577,6 +3591,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   private readonly preparedRepositoryIngress: boolean;
   private readonly preparedTokens: PreparedTokenReadinessService | undefined;
   private readonly credentialGatewayDriver: CredentialGatewayDriver | undefined;
+  private readonly openShellAttachments: OpenShellCredentialAttachments | undefined;
   private readonly protectedExecution: ProtectedExecutionDriver | undefined;
 
   private get proxyDriver() {
@@ -3925,6 +3940,15 @@ export class KubernetesComputeDriver implements ComputeDriver {
             );
           }
           channelProxy(channels.proxyUrl, channels.managedProxy, "/runtime/channels");
+          if (
+            channels.guardedFetchProxy !== undefined &&
+            typeof channels.guardedFetchProxy !== "boolean"
+          ) {
+            throw configurationConstraintFailure(
+              "Channel guarded-fetch proxy declaration must be a boolean.",
+              "/runtime/channels/guardedFetchProxy",
+            );
+          }
         }
       }
       if (options.executionCluster !== undefined) {
@@ -4059,6 +4083,32 @@ export class KubernetesComputeDriver implements ComputeDriver {
           "/gatewayRouting/endpointPort",
         );
         validateGatewayRoutingTarget(routing, "Gateway routing");
+        if (routing.channels !== undefined) {
+          validateDnsHostname(
+            required(
+              routing.channels.hostname,
+              "Channel callback hostname",
+              "/gatewayRouting/channels/hostname",
+            ),
+            "Channel callback hostname",
+            "/gatewayRouting/channels/hostname",
+          );
+          const privateHostname =
+            routing.hostname ||
+            `occ-gateway-${sha256Hex(`${routing.gatewayNamespace}/${routing.gatewayName}`, 12)}.${routing.envoyNamespace}.svc`;
+          if (routing.channels.hostname === privateHostname) {
+            throw configurationConstraintFailure(
+              "Channel callbacks require a hostname separate from gateway administration.",
+              "/gatewayRouting/channels/hostname",
+            );
+          }
+          if (options.runtime === undefined) {
+            throw configurationConstraintFailure(
+              "Channel callback routing requires a native Gateway runtime.",
+              "/gatewayRouting/channels",
+            );
+          }
+        }
         if (routing.sandbox !== undefined) {
           validateSandboxDomain(
             required(routing.sandbox.domain, "Sandbox domain", "/gatewayRouting/sandbox/domain"),
@@ -4113,9 +4163,15 @@ export class KubernetesComputeDriver implements ComputeDriver {
       readonly lifecycleDrivers?: readonly Driver[];
       readonly sandboxDriver?: SandboxDriver;
       readonly preparedRepositoryIngress?: true;
-      readonly preparedTokens?: PreparedTokenService;
+      readonly preparedTokens?: TokenService;
       readonly preprovisionedNamespace?: PreprovisionedKubernetesNamespace | undefined;
       readonly credentialGatewayDriver?: CredentialGatewayDriver;
+      /** Internal composition data for the exact built-in same-Backend pair. */
+      readonly openShellAttachments?: {
+        readonly sandboxDriver: SandboxDriver;
+        readonly credentialGatewayDriver: CredentialGatewayDriver;
+        readonly attachments: OpenShellCredentialAttachments;
+      };
       readonly protectedDriver?: InstalledDriver;
       readonly nodeEnrollment?: GatewayNodeEnrollment;
       readonly readNodeCa?: () => Promise<string | undefined>;
@@ -4159,6 +4215,17 @@ export class KubernetesComputeDriver implements ComputeDriver {
       );
     }
     this.credentialGatewayDriver = selection.credentialGatewayDriver;
+    const openShellAttachments = selection.openShellAttachments;
+    if (
+      openShellAttachments !== undefined &&
+      (openShellAttachments.sandboxDriver !== this.sandboxDriver ||
+        openShellAttachments.credentialGatewayDriver !== this.credentialGatewayDriver)
+    ) {
+      throw new ConfigurationFailure(
+        "OpenShell attachments require the exact composed Sandbox and Credential Gateway.",
+      );
+    }
+    this.openShellAttachments = openShellAttachments?.attachments;
     this.nodeEnrollment = selection.nodeEnrollment;
     this.readNodeCa = selection.readNodeCa;
     const lifecycleDrivers = selection.lifecycleDrivers ?? [];
@@ -4747,6 +4814,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
     this.requirePluginSecretInputs(configuration, topology, secretBindings);
     requireProviderApiKeys(configuration, openclaw, authentication);
     if (!agentSave) {
+      if (stage === "admission") {
+        // Refuse Installation channel requirements before a redeploy stops predecessors.
+        this.enabledChannels({ configuration, harness });
+      }
       this.validateChannelSecretBindings(configuration, secretBindings);
     }
   }
@@ -4819,6 +4890,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     admission = true,
   ): void {
     enabledChannelProviders(configuration, CHANNEL_PROVIDERS, callerSettingError);
+    requireChannelProxyEnvironment(configuration, callerSettingError);
     requireHarnessCredentialBinding(configuration, callerSettingError, options);
     // Every OpenClaw topology applies the tool policy, embedded too (findings 2688, 2689), and the
     // plugin entry key rule (finding 3077). Preparation and activation skip them: an active
@@ -7123,10 +7195,12 @@ export class KubernetesComputeDriver implements ComputeDriver {
           this.sandboxNamespaceForRevision(revision, namespace),
           namespace,
         );
-        const sources = [
+        const boundSources = [
           ...(harnessAuth.credentialSource === undefined ? [] : [harnessAuth.credentialSource]),
           ...credentialSources,
-        ].filter((source) => source.egress === undefined);
+        ];
+        const directAttachments = this.staticOpenAiAttachmentsForRevision(revision, boundSources);
+        const sources = boundSources.filter((source) => source.egress === undefined);
         const credentialContext =
           sources.length === 0
             ? undefined
@@ -7139,7 +7213,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
         const attachments =
           credentialContext === undefined
             ? []
-            : await this.requireCredentialGateway().attachForRevision(credentialContext);
+            : await (directAttachments ?? this.requireCredentialGateway()).attachForRevision(
+                credentialContext,
+              );
         const sourceIds = new Set(credentialContext?.sources.map(({ id }) => id));
         const attachedSourceIds = new Set(attachments.map(({ sourceId }) => sourceId));
         if (
@@ -7429,7 +7505,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
           await withdrawProviderExposure();
         }
         if (credentialContext !== undefined) {
-          const statuses = await this.requireCredentialGateway().attachmentStatus({
+          const statuses = await (
+            directAttachments ?? this.requireCredentialGateway()
+          ).attachmentStatus({
             ...credentialContext,
             sandbox,
           });
@@ -8455,7 +8533,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     const sandbox = sandboxDriver.harnessResource({ namespace: sandboxNamespace, revision });
     this.verifySandboxResourceRef(sandbox, revision, namespace);
-    const status = await this.requireCredentialGateway().withdraw({
+    const directAttachments = this.staticOpenAiAttachmentsForRevision(revision, [source]);
+    const status = await (directAttachments ?? this.requireCredentialGateway()).withdraw({
       namespace: sandboxNamespace,
       revision,
       sandbox,
@@ -9098,7 +9177,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     revisionId: string,
   ): Promise<void> {
     // Remove the endpoint before deleting its route-specific authentication policy.
-    for (const suffix of ["node", "sandbox"]) {
+    for (const suffix of ["node", "sandbox", "msteams"]) {
       const name = `${gatewayName}-${suffix}`;
       await this.deleteGatewayRoutingResource("HTTPRoute", name, ownership, namespace, revisionId);
       await this.deleteGatewayRoutingResource(
@@ -11277,6 +11356,58 @@ export class KubernetesComputeDriver implements ComputeDriver {
       signal: this.operationSignal(),
     });
     return catalog.find((entry) => entry.type === sourceType);
+  }
+
+  /** Admission selects the route; a changed or missing live source cannot change that route. */
+  private staticOpenAiAttachmentsForRevision(
+    revision: Readonly<AgentRevision>,
+    sources: readonly Readonly<CredentialSource>[],
+  ): OpenShellCredentialAttachments | undefined {
+    const auth = revision.harnessAuth;
+    if (
+      this.openShellAttachments === undefined ||
+      revision.executionAdmission.mode !== "unprotected" ||
+      revision.egressPlan !== undefined ||
+      revision.harness.mode !== "dedicated" ||
+      (revision.harness.id !== "codex" && revision.harness.id !== "openclaw") ||
+      auth.method !== "credential_source" ||
+      auth.sourceType !== "openai" ||
+      auth.loginMode !== "api_key" ||
+      auth.credentialGatewayId !== this.credentialGatewayDriver?.id
+    ) {
+      return undefined;
+    }
+    // OCC lists the Harness credential too. Only its exact snapshot is redundant;
+    // additional, duplicate, or inconsistent admission stays on the public Gateway.
+    // An absent/empty list remains supported for revisions predating this source list.
+    const admitted = revision.credentialSources ?? [];
+    if (
+      admitted.length > 1 ||
+      admitted.some(
+        (snapshot) =>
+          snapshot.sourceId !== auth.sourceId ||
+          snapshot.sourceType !== auth.sourceType ||
+          snapshot.credentialGatewayId !== auth.credentialGatewayId ||
+          snapshot.credentialProxyId !== undefined,
+      )
+    ) {
+      return undefined;
+    }
+    // Selection is final: a source refusal must never retry through Gateway compatibility.
+    const source = sources[0];
+    if (
+      sources.length !== 1 ||
+      source === undefined ||
+      source.ownerCapability !== "credential_gateway" ||
+      source.namespaceId !== revision.namespaceId ||
+      source.egress !== undefined ||
+      !credentialSourceMatchesSnapshot(source, auth)
+    ) {
+      throw new OwnershipFailure(
+        "The direct OpenShell attachment requires the exact admitted Harness source and Namespace.",
+      );
+    }
+    return this.openShellAttachments;
   }
 
   private requireCredentialGateway(): CredentialGatewayDriver {
@@ -13728,7 +13859,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
   }
 
   private gatewayRouteHeaderFilter(
-    access: "operator" | "node" | "node-transfer",
+    access: "operator" | "node" | "node-transfer" | "channel",
   ): KubernetesRecord {
     return {
       type: "RequestHeaderModifier",
@@ -13748,11 +13879,11 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           },
         ],
         remove: [
-          ...(access === "node-transfer" ? [] : ["authorization"]),
+          ...(access === "node-transfer" || access === "channel" ? [] : ["authorization"]),
           "cookie",
           "forwarded",
           "x-forwarded-for",
-          ...(access === "node" || access === "node-transfer"
+          ...(access !== "operator"
             ? [
                 TRUSTED_PROXY_SCOPES_HEADER,
                 "x-occ-identity",
@@ -14091,6 +14222,15 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     if (!Number.isSafeInteger(gatewayRevision) || gatewayRevision < 1) {
       throw new OwnershipFailure("The serving Gateway has an invalid revision.");
     }
+    await this.reconcileTeamsRoute(
+      revision,
+      ownership,
+      namespace,
+      service,
+      gateway,
+      gatewayRevisionId,
+      gatewayRevision,
+    );
     for (const access of ["node", "sandbox"] as const) {
       const publicRoute = this.gatewayRoute(revision, ownership, namespace, service, access);
       if (publicRoute === undefined) {
@@ -14131,6 +14271,117 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       await this.reconcile(policy, ownership, namespace);
       await this.reconcile(publicRoute, ownership, namespace);
     }
+  }
+
+  private async reconcileTeamsRoute(
+    revision: AgentRevision,
+    ownership: Ownership,
+    namespace: KubernetesNamespaceAddress,
+    service: ManagedKubernetesObject<"Service">,
+    gateway: ManagedKubernetesObject<"Deployment">,
+    gatewayRevisionId: string,
+    gatewayRevision: number,
+  ): Promise<void> {
+    const name = `${this.gatewayRouteName(revision.agentId)}-msteams`;
+    const routing = this.options.gatewayRouting!;
+    // The serving Deployment, rather than a candidate's configuration, owns this callback.
+    if (gateway.metadata.annotations?.["openclaw.dev/msteams-webhook"] !== "true") {
+      for (const kind of ["HTTPRoute", "SecurityPolicy"] as const) {
+        const existing = await this.getOwned(kind, name, namespace, ownership);
+        const existingRevision = existing?.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION];
+        if (existingRevision !== undefined) {
+          await this.deleteGatewayRoutingResource(
+            kind,
+            name,
+            ownership,
+            namespace,
+            existingRevision,
+          );
+        }
+      }
+      return;
+    }
+    if (routing.channels === undefined) {
+      throw new ConfigurationFailure("Microsoft Teams requires channel callback routing.");
+    }
+    const route = this.manifest(GATEWAY_API_VERSION, "HTTPRoute", name, ownership, namespace);
+    const metadata = {
+      ...route.metadata,
+      annotations: {
+        ...route.metadata.annotations,
+        [AGENT_REVISION_ID_ANNOTATION]: gatewayRevisionId,
+        [AGENT_REVISION_ANNOTATION]: String(gatewayRevision),
+      },
+      ...(service.metadata.uid === undefined
+        ? {}
+        : {
+            ownerReferences: [
+              {
+                apiVersion: "v1",
+                kind: "Service",
+                name: service.metadata.name,
+                uid: service.metadata.uid,
+                controller: false,
+                blockOwnerDeletion: false,
+              },
+            ],
+          }),
+    };
+    // The native Teams SDK validates Microsoft's JWT. This override removes the
+    // inherited OCE API-key policy only from the exact POST callback route.
+    await this.reconcile(
+      {
+        apiVersion: GATEWAY_SECURITY_POLICY_API_VERSION,
+        kind: "SecurityPolicy",
+        metadata,
+        spec: { targetRefs: [{ group: "gateway.networking.k8s.io", kind: "HTTPRoute", name }] },
+      },
+      ownership,
+      namespace,
+    );
+    await this.reconcile(
+      {
+        ...route,
+        metadata,
+        spec: {
+          hostnames: [routing.channels.hostname],
+          parentRefs: [
+            {
+              group: "gateway.networking.k8s.io",
+              kind: "Gateway",
+              namespace: routing.gatewayNamespace,
+              name: routing.gatewayName,
+              sectionName: "channels",
+            },
+          ],
+          rules: [
+            {
+              matches: [
+                {
+                  method: "POST",
+                  path: {
+                    type: "Exact",
+                    value: `${this.gatewayRoutePath(revision)}/channels/msteams`,
+                  },
+                },
+              ],
+              filters: [
+                {
+                  type: "URLRewrite",
+                  urlRewrite: {
+                    path: { type: "ReplaceFullPath", replaceFullPath: "/api/messages" },
+                  },
+                },
+                this.gatewayRouteHeaderFilter("channel"),
+              ],
+              backendRefs: [this.gatewayRouteBackendRef(service)],
+            },
+          ],
+        },
+      },
+      ownership,
+      namespace,
+    );
   }
 
   /** Admits public preview traffic to the serving Gateway's sandbox listener.
@@ -14884,7 +15135,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     };
   }
 
-  private enabledChannels(revision: AgentRevision): readonly ChannelRequirements[] {
+  private enabledChannels(
+    revision: Pick<AgentRevision, "configuration" | "harness">,
+  ): readonly ChannelRequirements[] {
     const providers = enabledChannelProviders(
       revision.configuration,
       CHANNEL_PROVIDERS,
@@ -14898,9 +15151,43 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       },
       preparationSettingError,
     );
-    return providers.map(
+    const configured = asRecord(revision.configuration.channels) ?? {};
+    for (const provider of providers) {
+      const configuration = configured[provider];
+      if (provider === "msteams") {
+        const teams = asRecord(configuration);
+        const webhook = asRecord(teams?.webhook);
+        if (
+          teams?.webhook !== undefined &&
+          (webhook === undefined ||
+            (webhook.path !== undefined && webhook.path !== "/api/messages"))
+        ) {
+          throw new ConfigurationFailure("Microsoft Teams webhook path must be /api/messages.");
+        }
+        if (teams?.legacyWebhook !== undefined && teams.legacyWebhook !== false) {
+          throw new ConfigurationFailure(
+            "Microsoft Teams legacy webhook listeners are unsupported.",
+          );
+        }
+        if (teams?.cloud !== undefined && teams.cloud !== "Public") {
+          throw new ConfigurationFailure(
+            "Microsoft Teams currently supports the Public cloud only.",
+          );
+        }
+      }
+    }
+    const enabled = providers.map(
       (provider) => CHANNEL_REQUIREMENTS[provider as keyof typeof CHANNEL_REQUIREMENTS],
     );
+    if (
+      enabled.some(({ webhook }) => webhook) &&
+      this.options.gatewayRouting?.channels === undefined
+    ) {
+      throw new ConfigurationFailure(
+        "Microsoft Teams requires a dedicated public channel callback listener.",
+      );
+    }
+    return enabled;
   }
 
   // A Gateway's environment sets a name a Secret binding could set only from a binding or from
@@ -16104,6 +16391,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             ...configuration.annotations,
             [AGENT_REVISION_ANNOTATION]: String(configuration.revision),
             [AGENT_REVISION_ID_ANNOTATION]: configuration.revisionId,
+            "openclaw.dev/msteams-webhook": String(enabledChannels.some(({ webhook }) => webhook)),
           }
         : {};
     const revisionLabels =
@@ -16584,6 +16872,12 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             throw new ConfigurationFailure("Gateway channel credentials are not configured.");
           }
           variables.push({ name: "HTTPS_PROXY", value: channels.proxyUrl });
+          variables.push({ name: "NODE_USE_ENV_PROXY", value: "1" });
+          variables.push({ name: "NO_PROXY", value: "localhost,127.0.0.1,::1" });
+          if (channels.guardedFetchProxy === true) {
+            // Native guarded downloads delegate destination DNS/IP checks to this reviewed proxy.
+            variables.push({ name: "OPENCLAW_PROXY_ACTIVE", value: "1" });
+          }
         }
       } else {
         variables.push(

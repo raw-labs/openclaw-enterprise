@@ -2,6 +2,8 @@ import type { Driver } from "../index.ts";
 
 export interface ChannelDirectoryLookupInput {
   readonly token: string;
+  readonly provider: string;
+  readonly context?: Readonly<Record<string, string>>;
   readonly kind: "users" | "channels";
   readonly query?: string;
   readonly cursor?: string;

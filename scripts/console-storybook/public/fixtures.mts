@@ -1,3 +1,4 @@
+import { createConnectionTemplateFixture } from "./connection-template-fixture.mts";
 import { createNetworkPolicyFixture } from "./network-policy-fixture.mts";
 import { createPresetFixtures } from "./preset-fixture.mts";
 import type {
@@ -37,15 +38,18 @@ type FixtureScenario = Parameters<typeof createConfigurationStore>[0] &
     "pluginCapabilities" | "pluginDiscoveryCredential"
   > &
   Parameters<typeof installationDriverConfigurations>[0] & {
+    oauthCatalog?: string;
     namespaceRechecks?: readonly (string | number)[];
     namespaceName?: string;
     namespaceStatus?: string;
     sessionUser?: unknown;
     extraSecrets?: readonly { id: string; name: string }[];
+    teamsBindings?: boolean;
     slackBindings?: boolean | "app" | readonly string[];
     slackGrantMissing?: string;
     auth?: null | string;
     namespaceDeleteOutcome?: string;
+    namespaceDeleteRetryStatusFailure?: "unavailable" | "invalid";
     observabilityUrl?: string;
     repositoryOptions?: readonly RepositoryOption[];
     credentialRegistrationOutcome?: string;
@@ -244,6 +248,7 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
           },
         ];
   const namespaceDeletionReads = new Map<string, number>();
+  let namespaceDeleteRetryStatusFailed = false;
   const backends = scenario.emptyBackends
     ? []
     : [{ id: "chatgpt-demo", name: "ChatGPT", type: "chatgpt" }];
@@ -254,6 +259,7 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
     ref: secretRef(id),
   });
   for (const secret of [
+    secretMetadata("sec_demo_teams_password", "Teams app password (simulated)"),
     secretMetadata("sec_demo_model", "Demo model API key (simulated)"),
     secretMetadata("sec_demo_service_account", "Demo Service Accounts token (simulated)"),
     secretMetadata("sec_demo_slack_app_token", "Slack app token (simulated)"),
@@ -288,6 +294,12 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
   if (scenario.candidateDeploymentStatus) {
     config.generation = 2;
     config.values.agents.defaults.model = "codex/gpt-5.1";
+  }
+  if (scenario.teams && scenario.teamsBindings !== false) {
+    config.secretBindings.MSTEAMS_APP_PASSWORD = {
+      source: { ...secretRef("sec_demo_teams_password") },
+      delivery: { type: "env" },
+    };
   }
   if (scenario.slack && scenario.slackBindings !== false) {
     const keys =
@@ -384,6 +396,12 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
     credentials,
     deploymentError: (checkedAt) => candidateDeploymentError(scenario, checkedAt),
   });
+  const templates = createConnectionTemplateFixture(
+    scenario.oauthCatalog,
+    createdAt,
+    namespaceId,
+    nextId,
+  );
   const presets = createPresetFixtures(scenario, namespaceId, auth);
   const networkPolicy = createNetworkPolicyFixture(scenario, {
     namespaceId,
@@ -426,6 +444,10 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
     if (path === "/api/auth/sign-out" && method === "POST") {
       signedIn = false;
       return response({});
+    }
+    const templateResponse = templates(path, method, body);
+    if (templateResponse) {
+      return templateResponse;
     }
     if (path === "/installation/driver-configurations" && method === "GET") {
       return response(installationDriverConfigurations(scenario));
@@ -520,6 +542,23 @@ export function installFixture(scenario: FixtureScenario, evidence: FixtureEvide
         return response(item, 202);
       }
       if (method === "GET") {
+        // The invalid-value preview fails the first read after the unconfirmed write;
+        // the unavailable preview waits for the ordinary retry prompt to open.
+        if (
+          scenario.namespaceDeleteRetryStatusFailure &&
+          item.id === namespaceId &&
+          !namespaceDeleteRetryStatusFailed &&
+          (scenario.namespaceDeleteRetryStatusFailure === "invalid"
+            ? item.status === "deleting"
+            : document.querySelector(".namespace-delete-dialog[open] #namespace-delete-title")
+                ?.textContent === `Retry deletion of ${item.name}?`)
+        ) {
+          namespaceDeleteRetryStatusFailed = true;
+          if (scenario.namespaceDeleteRetryStatusFailure === "invalid") {
+            return response({ ...item, status: [item.status] });
+          }
+          return new Response("Service unavailable", { status: 503 });
+        }
         if (item.status === "deleting" && scenario.namespaceDeleteOutcome === "complete") {
           const reads = (namespaceDeletionReads.get(item.id) ?? 0) + 1;
           namespaceDeletionReads.set(item.id, reads);

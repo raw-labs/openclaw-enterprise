@@ -1,24 +1,22 @@
 # Runtime image recipe
 
-Build a public local runtime image for the OpenClaw Enterprise quickstart and
-real-runtime integration tests. The image contains these runtime entrypoints:
+Build the runtime image for the quickstart and integration tests. Entrypoints:
 
 - OpenClaw gateway: `node /app/openclaw.mjs`.
 - Dedicated OpenClaw node: `node /app/openclaw.mjs connect --target-file <private-file> --ephemeral --pair-or-reconnect`.
 - Dedicated Codex app-server: `codex app-server`.
 
-`NPM_CONFIG_UPDATE_NOTIFIER=false` disables npm's background version check.
-Package installation and explicit network requests still use the configured
-network policy.
+`NPM_CONFIG_UPDATE_NOTIFIER=false` disables npm background version checks; installs
+and explicit requests still follow network policy.
 
-The Dockerfile builds OpenClaw from a verified public source archive, using its
-pinned package manager, frozen dependency lockfile, and upstream Docker assembly.
+The Dockerfile builds a verified OpenClaw source archive with its pinned package
+manager, frozen lockfile and upstream assembly.
 For a package registry mirror, supply the separate Corepack and pnpm build
 secrets described in [the image build guide](../../docs/guides/deploy/production-installation.md#build-through-a-package-registry-mirror).
-The selected upstream source pins stock Codex `0.164.0`. Both Codex entrypoints
-use this installation and frozen lockfile without dependency downgrades or binary patches. The seccomp profile retains its existing syscall
-rules; version admission does not replace native startup and sandbox verification.
-Codex and Slack come from that same source. Its restricted workspace-node commands
+Both Codex entrypoints use stock `0.164.0` from the selected source and frozen
+lockfile without downgrades or binary patches. Seccomp rules remain unchanged;
+version admission does not replace native startup and sandbox verification.
+Codex, Slack, and Teams come from that same source. Its restricted workspace-node commands
 and persistent device identity support split storage; published `2026.9.5` packages
 do not contain that complete contract.
 
@@ -34,15 +32,12 @@ an equivalent implementation is available upstream, the build applies its
 `readOnlyPaths` compatibility change as
 `openclaw-codex-read-only-paths.patch`. This preserves the restricted Codex
 filesystem profile required by the repository broker and selected plugins.
-The selected source preserves `on-request` when plugins use MCP elicitation,
-reconnects `connect --ephemeral` with saved device credentials after its setup
-code expires, and retains the original caller's authority while required-worker
-placement continues after session creation is acknowledged. Scope, role, and
-profile revocation still stop dispatch. The OpenClaw build stage applies the
-checksum-verified `openclaw-required-worker-authority-regression.patch`
-and runs the real Gateway public-RPC cases without network access. The cases
-cover placement before and after acknowledgement, disconnect, and committed
-role, scope, and profile revocation.
+The selected source preserves MCP elicitation's `on-request`, reconnects expired
+`connect --ephemeral` setup with saved credentials, and retains caller authority
+through required-worker placement after acknowledgement. The checksum-verified
+`openclaw-required-worker-authority-regression.patch` tests public-RPC placement
+before/after acknowledgement, disconnect, and committed role, scope and profile
+revocation without network access.
 The build also applies `openclaw-codex-full-access-profile.patch`, which selects
 the native full-access Codex profile, and
 `openclaw-control-ui-browser-reconnect.patch`, which offers a browser navigation
@@ -90,11 +85,9 @@ tool, the worker can call its MCP client locally. Tools that require Gateway
 policy hooks continue through the Gateway. Deployment still requires a provisioning
 SandboxDriver with networking, filesystem, and process containment.
 
-The images-runtime-startup lane runs the production Gateway and Harness
-entrypoints and validates their generated configurations with the image's CLI.
-Native AMD64 and ARM64 image checks and real deployment verification remain
-separate requirements. Schema acceptance alone does not prove placement,
-enrollment, containment, workspace access, or model execution.
+The images-runtime-startup lane validates production entrypoints and generated
+configuration. Separate native AMD64/ARM64 and deployment checks must verify
+placement, enrollment, containment, workspace access and model execution.
 
 | Input                                                 | Selection                                                                                                         |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -120,13 +113,12 @@ other controller changes keep it cached; the service stage builds the full,
 type-checked workspace.
 Asset preparation installs plugin build dependencies in a disposable stage.
 The production stage selects upstream required bundled plugins plus Codex and
-Slack before installing dependencies for the target architecture with lifecycle
+Slack and Teams before installing target-architecture dependencies with lifecycle
 scripts enabled and runs upstream postinstall, plugin pruning, import-closure,
 and native filesystem-addon checks. Extension tests, QA source, and documentation
 media are excluded; help text, skills, and runtime templates remain. A dependency
 walk removes unreachable pnpm store entries while retaining importer-specific
-versions and installed optional dependencies. Building
-requires registry access.
+versions and optional dependencies. Builds require registry access.
 
 ## Resolve OpenClaw build arguments
 
@@ -175,9 +167,9 @@ Kubernetes runtime can initialize its own bundled Skill assets. Gateway and
 Harness do not share a runtime-assets volume. Do not flatten `/app/dist`; OpenClaw resolves
 package-local runtime dependencies from its installed package root.
 
-Codex and Slack are packaged under `/app/dist/extensions/` with their runtime
+Codex, Slack, and Teams are packaged under `/app/dist/extensions/` with their runtime
 dependencies. They must load from a fresh runtime home without downloading or
-installing packages at gateway startup. Slack credentials remain operator-owned
+installing packages at gateway startup. Channel credentials remain operator-owned
 runtime Secrets; do not put them in the image.
 
 The `matrix-sdk-crypto` stage fetches the Matrix crypto library with the retrying,
@@ -328,7 +320,7 @@ tmpfs-backed runtime directories. The private broker endpoint smoke requires the
 reviewed Codex 0.164.0 seccomp profile above so the nested bubblewrap sandbox can
 start without broadening to an unconfined Docker seccomp profile.
 Passing means an embedded OpenClaw gateway reaches `/readyz` from a fresh home,
-the bundled Codex and Slack plugins load without missing package dependencies,
+the bundled Codex, Slack, and Teams plugins load without missing dependencies,
 the installed Codex plugin successfully initializes the image's real Codex
 app-server, and the Kubernetes dedicated-gateway startup path publishes the
 bundled skills directory into `/home/node/openclaw-runtime-assets`. These checks
@@ -337,7 +329,7 @@ enrolls a real restricted workspace node under the production supervisor with an
 inert Codex sibling. It requires exactly seven commands, retained identity across
 redeemed/expired-code restarts and file/envelope setup replacement, and one
 completion per setup. These checks do not exercise
-all workspace command payloads, make a model call, or establish a Slack connection.
+all workspace command payloads, make a model call, or establish a Slack or Teams connection.
 When running this suite from inside another container that talks to a host Docker
 daemon, mount the repository and any temporary fixture directory at the same
 absolute host path and set `TMPDIR` inside that shared path; otherwise nested
@@ -363,3 +355,12 @@ The `org.openclaw.image.revision` label records the same upstream commit for
 Docker inspection; the build checks that it matches packaged provenance. Local builds
 can pass `--build-arg OCC_BUILD_REVISION=<full-lowercase-git-sha>`; omitted metadata
 remains unknown. Rebuild the runtime image to include this metadata.
+
+## Microsoft Teams plugin
+
+The same pinned OpenClaw source assembly bundles `msteams` alongside `codex` and
+`slack`, retaining the Teams SDK and Azure dependencies. Upstream treats plugins
+built with their host as bundled; no compatibility override or plugin download
+is used. The Teams startup case exercises actual SDK authentication in the
+assembled image; see [Teams verification](../../docs/testing/teams.md). Live
+Microsoft delivery and public Kubernetes ingress remain separate acceptance checks.
