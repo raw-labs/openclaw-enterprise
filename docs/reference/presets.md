@@ -22,8 +22,8 @@ presets:
 ```
 
 `includeDefaults: true` seeds `default-codex`, **Standard Codex**, and **Standard OpenClaw**.
-Omitting or disabling it stops bundled seeding; explicit `files`
-still load. Each JSON file contains one `{ "name": "...", "template": { ... } }`
+Startup YAML requires opt-in; the [profile renderer](../guides/deploy/installation-profiles.md)
+defaults `presets.includeDefaults` to `true`. Explicit `files` still load. Each JSON file contains one `{ "name": "...", "template": { ... } }`
 object. Relative paths resolve beside the Installation YAML. The Helm chart mounts
 only that YAML, so on Helm list only files shipped in the controller image, by
 absolute path. Missing, malformed, invalid, or duplicate-name files, and names
@@ -84,12 +84,12 @@ Codex `config.toml` or a reasoning-effort override.
 
 ### Plain console default
 
-**Start with default Preset** reads the authorized `default-codex` copy in the
-selected Namespace. Its shipped template has no variables, model, name, or
-credential; the ordinary form collects them. An operator-customized copy with
-variables opens the variable chooser first. Missing or unreadable defaults
-disable quick-start; other readable Presets remain selectable. Install the file
-through `includeDefaults`, `presets.files`, or Preset POST to enable it.
+Quick-start prefers readable `default-codex`, otherwise the first readable Preset
+in case-insensitive browser locale order, with exact names breaking ties.
+Custom starters appear by name; `default-codex` keeps **Start with default Preset**.
+The exact-resource read must succeed. Denial leaves an error; empty or unavailable
+lists disable quick-start. Variables open the chooser; other templates apply
+immediately. The shipped default leaves model, name and credential to the form.
 **Start without Preset** is independent of Namespace Presets; it uses the
 console's shared configuration base and ordinary creation permissions.
 
@@ -177,8 +177,7 @@ with it. Omitted settings use the form's normal defaults.
 
 `agent.pluginApprovers` uses the Agent default plugin approver semantics from
 [Agent Plugins](agent-plugins.md#slack-approver-users). Omit it to inherit
-the form default. Use an empty array to select no Slack approvers, or a
-list of channel user identities to prefill selected approvers. Variable tokens
+the form default; `[]` selects no Slack approvers. Variable tokens
 can appear inside those identity strings; the completed Agent request still
 validates the rendered approvers with the selected Plugin Driver.
 
@@ -307,8 +306,9 @@ An included `template` replaces the whole template, including variable
 definitions; omitted fields stay unchanged. Writes check the template structure,
 variable syntax and default types, credential-binding structure, known
 cross-Namespace credential references, and credential literals at their native
-use sites. Ordinary launch-field errors, such as an invalid execution mode or
-plugin policy, can remain in a saved Preset. The console checks values needed
+use sites. A literal `agent.name`, `executionMode`, `backendId` or
+`pluginApprovers` that Agent create refuses is refused; plugin selections and
+tokens wait. The console checks values needed
 to populate its form; the existing creation APIs validate completed settings.
 The selected
 [Configuration Driver](drivers/configuration.md#optional-validation) must support
@@ -347,11 +347,10 @@ and an Agent separately. Follow [partial-save recovery](console/create-and-deplo
 if the second save fails or a response is lost.
 
 A Preset is read once when selected. **Use Preset** renders its variables and
-opens an ordinary editable Agent form. The chooser closes; changing the draft
-does not update or reread the Preset. **Start over** discards the unsaved draft
+opens an ordinary editable Agent form; changing the draft does not update or
+reread the Preset. **Start over** discards the unsaved draft
 and returns to the chooser, but is disabled once a Configuration has saved or a
 save outcome is uncertain.
 
-A valid Preset is not necessarily a valid Agent configuration. A later Agent
-validation error can leave a saved Configuration; follow the recovery steps
-above. Later deployments read the Agent's own draft.
+A valid Preset is not necessarily a valid Agent configuration. Later deployments
+read the Agent's own draft.

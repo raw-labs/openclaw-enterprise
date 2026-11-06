@@ -1,3 +1,9 @@
+---
+tags: [human_verified]
+# Backfilled from the verification tag recorded in 17ff921c5.
+last_verified: "2026-11-04"
+---
+
 # PostgreSQL tests
 
 ## Overview
@@ -11,7 +17,9 @@ URLs skip cases, so check the test results for skips.
 ## Version-worker tests
 
 The application lane prepares isolated databases and removes its resources on
-exit. Each run needs its own state file. With Docker Compose available, run:
+exit. Its PostgreSQL server is disposable, so preparation turns off `fsync`,
+`synchronous_commit` and `full_page_writes` there; keep no data in it. Each run
+needs its own state file. With Docker Compose available, run:
 
 ```sh
 (
@@ -44,7 +52,7 @@ file database: the suite copies it. The suite rejects a standalone
 `node scripts/ci/cleanup.mjs --state /printed/run/directory/state.json` and
 retain the state if cleanup fails. The `postgres`, `postgres-platform`, and
 `postgres-auth` lanes use the same prepare, run, and cleanup pattern; see
-[CI lanes](ci.md#manual-full-integration-lanes).
+[CI lanes](ci/full-integration.md#scenarios).
 
 <a id="postgresql"></a>
 
@@ -83,6 +91,29 @@ live gateway. Four optional Configuration cases also require
 Broad `pnpm test`, `pnpm test:integration`, and `pnpm test:postgres` include
 version-worker tests and therefore require prepared ownership.
 
+## Preset preservation across controller upgrades
+
+Run `tests/integration/postgres-preset-upgrade.test.ts` with an empty, migrated
+application-role `OCC_TEST_DATABASE_URL` or `postgres-platform` CI.
+Authenticated HTTP saves edited/custom Presets and Configuration. Restarts with
+stock inputs and disabled seeding must preserve IDs, values and generations;
+new Namespaces receive no stock Presets when seeding is disabled.
+
+CI proves current-version restarts. Cross-revision proof requires a prepared
+before checkout and a disposable database migrated by that revision. Set `OCC_TEST_PRESET_BEFORE_ROOT` to its absolute path and
+`OCC_TEST_PRESET_MIGRATION_DATABASE_URL` to that database's separate migrator-role
+URL. Run from the candidate:
+
+```sh
+node --test tests/integration/postgres-preset-upgrade.test.ts
+```
+
+The test stops the before controller, migrates, and starts the candidate twice.
+Scope credentials to this invocation; remove its owned database/server. Missing application
+configuration skips; missing cross-revision migrator fails.
+Compute/Secret Drivers are fixtures: this proves saved-state preservation,
+not images, Kubernetes or model execution.
+
 ## GitHub human sign-in
 
 With a fresh migrated `OCC_TEST_DATABASE_URL` and the
@@ -109,6 +140,21 @@ loopback database named `openclaw_failures_*` via
 its optional migration URL. Do not share that database with another process.
 
 ## Canonical migration compatibility
+
+Fresh installation, populated canonical upgrades, and logical restore checks
+pass on PostgreSQL 18.6 and 17.11. This evidence covers these workflows on those
+releases, not every server version or a complete production deployment.
+
+The `postgres` lane also runs a disposable PostgreSQL 16.15 container to verify
+early refusal for fresh and populated databases, unchanged dumps after refusal,
+and redaction of real connection errors. Run that regression alone with Docker:
+
+```sh
+OCC_TEST_MIGRATION_SERVER=1 node --test tests/integration/postgres-migration-version.test.ts
+```
+
+It pulls its pinned PostgreSQL image and removes only its own container and volume.
+Without the selector the case skips. It does not use an existing database.
 
 The `postgres` lane runs migration compatibility against its owned fixture. To
 run the canonical cases against an existing disposable loopback PostgreSQL 18

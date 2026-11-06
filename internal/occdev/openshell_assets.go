@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	openShellVersion           = "0.1.4"
-	openShellSourceSHA256      = "e7b80d636456eac7fea05494894f018b170d4c7b3bf89aa769e3f909554013e9"
+	openShellVersion           = "0.1.6"
+	openShellSourceSHA256      = "e7bce772f5837a4ffc29fb51a49381eec3d4771a9f015c75b06d4f66deb109d2"
 	agentSandboxManifestSHA256 = "230ee446d6035f631577e1c6b857f6973a8f09a0a853675d3cc34ebfe47abd6b"
 	openShellSourceArchiveURL  = "https://github.com/NVIDIA/OpenShell/archive/refs/tags/v" + openShellVersion + ".tar.gz"
 	agentSandboxManifestURL    = "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v0.5.2/sandbox.yaml"
@@ -98,10 +98,18 @@ func (r *runner) agentSandboxManifest(ctx context.Context, root string) (string,
 		return selected, nil
 	}
 	path := filepath.Join(root, "agent-sandbox-v0.5.2.yaml")
-	if err := downloadVerified(ctx, agentSandboxManifestURL, path, agentSandboxManifestSHA256); err != nil {
+	if err := downloadVerifiedManifest(ctx, r.opts.Err, agentSandboxManifestURL, path, agentSandboxManifestSHA256); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+func downloadVerifiedManifest(ctx context.Context, log io.Writer, url, destination, expected string) error {
+	data, err := downloadDevelopmentManifest(ctx, log, filepath.Base(destination), url, expected, developmentManifestRetry)
+	if err != nil {
+		return err
+	}
+	return exclusiveWrite(destination, data, 0600)
 }
 
 func downloadVerified(ctx context.Context, url, destination, expected string) error {

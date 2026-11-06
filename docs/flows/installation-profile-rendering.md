@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
-updated: 2026-10-18
-last_updated_session: authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d
+updated: 2026-11-05
+last_updated_session: authoring-run/7b9b79ce-b682-44c2-881a-2fe4aadc6441
 ---
 
 # Installation Profile Rendering Flow
@@ -21,9 +21,9 @@ service accounts, the repository registry, and Slack consumers.
 - Source: `scripts/render-installation-profile.mjs:parseArgs`,
   `scripts/render-installation-profile.mjs:buildRendered`, and
   `scripts/render-installation-profile.mjs:resolveHostedDiscoveryCidrs`.
-- Assumptions: The caller runs from the repository root with installed
-  dependencies, a trusted profile under `deploy/profiles/`, and site inputs that
-  contain no plaintext credentials.
+- Assumptions: The caller runs from the repository root with a trusted bundled
+  or explicitly selected profile and site inputs without plaintext credentials.
+  Native admin needs installed dependencies for the public suffix check.
 
 ## Flow
 
@@ -32,9 +32,12 @@ graph TD
   A["Operator invokes renderer"] --> B["Parse profile, input path, and output directory"]
   B --> C{"Profile is openclaw or codex?"}
   C -->|No| X["Exit before reading input"]
-  C -->|Yes| R["Clear prior generated files and preflight"]
-  R --> D["Load deploy/profiles/<profile>.json and input JSON"]
-  D --> E["Reject unsupported sections and fields"]
+  C -->|Yes| P{"Input or profile shares a generated file identity?"}
+  P -->|Yes| Q["Refuse without changing existing files"]
+  P -->|No| R["Clear prior generated files and preflight"]
+  R --> D["Load selected or bundled profile and input JSON"]
+  D -->|Unreadable or invalid| Y["Exit without rendered files or preflight"]
+  D -->|Valid| E["Reject unsupported sections and fields"]
   E --> F["Build objects and validate consumed inputs"]
   F --> G{"Any diagnostics errors?"}
   G -->|Yes| H["Write preflight.json with ok:false"]
@@ -55,11 +58,16 @@ graph TD
 
 `scripts/render-installation-profile.mjs:parseArgs`
 
-`parseArgs` accepts `--profile`, `--input`, and `--out-dir`; other flags fail
+`parseArgs` accepts `--profile`, `--input`, `--out-dir`, and optional `--profile-file`; other flags fail
 before output. Profiles are `openclaw` or `codex`, with no `default`. JSON supplies
 the release name and namespace for Helm and Installation settings.
 
-After valid arguments, the renderer removes prior `values.yaml`,
+Before cleanup, the renderer compares the input and selected profile file identities with each of its
+three output files. It refuses a shared file, including directory aliases,
+symbolic links, and hard links, without deleting or replacing existing files.
+Choose another input filename or output directory.
+
+After this check, the renderer removes prior `values.yaml`,
 `installation.yaml`, and `preflight.json` before loading input. Unreadable or
 malformed JSON cannot leave stale deployment files or success reports; other
 files remain untouched.
@@ -68,10 +76,15 @@ files remain untouched.
 
 `scripts/render-installation-profile.mjs:readProfile`
 
-`deploy/profiles/` supplies profile identity and PluginDriver selection. JSON
-supplies site images, domains, CIDRs, Secrets, and repository registry names.
-Explicit discovery CIDRs keep rendering offline and stable; omitted hosted
-Codex CIDRs make Helm values depend on DNS.
+`readProfile` loads the selected or bundled file and validates its closed schema,
+matching family and a nonempty array of bundled Plugin Drivers. Each entry uses
+an exact bundled ID and object configuration; invalid entries fail with their array
+index. Hosted discovery prerequisites apply when any selected Codex Driver uses
+the hosted catalog. The shared Codex catalog-source guard
+rejects invalid discovery modes before files are written; other options are startup-validated;
+[custom profile rules](../guides/deploy/custom-installation-profiles.md) define the inputs.
+Site JSON supplies infrastructure. Hosted `codex-plugin` needs a PAT; curated
+discovery does not. Runtime credentials remain per Agent.
 
 ### 3. Validate every supplied input
 
@@ -80,9 +93,8 @@ Codex CIDRs make Helm values depend on DNS.
 Closed sections reject unknown fields, including unused readiness flags;
 OpenClaw rejects Codex-only inputs.
 
-Startup consumes no discovery or runtime token values. Preflight directs
-operators to add `codex_pat` later through a same-Namespace Secret or the
-Console. Only `codex.managedServiceAccounts` enables optional managed issuance.
+Credentials belong to Agent setup. `codex.managedServiceAccounts` renders optional
+managed issuance; preflight does not prove it works.
 
 Preflight enforces Helm's lowercase release-name syntax and 53-character limit
 for `controlPlane.releaseName`. `controlPlane.namespace`, optional
@@ -178,23 +190,28 @@ when that name is a DNS-1035 Service label of at most 63 characters. The
 chart's upgrade guard still requires an explicit current broker Service name,
 and the same DNS-1035 check cannot fail after a successful preflight.
 
+Helm merges `dns.podLabels` over the chart default `k8s-app: kube-dns`. When the
+selector lacks `k8s-app`, `values.yaml` sets it to `null` so Helm deletes it.
+`installation.yaml` keeps the exact selector: Compute does not merge, and the
+profile schema accepts only string labels.
+
 ### 5. Build Installation startup YAML
 
 `scripts/render-installation-profile.mjs:buildRendered`
 
 The Installation output selects Kubernetes Configuration, native IAM,
-Kubernetes Compute, Kubernetes Secrets, default Preset seeding, and the profile
+Kubernetes Compute, Kubernetes Secrets, selected Preset seeding, and the profile
 PluginDriver. Compute settings consume the runtime image, DNS peer, trusted
 proxy CIDRs, plugin-status proxy CIDRs, gateway routing identity, runtime
 storage class, node selectors, and transport Secret prefix. The Codex profile
 also consumes the reviewed `runtime.codexSeccompProfile` path. Preflight applies
 the Compute driver's localhost-profile rule and refuses an absolute path, a
 backslash, an empty, `.`, or `..` segment, or a segment named `unconfined`,
-before writing `installation.yaml`. Optional `runtime.codexModelBaseUrl` gets
+before writing `installation.yaml`. Optional `runtime.modelProvider.baseUrl` gets
 Compute's endpoint rule. When optional
 managed ServiceAccount inputs are supplied, it emits the ChatGPT Backend and a
-matching ServiceAccount Driver; otherwise Codex Agents use the existing
-`codex_pat` token path configured at Agent creation. If the chart-managed Slack
+matching ServiceAccount Driver. Without those inputs it renders no managed
+issuance; each Agent still selects its own runtime credential binding. If the chart-managed Slack
 proxy is enabled, Compute receives the generated Service DNS URL and selector
 for gateway-to-proxy egress; the chart grants API-to-proxy egress. Repository
 opt-in adds the GitHub Backend, Repo Driver,
@@ -205,10 +222,9 @@ truncates `<releaseName>-agent-gateways` to 63 characters and removes a trailing
 hyphen. HTTPRoute parent references therefore match the Gateway the chart
 renders.
 
-Optional `presets.files` adds operator-selected JSON paths and retains both standard
-Presets. Preflight rejects non-lists and empty/non-string entries without reading
-files; controller startup resolves paths and validates contents. Changes alter
-the Installation checksum.
+`presets.includeDefaults` defaults to `true`; `presets.files` adds JSON paths.
+Disabling defaults without files seeds nothing. Rendering validates options;
+startup reads and validates files. Changes alter the Installation checksum.
 
 `runtime.transportSecretPrefix` must produce the same DNS-safe name that
 Kubernetes Compute startup requires: `<prefix>-<12 hex characters>`, at most
@@ -220,21 +236,19 @@ dot does not, because the suffix would start a new label with a hyphen.
 
 `scripts/render-installation-profile.mjs:resolveHostedDiscoveryCidrs`
 
-After validation, hosted `codex-plugin` with omitted `codex.modelDiscoveryCidrs`
-queries IPv4 addresses for `auth.openai.com` and `chatgpt.com` with a resolver timeout of 1.5 seconds and one try. Sorted unique
-IPv4 `/32` answers populate the existing API-only TCP 443 Helm policy; the driver
-mutates no Kubernetes resources.
-
-Supplied lists bypass DNS unchanged; `[]` requires external HTTPS policy for
-both hosts. Other driver selections bypass resolution. DNS failure records a
-preflight error and revokes both YAML files, including after successful renders.
-This snapshot needs operator verification of API Pod DNS/NAT, authenticated
-Console discovery, and rerender/upgrade after address changes; it never
-refreshes live policy.
+Hosted `codex-plugin` queries IPv4 for `auth.openai.com` and `chatgpt.com` with a
+1.5-second timeout and one try. Sorted unique `/32` answers populate API-only
+TCP 443 Helm policy; the renderer mutates no cluster resources. Only `codex`
+accepts explicit `codex.modelDiscoveryCidrs`: lists bypass DNS, while `[]` needs
+external HTTPS policy. The `openclaw` family with hosted discovery always needs
+DNS. Other Driver selections bypass resolution. Failure records a preflight error
+and revokes both YAML files. Operators verify API Pod DNS/NAT and authenticated
+Console discovery, then rerender and upgrade after address changes; snapshots
+never refresh live policy.
 
 ### 7. Write outputs and preflight
 
-`scripts/render-installation-profile.mjs:writeYaml`
+`scripts/render-installation-profile.mjs:renderInstallationProfile`
 
 On success, the renderer serializes a deterministic `installation.yaml`, hashes
 those exact bytes with SHA-256, and sets `controlPlane.installationChecksum` in
@@ -247,7 +261,7 @@ U+0085 into a space and refuses the others), U+2028, U+2029, U+FEFF, U+FFFE and
 U+FFFF; preflight refuses lone UTF-16 surrogates, which YAML cannot spell.
 On validation failure, it writes only `preflight.json`
 with `ok:false`, lists only that report in `outputs`, and exits nonzero.
-Input-loading failures exit without a preflight report.
+Input or profile-loading failures exit without a preflight report.
 
 The preflight report lists warnings, external prerequisites, and the next
 operator steps. It tells the operator to update the Installation startup Secret
@@ -294,6 +308,16 @@ activation, and repository registry creation need separate evidence.
 
 ## Changelog
 
+- 2026-11-05 12:40: Adopt upstream Plugin Driver arrays in custom-profile validation and hosted discovery diagnostics. (authoring-run/7b9b79ce-b682-44c2-881a-2fe4aadc6441 - cf6f0ca6389e9fc1e4c85463ce08001ea1464066)
+
+- 2026-11-05 01:10: Preserve input/profile output-file identity checks and validate Codex catalogSource before rendering in the accompanying refresh. (agent:main:dashboard:34871ae5-240f-4f44-b364-50bd21ecedec - 5acf92b89f9053fec747a802e3790822a5b4340d)
+
+- 2026-11-03 15:09: Document shared provider routing and separate destination authorization. (authoring-run/4d0e1a9c-b86a-4b59-be3e-d4306d5da9fc - 47e0e95df)
+
+- 2026-10-28 20:25: Refuse input/output file collisions before cleanup in the accompanying change. (authoring-run/ebaa9b91-58b3-47dc-97d9-ad103250247d - 420d76bcbd15dcd3644e474d413484c35ce22797)
+
+- 2026-10-19 22:48: Add trusted profile-file overrides, optional default Preset seeding and PluginDriver-based catalog prerequisites. (authoring-run/d45560cc-1312-47a3-bc97-9e85137cdea9 - a0e909fda01709486815fcc113db4229eba646bc)
+
 - 2026-10-18 14:40: Compare database CA mount destinations with Helm. (authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d - bcf4fbcf0)
 
 - 2026-10-13 16:26: Merge current profile validation while retaining hosted discovery DNS snapshots and explicit network policy inputs. (authoring-run/1e1d633d-329d-462f-b077-6cb27c43a6e4 - da72ecf45a0989b857fd7f05d8238a38a979eb64)
@@ -305,6 +329,7 @@ activation, and repository registry creation need separate evidence.
 - 2026-10-10: One `dedicatedSecrets` rule replaces the sign-in, gateway API key and credential Secret checks and adds the database CA Secret.
 
 - 2026-10-10: Refuse gateway API key Secret names that Kubernetes refuses.
+
 - 2026-10-11: Refuse Gateway StorageClass, repository ConfigMap and Secret, database CA Secret, and ChatGPT admin Secret names that Kubernetes refuses.
 
 - 2026-10-10 02:33: Merge current main while retaining selector owners and Kubernetes DNS-subdomain parity. (authoring-run/c4350829-13f6-40e0-902f-9d96e622a27c - db4ccbdea96a752cd99a66cf4cf02c195f5fe3ba)
@@ -315,64 +340,4 @@ activation, and repository registry creation need separate evidence.
 
 - 2026-10-10 00:30: Match Kubernetes DNS-subdomain limits in the accompanying setup validation change. (authoring-run/4a617af9-0745-4870-a679-848dba61de53 - 3e34cc0f4b469d29fc79d2c10a33f87a0921ee47)
 
-- 2026-10-09 23:58: Reject database CA mount collisions with the active mounts selected by installation profiles. (authoring-run/19832129-1f67-41f2-8961-d10c648012fd - e6d0571907da6bc6d40eed3e1f8125f7dd332e99)
-
-- 2026-10-09: Check DNS, API client and metrics scraper selectors with Compute's peer label rule, allowing empty values.
-
-- 2026-10-09: Apply the chart's sign-in Secret, runtime node selector, claim name and Backend ID rules, and escape characters Helm's YAML parser changes.
-
-- 2026-10-09 21:03: Validate controller image references before emitting profile files. (authoring-run/9a3fd823-79af-431c-b422-44c0ba255013 - b62cf404ed354079e1c51b64a1e664b3c66c0262)
-
-- 2026-10-09 20:06: Validate transport Secret prefixes before rendering Installation configuration. (authoring-run/8b675a82-44c5-4fc1-a404-dad5edd03858 - cd468c23101b201b3969fa1a4077a18042d3396b)
-
-- 2026-10-09 19:54: Reject external sign-in credential-key collisions during profile preflight. (authoring-run/d628d0ae-29d8-405c-b812-0534f00d5821 - 60a837dfd798e8fac90b53c47436c4bc7a36e8e4)
-
-- 2026-10-09 19:42: Validate control-plane placement labels before writing profile output. (authoring-run/2e2ce65b-ab3e-4466-8f24-602241488e52 - 3a1e29fb461d2ad61a9276ae4af432bcf2d04c88)
-
-- 2026-10-09: Check API client and DNS peer namespaces as DNS labels of at most 63 characters.
-
-- 2026-10-09: Check gateway and Envoy namespaces as DNS labels of at most 63 characters.
-
-- 2026-10-09: Accept empty control-plane placement label values, as Kubernetes does.
-
-- 2026-10-09: Refuse Google hosted domains the chart and API refuse.
-
-- 2026-10-09: Refuse a repository broker Service name the chart's DNS-1035 check refuses.
-
-- 2026-10-09: Refuse gateway and Envoy namespaces the Compute driver refuses.
-
-- 2026-10-09: Refuse Codex seccomp paths the Compute driver refuses.
-
-- 2026-10-08: Refuse database CA keys the chart refuses.
-
-- 2026-10-08: Refuse installation names the chart and the bootstrap Job refuse.
-
-- 2026-10-08 18:17: Resolve hosted Codex discovery destinations when the existing CIDR input is omitted, preserving explicit lists and external policy management. (authoring-run/80c1ae0f-fe2f-4d78-bc5c-ebfacffd1194 - 946e3a5dee61c34ac8d87b715eda1e2cc059d26a)
-
-- 2026-10-07 12:07: Unify imported and managed PAT authentication while preserving source ownership and existing OAuth behavior. (01a0e5ec-d802-7800-9eb6-8022c1ac0d06 - be5006e62)
-
-- 2026-10-07: Refuse a public-suffix shared cookie domain in preflight.
-
-- 2026-10-06 15:26: Reject invalid Helm release names before emitting deployment files. (authoring-run/2ae5d308-21b1-4e0c-b693-55c25dd9f879 - 4a314f5b5ac48937acf976fc3e69c385d1883c35)
-
-- 2026-10-06 13:20: Reject noncanonical SHA-256 image digests before emitting deployment files. (authoring-run/feaed473-dcbe-4c10-93fc-39e937f1e798 - f2fb8cbe952d7c27b2690f86134c89e6912cb883)
-
-- 2026-09-29 20:30: Stop defaulting the repository broker Service name so the chart upgrade guard applies.
-
-- 2026-09-29 18:00: Carry external sign-in, the recovery user ID, and trusted proxies through profile rerenders.
-
-- 2026-09-28 22:45: Preserve original Slack public HTTPS egress and repository provider ranges in both profiles. (authoring-run/9c2c8f31-7cb0-4359-a7d7-a6f5c3be882a - 1365d9b33eec2de2452bd3142f57a1729cccd559)
-
-- 2026-09-28 21:04: Added optional Preset file inputs to the renderer and paired startup output. (authoring-run/9c2c8f31-7cb0-4359-a7d7-a6f5c3be882a - 1365d9b33eec2de2452bd3142f57a1729cccd559)
-
-- 2026-09-28 19:57: Match Helm Gateway names and invalidate prior generated files before rerendering. (authoring-run/c35ba3ae-a801-46fc-af68-f8f7a27d56ed - 15bab9571fa12a2192a4d5dbff70f3e263468ee7)
-
-- 2026-09-28 15:36: Documented installation profile rendering flow. (authoring-run/6f2a325a-cf1c-4277-9ce3-7623626f68c6 - 6c56149f1f2b7290d8526d87c3624c9b7db09fbf)
-
-- 2026-09-28 16:43: Updated the output step after removing the runtime YAML-loader dependency. (authoring-run/6f2a325a-cf1c-4277-9ce3-7623626f68c6 - 6c56149f1f2b7290d8526d87c3624c9b7db09fbf)
-
-- 2026-09-28 17:04: Clarified that Codex defaults to existing `codex_pat` token credentials and renders managed ServiceAccount wiring only when explicitly supplied. (authoring-run/6f2a325a-cf1c-4277-9ce3-7623626f68c6 - 6c56149f1f2b7290d8526d87c3624c9b7db09fbf)
-
-- 2026-09-28 17:31: Documented stricter profile preflight checks for IPv4 CIDRs, native-admin DNS domains, and paired metrics selectors. (authoring-run/6f2a325a-cf1c-4277-9ce3-7623626f68c6 - 6c56149f1f2b7290d8526d87c3624c9b7db09fbf)
-
-- 2026-09-28 18:02: Documented rendered Installation checksum injection into Helm values and the Secret-before-Helm apply order. (authoring-run/6f2a325a-cf1c-4277-9ce3-7623626f68c6 - 6c56149f1f2b7290d8526d87c3624c9b7db09fbf)
+[Installation Profile Rendering documentation history](installation-profile-rendering/history.md) preserves the older dated entries.
