@@ -137,6 +137,11 @@ RUN echo 'f8d1e51706f59964839d231818909ffb2ee5f6b951385a353a1a4fd07c45e2cc  /tmp
 COPY deploy/runtime/openclaw-codex-full-access-profile.patch /tmp/openclaw-codex-full-access-profile.patch
 RUN echo 'e942e1804475a8e828859c5ba81c20de944105a7dbe00bbba6c2275b32c0944b  /tmp/openclaw-codex-full-access-profile.patch' | sha256sum --check --strict \
     && git apply /tmp/openclaw-codex-full-access-profile.patch
+# TODO(native-internal-transport-bypass): Remove this bridge when OC exposes an
+# exact-endpoint bypass for host-provisioned internal transports.
+COPY deploy/runtime/openclaw-internal-transport-proxy.patch /tmp/openclaw-internal-transport-proxy.patch
+RUN echo '1a37ccc2e6b3318247f8d36d633ed1b19e28d059e8de789550a38cb0ab4ba4c9  /tmp/openclaw-internal-transport-proxy.patch' | sha256sum --check --strict \
+    && git apply /tmp/openclaw-internal-transport-proxy.patch
 COPY scripts/build-runtime-assets.mjs /tmp/build-runtime-assets.mjs
 RUN node /tmp/build-runtime-assets.mjs inputs /source /inputs
 

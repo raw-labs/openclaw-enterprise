@@ -1,7 +1,7 @@
 ---
 created: 2026-08-21
-updated: 2026-11-05
-last_updated_session: authoring-run/0f9e4fc6-9649-465a-8ab4-3fc3124417e2
+updated: "2026-11-05 19:30"
+last_updated_session: authoring-run/88571699-9ee3-42d5-89c5-d871f0a18b62
 ---
 
 # Harness Execution Topology Flow
@@ -51,6 +51,8 @@ graph TD
 ```
 
 ## Execution Trace
+
+[Gateway proxy routing](gateway-outbound-proxy.md) covers both Gateway modes, not separate Harnesses.
 
 ### 1. Freeze Gateway and Harness settings
 
@@ -350,6 +352,8 @@ owns claim sizes, mounts, StorageClass requirements and final teardown.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-05 19:30: Link proxy routing (authoring-run/88571699-9ee3-42d5-89c5-d871f0a18b62 - 324fbad6f248bce4606e175fbb67ac506cd824ff)
 
 - 2026-11-05 14:07: Trace helper specialization. (authoring-run/0f9e4fc6-9649-465a-8ab4-3fc3124417e2 - 644b3f9)
 

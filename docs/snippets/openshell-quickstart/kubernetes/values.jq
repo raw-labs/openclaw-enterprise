@@ -65,7 +65,7 @@
   "repositoryCredentials": {
     "enabled": false
   },
-  "slackProxy": {
+  "gatewayProxy": {
     "enabled": false
   },
   "metrics": {

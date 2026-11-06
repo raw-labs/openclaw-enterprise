@@ -723,7 +723,7 @@ async function startInClusterControllers(
   workerIsolation.metadata.name = `${workerName}-isolation`;
   workerIsolation.spec.podSelector.matchLabels = workerLabels;
   manifests.items.push(workerIsolation);
-  const channels = apiConfiguration.drivers.compute.configuration.runtime?.channels;
+  const channels = apiConfiguration.drivers.compute.configuration.runtime?.proxy;
   if (channels !== undefined) {
     assert.ok(channels.managedProxy, "Slack topology requires the chart-managed proxy");
     // Admission validates Slack credentials before deployment. The chart grants
@@ -945,8 +945,13 @@ function installationConfiguration(authentication, platformNamespace, slack, opt
     configuration.drivers.compute.configuration.gatewayRouting = options.gatewayRouting;
     delete configuration.drivers.compute.configuration.network.gatewayClients;
   }
+  if (options.gatewayProxyUrl !== undefined) {
+    configuration.drivers.compute.configuration.runtime.proxy = {
+      proxyUrl: options.gatewayProxyUrl,
+    };
+  }
   if (slack !== undefined) {
-    configuration.drivers.compute.configuration.runtime.channels = {
+    configuration.drivers.compute.configuration.runtime.proxy = {
       proxyUrl: slack.proxyUrl,
       managedProxy: slack.managedProxy,
     };
