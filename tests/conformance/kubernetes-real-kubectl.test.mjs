@@ -29,8 +29,8 @@ import {
 } from "../helpers/kubernetes-real.mjs";
 import { refusingPort } from "../helpers/available-port.mjs";
 import { listen } from "../helpers/listen.mjs";
-import { withEnvironment } from "../helpers/environment.mjs";
-import { commandPath, prependPath, writeCommand } from "../helpers/fake-commands.mjs";
+import { withEnvironment } from "../helpers/environment.ts";
+import { commandPath, prependPath, writeCommand } from "../helpers/fake-commands.ts";
 import { readJsonLines } from "../helpers/json-lines.mjs";
 import {
   createOpenShellKubernetesFixture,
@@ -1355,6 +1355,7 @@ test(
           "inClusterApiForward",
           "inClusterWorker",
           "worker",
+          "agentWorkloads",
           "productionApp",
           "observerPool",
           "postgresNetwork",
@@ -1462,6 +1463,7 @@ test(
       "attempted inClusterApiForward",
       "attempted inClusterWorker",
       "attempted worker",
+      "attempted agentWorkloads",
       "attempted productionApp",
       "attempted observerPool",
       "attempted postgresNetwork",
@@ -1564,7 +1566,6 @@ test(
         const env = {
           ...process.env,
           TOPOLOGY_TEARDOWN_RECORD: record,
-          OCC_TEST_SLACK_PROXY_URL: "http://127.0.0.1:3128",
           OCC_TEST_SLACK_CHANNEL_ID: "C0",
           OCC_TEST_SLACK_SENDER_BOT_TOKEN: "xoxb-sender",
           SLACK_APP_TOKEN: "xapp-app",

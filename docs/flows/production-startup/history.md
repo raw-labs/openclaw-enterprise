@@ -8,6 +8,8 @@ This record preserves the dated changes to the production startup flow. See the 
 
 ## Changelog
 
+- 2026-10-14 16:02: Trace accompanying API-only proxy startup. (authoring-run/7bd4f79c-2e3a-40b6-b2e9-5e51b495a8f0 - bd8fe1f7b0b798dca84d6f90b7377ddda79d88a6)
+
 - 2026-10-24 17:23: Reject metrics and repository listeners sharing port 8443 before deployment. (authoring-run/21b9b442-e8b7-45d3-a482-742f1742b077 - fd5723d94aebbd96d93e85649eec908adbc6d58a)
 
 - 2026-10-23 11:15: Recognize the reviewed logical-restore catalog. (authoring-run/1b38bd1a-842f-42a8-8641-4858e5a2183a - a4146f54983537954246bc4df3a937293d92b220)
