@@ -122,6 +122,7 @@ function send(
     resolve: (value: OpenShellServiceDocument | boolean) => void,
     reject: (error: unknown) => void,
   ) => void,
+  body?: string,
 ): Promise<OpenShellServiceDocument | boolean> {
   const target = serviceTarget(options, serviceUrl);
   signal.throwIfAborted();
@@ -139,9 +140,18 @@ function send(
     const request = (target.secure ? httpsRequest : httpRequest)({
       hostname: target.hostname,
       port: target.port,
-      method: "GET",
+      method: body === undefined ? "GET" : "POST",
       path,
-      headers: { ...headers, host: target.host },
+      headers: {
+        ...headers,
+        host: target.host,
+        ...(body === undefined
+          ? {}
+          : {
+              "content-type": "application/json",
+              "content-length": String(Buffer.byteLength(body)),
+            }),
+      },
       agent: false,
       ...(target.secure
         ? {
@@ -167,18 +177,22 @@ function send(
       (value) => finish(() => resolve(value)),
       (error) => finish(() => reject(error)),
     );
-    request.end();
+    request.end(body);
   });
 }
 
-/** One bounded GET to a bearer-passthrough service path. */
-export async function getServiceDocument(
+/** A bounded JSON exchange through the existing authenticated service transport. */
+async function serviceDocument(
   options: ServiceTransportOptions,
   serviceUrl: string,
   path: string,
   bearer: string,
   signal: AbortSignal,
+  body?: string,
 ): Promise<OpenShellServiceDocument> {
+  if (body !== undefined && Buffer.byteLength(body) > 4096) {
+    throw new OpenShellGatewayFailure("OpenShell service request exceeds its size bound.");
+  }
   if (!path.startsWith("/") || path.startsWith("//")) {
     throw new OpenShellGatewayFailure("OpenShell service path must be absolute.");
   }
@@ -221,7 +235,29 @@ export async function getServiceDocument(
         });
       });
     },
+    body,
   )) as OpenShellServiceDocument;
+}
+
+export function getServiceDocument(
+  options: ServiceTransportOptions,
+  serviceUrl: string,
+  path: string,
+  bearer: string,
+  signal: AbortSignal,
+): Promise<OpenShellServiceDocument> {
+  return serviceDocument(options, serviceUrl, path, bearer, signal);
+}
+
+export function postServiceDocument(
+  options: ServiceTransportOptions,
+  serviceUrl: string,
+  path: string,
+  bearer: string,
+  body: Readonly<Record<string, unknown>>,
+  signal: AbortSignal,
+): Promise<OpenShellServiceDocument> {
+  return serviceDocument(options, serviceUrl, path, bearer, signal, JSON.stringify(body));
 }
 
 /**
@@ -250,8 +286,27 @@ export async function serviceWebSocketHandshake(
     signal,
     (request, resolve) => {
       request.on("upgrade", (response: IncomingMessage, socket: Socket) => {
-        socket.destroy();
-        resolve(response.statusCode === 101 && response.headers["sec-websocket-accept"] === accept);
+        if (response.statusCode !== 101 || response.headers["sec-websocket-accept"] !== accept) {
+          socket.destroy();
+          resolve(false);
+          return;
+        }
+        // A probe owns only this disposable connection. Send a masked RFC 6455
+        // normal-close frame so the Harness does not report an abrupt disconnect.
+        const mask = randomBytes(4);
+        const closeFrame = Buffer.alloc(8);
+        closeFrame.set([0x88, 0x82]);
+        mask.copy(closeFrame, 2);
+        closeFrame.writeUInt16BE(1000 ^ mask.readUInt16BE(0), 6);
+        const cleanup = setTimeout(() => socket.destroy(), options.requestTimeoutMs);
+        cleanup.unref();
+        socket.once("close", () => clearTimeout(cleanup));
+        socket.once("error", () => socket.destroy());
+        // Let the server close TCP after acknowledging Close, within the bound above.
+        socket.once("end", () => socket.end());
+        socket.resume();
+        socket.write(closeFrame);
+        resolve(true);
       });
       request.on("response", (response: IncomingMessage) => {
         response.destroy();
