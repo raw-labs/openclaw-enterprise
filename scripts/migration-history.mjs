@@ -119,6 +119,13 @@ function requireReceiptsMatchEntries(receipts, entries) {
 }
 
 function classifyReceipts(receipts, manifest) {
+  // The original plugin-driver migration has the same final schema and grants.
+  // Preserve its published receipts while using the repaired SQL for pending upgrades.
+  receipts = receipts.map((receipt, index) => {
+    const entry = manifest.entries[index];
+    const accepted = manifest.acceptedMigrationHashes?.[entry?.tag];
+    return accepted?.includes(receipt.hash) ? { ...receipt, hash: entry.sha256 } : receipt;
+  });
   const expected = manifest.entries;
   const providerCompleted = manifest.compatibleLineages?.providerCompleted;
   const providerCount = providerCompleted?.entries.length ?? 0;

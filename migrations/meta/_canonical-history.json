@@ -544,7 +544,7 @@
       "when": 1787000000068,
       "tag": "0068_agent_plugin_driver",
       "breakpoints": true,
-      "sha256": "4ae7aeabcbdccad1f4aafef523e992740e467c055f7f7a9ab9a1f5adb202341c"
+      "sha256": "49154a9ea9919dae65099f6dd6dd0956f5016aec5f359b9c77e652c8bf015b78"
     }
   ],
   "initialSchemaStates": {
@@ -902,5 +902,10 @@
         }
       ]
     }
+  },
+  "acceptedMigrationHashes": {
+    "0068_agent_plugin_driver": [
+      "4ae7aeabcbdccad1f4aafef523e992740e467c055f7f7a9ab9a1f5adb202341c"
+    ]
   }
 }
