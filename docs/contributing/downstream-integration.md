@@ -51,7 +51,8 @@ Do not use force pushes to make published history match a cleaner diagram.
 ## Retire or replace an input
 
 When upstream absorbs a feature, record its upstream replacement before removing
-it from the outstanding selection. Squashed commits require comparing behavior
+it from the outstanding selection. Absorption does not require closing the source PR;
+record its actual GitHub state without changing it. Squashed commits require comparing behavior
 and tests; ancestry alone cannot prove equivalence. Remove compatibility code
 only after the selected upstream composition supplies its behavior.
 

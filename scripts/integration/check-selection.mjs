@@ -85,7 +85,10 @@ for (const feature of selection.absorbedFeatures ?? []) {
   known.add(feature.number);
   assert.equal(feature.author, "miguelbranco80");
   assert.equal(feature.status, "absorbed-upstream");
-  assert.equal(feature.forkState, "closed");
+  assert.ok(["open", "closed"].includes(feature.forkState));
+  if (feature.forkState === "open") {
+    assert.ok(feature.reason, "An open absorbed PR needs an explicit retirement reason");
+  }
   ancestor(feature.priorSelectedCommit);
   ancestor(feature.upstreamCommit);
   git("merge-base", "--is-ancestor", feature.upstreamCommit, selection.upstream.commit);
