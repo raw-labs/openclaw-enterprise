@@ -1474,20 +1474,37 @@ test(
         (await optedIn.request("GET", agentPath)).data.activeRevisionId === resumed.data.id,
     );
     await assertServing(resumed.data.id);
-    // Creating a second Agent does not inherit the trial Agent's Secret grants.
-    const ungranted = await optedIn.request("POST", `/namespaces/${namespaceId}/agents`, {
-      name: "Ungrantable channel consumer",
+    // Deploy now grants referenced sources transactionally. The second Agent must
+    // still receive its own projections, never the first Agent's credential copy.
+    const second = await optedIn.request("POST", `/namespaces/${namespaceId}/agents`, {
+      name: "Independent channel consumer",
       configurationId: provisioned.configurationId,
       executionMode: "embedded",
       harnessAuth: plan.harnessAuth,
     });
-    assert.equal(ungranted.status, 201, JSON.stringify(ungranted.body));
-    const denied = await optedIn.request(
-      "POST",
-      `/namespaces/${namespaceId}/agents/${ungranted.data.id}/deploy`,
+    assert.equal(second.status, 201, JSON.stringify(second.body));
+    const secondPath = `/namespaces/${namespaceId}/agents/${second.data.id}`;
+    const secondDeploy = await optedIn.request("POST", `${secondPath}/deploy`);
+    assert.equal(secondDeploy.status, 202, JSON.stringify(secondDeploy.body));
+    await waitFor(
+      "second embedded Agent deployment",
+      async () =>
+        (await optedIn.request("GET", secondPath)).data.activeRevisionId === secondDeploy.data.id,
     );
-    assert.equal(denied.status, 403, JSON.stringify(denied.body));
-    assert.equal(await missing("deployment", gatewayName(ungranted.data.id), placement), true);
+    const secondDeployment = await resource("deployment", gatewayName(second.data.id), placement);
+    for (const name of Object.keys(secretBindings)) {
+      const ref = secondDeployment.spec.template.spec.containers[0].env.find(
+        (entry) => entry.name === name,
+      ).valueFrom.secretKeyRef;
+      const projected = await resource("secret", ref.name, placement);
+      assert.equal(projected.metadata.labels["openclaw.dev/agent"], second.data.id);
+      assert.equal(projected.metadata.labels["openclaw.dev/revision"], secondDeploy.data.id);
+    }
+    assert.equal((await optedIn.request("POST", `${secondPath}/stop`)).status, 202);
+    await waitFor(
+      "second embedded Agent stop",
+      async () => await missing("deployment", gatewayName(second.data.id), placement),
+    );
     // Withdrawal must remain possible after the operator restores default refusal.
     await optedIn.stopWorker();
     const stopped = await stock.request("POST", `${agentPath}/stop`);
