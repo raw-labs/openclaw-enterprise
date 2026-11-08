@@ -4,7 +4,7 @@ rfc: ../rfcs/0031-temporary-embedded-channel-trial.md
 
 # Implementation plan: Trial native channels in embedded OpenClaw
 
-- **ID:** RFC-0030
+- **ID:** RFC-0031
 - **Delivery status:** In progress
 - **Owner:** miguelbranco80
 - **Authority:** [Temporary embedded channel proposal](../rfcs/0031-temporary-embedded-channel-trial.md)
@@ -79,7 +79,7 @@ without changing the trial's Proposed trust decision. RFC-0023 was allocated
 upstream, so this unmerged proposal and its plan now use RFC-0029.
 
 On the 2026-11-05 refresh, upstream allocated RFC-0029 to per-Agent plugin
-catalogs. The unmerged trial now uses RFC-0030; this existing plan filename is
+catalogs. The unmerged trial now uses RFC-0031; this existing plan filename is
 retained. The proposal remains Proposed and this delivery remains partial.
 
 Current admission retains upstream model-provider ownership: the fixture sets the

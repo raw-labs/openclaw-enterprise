@@ -1385,7 +1385,7 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
   // Full Integration allocation while ordinary CI uses four CPUs.
   const jobs = loadYaml(".github/workflows/full-integration.yml").jobs;
   const job = jobs["pr-safe-same-sha"];
-  const runnerFor = (target, lane) => {
+  const runnerFor = (target, lane, vars = {}) => {
     const runner = target["runs-on"];
     return runner.startsWith("${{")
       ? runInNewContext(runner.replace(/^\$\{\{\s*|\s*\}\}$/g, ""), {
@@ -1397,9 +1397,10 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
   };
   const ciRunners = new Map(laneTable().map((row) => [row.lane, row.runner]));
   assert.equal(job.strategy.matrix.include, "${{ fromJSON(needs.ci-reuse.outputs.matrix) }}");
-  const lanes = JSON.parse(read("scripts/ci/full-integration-lanes.json")).map(
-    (entry) => entry.lane,
-  );
+  const lanes = [
+    ...JSON.parse(read("scripts/ci/full-integration-lanes.json")),
+    ...jobs["image-lanes-same-sha"].strategy.matrix.include,
+  ].map((entry) => entry.lane);
   const pinned = lanes.filter(
     (lane) =>
       lane === "postgres-auth" ||

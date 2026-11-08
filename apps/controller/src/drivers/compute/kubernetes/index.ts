@@ -4567,11 +4567,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     this.verifyGatewayRoutingConfiguration({
       configuration: this.namedGatewayConfigurationDocument(input.configuration),
-      harness: {
-        id: input.executionMode === "embedded" ? "openclaw" : "codex",
-        version: "provisioning",
-        mode: input.executionMode,
-      },
+      harness: { mode: input.executionMode },
     });
   }
 
@@ -15468,8 +15464,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
   }
 
   private enabledChannels(revision: {
-    configuration: AgentRevision["configuration"];
-    harness: Pick<RevisionHarnessDescriptor, "mode">;
+    readonly configuration: AgentRevision["configuration"];
+    readonly harness: Pick<RevisionHarnessDescriptor, "mode">;
   }): readonly string[] {
     const providers = enabledChannelProviders(
       revision.configuration,
