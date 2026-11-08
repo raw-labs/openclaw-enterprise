@@ -731,7 +731,7 @@ async function startInClusterControllers(
   workerIsolation.spec.podSelector.matchLabels = workerLabels;
   manifests.items.push(workerIsolation);
   const channels = apiConfiguration.drivers.compute.configuration.runtime?.proxy;
-  if (channels !== undefined) {
+  if (channels?.managedProxy !== undefined) {
     assert.ok(channels.managedProxy, "Slack topology requires the chart-managed proxy");
     // Admission validates Slack credentials before deployment. The chart grants
     // only the API this proxy route; the worker keeps its existing isolation.
@@ -1681,12 +1681,17 @@ async function arrangeProductionTopology(testContext, mode, slack, options = {})
     controller.authentication,
     platformNamespace,
     slack,
-    workspaceGateway === undefined
-      ? {}
-      : {
-          gatewayRouting: workspaceGateway.routing,
-          gatewayTrustedProxyCidrs: workspaceGateway.nativeOptions.gatewayAuth.trustedProxies,
-        },
+    {
+      ...(options.gatewayProxyUrl === undefined
+        ? {}
+        : { gatewayProxyUrl: options.gatewayProxyUrl }),
+      ...(workspaceGateway === undefined
+        ? {}
+        : {
+            gatewayRouting: workspaceGateway.routing,
+            gatewayTrustedProxyCidrs: workspaceGateway.nativeOptions.gatewayAuth.trustedProxies,
+          }),
+    },
   );
   // Cases share an Installation, so keep its policy after the Default user case
   // creates durable Owner bindings. Kubernetes cleanup does not remove those grants.

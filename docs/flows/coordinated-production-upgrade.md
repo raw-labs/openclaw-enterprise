@@ -81,14 +81,13 @@ Runtime upgrades lock the private sibling dispatch journal separately from evide
 `matches_yaml` compares ordered candidate YAML mappings, including images, with
 the [baseline](../guides/deploy/upgrade-baseline.md#record-the-release-and-its-configuration)
 before protected-setting projections. Unusable inputs or unwritable evidence cause
-`Cannot compare upgrade YAML`. Only Slack directory proxy, curated Codex
+`Cannot compare upgrade YAML`. Only curated Codex
 PluginDriver selection and wrapping one registration in an array may change before
-image selection. Baselines remain unchanged. Startup validates the candidate
+image selection. Proxy changes require protected configuration updates. Baselines remain unchanged. Startup validates the candidate
 controller; broker checks compare references, not ConfigMap/Secret contents.
 
-Runtime upgrades require complete authorized inventory and baseline versions.
-Nonterminal deployments, missing versions or unready Namespaces stop preparation.
-Stopped/deleting Agents are excluded; pending repository cleanup is allowed.
+Runtime upgrades require authorized inventory, baseline versions and ready Namespaces.
+Nonterminal deployments block preparation. Exclude stopped/deleting Agents; allow pending repository cleanup.
 
 `prepare_upgrade` copies the PostgreSQL `run` result;
 `validate_controller_compatibility` calls
@@ -343,6 +342,7 @@ undoing prior merges. Rename keys are literal, including `constructor` and
 
 - 2026-11-05 19:30: Keep general Gateway proxy selection outside image-only candidate changes (authoring-run/88571699-9ee3-42d5-89c5-d871f0a18b62 - 324fbad6f248bce4606e175fbb67ac506cd824ff)
 - 2026-11-08 12:18: Reject Helm target overrides. (authoring-run/cd7fae84-40fe-4d7a-bfe0-aff970e961db - 4566d20b8ef66a3268e27bceac946765ecd5d336)
+- 2026-11-08 10:00: Preserve proxy boundaries alongside current upstream lifecycle. (agent:main:subagent:060410f5-67b1-4703-b963-741996a862b6 - 7db5638975981ec1400f1a4ba52da77d5fd33dce)
 
 - 2026-11-07 03:01: Freeze reviewed controller compatibility evidence. (authoring-run/4adaf10b-d7e7-46e1-8f30-65993c797458 - ada47832cb112f255f6c51d34dae37acce9760cd)
 
