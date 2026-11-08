@@ -213,12 +213,13 @@ Switching methods hides that feedback without changing the lookup or saved choic
 
 ## Changelog
 
-- 2026-11-05 01:26: Preserve accepted Configuration Secret grants and upstream creation checks during refresh. (agent:main:dashboard:34871ae5-240f-4f44-b364-50bd21ecedec - b698b30abc802185905bf4ff28792a7b9cc1c04e)
+- 2026-11-08 09:34: Preserve authored plugin permissions and the disabled Codex entry while merging Namespace capability discovery. (authoring-run/f474f795-758c-4b42-8835-1bdcf14162fa - 7db5638975981ec1400f1a4ba52da77d5fd33dce)
+
+- 2026-11-05: A member reads the Namespace's Agent capabilities after a refused Installation read, registers a model Secret with a Credential Gateway, and opens the draft without an IAM request. (claude/session_01HzmRt1DGB79VEnEWHt7PRy)
+- 2026-11-05 18:37: Explain the Configuration number range refusal on Create. (authoring-run/d006a89e-c176-48cc-8710-16d38835bbb9 - 5fd3fde4911e1640c354d69bb09f6f3d72445a05)
 - 2026-11-05 13:00: Retain upstream malformed-policy guards while preserving authored allow/deny lists through Harness changes. (authoring-run/e403cb92-13a9-40b8-a636-6922c2747638 - 71d3a9d7a5385839159672c5152ee42848e9a46c)
 
 - 2026-11-05 08:55: Preserve Harness-switch permissions and use existing server admission, including disabled Codex entry acceptance. (authoring-run/878b2a70-223a-4813-9763-0f2a7051f8bd - 65dc3e90e)
-- 2026-11-05: A member reads the Namespace's Agent capabilities after a refused Installation read, registers a model Secret with a Credential Gateway, and opens the draft without an IAM request. (claude/session_01HzmRt1DGB79VEnEWHt7PRy)
-- 2026-11-05 18:37: Explain the Configuration number range refusal on Create. (authoring-run/d006a89e-c176-48cc-8710-16d38835bbb9 - 5fd3fde4911e1640c354d69bb09f6f3d72445a05)
 - 2026-11-04 22:06: Explain which Create Agent settings stay in place when an invalid plugin list blocks a Codex change. (authoring-run/386aa943-15cf-49cd-b53e-05831b4a7da0 - e109eba64ea0e81c02513f81f9c892a832dc1b69)
 - 2026-10-25: The per-Secret `operate` remedy names an exact-Secret grant; the Agents list gives Create Agent's next step when Agent create is denied. (findings 2507, 2508)
 - 2026-10-25: Refuse a typed model key, and disable the Preset's **Create new Secret**, where `operate` is denied on a readable Secret. (fix-2492, finding 2492)

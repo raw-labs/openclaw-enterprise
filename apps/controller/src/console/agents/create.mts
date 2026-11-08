@@ -1404,7 +1404,7 @@ function renderAgentForm(
     if (values === undefined) {
       return diagnostic.kind === "number-range" ? "number-range" : "invalid-json";
     }
-    // Only the Codex template merges this field. Do not validate unrelated draft settings.
+    // Codex controls require a valid allowlist when supplied; other Harness drafts stay editable.
     if (targetHarness !== "codex" || !Object.hasOwn(objectFields(values.plugins), "allow")) {
       return values;
     }
@@ -1622,25 +1622,24 @@ function renderAgentForm(
         };
       }
     }
-    values.models = { ...values.models, providers };
+    values.models = { ...(values.models ?? {}), providers };
     // Keep an authored disable through a round trip; the runtime overlay owns enablement.
-    const codex = values.plugins?.entries?.codex;
-    const codexDisabled =
-      codex !== null && typeof codex === "object" && "enabled" in codex && codex.enabled === false;
+    const codex = pluginEntries.codex;
+    const codexDisabled = isObject(codex) && codex.enabled === false;
     if (next.plugins) {
       const runtimeEntry = {
         ...next.plugins.entries.codex,
         ...(codexDisabled ? { enabled: false } : {}),
       };
       values.plugins = {
-        ...values.plugins,
+        ...(values.plugins ?? {}),
         entries: {
-          ...values.plugins?.entries,
+          ...(plugins.entries ?? {}),
           codex: resetTransport ? runtimeEntry : (codex ?? runtimeEntry),
         },
       };
-    } else if (values.plugins?.entries?.codex && !codexDisabled) {
-      delete values.plugins.entries.codex;
+    } else if (pluginEntries.codex && !codexDisabled) {
+      delete pluginEntries.codex;
     }
     configuration.value = JSON.stringify(values, null, 2);
     // Read the written selections: omitted primaries and -0 must match subsequent draft reads.
