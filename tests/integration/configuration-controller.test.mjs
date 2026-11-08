@@ -3276,6 +3276,7 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
     ...[
       ["env", "OPENCLAW_PROXY_ACTIVE", "1"],
       ["env.vars", "https_proxy", "http://proxy.example.invalid:3128"],
+      ["env.vars", "HTTP_PROXY", "http://proxy:3128"],
       ["env.vars", "NO_PROXY", "*"],
     ].map(([parent, name, value]) => [
       { ...valid, env: parent === "env" ? { [name]: value } : { vars: { [name]: value } } },
@@ -3439,7 +3440,7 @@ test("Configuration save and Kubernetes deployment refuse caller-owned credentia
   // A disabled unsupported channel and an ordinary application env name still save.
   for (const values of [
     { ...valid, channels: { discord: { enabled: false } } },
-    { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
+    { ...valid, env: { vars: { APPLICATION_ORIGIN: "http://app.example.test" } } },
   ]) {
     await updateSaved(context, item, values, JSON.stringify(values));
   }
@@ -3583,7 +3584,9 @@ test("Configuration create, update and Agent create's check refuse a channel cre
   assert.deepEqual(stored.body.data.values, slack);
   assertRefused(
     await request(context.app, "PATCH", item, {
-      body: { values: { ...slack, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } } },
+      body: {
+        values: { ...slack, env: { vars: { APPLICATION_ORIGIN: "http://app.example.test" } } },
+      },
     }),
     appRefusal,
     { label: "unrelated update of a stored row" },
