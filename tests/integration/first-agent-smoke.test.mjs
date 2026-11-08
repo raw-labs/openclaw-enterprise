@@ -14,6 +14,7 @@ import {
   bakeReferences,
   clusterEventLines,
   createApi,
+  createStepRecorder,
   observeAgentStop,
   postgresImage,
   providerImageDockerfile,
@@ -27,13 +28,97 @@ import {
   waitFor,
   watchCluster,
 } from "../../scripts/ci/first-agent-smoke.mjs";
-import { withEnvironment } from "../helpers/environment.mjs";
-import { commandPath } from "../helpers/fake-commands.mjs";
+import { withEnvironment } from "../helpers/environment.ts";
+import { commandPath } from "../helpers/fake-commands.ts";
 import { listen } from "../helpers/listen.mjs";
 
 const revision = "rev_00000000-0000-4000-8000-000000000001";
 const chatNonce = "OCE_SMOKE_00000000-0000-4000-8000-000000000001";
 const validChatReply = { status: 200, role: "assistant", content: chatNonce };
+
+test("smoke timing records overlapping admissions on one elapsed timeline", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "first-agent-timing-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let clock = 1000;
+  const recorder = createStepRecorder(() => clock);
+  const embedded = Promise.withResolvers();
+  const codex = Promise.withResolvers();
+  const control = Promise.withResolvers();
+  const started = [];
+  const admission = recorder.initialAdmissions({
+    embedded: () => {
+      started.push("embedded");
+      clock += 2;
+      return embedded.promise;
+    },
+    codex: () => {
+      started.push("codex");
+      clock += 3;
+      return codex.promise;
+    },
+    control: () => {
+      started.push("control");
+      return control.promise;
+    },
+  });
+  assert.deepEqual(started, ["embedded", "codex", "control"]);
+
+  clock = 1010;
+  control.resolve("control");
+  await Promise.resolve();
+  clock = 1020;
+  embedded.resolve("embedded");
+  await Promise.resolve();
+  clock = 1030;
+  codex.resolve("codex");
+  assert.deepEqual(await admission, ["embedded", "codex", "control"]);
+
+  await recorder.writeTimingReport(directory);
+  const report = JSON.parse(
+    await readFile(join(directory, "first-agent-smoke-timing.json"), "utf8"),
+  );
+  assert.deepEqual(report, {
+    version: 1,
+    rows: [
+      { phase: "admit-reader-control", startMs: 5, endMs: 10, status: "ok" },
+      { phase: "admit-embedded", startMs: 0, endMs: 20, status: "ok" },
+      { phase: "admit-codex", startMs: 2, endMs: 30, status: "ok" },
+      { phase: "initial-admissions", startMs: 0, endMs: 30, status: "ok" },
+    ],
+  });
+});
+
+test("smoke timing retains failure and omits pending branches and free-form data", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "first-agent-timing-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let clock = 20;
+  const recorder = createStepRecorder(() => clock);
+  const pending = Promise.withResolvers();
+  const failed = Promise.withResolvers();
+  const error = new Error("unpublished diagnostic sentinel");
+  await recorder.step("free-form timing sentinel", () => "operation result sentinel");
+  const admission = recorder.initialAdmissions({
+    embedded: () => pending.promise,
+    codex: () => failed.promise,
+    control: () => pending.promise,
+  });
+  clock = 28;
+  failed.reject(error);
+  await assert.rejects(admission, (rejection) => rejection === error);
+
+  await recorder.writeTimingReport(directory);
+  const report = JSON.parse(
+    await readFile(join(directory, "first-agent-smoke-timing.json"), "utf8"),
+  );
+  assert.deepEqual(report, {
+    version: 1,
+    rows: [
+      { phase: "admit-codex", startMs: 0, endMs: 8, status: "failed" },
+      { phase: "initial-admissions", startMs: 0, endMs: 8, status: "failed" },
+    ],
+  });
+  pending.resolve();
+});
 
 test("chat proof accepts the deterministic assistant answer", () => {
   for (const content of [chatNonce, ` \t${chatNonce}\r\n`]) {
@@ -524,6 +609,21 @@ test("the smoke bake only pushes the controller and runtime images, and loads th
         !output.startsWith("type=docker") || definition === target["smoke-provider"],
         output,
       );
+    }
+  }
+});
+
+test("an artifact-backed smoke derives trust and provider images without compiling a runtime", () => {
+  const runtimeContext = `oci-layout:///work/verified-runtime@sha256:${"d".repeat(64)}`;
+  for (const load of [false, true]) {
+    const { target } = smokeBakeDefinition({ ...bakeInput, runtimeContext, load });
+    // Both FROM (trust) and COPY --from (provider) must resolve the same verified
+    // image. Keeping the source target here would silently reintroduce a cold build.
+    assert.equal(target["smoke-runtime-base"], undefined);
+    assert.deepEqual(target["smoke-runtime"].contexts, { "smoke-runtime-base": runtimeContext });
+    assert.equal(target["smoke-runtime"].args.RUNTIME_IMAGE, "smoke-runtime-base");
+    if (!load) {
+      assert.deepEqual(target["smoke-provider"].contexts, { "smoke-runtime-base": runtimeContext });
     }
   }
 });

@@ -1,5 +1,10 @@
 import { Check } from "typebox/value";
-import { ConfigurationValues, JsonValue } from "../../packages/contracts/src/api/common.ts";
+import {
+  ConfigurationValues,
+  CreatePresetBody,
+  JsonValue,
+} from "../../packages/contracts/src/api/common.ts";
+import { validatePresetTemplate } from "../../packages/contracts/src/index.ts";
 import { AgentDeploymentStatusSchema } from "../../packages/contracts/src/api/resources.ts";
 import {
   deploymentErrorForWork,
@@ -364,6 +369,7 @@ export async function newPage(
   options: {
     args?: string[];
     browserType?: BrowserType;
+    launch?: () => Promise<Browser>;
     browser?: () => Promise<Browser>;
     context?: Parameters<Browser["newContext"]>[0];
   } = {},
@@ -371,13 +377,13 @@ export async function newPage(
   const artifacts = await artifactDirectory(t);
   assert.ok(
     options.browser === undefined ||
-      (options.args === undefined && options.browserType === undefined),
+      (options.args === undefined && options.browserType === undefined && options.launch === undefined),
     "pass a shared browser or browser type/launch arguments, not both",
   );
-  const shared = options.args === undefined && options.browserType === undefined;
+  const shared = options.args === undefined && options.browserType === undefined && options.launch === undefined;
   const browser = shared
     ? await (options.browser ?? sharedBrowser)()
-    : await launchBrowser(options);
+    : await (options.launch?.() ?? launchBrowser(options));
   const resources: {
     context?: BrowserContext;
     diagnostics?: Awaited<ReturnType<typeof watchBrowserContext>>;
@@ -722,11 +728,24 @@ export async function waitForShownInputValue(
 export async function waitForEnabled(locator: Locator, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   await locator.waitFor({ state: "attached", timeout: timeoutMs });
-  await waitForCondition(
-    () => locator.isEnabled(),
-    `${locator} stayed disabled for ${timeoutMs} ms`,
-    Math.max(1, deadline - Date.now()),
-  );
+  try {
+    await waitForCondition(
+      () => locator.isEnabled(),
+      `${locator} stayed disabled for ${timeoutMs} ms`,
+      Math.max(1, deadline - Date.now()),
+    );
+  } catch (error) {
+    const reason = await locator.evaluate((element) =>
+      (element.getAttribute("aria-describedby") ?? "")
+        .split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" "),
+    );
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}; UI reason: ${reason}`,
+      { cause: error },
+    );
+  }
 }
 
 // Ordering sentinel for "this action sends no request" checks. After one macrotask turn, the
@@ -780,13 +799,19 @@ export async function waitForCondition(
   }
 }
 
-// A Preset the product ships in deploy/presets, by file name without ".json" ("default-codex",
-// "standard-codex"): for createConsoleAppFixture's defaultPresets or a Preset create. Each call
-// reads the file again, so callers never share one object.
+// Read a fresh shipped draft by file name without ".json". The wire shape and template
+// syntax are checked; concrete launch fields and credential admission remain downstream.
 export async function shippedPreset(name: string) {
   const preset: unknown = JSON.parse(
     await readFile(new URL(`../../deploy/presets/${name}.json`, import.meta.url), "utf8"),
   );
+  assert.ok(
+    Check({ SafeJsonValue: JsonValue }, CreatePresetBody, preset),
+    `Expected shipped Preset ${name} to match the create wire shape`,
+  );
+  // Discard the validator's broader return type: tokenized approvers are valid drafts but
+  // need not satisfy the concrete Agent approver schema until rendered.
+  validatePresetTemplate(preset.template);
   return preset;
 }
 

@@ -577,6 +577,46 @@
       "tag": "0072_installation_gateway_proxy",
       "breakpoints": true,
       "sha256": "c2234ccaab335e36b5bdccd3d32e25168a18f9f205120af98de7715230f075c7"
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1787000000073,
+      "tag": "0073_connection_templates",
+      "breakpoints": true,
+      "sha256": "c0cc7c64e1c13a00b07f56c624cb12fb09746439eb5bf8ad7ed3e9f3ad70299a"
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1787000000074,
+      "tag": "0074_saved_connections",
+      "breakpoints": true,
+      "sha256": "d365de5ec6046c7e0ff274c8527b3598c0bf1560a9b3ffc675103d6b3912da4d"
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1787000000075,
+      "tag": "0075_default_users",
+      "breakpoints": true,
+      "sha256": "a4f7c22caf4f9dcb548cad3f3a069a0f66ea941a0b43f9fe2087b5f72803cce9"
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1787000000076,
+      "tag": "0076_harness_revision_settings",
+      "breakpoints": true,
+      "sha256": "bb7a1b4480f0566ecf56f47f5789ba681994ffa2a5cba5eda14d38be8973eb7c"
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1787000000077,
+      "tag": "0077_account_administration_policy",
+      "breakpoints": true,
+      "sha256": "7c27834941b7a38bc8537fffd1a59cb98dba98f3e32e16c639bec9d4829d910a"
     }
   ],
   "initialSchemaStates": {
@@ -695,7 +735,12 @@
     "preAgentDeployIntent": "702d71fd350d70b9135f3a7232c638f78640a1cbdc6dbf563b978d44382189b1",
     "preAgentCredentialSourceLimit": "ef93e71de1f6c50730a403e24ea037c9f730ba339703305add1a52e93a5ad2dc",
     "preAgentPluginDriver": "24db64540d6831729f5ba4756aa7eb83b462fc580fffa63a25a9c31711c03b6c",
-    "preInstallationGatewayProxy": "175a1ede94b2168d47f1c03dfee9b4960acde2563e6d2e68a73464f3c061604f"
+    "preInstallationGatewayProxy": "175a1ede94b2168d47f1c03dfee9b4960acde2563e6d2e68a73464f3c061604f",
+    "preConnectionTemplates": "8fc3e20bcb36ad9b2afe8ab96077139b12b50c825dd18ff323603d0e0540b250",
+    "preSavedConnections": "1989ad2291a59e5d15e7f35fd008677449cac6cd11e653605b3d48675655dba9",
+    "preDefaultUsers": "b3d9b0b499a4ea4a0cab68cd2836ab6ceba96be82c3f2bb6faac5e7fcb2a06c4",
+    "preHarnessOverrides": "451fc5103dcacb194c7decfd419da6444995d78ddbd4f44ee4f69217b4cb6c5b",
+    "preAccountAdministrationPolicy": "c1e2e44e89e14f9408c939d4e2caf72d49dabc200df617f52b11a7050c36828c"
   },
   "ledgerCatalogs": {
     "initialized": "62946da6b1fc2b06df09e97dda4cf1831f170a2f3d5ff35a9f107af206c425dc",

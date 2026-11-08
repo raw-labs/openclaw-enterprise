@@ -16,8 +16,11 @@ import type {
 } from "../../packages/contracts/src/index.ts";
 import {
   loadInstallationConfiguration,
+  loadStartupConfigurationSnapshot,
   readPublicCaBundle,
+  type InstallationRuntimeDrivers,
 } from "../../apps/controller/src/composition/installation-config.ts";
+import { GitHubRepositoryPolicy } from "../../apps/controller/src/drivers/repo/github/policy.ts";
 import { startPreparedGitHubGitOwner } from "../../apps/controller/src/backends/repository-credentials/prepared-git-owner.ts";
 import { bindRepositoryGitTransport } from "../../apps/controller/src/composition/repository-credentials/transport.ts";
 import { repositoryGitAuthority } from "../../apps/controller/src/composition/repository-credentials/custody-selection.ts";
@@ -226,27 +229,91 @@ test("production composition separates repository policy from protected and expl
   assert.deepEqual(scope.pushRefAllowlist, ["refs/heads/review"]);
   assert.equal(scope.pullRequestBase, "main");
   assert.equal(scope.draftPullLimit, "one-per-grant");
-  await assert.rejects(
-    load({
+  const startup = await loadStartupConfigurationSnapshot({
+    mode: "production",
+    environment: { OCC_CONFIG_PATH: path },
+  });
+  const loadSnapshot = (value: typeof configuration) =>
+    loadInstallationConfiguration({
+      mode: "production",
+      packageRoot: directory,
+      startupConfiguration: { ...startup, configuration: value },
+    });
+  const unknownPolicyField = {
+    name: "ConfigurationValidationError",
+    error: {
+      details: [
+        {
+          path: "",
+          code: "UNKNOWN_FIELD",
+          message: "Configuration does not satisfy additionalProperties.",
+        },
+      ],
+    },
+  };
+  for (const misplaced of [
+    { controlSocket: "/unselected/control.sock" },
+    { publicCaPath: "/unselected/public-ca.pem" },
+  ]) {
+    const invalid = {
       ...configuration,
       repository: {
         ...configuration.repository,
-        configuration: { sessionDurationSeconds: 180, controlSocket: "/unselected/control.sock" },
+        configuration: { sessionDurationSeconds: 180, ...misplaced },
       },
-    }),
-    {
-      name: "ConfigurationValidationError",
-      error: {
-        details: [
-          {
-            path: "",
-            code: "UNKNOWN_FIELD",
-            message: "Configuration does not satisfy additionalProperties.",
-          },
-        ],
+    };
+    await assert.rejects(load(invalid), unknownPolicyField);
+  }
+  for (const replacePolicy of [false, true]) {
+    const mutable = {
+      ...configuration,
+      repository: {
+        ...configuration.repository,
+        configuration: { sessionDurationSeconds: 180 },
       },
-    },
-  );
+    };
+    let scheduled = false;
+    const validate = GitHubRepositoryPolicy.validateConfiguration;
+    const validation = t.mock.method(
+      GitHubRepositoryPolicy,
+      "validateConfiguration",
+      (value: unknown) => {
+        const errors = validate(value);
+        if (!scheduled && errors.length === 0) {
+          scheduled = true;
+          // Mutate at the next loader await, after genuine validation of the policy copy.
+          queueMicrotask(() => {
+            if (replacePolicy) {
+              mutable.repository.configuration = { sessionDurationSeconds: 90 };
+            } else {
+              Object.assign(mutable.repository.configuration, {
+                sessionDurationSeconds: 90,
+                note: "changed after validation",
+              });
+            }
+          });
+        }
+        return errors;
+      },
+    );
+    try {
+      const captured = (await loadSnapshot(mutable))!;
+      assert.equal(mutable.repository.configuration.sessionDurationSeconds, 90);
+      assert.equal(
+        captured.repositoryPolicy!.resolve({
+          namespaceId,
+          bindings: [{ repositoryRef: "source", profile: "git-write" }],
+        }).sessionDurationSeconds,
+        180,
+      );
+      assert.equal(
+        captured.repositoryGitDriver!.ref.configurationId,
+        protectedGit.repositoryGitDriver!.ref.configurationId,
+      );
+    } finally {
+      validation.mock.restore();
+    }
+  }
   await assert.rejects(
     load({
       ...configuration,
@@ -477,7 +544,6 @@ function externalGitJourney(
     const modelGateway = conversation
       ? new OpenShellCredentialGatewayDriver(modelGatewayConfiguration, {
           id: "external-journey-model",
-          modelProvider: { protocol: "openai-responses", baseUrl: conversation.baseUrl },
           backend: {
             id: "external-journey-model",
             drivers: { credential_gateway: "external-journey-model" },
@@ -560,15 +626,28 @@ function externalGitJourney(
       });
     const apiPackage = await protectedDriverPackage(t, id, "repository-git");
     const apiDrivers = (await load(apiPackage.directory))!;
-    const loadedDrivers = (await load(directory))!;
-    const drivers = modelGateway
-      ? {
-          ...loadedDrivers,
+    const loadWorkerDrivers = async (
+      liveSender?: InstallationRuntimeDrivers["repositoryGitDriver"],
+    ) => {
+      const loaded = (await load(directory))!;
+      if (liveSender) {
+        // The worker restarts, but the external sandbox still has its original policy and material.
+        assert.deepEqual(loaded.repositoryGitDriver?.ref, liveSender.ref);
+      }
+      return {
+        ...loaded,
+        ...(liveSender && {
+          protectedDriver: liveSender,
+          repositoryGitDriver: liveSender,
+          sandboxDriver: liveSender.require("sandbox"),
+          proxyDriver: liveSender.require("credential_proxy"),
+        }),
+        ...(modelGateway && {
           credentialGatewayDriver: modelGateway,
           installation: {
-            ...loadedDrivers.installation,
+            ...loaded.installation,
             drivers: {
-              ...loadedDrivers.installation.drivers,
+              ...loaded.installation.drivers,
               credential_gateway: {
                 id: modelGateway.id,
                 implementation: modelGateway.implementation,
@@ -577,8 +656,10 @@ function externalGitJourney(
               },
             },
           },
-        }
-      : loadedDrivers;
+        }),
+      };
+    };
+    let drivers = await loadWorkerDrivers();
     const { repositoryOwner, repositoryRegistry, repositoryGitDriver: owner } = drivers;
     assert.ok(owner && repositoryOwner && repositoryRegistry && drivers.preparedRepositoryGit);
     assert.equal(repositoryOwner.controlSocket, undefined);
@@ -1097,10 +1178,8 @@ function externalGitJourney(
     }
     const ref = { ...key, revisionId: revision.id };
     t.diagnostic("journey revision " + revision.id);
-    // Queue cadences are not under test here: waits on a worker pass make this revision's
-    // queued passes due.
-    try {
-      await f.start(compute, {
+    const startWorker = () =>
+      f.start(compute, {
         emit,
         transformDrivers: () => ({
           ...drivers,
@@ -1108,6 +1187,10 @@ function externalGitJourney(
           configurationDriver: controller.selectedDriver("configuration"),
         }),
       });
+    // Queue cadences are not under test here: waits on a worker pass make this revision's
+    // queued passes due.
+    try {
+      await startWorker();
       await waitForRevisionPass(
         "worker's standing execution",
         f,
@@ -1668,6 +1751,7 @@ function externalGitJourney(
           await f.stop();
           await transport!.close();
           await prepared.close();
+          drivers = await loadWorkerDrivers(owner);
           prepared = await startOwner();
           transport = await bindRepositoryGitTransport(
             drivers,
@@ -1677,14 +1761,7 @@ function externalGitJourney(
             transportOptions,
           );
           await expireStoppedClaims(f, revision);
-          await f.start(compute, {
-            emit,
-            transformDrivers: () => ({
-              ...drivers,
-              computeDriver: compute,
-              configurationDriver: controller.selectedDriver("configuration"),
-            }),
-          });
+          await startWorker();
           const replacementPasses = peer.delivery.reconciliations;
           await waitFor(
             "replacement observes hidden B without dispatch",
@@ -1755,15 +1832,9 @@ function externalGitJourney(
           assert.deepEqual((await readReduction()).records, []);
           peer.reduction.loseReply = true;
           peer.reduction.hideObservation = true;
+          drivers = await loadWorkerDrivers(owner);
           await expireStoppedClaims(f, revision);
-          await f.start(compute, {
-            emit,
-            transformDrivers: () => ({
-              ...drivers,
-              computeDriver: compute,
-              configurationDriver: controller.selectedDriver("configuration"),
-            }),
-          });
+          await startWorker();
           const original = await waitFor(
             "original withdrawal applies despite its lost reply",
             async () => {
@@ -1967,6 +2038,7 @@ function externalGitJourney(
         peer.reduction.hideObservation = false;
         await transport!.close();
         await prepared.close();
+        drivers = await loadWorkerDrivers(owner);
         prepared = await startOwner();
         transport = await bindRepositoryGitTransport(
           drivers,
@@ -1976,14 +2048,7 @@ function externalGitJourney(
           transportOptions,
         );
         await expireStoppedClaims(f, revision);
-        await f.start(compute, {
-          emit,
-          transformDrivers: () => ({
-            ...drivers,
-            computeDriver: compute,
-            configurationDriver: controller.selectedDriver("configuration"),
-          }),
-        });
+        await startWorker();
         // Cleanup retries after the lost reply on its 30-second cadence.
         await waitForRevisionPass(
           "replacement worker observes the original reduction",

@@ -26,6 +26,7 @@ import {
 import { migrateWithHistory } from "../../scripts/migration-history.mjs";
 import { createPostgresPool } from "../../packages/occ/src/state/postgres-pool.ts";
 import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
+import { assertReleasedControllerCompatibility } from "../helpers/released-controller-compatibility.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
 const migrationsDirectory = join(repositoryRoot, "migrations");
@@ -41,6 +42,16 @@ const providerMigrationTags = new Set([
   "0030_codex_pat_harness_auth",
 ]);
 const execFileAsync = promisify(execFile);
+const controllerImages = {
+  released: {
+    reference: process.env.OCC_TEST_RELEASED_CONTROLLER_IMAGE,
+    revision: process.env.OCC_TEST_RELEASED_CONTROLLER_REVISION,
+  },
+  candidate: {
+    reference: process.env.OCC_TEST_CANDIDATE_CONTROLLER_IMAGE,
+    revision: process.env.OCC_TEST_CANDIDATE_CONTROLLER_REVISION,
+  },
+};
 const dependency = createRequire(new URL("../../packages/occ/package.json", import.meta.url));
 const { drizzle } = dependency("drizzle-orm/node-postgres");
 const { migrate } = dependency("drizzle-orm/node-postgres/migrator");
@@ -235,13 +246,21 @@ test(
           .replaceAll(`"occ"."${table}".`, `"${table}".`);
         await client.query(temporaryDdl);
         const checks = await client.query(
-          `SELECT pg_get_constraintdef(oid) AS definition
+          `SELECT pg_get_constraintdef(oid) AS definition, convalidated, conrelid=$3::regclass AS stored
              FROM pg_constraint
             WHERE conname = $1 AND conrelid IN ($2::regclass, $3::regclass)`,
           [constraint, `pg_temp.${table}`, `occ.${table}`],
         );
         assert.equal(checks.rowCount, 2, `Both tables must have ${constraint}`);
-        assert.equal(checks.rows[0].definition, checks.rows[1].definition);
+        const generated = checks.rows.find((row) => !row.stored);
+        const stored = checks.rows.find((row) => row.stored);
+        // Existing snapshots remain available for cleanup; new writes need resolved settings.
+        const retainedUnsupportedSnapshots = constraint === "agent_revisions_admitted_snapshot";
+        assert.equal(stored.convalidated, !retainedUnsupportedSnapshots);
+        assert.equal(
+          stored.definition,
+          generated.definition + (retainedUnsupportedSnapshots ? " NOT VALID" : ""),
+        );
         await client.query(`DROP TABLE pg_temp."${table}"`);
       }
     } finally {
@@ -1370,10 +1389,12 @@ async function assertCompletedHistory(db, previous = []) {
     WHERE n.nspname='occ' AND p.prosecdef ORDER BY identity`)
     ).rows,
     [
+      ["occ.check_connection_registration_scope()", false, "search_path=pg_catalog, pg_temp"],
       // The app records a standing execution; only the Agent lifecycle trigger can close it.
       ["occ.close_repository_standing_execution()", false],
       ["occ.create_agent_sandbox_policy()", false, "search_path=pg_catalog, occ"],
       ["occ.finalize_agent_deletion(text,text,text,uuid)", true],
+      ["occ.hold_account_administration_policy(text)", true],
       ["occ.record_repository_standing_execution(text,text,text,text,text)", true],
       ["occ.remove_sandbox_policy_access()", false, "search_path=pg_catalog, occ"],
       ["occ.retry_failed_agent_deletion(text,text,text,text)", true],
@@ -1405,7 +1426,12 @@ function receiptsMatchEntries(receipts, entries) {
 
 async function seedCanonicalData(
   db,
-  { preset = false, computeAdmission = false, executionAdmission = false } = {},
+  {
+    preset = false,
+    computeAdmission = false,
+    executionAdmission = false,
+    harnessSettings = false,
+  } = {},
 ) {
   const installation = `ins_${randomUUID()}`;
   const namespace = `ns_${randomUUID()}`;
@@ -1448,7 +1474,12 @@ async function seedCanonicalData(
           configuration_kind: "agent",
           configuration_generation: 1,
           draft_spec: {},
-          harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
+          harness: {
+            id: "codex",
+            version: "1.0.0",
+            mode: "dedicated",
+            ...(harnessSettings ? { overrides: {}, configuration: {} } : {}),
+          },
           harness_auth: { method: "runtime" },
           ...(executionAdmission
             ? { execution_admission: { version: 2, mode: "unprotected" } }
@@ -1813,6 +1844,8 @@ async function assertUpgradedRevisionReadable(db) {
   // New rows still fail closed: no snapshot may omit its decision, and a decision that
   // claims protection without the protected plan and reader marker is inconsistent.
   const revisionId = `rev_${randomUUID()}`;
+  // A new writer supplies the current Harness shape while the old row stays unchanged.
+  const currentSpec = `jsonb_set(admitted_spec, '{harness}', (admitted_spec->'harness') || '{"overrides":{},"configuration":{}}'::jsonb)`;
   const insertRevision = (rewrite, ...parameters) =>
     db.app.query(
       `INSERT INTO occ.agent_revisions(id,namespace_id,agent_id,revision_number,admitted_spec,backend_id,admitted_at)
@@ -1822,8 +1855,8 @@ async function assertUpgradedRevisionReadable(db) {
   const invalidAdmission = (error) =>
     error.code === "23514" && error.constraint === "agent_revisions_execution_admission";
   for (const rewrite of [
-    "admitted_spec - 'execution_admission'",
-    `admitted_spec || '{"execution_admission":{"version":2,"mode":"protected"}}'::jsonb`,
+    `${currentSpec} - 'execution_admission'`,
+    `${currentSpec} || '{"execution_admission":{"version":2,"mode":"protected"}}'::jsonb`,
   ]) {
     await assert.rejects(insertRevision(rewrite), invalidAdmission);
   }
@@ -1832,7 +1865,7 @@ async function assertUpgradedRevisionReadable(db) {
   const plan = { execution: { namespaceId, agentId, revisionId }, routes: [] };
   const insertProtectedV2 = (egressPlan) =>
     insertRevision(
-      `jsonb_set(admitted_spec, '{harness_auth,protectedExecutionVersion}', '2'::jsonb)
+      `jsonb_set(${currentSpec}, '{harness_auth,protectedExecutionVersion}', '2'::jsonb)
        || jsonb_build_object('execution_admission', '{"version":2,"mode":"protected"}'::jsonb,
                              'egress_plan', $3::jsonb)`,
       egressPlan,
@@ -2007,6 +2040,11 @@ test(
       [70, "preAgentPluginDriver"],
       [53, "preRuntimeRoles"],
       [55, "preGatewayOutbound"],
+      [72, "preConnectionTemplates"],
+      [73, "preSavedConnections"],
+      [74, "preDefaultUsers"],
+      [75, "preHarnessOverrides"],
+      [76, "preAccountAdministrationPolicy"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
@@ -2015,6 +2053,7 @@ test(
           computeAdmission: prefix >= 59,
           // 0060 requires an execution admission on every revision written after it.
           executionAdmission: prefix >= 63,
+          harnessSettings: prefix >= 76,
         });
         const assertSourceOwners =
           prefix === 62
@@ -2038,11 +2077,47 @@ test(
         assert.ok(existingBindings.rows.length > 0);
         assert.ok(existingBindings.rows.every((row) => row.first_deployment_digest === null));
         await assertUpgradedAuthentication(db);
+        if (history === "preConnectionTemplates") {
+          // An Installation-wide template cannot present a Namespace client's credentials,
+          // even when an application-role writer bypasses OCC.
+          const templateId = `ctp_${randomUUID()}`;
+          const registrationId = `ccr_${randomUUID()}`;
+          await db.app.query("BEGIN");
+          try {
+            await db.app.query(
+              `INSERT INTO occ.oauth_clients
+                 (id,namespace_id,display_name,issuer,client_id,token_url,token_endpoint_auth_method,created_at)
+               VALUES ($1,$2,'Namespace client','https://issuer.example.test','shared-client','https://issuer.example.test/token','none',now())`,
+              [registrationId, namespaceId],
+            );
+            await db.app.query(
+              `INSERT INTO occ.connection_templates
+                 (id, namespace_id, display_name, current_version, created_at)
+               VALUES ($1, NULL, 'Installation template', 1, now())`,
+              [templateId],
+            );
+            await assert.rejects(
+              db.app.query(
+                `INSERT INTO occ.oauth_connection_template_versions
+                   (template_id, version, oauth_client_id, issuer, mode, authorization_url,
+                    token_url, scopes, authorization_parameters, destinations, created_at)
+                 VALUES ($1, 1, $2, 'https://issuer.example.test', 'manual',
+                    'https://issuer.example.test/auth', 'https://issuer.example.test/token',
+                    ARRAY['read'], '{}', '[{"host":"api.example.test","port":443,"path":"/"}]', now())`,
+                [templateId, registrationId],
+              ),
+              { code: "23514", message: /registration must belong to the template scope/ },
+            );
+          } finally {
+            await db.app.query("ROLLBACK");
+          }
+        }
         if (history === "preGatewayManagedMode") {
           await db.app.query(
             `INSERT INTO occ.agent_revisions
                (id, namespace_id, agent_id, revision_number, backend_id, admitted_spec, admitted_at)
-             SELECT $1, namespace_id, agent_id, revision_number + 1, backend_id, admitted_spec, now()
+             SELECT $1, namespace_id, agent_id, revision_number + 1, backend_id,
+               jsonb_set(admitted_spec, '{harness}', (admitted_spec->'harness') || '{"overrides":{},"configuration":{}}'::jsonb), now()
              FROM occ.agent_revisions`,
             [`rev_${randomUUID()}`],
           );
@@ -2182,7 +2257,16 @@ test(
       history: "preCanonicalHarnessAuth",
     });
     await assertCompletedHistory(db, receipts);
-    executionAdmission = { execution_admission: { version: 2, mode: "unprotected" } };
+    const originalHarness = (
+      await db.app.query(
+        "SELECT admitted_spec->'harness' AS harness FROM occ.agent_revisions WHERE namespace_id=$1 AND revision_number=1",
+        [namespaceId],
+      )
+    ).rows[0].harness;
+    executionAdmission = {
+      execution_admission: { version: 2, mode: "unprotected" },
+      harness: { ...originalHarness, overrides: {}, configuration: {} },
+    };
     assert.deepEqual((await insertSnapshot(binding)).rows, [{ auth: binding }]);
     const apiKey = { ...binding, loginMode: "api_key" };
     assert.deepEqual((await insertSnapshot(apiKey)).rows, [{ auth: apiKey }]);
@@ -2542,6 +2626,7 @@ test(
       const restored = await restoreHistoryArchive(context, fixture, archive);
       const accepted = await logicalRestoreSnapshot(restored);
       const restoredDigest = catalogDigest(accepted.occ);
+      context.diagnostic(`Restore ${lineage}: ${restoredDigest}`);
       assert.notEqual(restoredDigest, catalogDigest(native.occ));
       assert.deepEqual(accepted.receipts, native.receipts);
       assert.deepEqual(accepted.drizzle, native.drizzle);
@@ -2565,6 +2650,7 @@ test(
           await readFile(join(migrationsDirectory, "meta/_canonical-history.json"), "utf8"),
         );
         const upgraded = await logicalRestoreSnapshot(restored);
+        context.diagnostic(`Upgraded restore: ${catalogDigest(upgraded.occ)}`);
         assert.deepEqual(upgraded.identities, native.identities);
         assert.deepEqual(upgraded.receipts.slice(0, 51), native.receipts);
         assert.deepEqual(
@@ -3870,3 +3956,27 @@ test(
     assert.equal(await authorize(principals[2], "read"), true);
   },
 );
+
+// An unselected opt-in case must not become an unexpected skip in native PostgreSQL CI.
+if (
+  Object.values(controllerImages).some((image) =>
+    Object.values(image).some((value) => value !== undefined),
+  )
+) {
+  test(
+    "Released controller remains usable across candidate database writes",
+    { timeout: 360_000 },
+    async (t) => {
+      assert.ok(
+        Object.values(controllerImages).every(
+          (image) => typeof image.reference === "string" && typeof image.revision === "string",
+        ),
+        "Both released and candidate controller image references and revisions are required.",
+      );
+      await assertReleasedControllerCompatibility(t, controllerImages, async () => {
+        const fixture = await migrationHistoryFixture();
+        return historyDatabase(t, fixture, "released_controller");
+      });
+    },
+  );
+}

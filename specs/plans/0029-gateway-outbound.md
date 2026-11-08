@@ -1,12 +1,12 @@
 ---
-rfc: ../rfcs/0030-gateway-outbound.md
+rfc: ../rfcs/0034-gateway-outbound.md
 ---
 
 # Implementation plan: managed Gateway outbound HTTPS
 
 - **ID:** RFC-0030
 - **Delivery status:** In progress
-- **Authority:** [RFC-0030](../rfcs/0030-gateway-outbound.md)
+- **Authority:** [RFC-0030](../rfcs/0034-gateway-outbound.md)
 - **RFC review:** [#3520](https://github.com/openclaw/openclaw-enterprise/pull/3520)
 - **Original source baseline:** `d3ccc54781d0d50b40e9aeb814f0573d38c0a585`
 - **Current refresh target:** upstream `main` at `b891554203643c769f19d71860d03382bb9717bc`

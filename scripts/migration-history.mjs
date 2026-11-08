@@ -148,6 +148,21 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 25) {
     return "main";
   }
+  if (count === 72 && completedCount > 72) {
+    return "preConnectionTemplates";
+  }
+  if (count === 73 && completedCount > 73) {
+    return "preSavedConnections";
+  }
+  if (count === 74 && completedCount > 74) {
+    return "preDefaultUsers";
+  }
+  if (count === 75 && completedCount > 75) {
+    return "preHarnessOverrides";
+  }
+  if (count === 76 && completedCount > 76) {
+    return "preAccountAdministrationPolicy";
+  }
   if (count === completedCount) {
     return "completed";
   }
