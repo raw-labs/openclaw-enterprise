@@ -86,7 +86,7 @@ are implemented. Single-cluster Kubernetes execution places Gateway and Harness 
 namespace with separate Pods, identities and storage. External access-gateway admission, workload
 token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental.
-The [embedded-channel trial](../specs/rfcs/0030-temporary-embedded-channel-trial.md)
+The [embedded-channel trial](../specs/rfcs/0031-temporary-embedded-channel-trial.md)
 is a proposed, default-off evaluation exception to channel credential separation;
 it is unsupported for production and does not change the regular architecture.
 
@@ -119,9 +119,10 @@ platform state, IAM policy, controller work, and audit evidence.
 
 The API authenticates human sessions and non-Agent service keys, resolves an
 explicitly provisioned identity, and authorizes exact resource operations.
-The console at `/console/` uses these same APIs. GitHub and Google sign-in require
-administrator-enrolled identities; neither sign-in nor Namespace membership
-grants permissions. See [authentication](reference/authentication.md) and
+The console at `/console/` uses these same APIs. External sign-in uses enrolled
+identities. GitHub optionally enrolls verified team members into an operator-selected
+native IAM Group; its existing bindings determine access. Namespace membership
+does not grant permissions. See [authentication](reference/authentication.md) and
 [authorization](reference/authorization.md).
 
 Resource mutations, queued work, and audit records commit together. The worker

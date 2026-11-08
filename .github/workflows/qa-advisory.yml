@@ -119,7 +119,7 @@ jobs:
     name: QA advisory (${{ matrix.installation }})
     needs: eligibility
     if: needs.eligibility.outputs.openshell-file == ''
-    runs-on: ${{ vars.CI_LARGE_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    runs-on: ${{ vars.CI_LARGE_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 120
     environment: integration-qa-pr
     strategy:
