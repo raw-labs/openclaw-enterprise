@@ -1390,7 +1390,7 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
     return runner.startsWith("${{")
       ? runInNewContext(runner.replace(/^\$\{\{\s*|\s*\}\}$/g, ""), {
           matrix: { lane },
-          vars: {},
+          vars,
           startsWith: (value, prefix) => value.startsWith(prefix),
         })
       : runner;

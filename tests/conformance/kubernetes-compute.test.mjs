@@ -9049,7 +9049,7 @@ test("dedicated Codex projects the account-owned token through the common PAT lo
   assert.equal(agentEnvironment.SLACK_BOT_TOKEN, undefined);
   assert.equal(agentEnvironment.MSTEAMS_APP_PASSWORD, undefined);
 
-  driver.validateEnabledChannels({
+  driver.enabledChannels({
     configuration: { channels: { slack: {}, msteams: {} } },
     harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
     harnessAuth: apiKeyAuth,
@@ -12367,7 +12367,7 @@ test("native channel providers require Secret bindings and project guarded proxy
         configuredRevision.secretBindings,
       ),
     );
-    driver.validateEnabledChannels(configuredRevision);
+    driver.enabledChannels(configuredRevision);
     const expectedSecretEnvironment = expectedSecrets.map((name) =>
       secretEnvironment.find((item) => item.name === name),
     );
@@ -12482,7 +12482,7 @@ test("native channel providers require Secret bindings and project guarded proxy
     secretBindings,
     secretDriverId: "secret-kubernetes",
   };
-  managedDriver.validateEnabledChannels(managedRevision);
+  managedDriver.enabledChannels(managedRevision);
   const managedGateway = managedDriver.deployment(
     `gateway-${suffix}`,
     { namespaceId: tenant.id, agentId },

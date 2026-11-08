@@ -1,6 +1,6 @@
 ---
 created: 2026-10-20
-updated: 2026-11-05
+updated: 2026-11-08
 last_updated_session: claude/session_01HzmRt1DGB79VEnEWHt7PRy
 ---
 
@@ -30,7 +30,7 @@ graph TD
   B -->|supported Dedicated| C["Queue provisioning with inline Configuration"]
   C --> D["Worker creates resources, grants and first deployment"]
   B -->|ordinary draft| E["Validate, then POST Configuration and Agent"]
-  E --> F["Grant Agent use of selected Secrets"]
+  E --> F["Grant model and staged channel Secret use"]
   F -->|failed| G["Retry credential access"]
 ```
 
@@ -171,9 +171,11 @@ Agent/Configuration for [workspace setup](../workspace-files.md).
 
 ### 5. Grant Secret access and edit authentication
 
-`create.mts:grantConfigurationSecretAccess` grants exact Secret `operate` for final
-same-Namespace `env` bindings. Failure retains the Agent; **Retry credential access**
-rereads grants without duplication. A session known not to administer the Installation sends
+`create.mts:grantConfigurationSecretAccess` grants an administrator-created Agent
+access to staged channel Secrets that remain bound in its saved Configuration.
+Failure retains the Agent; **Retry credential access** rereads those grants without
+duplication. Other bound Configuration credentials use upstream deployment-time
+grants, subject to the deploying caller’s exact credential permissions. A session known not to administer the Installation sends
 no IAM request and opens the saved draft: the member's
 [deploy writes these grants](../namespace-iam-policy.md#6-default-users-owners-and-deploy-time-grants).
 After a refused Installation read, the "Your access" status block above the form gives the

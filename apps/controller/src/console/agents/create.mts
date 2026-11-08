@@ -173,6 +173,7 @@ export interface CreateAgentDraft {
   pendingPrimaryModel: string | undefined;
   pendingModelSelections: Record<string, unknown> | undefined;
   configurationSecretBindings: SecretBindings;
+  stagedChannelSecrets: SecretMetadata[];
   pluginApprovers: PluginApprovers | undefined;
   oauthLogin: DeviceLogin | null | undefined;
   modelCredentialSource: CredentialReference | null | undefined;
@@ -2085,6 +2086,7 @@ function renderAgentForm(
     | { kind: "ordinary" }
     | { kind: "repository-scoped"; repositoryPolicy: "current" | "reloading" | "reload-required" }
     | undefined;
+  let stagedChannelSecrets = draft.stagedChannelSecrets ?? [];
   let savedSecret = draft.savedSecret;
   let savedConfiguration = draft.savedConfiguration;
   let savedAgent: SavedAgent | undefined;
@@ -2495,6 +2497,7 @@ function renderAgentForm(
     pendingPrimaryModel,
     pendingModelSelections,
     configurationSecretBindings,
+    stagedChannelSecrets,
     modelCredentialSource,
     modelCredentialSecret,
     oauthLogin: oauthLogin.capture(),
@@ -2670,6 +2673,7 @@ function renderAgentForm(
         configuration.value = JSON.stringify(updatedValues, null, 2);
         if (options.secretBindings !== undefined) {
           configurationSecretBindings = structuredClone(options.secretBindings);
+          stagedChannelSecrets = [...stagedChannelSecrets, ...(options.changedSecrets ?? [])];
           directorySecret.refresh();
           defaultApprovers.refreshDirectory();
           pluginDiscovery.update();

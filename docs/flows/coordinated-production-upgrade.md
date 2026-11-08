@@ -8,15 +8,14 @@ last_updated_session: "authoring-run/cd7fae84-40fe-4d7a-bfe0-aff970e961db"
 
 ## Overview
 
-`scripts/upgrade-production-images` updates the OpenClaw Control Plane (OCC) and/or
-Agent runtimes. Controller-only upgrades optionally verify one original
-Agent revision. Runtime upgrades redeploy running Agents, checking ready Pods and
-read-only Doctor lint.
+`scripts/upgrade-production-images` updates OCC or Agent runtimes. Controller-only
+upgrades can verify one revision. Runtime upgrades redeploy running
+Agents and check ready Pods and read-only Doctor lint.
 
 ## Entry Points
 
-- Run `scripts/upgrade-production-images` with images, target, release, source
-  revision and protected files.
+- Run `scripts/upgrade-production-images` with the images, target, release,
+  source revision and protected files.
 - Required: healthy production Helm release, matching OCC/Kubernetes Installation
   IDs, and, for runtime upgrades, complete authorized inventory without active deployments.
 - Source: `scripts/upgrade-production-images`,
@@ -69,24 +68,23 @@ graph TD
 
 `scripts/upgrade-production-images:prepare_upgrade`
 
-Before reads or writes, reject nonempty
-[Helm target/TLS overrides](../guides/deploy/production-upgrade.md).
+Reject nonempty
+[Helm target/TLS overrides](../guides/deploy/production-upgrade.md) before I/O.
 `HEAD` must match `--source-revision`; chart changes, symlinks and internal
-evidence/baseline aliases are rejected. Other edits and image provenance remain unchecked.
+evidence/baseline aliases are rejected. Other edits and image provenance are unchecked.
 
-Resume binds the evidence directory's path, device and inode; aliases share its
-lock. Resume checks saved parameters under lock, then rejects `completed`.
+Resume binds the evidence path, device and inode. Aliases share its lock.
+Under lock, resume checks parameters and rejects `completed`.
 Runtime upgrades lock the private sibling dispatch journal separately from evidence.
 
 `matches_yaml` compares ordered candidate YAML mappings, including images, with
 the [baseline](../guides/deploy/upgrade-baseline.md#record-the-release-and-its-configuration)
-before protected-setting projections. Unusable inputs or unwritable evidence cause
+before protected-setting projections. Unusable inputs or unwritable evidence produce
 `Cannot compare upgrade YAML`. Only curated Codex
 PluginDriver selection and wrapping one registration in an array may change before
-image selection. Proxy changes require protected configuration updates. Baselines remain unchanged. Startup validates the candidate
-controller; broker checks compare references, not ConfigMap/Secret contents.
+image selection. Proxy changes require protected configuration updates. Baselines remain unchanged. Startup validates the controller; broker checks compare references, not contents.
 
-Runtime upgrades require authorized inventory, baseline versions and ready Namespaces.
+Runtime upgrades require authorized inventory, baselines and ready Namespaces.
 Nonterminal deployments block preparation. Exclude stopped/deleting Agents; allow pending repository cleanup.
 
 `prepare_upgrade` copies the PostgreSQL `run` result;
@@ -181,8 +179,7 @@ drafts per the [production guide](../guides/deploy/production-upgrade.md).
 
 `scripts/upgrade-production-images:1588`
 
-Resume requires prepared evidence; otherwise reconcile preflight resources and
-use fresh evidence per [upgrade recovery](../guides/deploy/production-upgrade-recovery.md).
+Resume requires prepared evidence. Otherwise reconcile preflight resources per [upgrade recovery](../guides/deploy/production-upgrade-recovery.md).
 It binds directory, kubeconfig, inputs, OCC URL, scripts, flow, chart and pair;
 requalifies the pair; and rejects changed eligible nodes.
 Ineligible Helm states stop before values/Secret reads. Values must match baseline
@@ -203,9 +200,9 @@ can leave the API stopped. Before the deadline, Pods must disappear and original
 Deployments remain at zero. Operators stop other writers and autoscalers and keep
 nodes reachable.
 
-The script atomically installs saved candidates. Installation Secret updates use
+It atomically installs saved candidates. Installation Secret updates use
 a resource-version precondition, preserving other data and metadata.
-An already-present candidate is not rewritten after a lost response.
+Lost responses do not rewrite an already-present candidate.
 Both OCC Pod templates include its checksum.
 
 Each submission durably records prior/expected revisions in private `helm-started`
@@ -217,9 +214,8 @@ reconciliation; restarting old images cannot undo committed migrations.
 
 `scripts/upgrade-production-images:1791`
 
-The script waits for both OCC Deployments and checks controller images,
-replica counts, and changed Installation checksums. Each component needs
-exactly one named container. A broker-enabled worker may instead be a restartable
+It awaits both OCC Deployments and checks images,
+replica counts, and changed Installation checksums. Each needs one named container. A broker-enabled worker may instead be a restartable
 init container; non-restartable or ambiguous placement fails. Authenticated OCC
 access is retried and must return the same Installation ID.
 Worker preparation re-renders launch requirements from the current controller.

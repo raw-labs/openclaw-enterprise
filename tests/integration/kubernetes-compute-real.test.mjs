@@ -434,7 +434,6 @@ test(
       assert.equal(secret.status, 201, JSON.stringify(secret.error));
       let boundSecret;
       let boundSecretValue;
-      let boundSecretGrant;
       if (options.boundSecret === true) {
         boundSecretValue = `bound-secret-${randomUUID()}`;
         boundSecret = await request("POST", `/namespaces/${namespaceId}/secrets`, {
@@ -556,7 +555,7 @@ test(
         modelSecretId: secret.data.id,
         ...(boundSecret === undefined
           ? {}
-          : { boundSecretId: boundSecret.data.id, boundSecretValue, boundSecretGrant }),
+          : { boundSecretId: boundSecret.data.id, boundSecretValue }),
       };
     }
 
@@ -652,9 +651,21 @@ test(
       );
     }
     const revokedRevision = await deploy(namespaceIds[0], boundSecretAgent.id);
+    // Deployment now creates the exact Secret grant. Revoke that real binding after
+    // admission, rather than retaining the retired create-time/manual-grant fixture.
+    await assertDeployGrants(namespaceIds[0], boundSecretAgent);
+    const admittedBindings = await request(
+      "GET",
+      `/namespaces/${namespaceIds[0]}/iam/access-bindings`,
+    );
+    assert.equal(admittedBindings.status, 200, JSON.stringify(admittedBindings.error));
+    const boundSecretGrant = admittedBindings.data.find(
+      ({ id }) => id === `binding_${boundSecretAgent.id}_${boundSecretAgent.boundSecretId}_operate`,
+    );
+    assert.ok(boundSecretGrant);
     const revokedGrant = await request(
       "DELETE",
-      `/namespaces/${namespaceIds[0]}/iam/access-bindings/${boundSecretAgent.boundSecretGrant.binding.id}`,
+      `/namespaces/${namespaceIds[0]}/iam/access-bindings/${boundSecretGrant.id}`,
     );
     assert.equal(revokedGrant.status, 204, JSON.stringify(revokedGrant.error));
     const queued = await observerPool.query(
@@ -702,17 +713,9 @@ test(
     context.diagnostic(
       "Configuration Secret revocation: work=failed_permanent/AUTHORIZATION_DENIED; no active revision, Deployments, Pods, or new delivered Secrets.",
     );
-    // Restore only this exact grant. The ordinary deployments below prove recovery
-    // and compare the real gateway's BOUND_SENTINEL with the original synthetic value.
-    const restored = await request("POST", `/namespaces/${namespaceIds[0]}/iam/access-bindings`, {
-      subjectKind: "identity",
-      subjectId: boundSecretAgent.servicePrincipalId,
-      roleId: boundSecretAgent.boundSecretGrant.role.id,
-      resourceKind: "secret",
-      resourceId: boundSecretAgent.boundSecretId,
-    });
-    assert.equal(restored.status, 201, JSON.stringify(restored.error));
-
+    // Ordinary redeployment must recreate the exact revoked grant and recover.
+    // assertDeployGrants below checks that real admission result; the gateway's
+    // BOUND_SENTINEL must still match the original synthetic value.
     const admitted = await Promise.all([
       deploy(namespaceIds[0], first.id),
       deploy(namespaceIds[0], second.id),
