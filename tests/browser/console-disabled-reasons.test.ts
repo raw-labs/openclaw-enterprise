@@ -285,7 +285,7 @@ test("the Namespace selector with no readable Namespace is reachable and names t
 // With no readable starter, the disabled shortcut must expose its reason to keyboard
 // and screen-reader users. The quick-start suite separately covers custom fallbacks.
 test("Start with default Preset names the missing readable starter as its reason", async (t) => {
-  const { fixture, namespace }: ReadyNamespace = await createReadyConsoleNamespace(
+  const { fixture, namespace } = await createReadyConsoleNamespace(
     t,
     "No readable starter Preset",
     { defaultPresets: [], filesystemConfiguration: true },
