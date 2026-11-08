@@ -146,22 +146,20 @@ uses a 10-second timeout and accepts up to 4 MiB per response, ten pages, and
 ### Human runtime access
 
 `listAgentRuntimeRoles(configuration)` and
-`getAgentRuntimeAccess(revision, principalId, runtimeRole)` provide role
-catalogs and verified human transport. Kubernetes implements them; Docker/SSH omit
-them. See [runtime access](../agent-native-admin.md).
+`getAgentRuntimeAccess(revision, principalId, runtimeRole)` provide role catalogs and verified human transport in Kubernetes, not Docker/SSH.
+See [runtime access](../agent-native-admin.md).
 
 ### Namespace and gateway results
 
-Return the requested `namespaceId`. Failures are `retryable` or `permanent`;
+Return `namespaceId`. Failures are `retryable` or `permanent`;
 a true ready or deleted flag succeeds only without a failure. Worker-log
 failure reasons allow up to 256 characters: letters, digits, spaces, and
 `. _ : / @ -`. Exclude provider output and other tenants' values.
 
 ### Optional gateway endpoint resolution
 
-`getGatewayEndpoint(revision)` returns a private WSS address from trusted
-Driver settings and approved resource IDs, or `undefined` if gateway access is
-unsupported. OCC authorizes Agent access and reads its selected revision first.
+`getGatewayEndpoint(revision)` returns private WSS from trusted settings and approved resource IDs,
+or `undefined` when unsupported. OCC authorizes Agent access and reads its selected revision first.
 This method neither checks readiness, authorizes callers, grants backend route
 permissions, nor saves URLs in Agent Configuration. Connection
 errors are dependency failures.

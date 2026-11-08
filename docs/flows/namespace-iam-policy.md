@@ -72,24 +72,20 @@ policy delegation.
 
 `apps/controller/src/http/iam.ts:iamHandlers`
 
-List and read operations call the corresponding `OpenClawController` IAM method
-and return policy metadata. Create, runtime-role change and delete operations use the handler's `transactIAM` callback, append an attributable mutation audit event, and return
-only after the transaction commits. For human sessions, authentication wraps
-`controller.transact` and retains the admitted session before the IAM command and
-checks its expiry again after the command and audit append. PostgreSQL locks the
-user before the session, then the controller takes its existing Namespace and
-account locks. Guarded profiles first reuse
-`packages/occ/src/state/human-authentication.ts:PostgresHumanAuthentication.holdSession`,
-which validates the bound account and sign-in method through the existing actor guard.
-Session retention takes shared user locks and preserves the policy transaction's
-timeout settings. Account-management operations keep their exclusive locks and
-five-second lock and ten-second statement limits. Independent sessions can write
-different Namespaces concurrently while revocation still waits for both holders.
-Logout or account/method revocation must wait for a protected
-write to finish; revocation that completes first makes the write fail. Expiry
-during the write or before server-side COMMIT validation rolls back policy and its success audit. The memory auth adapter
-serializes policy writes with local logout and rechecks the session inside the
-transaction. Non-session credentials keep their existing admission behavior.
+Reads call `OpenClawController` IAM methods. Create, runtime-role change and delete
+use `transactIAM`, append attributable audit, and return after commit. Human
+authentication wraps `controller.transact`, retaining the admitted session before
+the command and rechecking expiry after command/audit. PostgreSQL locks user,
+then session, before Namespace/account locks. Guarded profiles reuse
+`packages/occ/src/state/human-authentication.ts:PostgresHumanAuthentication.holdSession`
+to validate account and sign-in method through the actor guard.
+Shared user locks preserve policy-transaction timeouts. Account management keeps
+exclusive locks and five-second lock/ten-second statement limits. Independent
+sessions can write different Namespaces concurrently; revocation waits for both.
+Logout or account/method revocation waits for protected writes; earlier revocation
+rejects the write. Expiry during writes or server-side COMMIT validation rolls back
+policy and success audit. Memory authentication serializes writes with local
+logout and rechecks sessions inside the transaction. Non-session admission is unchanged.
 The event's authorization records the
 Installation `administer` check. Role events carry the Namespace as resource and
 `roleId` plus `permissions` in details. AccessBinding create, runtime-role change and delete events
@@ -119,7 +115,12 @@ the caller can read it before asking the IAM Driver to create the binding.
 Permission for the target's kind, or a `create` Permission stored before Role
 creation refused them, because evaluation would drop those grants.
 
-Runtime assignment creation and changes use the saved Agent Configuration through the Compute catalog, independent of deployment. `runtimeRoleConfiguration` supplies its reviewed ID and generation. After holding IAM authority and the Namespace lock, OCC reads that Configuration through its Driver and rejects a changed ID or generation with `409`, or an unknown role with `400`. The lock serializes this check and binding write against Configuration changes and Agent Configuration replacement. Only `runtimeRole` is persisted on the existing exact human/Agent binding. Native definitions and profile admission are traced in [OpenClaw access](agent-native-admin.md).
+Runtime assignments use the saved Agent Configuration's Compute catalog, even
+without deployment. `runtimeRoleConfiguration` supplies the reviewed ID/generation.
+Under IAM authority and the Namespace lock, OCC rejects Configuration drift with
+`409` and unknown roles with `400`. The lock serializes binding writes against
+Configuration edits/replacement. Only `runtimeRole` persists on the exact
+human/Agent binding. See [native definitions and admission](agent-native-admin.md).
 
 ### 4. The IAM Driver persists or reads policy
 
@@ -149,19 +150,13 @@ This transaction binding alone does not fence concurrent policy invalidation.
 Human HTTP policy writers additionally retain their session through the original
 unit's `holdAuthenticationSession` operation, implemented by PostgreSQL State.
 
-A unit reads the policy once, not once per decision. `readNativeIAMState` keeps
-the policy it read on that unit's transaction context. A read-only unit is one
-REPEATABLE READ snapshot that writes nothing, so it reuses the policy for every
-lookup and decision; a list route therefore reads the policy once for all its
-items. A writing unit reuses it only until it issues any other statement, so its
-own IAM writes and any locks it takes come before the next read. Two
-back-to-back decisions in a writing unit do not see a commit another unit makes
-between them, as if it had committed just after; the read was never a fence.
-The policy is built fresh from that read's rows and frozen in place as an
-immutable snapshot (`freezeSnapshot`), and the native Driver validates and
-indexes each snapshot once (identities by id, issuer and subject; bindings by
-subject; Restrictions by action and kind). Nothing outlives the
-unit: the next request reads the policy again.
+`readNativeIAMState` caches policy per transaction context. Read-only units reuse one
+REPEATABLE READ snapshot without writes, including every list item. Writing units
+reuse it until another statement; IAM writes and locks precede the next read.
+Back-to-back decisions can miss another unit's intervening commit: this cache is
+not an authority fence. `freezeSnapshot` freezes freshly read rows; the native
+Driver validates and indexes identities by id/issuer/subject, bindings by subject,
+and Restrictions by action/kind once. The cache ends with the unit; later requests reread policy.
 
 `packages/occ/src/index.ts:OpenClawController.updateAgent` checks Agent `update`
 again after locking the Namespace. Namespace IAM writes take the same lock.
@@ -300,6 +295,8 @@ behavior.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-08 09:14: Preserve assignments and Groups. (authoring-run/6771c2a9-4429-4203-9b21-d5eb7d4c4d0e - ebd4e23fa06d5195229c038d5ca86de0a9e78388)
 
 - 2026-11-04 12:00: Replace the built-in Roles, Group, and membership routes with the configured policy and membership at account creation; deploy grants for any Role. (claude/session_01HzmRt1DGB79VEnEWHt7PRy)
 - 2026-11-04 02:25: Recheck Agent update permission under the Namespace lock. (authoring-run/fbfcb29f-156c-4cfd-af1d-fa15224dd2e5 - fdca6e74421067adc66dce4f141d153af0355f68)
