@@ -1422,6 +1422,32 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
   for (const { lane } of images.strategy.matrix.include) {
     assert.equal(runnerFor(images, lane), ciRunners.get(lane), lane);
   }
+  const build = loadYaml(".github/workflows/ci-runtime-artifact.yml").jobs.build;
+  assert.equal(runnerFor(build), "blacksmith-8vcpu-ubuntu-2404");
+  assert.equal(
+    runnerFor(build, undefined, { CI_LARGE_RUNNER: "configured-build" }),
+    "configured-build",
+  );
+  const ordinaryImages = loadYaml(".github/workflows/ci.yml").jobs["image-lanes"];
+  // Reused builds and their consumers must run on the fork's selected capacity;
+  // sandbox startup keeps its compatible-kernel override in both workflows.
+  for (const target of [images, ordinaryImages]) {
+    assert.equal(
+      runnerFor(target, "images-packaging", { CI_LARGE_RUNNER: "configured-images" }),
+      "configured-images",
+    );
+    assert.equal(
+      runnerFor(target, "images-runtime-startup", { CI_COMPAT_RUNNER: "configured-compatible" }),
+      "configured-compatible",
+    );
+    assert.equal(
+      runnerFor(target, "images-runtime-startup", {
+        CI_SANDBOX_RUNNER: "configured-sandbox",
+        CI_COMPAT_RUNNER: "configured-compatible",
+      }),
+      "configured-sandbox",
+    );
+  }
 });
 
 test("Suite Audit and Static Checks runs the audit and every check the lanes skip", () => {

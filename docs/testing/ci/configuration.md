@@ -23,7 +23,7 @@ permissions are set in the [workflow files](../../../.github/workflows);
 ## Local runner overrides
 
 Set `CI_RUNNER` for Suite Audit and Static Checks, and `CI_LARGE_RUNNER` for
-matrix lanes, advisory QA and same-source qualification. Unset variables retain
+matrix lanes, shared runtime-image builds, advisory QA and same-source qualification. Unset variables retain
 the workflow defaults. Select ephemeral Linux runners with sufficient resources,
 enforcing NetworkPolicies for k3d and browser sandbox support.
 `CI_RUNNER_FILE_CONCURRENCY` bounds ordinary CI/advisory test-file concurrency

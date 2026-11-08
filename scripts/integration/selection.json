@@ -862,13 +862,37 @@
         "proof": "Rebuilt Storybook; inspected desktop previews and screenshots; recorded and replayed a 17-second Preset-to-draft walkthrough. Captures remain outside the checkout and are delivered in the task conversation. Simulated UI only; persistence and permission checks have separate browser/database proof."
       },
       "environment": "Browser libraries extracted into a task-local directory. CI deadline test used a scoped date command backed by the real Node clock because this host date prints nanoseconds for %s%3N; no source assertion was weakened.",
-      "pageLengthReview": "References and flows above 1500 words retain one coherent contract or lifecycle. Removed duplicate changelog entries and redundant prose to satisfy the 2500-word limit; no new exception."
+      "pageLengthReview": "References and flows above 1500 words retain one coherent contract or lifecycle. Removed duplicate changelog entries and redundant prose to satisfy the 2500-word limit; no new exception.",
+      "ciRepair": "Slack directory: 22 passed, zero skipped. CI policy/runner selection: 76 passed, zero skipped. Existing runner overrides now also cover the new shared runtime-image producer and ordinary image consumers, with compatible sandbox selection in same-source qualification."
     },
     "limits": [
       "No source PR merge, image publication, release or deployment.",
       "Provider-specific live messaging and real model execution are not established by local fixture checks.",
       "The updated real Kubernetes post-admission Secret-revocation fixture awaits final-head CI; local PostgreSQL and browser proof do not substitute for it."
-    ]
+    ],
+    "failedCandidates": [
+      {
+        "commit": "f2a4e024db4948cfc9aed60f013ee74917623fd3",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42491986627",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42491986562",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42491998126",
+        "notes": "All real k3d lanes and PostgreSQL migration CI passed. Checks/Conformance 2 found an obsolete Slack directory proxy error prefix after the generic proxy rename. The new shared-runtime producer and ordinary image consumers omitted the fork runner overrides. Align the exact error expectation and preserve configured build/kernel selection; qualify the repaired SHA."
+      }
+    ],
+    "codeqlAccounting": {
+      "observedCandidate": "f2a4e024db4948cfc9aed60f013ee74917623fd3",
+      "baseline": "c14c33ab437582ffc7641d9dc9c4184247d50a16",
+      "baselineResults": 92,
+      "candidateResults": 89,
+      "newFingerprints": 3,
+      "removedFingerprints": 6,
+      "notes": [
+        "Upstream runtime-artifact OCI metadata reader has an lstat/readFile race finding. It remains open; no claim of security clearance.",
+        "The generic API dispatcher has an authorization rate-limiting finding after upstream route changes. It remains open and needs security triage.",
+        "A generated source string in the CI runner test has a sanitization finding; it is test-only code, not a production endpoint. No alert was dismissed."
+      ],
+      "limits": "Successful analyzer jobs are not a zero-findings result. Final-head analyzers and any security gates remain required."
+    }
   },
   "previousBatches": [
     {
