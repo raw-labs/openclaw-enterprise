@@ -369,20 +369,27 @@ export async function newPage(
   options: {
     args?: string[];
     browserType?: BrowserType;
+    launch?: () => Promise<Browser>;
     browser?: () => Promise<Browser>;
     context?: Parameters<Browser["newContext"]>[0];
   } = {},
 ) {
   const artifacts = await artifactDirectory(t);
   assert.ok(
-    options.browser === undefined ||
-      (options.args === undefined && options.browserType === undefined),
-    "pass a shared browser or browser type/launch arguments, not both",
+    options.browserType === undefined ||
+      (options.browser === undefined && options.launch === undefined),
+    "pass a browser type only with launch arguments",
   );
-  const shared = options.args === undefined && options.browserType === undefined;
+  assert.ok(
+    [options.browser, options.args, options.launch].filter((option) => option !== undefined)
+      .length <= 1,
+    "pass one of a shared browser, launch arguments, or a dedicated browser factory",
+  );
+  const shared =
+    options.args === undefined && options.launch === undefined && options.browserType === undefined;
   const browser = shared
     ? await (options.browser ?? sharedBrowser)()
-    : await launchBrowser(options);
+    : await (options.launch?.() ?? launchBrowser(options));
   const resources: {
     context?: BrowserContext;
     diagnostics?: Awaited<ReturnType<typeof watchBrowserContext>>;
@@ -724,11 +731,24 @@ export async function waitForShownInputValue(
 export async function waitForEnabled(locator: Locator, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   await locator.waitFor({ state: "attached", timeout: timeoutMs });
-  await waitForCondition(
-    () => locator.isEnabled(),
-    `${locator} stayed disabled for ${timeoutMs} ms`,
-    Math.max(1, deadline - Date.now()),
-  );
+  try {
+    await waitForCondition(
+      () => locator.isEnabled(),
+      `${locator} stayed disabled for ${timeoutMs} ms`,
+      Math.max(1, deadline - Date.now()),
+    );
+  } catch (error) {
+    const reason = await locator.evaluate((element) =>
+      (element.getAttribute("aria-describedby") ?? "")
+        .split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" "),
+    );
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}; UI reason: ${reason}`,
+      { cause: error },
+    );
+  }
 }
 
 // Ordering sentinel for "this action sends no request" checks. After one macrotask turn, the
