@@ -15467,9 +15467,10 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     };
   }
 
-  private enabledChannels(
-    revision: Pick<AgentRevision, "configuration" | "harness">,
-  ): readonly string[] {
+  private enabledChannels(revision: {
+    configuration: AgentRevision["configuration"];
+    harness: Pick<RevisionHarnessDescriptor, "mode">;
+  }): readonly string[] {
     const providers = enabledChannelProviders(
       revision.configuration,
       CHANNEL_PROVIDERS,

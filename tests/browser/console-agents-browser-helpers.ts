@@ -376,11 +376,17 @@ export async function newPage(
 ) {
   const artifacts = await artifactDirectory(t);
   assert.ok(
-    options.browser === undefined ||
-      (options.args === undefined && options.browserType === undefined && options.launch === undefined),
-    "pass a shared browser or browser type/launch arguments, not both",
+    options.browserType === undefined ||
+      (options.browser === undefined && options.launch === undefined),
+    "pass a browser type only with launch arguments",
   );
-  const shared = options.args === undefined && options.browserType === undefined && options.launch === undefined;
+  assert.ok(
+    [options.browser, options.args, options.launch].filter((option) => option !== undefined)
+      .length <= 1,
+    "pass one of a shared browser, launch arguments, or a dedicated browser factory",
+  );
+  const shared =
+    options.args === undefined && options.launch === undefined && options.browserType === undefined;
   const browser = shared
     ? await (options.browser ?? sharedBrowser)()
     : await (options.launch?.() ?? launchBrowser(options));
