@@ -1,7 +1,7 @@
 ---
 created: 2026-09-04
-updated: 2026-11-08
-last_updated_session: authoring-run/c9bf410d-11cf-461c-9bcb-50414c3257b7
+updated: 2026-11-09
+last_updated_session: authoring-run/9bdbe5a7-be32-4674-88f5-98350eb572ae
 ---
 
 # GitHub Actions testing flow
@@ -160,7 +160,7 @@ both commits.
 
 `scripts/ci/run-tests.mjs:main`, `scripts/ci/reporter.mjs:jsonLinesReporter` and `scripts/ci/failure-redaction.mjs:redactFailure`
 
-The runner discovers active test files and verifies one lane assignment per file. Different prerequisites require separate files. It invokes whole files with invocation-scoped environment inputs. A custom Node reporter publishes case names, locations and outcomes, excluding arbitrary output. The runner also keeps each failure's error message (at most 600 characters) and top stack frame (240), with the repository path stripped, every nonpublic environment value of eight or more characters (from the job and from the test process) replaced by `[env:NAME]`, and common token, key, URL-password and `password=`-style values replaced by `[redacted]`; the runner prints the same line per failed case to the job log. Values a test generates at run time are redacted only when they match those shapes. Controller HTTP assertion diagnostics can also retain numeric actual and expected status codes, an allowlisted OCC error code, and the upstream ChatGPT operation and status when available. Denied-traffic failures retain only an allowlisted traffic category, without target addresses or response data. Plugin-status fixture failures retain an allowlisted readiness or rollout stage. Rollout diagnostics include allowed Pod phases, readiness and scheduling flags, container restart counts and exit codes, and allowlisted reasons. These structured diagnostics exclude response bodies, credentials, and identities.
+The runner verifies one lane per active test file; different prerequisites require separate files. It invokes whole files with invocation-scoped inputs. The Node reporter publishes case names, locations and outcomes, excluding arbitrary output. The runner also keeps each failure's error message (at most 600 characters) and top stack frame (240), stripping repository paths, replacing job/test nonpublic environment values of eight or more characters with `[env:NAME]`, and common token, key, URL-password and `password=`-style values replaced by `[redacted]`; the runner prints the same line per failed case to the job log. Values a test generates at run time are redacted only when they match those shapes. Controller HTTP assertion diagnostics can also retain numeric actual and expected status codes, an allowlisted OCC error code, and the upstream ChatGPT operation and status when available. Denied-traffic failures retain only an allowlisted traffic category, without target addresses or response data. Plugin-status fixture failures retain an allowlisted readiness or rollout stage. Rollout diagnostics include allowed Pod phases, readiness and scheduling flags, container restart counts and exit codes, and allowlisted reasons. Diagnostics exclude bodies, credentials and identities.
 
 Required cases must pass; every skip or TODO fails the lane. There are no counterpart-skip lists or CI name filters. Synthetic file-wrapper success, missing output, zero cases, or interruption without final reporter output cannot establish coverage. Lane results retain failure, timeout and cleanup outcomes.
 
@@ -171,19 +171,26 @@ Required cases must pass; every skip or TODO fails the lane. There are no counte
 `scripts/ci/cleanup.mjs:main` and `scripts/ci/run-tests.mjs:main`
 
 `.github/actions/run-ci-lane/action.yml` uploads one sanitized result artifact
-per lane and run. A retry replaces that lane's artifact, preventing aggregation
-of a stale result; other lanes retain theirs. Each attempt also uploads the same
-file as `attempt-<run attempt>-<artifact-prefix>-<lane>`, which no aggregate
+per lane and run. Retries replace only that lane's artifact, preventing stale aggregation. Each attempt also uploads
+that file as `attempt-<run attempt>-<artifact-prefix>-<lane>`, which no aggregate
 pattern matches, so a failed attempt's cases survive a `--failed` rerun.
 
-The `k3d-fixture-configuration` lane samples memory, pressure, disk and process RSS every 15 seconds, without arguments or environment. Minute summaries reach logs; failed/cancelled attempts print the last samples and upload at most about 1 MiB as `memory-<artifact-prefix>-<lane>-attempt-<run attempt>`. Sampling/upload errors do not fail tests; runner loss can leave only logged summaries.
+`scripts/ci/memory-sampler.sh` samples memory pressure, RSS, process IDs,
+containers and disk every 15 seconds, excluding arguments and environment.
+`k3d-fixture-configuration` samples during tests and logs live summaries for
+runner-loss diagnosis. Runtime startup and browser lanes sample from before
+preparation through cleanup, then print summaries.
+
+Each attempt uploads `memory-<artifact-prefix>-<lane>-attempt-<run attempt>`
+(about 1 MiB maximum). Sampler/upload errors do not fail the lane.
+Only live summaries survive runner loss.
 
 For `images-packaging`, `scripts/ci/export-image-reconciliation.mjs` attempts to
 retain attempt-specific cleanup records for prepared controller and runtime tags.
 Planned records do not prove image creation; tag names confer no authentication
 or deletion authority. Missing state is unavailable, and empty inventories do not
-prove cleanup. The separate runtime-images test tag, other resource kinds and
-private environment values are excluded. Export, upload or runner failure can
+prove cleanup. Exports exclude the runtime-images test tag, other resource kinds and
+private environment values. Export, upload or runner failure can
 prevent retention.
 
 Fixture bootstrap diagnostics upload separately as `diagnostics-<artifact-prefix>-<lane>-attempt-<N>`.
@@ -191,8 +198,7 @@ They survive cluster/private-state cleanup but cannot satisfy required test resu
 
 `tests/helpers/local-first-agent-native.mjs:nativeWorkerPlacementObservation`
 classifies public placement errors and projects environment/tunnel states, node
-connection and capability counts, and exact workspace-node matches. The expected
-node comes from the selected revision's Gateway Pod. Failure reads use
+connection and capability counts, and exact workspace-node matches. The selected revision's Gateway Pod supplies the expected node. Failure reads use
 `sessions.describe`, `environments.status` and `node.list` share a five-second
 budget; failed refreshes retain a labeled fallback observation.
 `reporter.mjs:nativeFirstAgentProofDiagnostic` validates the fixed categories,
@@ -200,39 +206,30 @@ booleans and counters again. Raw errors and identifiers do not enter the record.
 Public RPCs do not expose workspace-binding readiness or restoration; a workspace
 reference does not prove either state.
 
-Per-file cleanup releases its database; job cleanup removes state-owned resources.
-Deleting an owned `k3d-cluster` removes its Collector Namespace and RBAC. Logging
-cleanup removes its Docker backend and JSONL/config directory even without
-Kubernetes. Cleanup failure fails the check except for
-[hosted QA image warnings](github-actions-testing/preparation.md). Private
-state stays on its runner host and path; user databases, contexts, unrelated
-containers and other image references remain outside that ownership.
+Per-file cleanup releases its database; job cleanup removes owned resources. Deleting the
+owned k3d cluster removes Collector RBAC and Namespace. Logging cleanup removes its Docker
+backend and JSONL/config directory without Kubernetes. Cleanup errors fail the check except
+for [hosted QA image warnings](github-actions-testing/preparation.md). Private state stays
+on its original runner and path. User databases, contexts, unrelated containers and other
+image references remain untouched.
 
-`scripts/ci/cleanup.mjs:execFile` waits for exit and drained output.
-On POSIX, `scripts/ci/cleanup-command.mjs` leads each group. Caller exit,
-including SIGKILL or `process.exit()`, closes its private IPC channel;
-the supervisor kills its group. Completion drains output, kills grouped
-descendants, and returns command status.
-At its [deadline](../testing/ci/configuration.md#runner-overrides), TERM then KILL
-bound the group despite direct-child exit. Escaped groups receive no signals;
-retained streams close after another grace. Windows provides direct-child
-termination and stream bounds, without this supervisor.
+`scripts/ci/cleanup.mjs:execFile` awaits exit and drained output. On POSIX,
+`scripts/ci/cleanup-command.mjs` kills its group on caller IPC closure, including caller SIGKILL.
+Completion drains output, kills grouped descendants and returns command status.
+At [timeout](../testing/ci/configuration.md#runner-overrides), TERM then KILL still apply after
+direct-child exit. Escaped groups are unsignaled; retained streams close after grace.
+Windows bounds streams and terminates only the direct child.
 
-`scripts/ci/run-tests.mjs:killDescendants` stops active cleanup groups before
-sweeping descendants and exiting after abandoned work.
-`tests/helpers/postgres-worker-revision-fixture.mjs:disposeStep` records named
-timeouts and continues disposal. Root hooks allow two seconds for reports before
-exit; cleanup failure arms that grace immediately. A 60-second backstop covers
-skipped hooks. The parent runner accounts for failures. Failed resources stay in state; cleanup continues.
+`scripts/ci/run-tests.mjs:killDescendants` stops cleanup groups before sweeping descendants.
+`tests/helpers/postgres-worker-revision-fixture.mjs:disposeStep` records timeouts and continues.
+Root hooks allow two seconds for reports, immediately on cleanup failure; skipped hooks have a
+60-second backstop. The runner reports failures; failed resources stay recorded.
 
-`CI Required` checks jobs even after failures. Full-mode aggregation verifies
-matching commit SHAs, success, required evidence and cleanup; the runner
-validates cases. Docs mode checks documentation, audit and skipped test jobs
-without aggregation, proving only those checks. Full Integration accounts for
-its selected `full` group or lane. `ssh-host` stays outside automatic groups until
-an operator prepares its [disposable host](../testing/ssh.md#ssh-raw-hosts).
-Abrupt runner loss can prevent teardown and loses private `RUNNER_TEMP` state.
-External reconciliation awaits an approved resource ledger.
+`scripts/ci/impact-gate.mjs:main` and Full Integration report matrix failures by job.
+`scripts/ci/run-tests.mjs:aggregateGroup` attributes lane outcomes only to matching lane/SHA
+receipts, even when the parent fails. Reused lanes have independent successful job entries; fresh lanes retain their matrix parent. Passing requires successful jobs, one owner per lane, test evidence and cleanup. Docs mode skips aggregation. Full Integration checks its lane or `full` group; `ssh-host` requires a [disposable host](../testing/ssh.md#ssh-raw-hosts).
+Runner loss can prevent teardown and erase private `RUNNER_TEMP` state; external reconciliation
+awaits an approved resource ledger.
 
 ## Debugging and Verification
 
@@ -256,7 +253,10 @@ External reconciliation awaits an approved resource ledger.
 
 ## Changelog
 
+- 2026-11-09 09:25: Preserve CI tool reuse and memory sampler cleanup with scoped trial AppArmor. (authoring-run/9bdbe5a7-be32-4674-88f5-98350eb572ae - 40a11012d4a7f17cddc8ac1690dc5ffe974a5a51)
+
 - 2026-11-08 09:42: Preserve scoped runner overrides with upstream same-source reuse and capacity selection. (authoring-run/c9bf410d-11cf-461c-9bcb-50414c3257b7 - 3e4abcdfe38a9e7db647e92ed9f4c98bea6b923d)
+- 2026-11-08 08:28: Preserve matrix failure attribution alongside admitted CI reuse. (authoring-run/7219e3b9-3091-4a5b-8712-c543ff5f0c68 - 006cf6288913ff8eb56d0fbc2283885bd551ecc9)
 
 - 2026-11-08 16:09: Reuse admitted same-source ordinary CI results before fresh Full Integration execution. (authoring-run/d394120a-859d-45f1-ba62-9bf9dd9b66c1 - 832dbfca29eca2dd3cb98bd9dd5d803d9100911e)
 
@@ -266,6 +266,8 @@ External reconciliation awaits an approved resource ledger.
 
 - 2026-11-05 01:49: Preserve CI selection and deadlines with scoped runners and CI-only AppArmor. (authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f - 94346f8101230627f206ed9731f2c32beba27bad)
 - 2026-11-04 12:10: Isolate the Codex Git proof queue without Slack. (authoring-run/14bcb9d6-2d4c-449d-8bbc-b64e3ef7e632 - aa60a72115e342ec020d1083fb5e30c139202c84)
+
+- 2026-11-06 09:03: Validate lane identity before attributing outcomes from matrix results. (authoring-run/acefb857-8e57-4f00-b7f5-ed9224944d88 - 048b2cd25cc59087bcb2551fce03a39eef023340)
 
 - 2026-11-04 10:07: Consolidate Full Integration policy and bound the cutover proof routes. (authoring-run/79147f32-199a-48ad-9b7e-fbdf94bf9d60 - 2628dba73edd44e4980711129e48fb7842828019)
 
