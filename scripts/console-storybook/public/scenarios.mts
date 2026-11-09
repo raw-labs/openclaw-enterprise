@@ -46,6 +46,7 @@ import {
 import { calendarPlugin, pluginCapabilities, pluginSetup } from "./plugin-scenario-data.mts";
 import { namespacesScenarios } from "./scenario-groups/namespaces.mts";
 import { secretsScenarios } from "./scenario-groups/secrets.mts";
+import { connectionTemplateScenarios } from "./scenario-groups/connection-templates.mts";
 import { settingsScenarios } from "./scenario-groups/settings.mts";
 import { signInScenarios } from "./scenario-groups/sign-in.mts";
 
@@ -70,6 +71,7 @@ type LocalScenario = Parameters<typeof createAgentLifecycle>[0] &
     description: string;
     path?: string;
     buildRevision?: string;
+    debugEnabled?: boolean;
     actions?: readonly StoryAction[];
     rules?: readonly AuthoredRule[];
     steps?: readonly string[];
@@ -81,7 +83,9 @@ type LocalScenario = Parameters<typeof createAgentLifecycle>[0] &
       status: "observed" | "undeployed" | "unsupported";
       images: readonly RuntimeImage[];
     };
-    nativeAdmin?: "available" | "stopped" | "unsupported" | "denied";
+    nativeAdmin?: "available" | "stopped" | "unsupported" | "denied" | "disabled";
+    nativeAdminReason?: string;
+    nativeAssignmentPrincipal?: string;
     nativeAdminUrl?: string;
     observabilityUrl?: string;
     observabilityDenied?: boolean;
@@ -255,7 +259,8 @@ const authoredScenarios = {
   runtimeImages: {
     group: "Pages/Navigation",
     name: "Debug runtime images",
-    path: "/console/agents?debug=true",
+    path: "/console/agents",
+    debugEnabled: true,
     buildRevision: "1234567890abcdef1234567890abcdef12345678",
     runtimeImages: {
       status: "observed",
@@ -280,13 +285,14 @@ const authoredScenarios = {
     },
     actions: [{ selector: ".runtime-debug-images summary", click: true }],
     description:
-      "Inspect the OCE commit and each Agent's observed runtime images. Expand an Agent, compare the gateway image ID, Enterprise source commit, and upstream OpenClaw commit, then navigate to Namespaces: debug=true remains enabled. Remove the flag to hide diagnostics.",
+      "Inspect the OCE commit and each Agent's observed runtime images. Expand an Agent, compare the gateway image ID, Enterprise source commit, and upstream OpenClaw commit, then navigate to Namespaces: Debug mode remains enabled. Turn it off in Settings to hide diagnostics.",
     gap: "Simulated image identities demonstrate presentation. Native Driver integration verifies actual Docker and Kubernetes observations separately.",
   } satisfies LocalScenario,
   runtimeImagesUnavailable: {
     group: "Pages/Navigation",
     name: "Debug metadata unavailable",
-    path: "/console/agents?debug=true",
+    path: "/console/agents",
+    debugEnabled: true,
     rules: [{ suffix: "/runtime-images", status: 503 }],
     actions: [{ selector: ".runtime-debug-images summary", click: true }],
     description:
@@ -408,7 +414,7 @@ const authoredScenarios = {
     description:
       "Agent panels retain loaded controls on tab and page returns. This preview uses simulated API data.",
     steps: [
-      "Wait for Native admin UI, then open Credentials and return to Configuration. The native access result remains visible.",
+      "Wait for OpenClaw, then open Credentials and return to Configuration. The access result remains visible.",
       "Expand View admitted native configuration, visit Workspace files, then return. The disclosure stays expanded.",
       "Return to Agents and use browser Back. Native admin access and expanded panels remain loaded after admission succeeds.",
       "Click Refresh access to explicitly check the native endpoint again. Page Refresh reloads all panels.",
@@ -636,6 +642,25 @@ const authoredScenarios = {
       "This caller's Delete was refused for a reason that is not a grant, and another person's deletion of the Agent started after the list loaded. A window refocus rebuilds the list: the row gains its Deleting badge, keeps the refusal and its note, and focus returns to Delete. The page scrolls only as far as needed to keep the icon and its note in view (finding 2976). Simulated API; no backend proof.",
     steps: [
       "At 390 px, scroll until the note Not deleted: see above sits at the bottom of the window, with Delete Research assistant focused. Switch to another window, then return. The row reads Deleting, and Delete and its note are both in view.",
+    ],
+  } satisfies LocalScenario,
+  agentsNamespaceFocusDuringRefresh: {
+    group: "Pages/Agents",
+    name: "Namespace focus during list refresh",
+    rules: [
+      {
+        path: "/namespaces/ns_00000000-0000-4000-8000-000000000001/agents",
+        skip: 1,
+        once: true,
+        delayMs: 6500,
+      },
+    ],
+    description:
+      "The simulated Agents list refresh waits briefly so you can move keyboard focus to the Namespace selector. When the list returns, focus stays on the selector.",
+    steps: [
+      "Tab to Research assistant. Switch to another window, then return to start the list refresh.",
+      "While the list refreshes, Tab to the Namespace selector. Wait for the list to return and check that the selector still has focus.",
+      "Press Tab to continue from the selector, then Shift+Tab to return to it.",
     ],
   } satisfies LocalScenario,
   agentsRowRefocusStopped: {
@@ -907,6 +932,7 @@ const authoredScenarios = {
       "A caller without Installation access is told Backends apply to the whole Installation. The Namespace selector is hidden, since another Namespace would not change the answer.",
   } satisfies LocalScenario,
   ...namespacesScenarios,
+  ...connectionTemplateScenarios,
   ...settingsScenarios,
   notFound: {
     group: "Pages/Navigation",
@@ -1152,7 +1178,8 @@ const authoredScenarios = {
   buildRevision: {
     group: "Components/Navigation",
     name: "OCC build revision",
-    path: "/console/agents?debug=true",
+    path: "/console/agents",
+    debugEnabled: true,
     buildRevision: "abcdef1234567890abcdef1234567890abcdef12",
     description:
       "Approved OpenClaw mech mascot beside the OpenClaw Enterprise wordmark and an eight-character OCC commit. Check the mascot at desktop and mobile widths, then hover the version for the full hash. This revision is simulated.",
@@ -1160,7 +1187,8 @@ const authoredScenarios = {
   developmentBuild: {
     group: "Components/Navigation",
     name: "OCC development build",
-    path: "/console/agents?debug=true",
+    path: "/console/agents",
+    debugEnabled: true,
     description:
       "Approved OpenClaw mech mascot beside the OpenClaw Enterprise wordmark with an adjacent dev label when OCC build metadata is unavailable. No checkout or gateway revision is inferred.",
   } satisfies LocalScenario,
@@ -1260,6 +1288,88 @@ const authoredScenarios = {
       "Open Deployment and expand Deployment details, then use Open Agent UI directly. Compare Denied and hidden: there is no launch or access warning there.",
     ],
   } satisfies LocalScenario,
+  nativeReadError: {
+    group: "Components/Native admin",
+    name: "Status read failure",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "available",
+    rules: [{ suffix: "/native-admin", method: "GET", status: 503, once: true }],
+    description: "A failed access read keeps its error and Refresh access visible.",
+    steps: [
+      "Confirm the OpenClaw card shows Service unavailable and no launch link.",
+      "Click Refresh access. The error clears and Open Agent UI becomes available.",
+    ],
+    gap: "Simulated status recovery; deployment-triggered refresh is covered by the Console browser integration.",
+  } satisfies LocalScenario,
+  nativeReadRecovery: {
+    group: "Components/Native admin",
+    name: "Recovery on Back",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "available",
+    rules: [{ suffix: "/native-admin", method: "GET", status: 503, once: true }],
+    description: "Back rechecks a failed access read and replaces the error after recovery.",
+    steps: [
+      "Confirm the OpenClaw card shows Service unavailable and no launch link.",
+      "Open Namespaces, then use Back. The error clears and Open Agent UI becomes available.",
+    ],
+    gap: "Simulated status recovery; the browser integration uses the real role catalog after its outage ends.",
+  } satisfies LocalScenario,
+  nativeUiConfiguration: {
+    group: "Components/Native admin",
+    name: "UI Configuration Required",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "unsupported",
+    nativeAdminReason: "ui_configuration",
+    description: "UI enablement or allowed origin must be corrected before launch.",
+    steps: ["Confirm the reason names UI configuration and the launch link is absent."],
+  } satisfies LocalScenario,
+  nativeRoleUnavailable: {
+    group: "Components/Native admin",
+    name: "Assigned Role Missing",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "unsupported",
+    nativeAdminReason: "role_unavailable",
+    description: "An assignment survives a deployment that removes its role definition.",
+    steps: ["Confirm the message directs an administrator to Sharing or restoring the role."],
+  } satisfies LocalScenario,
+  nativeDeviceApproval: {
+    group: "Components/Native admin",
+    name: "Pairing Permissions Required",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "unsupported",
+    nativeAdminReason: "device_approval_required",
+    description: "Pairing cannot approve every scope required by the assigned role.",
+    steps: ["Confirm the pairing permissions message is distinct from a disabled UI."],
+  } satisfies LocalScenario,
+  nativeAdministratorAssignment: {
+    group: "Components/Native admin",
+    name: "Administrator Needs Assignment",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "available",
+    nativeAssignmentPrincipal: "prn_00000000-0000-4000-8000-000000000003",
+    description:
+      "An Installation administrator needs an explicit OpenClaw role. Simulated UI proof.",
+    steps: [
+      "Confirm the OpenClaw card shows assignment guidance and no launch link.",
+      "In Share Agent, enter prn_00000000-0000-4000-8000-000000000003, select platform-administrator, acknowledge the permissions and select Share Agent.",
+      "Select Refresh access. Open Agent UI becomes available in the same tab.",
+    ],
+  } satisfies LocalScenario,
+  nativeDisabled: {
+    group: "Components/Native admin",
+    name: "Disabled and hidden",
+    path: revision,
+    deployed: true,
+    nativeAdmin: "disabled",
+    description:
+      "A disabled Installation hides OpenClaw without suggesting an assignment. Simulated UI proof.",
+  } satisfies LocalScenario,
   nativeStopped: {
     group: "Components/Native admin",
     name: "Stopped",
@@ -1278,15 +1388,22 @@ const authoredScenarios = {
     path: revision,
     deployed: true,
     nativeAdmin: "unsupported",
-    description: "The selected runtime does not expose a supported native admin endpoint.",
+    nativeAdminReason: "transport_unsupported",
+    description: "The selected Compute Driver does not support OpenClaw browser admission.",
   } satisfies LocalScenario,
   nativeDenied: {
     group: "Components/Native admin",
     name: "Denied and hidden",
     path: revision,
     deployed: true,
-    nativeAdmin: "denied",
-    description: "Denied native-admin access hides the whole panel.",
+    observabilityDenied: true,
+    rules: [{ suffix: "/native-admin", method: "GET", status: 403 }],
+    description:
+      "A person without an OpenClaw assignment can retain their Agent page while access is denied.",
+    steps: [
+      "Confirm the OpenClaw card is hidden.",
+      "Open Namespaces, then use Back. The cached Agent page returns with OpenClaw still hidden.",
+    ],
   } satisfies LocalScenario,
   nativeRefreshing: {
     group: "Components/Native admin",

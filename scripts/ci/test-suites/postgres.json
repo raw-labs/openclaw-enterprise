@@ -6,6 +6,12 @@
   "files": [
     {
       "path": "tests/integration/postgres-migration-compatibility.test.mjs",
+      "optionalEnv": [
+        "OCC_TEST_RELEASED_CONTROLLER_IMAGE",
+        "OCC_TEST_RELEASED_CONTROLLER_REVISION",
+        "OCC_TEST_CANDIDATE_CONTROLLER_IMAGE",
+        "OCC_TEST_CANDIDATE_CONTROLLER_REVISION"
+      ],
       "expectedTests": [
         "Logical restore preserves reviewed canonical and Provider migration histories",
         "First installation requires empty migration history under the migration lock",
@@ -18,7 +24,8 @@
         "Migration rejects legacy active_runtime state without changing persisted rows",
         "Migration rejects legacy harness_revision state without changing persisted rows",
         "Migration rejects legacy harness_account state without changing persisted rows",
-        "Drizzle second migration preserves the applied journal and PostgreSQL schema"
+        "Drizzle second migration preserves the applied journal and PostgreSQL schema",
+        "Runtime-role upgrade preserves existing human administrators without a revocation fallback"
       ]
     },
     {

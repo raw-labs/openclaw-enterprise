@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, readlink, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, readlink, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -92,9 +92,11 @@ packages:
   };
   for (const [name, bytes] of Object.entries(files)) {
     await mkdir(join(root, name, ".."), { recursive: true });
-    await writeFile(join(root, name), bytes, {
-      mode: name.endsWith("bin.js") || name.endsWith("/codex") ? 0o755 : 0o644,
-    });
+    const path = join(root, name);
+    await writeFile(path, bytes, { mode: 0o644 });
+    if (name.endsWith("bin.js") || name.endsWith("/codex")) {
+      await chmod(path, 0o755);
+    }
   }
   await mkdir(join(root, "node_modules/.bin"));
   await symlink("../codex/bin.js", join(root, "node_modules/.bin/codex"));
@@ -189,6 +191,12 @@ packages:
   assert.equal(provenance.commit, sourceIdentity.commit);
   assert.equal(provenance.sourceArchiveSha256, sourceIdentity.sourceArchiveSha256);
   assert.equal(
+    provenance.openclawTrustedProxyRolePatchSha256,
+    createHash("sha256")
+      .update(await readFile("deploy/runtime/openclaw-trusted-proxy-role.patch"))
+      .digest("hex"),
+  );
+  assert.equal(
     provenance.runtimeContentsSha256,
     createHash("sha256").update(contents).digest("hex"),
   );
@@ -217,6 +225,7 @@ packages:
   // The remaining per-patch fields keep their names and values.
   for (const [field, file] of [
     ["openclawBridgePatchSha256", "openclaw-codex-read-only-paths.patch"],
+    ["openclawTrustedProxyRolePatchSha256", "openclaw-trusted-proxy-role.patch"],
     [
       "openclawRequiredWorkerAuthorityRegressionPatchSha256",
       "openclaw-required-worker-authority-regression.patch",

@@ -85,7 +85,7 @@ The API, console, durable worker, PostgreSQL persistence, and Kubernetes packagi
 are implemented. Single-cluster Kubernetes execution places Gateway and Harness in one tenant
 namespace with separate Pods, identities and storage. External access-gateway admission, workload
 token authentication to OCC, and general credential-free model inference remain
-planned. The two-cluster profile is experimental.
+planned. The two-cluster profile is experimental. Human Gateway entry now uses exact OCE person/Agent assignments and native role enforcement through the Kubernetes Driver and patched runtime; broader checkpoint 3 permission mediation remains planned. See [Agent OpenClaw access](reference/agent-native-admin.md).
 
 <a id="current-limitations"></a>
 <a id="near-term-future-work"></a>
@@ -116,9 +116,10 @@ platform state, IAM policy, controller work, and audit evidence.
 
 The API authenticates human sessions and non-Agent service keys, resolves an
 explicitly provisioned identity, and authorizes exact resource operations.
-The console at `/console/` uses these same APIs. GitHub and Google sign-in require
-administrator-enrolled identities; neither sign-in nor Namespace membership
-grants permissions. See [authentication](reference/authentication.md) and
+The console at `/console/` uses these same APIs. External sign-in uses enrolled
+identities. GitHub optionally enrolls verified team members into an operator-selected
+native IAM Group; its existing bindings determine access. Namespace membership
+does not grant permissions. See [authentication](reference/authentication.md) and
 [authorization](reference/authorization.md).
 
 Resource mutations, queued work, and audit records commit together. The worker

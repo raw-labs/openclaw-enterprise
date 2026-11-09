@@ -1,3 +1,5 @@
+import { nativeAdminComputeDriver } from "./console-agents-test-support.ts";
+import { nativeRolesGateway } from "../helpers/runtime-roles.mjs";
 import { openAdvancedSettings, waitForLiveControls } from "./console-agents-ui-test-support.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -15,6 +17,7 @@ import {
 } from "../../apps/controller/src/drivers/plugin/index.ts";
 import { apiErrorResponse } from "../helpers/api-error.mjs";
 import { createTestConfigurationDriver } from "../helpers/configuration-driver.ts";
+import { staticEgressFixture } from "../helpers/static-egress.mjs";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import {
@@ -844,13 +847,15 @@ test("Agent deployment shows the API's reason when it rejects the saved model", 
   await storeRefusedConfiguration(fixture, configurationDriver, agent, bare, reason);
   const { page } = await newPage(t, fixture);
   const url = detailUrl(fixture, namespace.id, agent.id, "draft", "configuration");
-  await login(page, fixture, url);
   const rejected = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
       response.url().endsWith(`/agents/${agent.id}/deploy`),
   );
-  await page.getByRole("button", { name: "Deploy new version" }).click();
+  await login(page, fixture, url);
+  const deploy = page.getByRole("button", { name: "Deploy new version" });
+  await waitForEnabled(deploy);
+  await deploy.click();
   assert.equal((await rejected).status(), 400);
   // The generic "check the entered values" text cannot tell the user which setting to fix.
   await page.getByText(reason, { exact: true }).waitFor();
@@ -1080,10 +1085,21 @@ test("Plugin save distinguishes a refusal, a stale read, and an unconfirmed succ
 });
 
 test("Agent sharing shows a rejected write's reason, but generic text after an accepted write", async (t) => {
-  const fixture = await createConsoleAppFixture(t, { provisionedPeople: ["sharing-recipient"] });
+  const fixture = await createConsoleAppFixture(t, {
+    provisionedPeople: ["sharing-recipient"],
+    computeDriver: nativeAdminComputeDriver("wss://private-gateway.example.invalid/sharing"),
+  });
   await fixture.bootstrap();
-  const namespace = await fixture.createNamespace("Sharing rejection");
-  const agent = await fixture.createAgent(namespace.id, "Sharing Agent", nativeValues("sharing"));
+  const namespace = await fixture.createNamespace("Sharing rejection", { ready: true });
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Sharing Agent",
+    nativeRolesGateway(nativeValues("sharing"), fixture.origin),
+  );
+  // Keep deployed policy available alongside the saved Configuration catalog.
+  await fixture.seedActiveAgentRevision(namespace.id, agent.id);
+  const baselineRoles = (await fixture.request("GET", `/namespaces/${namespace.id}/iam/roles`))
+    .data;
   const { page } = await newPage(t, fixture);
   const detail = detailUrl(fixture, namespace.id, agent.id, "draft", "access");
   await login(page, fixture, detail);
@@ -1104,11 +1120,10 @@ test("Agent sharing shows a rejected write's reason, but generic text after an a
       }),
     });
   };
-  assert.ok(fixture.provisionedAccounts[0]);
   const panel = page.getByRole("region", { name: "Share Agent", exact: true });
   await panel
     .getByLabel("Existing person’s Principal ID")
-    .fill(fixture.provisionedAccounts[0].principal.id);
+    .fill(fixture.provisionedAccounts[0]!.principal.id);
   await panel.getByRole("checkbox").check();
 
   // The first write (the discovery Role) is rejected: its reason is shown.
@@ -1127,7 +1142,7 @@ test("Agent sharing shows a rejected write's reason, but generic text after an a
   await panel.getByText("Check the entered values and resource IDs", { exact: false }).waitFor();
   assert.equal(await panel.getByText(reason, { exact: false }).count(), 0);
   const roles = await fixture.request("GET", `/namespaces/${namespace.id}/iam/roles`);
-  assert.equal(list(roles.data).length, 1);
+  assert.equal(roles.data.length - baselineRoles.length, 1);
 
   // The discovery Role now exists, so its rejected binding is the first write: reason shown.
   await panel.getByRole("button", { name: "Refresh sharing" }).click();
@@ -1144,12 +1159,12 @@ test("Agent sharing shows a rejected write's reason, but generic text after an a
   await panel.getByRole("checkbox").check();
   await panel.getByRole("button", { name: "Share Agent", exact: true }).click();
   await panel.getByText("Agent access is shared.", { exact: false }).waitFor();
-  const bindings = await fixture.request("GET", `/namespaces/${namespace.id}/iam/access-bindings`);
-  assert.equal(list(bindings.data).length, 2);
+  const bindings = await fixture.addedAccessBindings(namespace.id);
+  assert.equal(bindings.length, 2);
   await page.route(`${policyPath}/access-bindings/*`, reject);
   const removeBinding = panel.getByRole("button", { name: "Remove binding", exact: true });
   // Removal deletes the binding at once, so it takes the destructive tone (finding 1967).
-  assert.match(text(await removeBinding.getAttribute("class")), /\bbutton--danger\b/);
+  assert.match((await removeBinding.getAttribute("class")) ?? "", /\bbutton--danger\b/);
   await removeBinding.click();
   await panel.getByText(reason, { exact: false }).waitFor();
   assert.equal(await panel.getByText("Check the entered values", { exact: false }).count(), 0);
@@ -2030,6 +2045,9 @@ test("Agent detail preserves admitted revision history while draft edits change 
       .getAttribute("value"),
   );
   await page.waitForURL((url) => url.searchParams.get("revision") === second.revision.id);
+  // The URL changes before the new snapshot arrives; wait for its own content
+  // before expanding the disclosure, rather than expanding the previous one.
+  await page.getByText('"marker": "rev-two"').waitFor({ state: "attached" });
   await revealNativeConfiguration(page, "View admitted native configuration");
   await page.getByText('"marker": "rev-two"').waitFor();
   await expectNoText(page, /"marker": "rev-one"|"marker": "draft-current"/, () =>
@@ -2044,12 +2062,14 @@ test("Agent detail preserves admitted revision history while draft edits change 
       .getAttribute("value"),
   );
   await page.waitForURL((url) => url.searchParams.get("revision") === first.revision.id);
+  await page.getByText('"marker": "rev-one"').waitFor({ state: "attached" });
   await revealNativeConfiguration(page, "View admitted native configuration");
   await page.getByText('"marker": "rev-one"').waitFor();
   assertRevisionUrl(page, first.revision.id);
 
   await page.getByRole("button", { name: "Open draft" }).last().click();
   await page.waitForURL((url) => url.searchParams.get("revision") === "draft");
+  await page.getByText('"marker": "draft-current"').waitFor({ state: "attached" });
   await revealNativeConfiguration(page, "View native Configuration");
   await page.getByText('"marker": "draft-current"').waitFor();
   await expectNoText(page, /"marker": "rev-one"|"marker": "rev-two"/, () =>
@@ -3076,4 +3096,58 @@ test("Dedicated OpenClaw credentials and plugins do not offer Codex-only control
   );
   await dialog.getByRole("button", { name: "Done", exact: true }).click();
   assert.equal(await page.getByLabel("Plugin selections JSON").isEnabled(), true);
+});
+
+// Real Console, HTTP, IAM, and Compute admission; runtime observations use the existing wire
+// fixture. This proves submission and refusal/recovery, not a model turn or live cluster.
+test("Harness controls submit the latest request directly and recover from destination refusal", async (t) => {
+  const fixture = await staticEgressFixture(t, { admitRevision: false });
+  assert.ok(
+    "origin" in fixture && "credentials" in fixture && "registerCleanupBeforeAppClose" in fixture,
+  );
+  const { namespace, agent, modelProvider } = fixture;
+  const { page } = await newPage(t, fixture);
+  const path = `/namespaces/${namespace.id}/agents/${agent.id}`;
+  const requests = apiRequests(page, fixture.origin);
+  await login(page, fixture, detailUrl(fixture, namespace.id, agent.id, "draft", "configuration"));
+  await page.getByText("Use the Installation default at deployment.", { exact: true }).waitFor();
+  await page.locator(".agent-harness-settings summary").click();
+  await page.getByLabel("Harness settings", { exact: true }).selectOption("custom");
+  const input = page.getByLabel("Provider base URL", { exact: true });
+  const deploy = page.getByRole("button", { name: "Deploy new version", exact: true });
+  await input.fill("https://unapproved.example.com/v1");
+  await waitForEnabled(deploy);
+  const refused = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url() === fixture.origin + path + "/deploy",
+  );
+  await deploy.click();
+  assert.equal((await refused).status(), 409);
+  await page.getByRole("alert").filter({ hasText: "authorized_base_url" }).waitFor();
+  assert.equal((await fixture.request("GET", path + "/revisions")).data.length, 0);
+
+  // Editing the URL changes the actual submitted value without another preparatory operation.
+  await input.fill(modelProvider.baseUrl);
+  await page
+    .getByText(`Requested destination: ${modelProvider.baseUrl}`, { exact: true })
+    .waitFor();
+  await waitForEnabled(deploy);
+  const accepted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url() === fixture.origin + path + "/deploy",
+  );
+  await deploy.click();
+  const response = await accepted;
+  assert.equal(response.status(), 202);
+  assert.equal(
+    response.request().postDataJSON().harnessOverrides.modelProvider.baseUrl,
+    modelProvider.baseUrl,
+  );
+  const revision = (await response.json()).data;
+  assert.equal(revision.harness.overrides.modelProvider.baseUrl, modelProvider.baseUrl);
+  assert.equal(revision.harness.configuration.modelProvider.baseUrl, modelProvider.baseUrl);
+  await page.getByText("Resolved Harness settings", { exact: true }).waitFor();
+  assert.equal(pathRequests(requests, "POST", path + "/deploy").length, 2);
 });

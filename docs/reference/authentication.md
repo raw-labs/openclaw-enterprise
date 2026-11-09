@@ -1,8 +1,9 @@
 # Authentication
 
 OpenClaw Control Plane (OCC) authenticates human controller API clients with
-user sessions established through email/password sign-in or an administrator-enrolled
-GitHub, Google or OIDC identity. Programmatic non-Agent automation authenticates with service
+user sessions established through email/password sign-in or an enrolled
+GitHub, Google or OIDC identity. GitHub can use opt-in
+[team enrollment](authentication/team-enrollment.md). Programmatic non-Agent automation authenticates with service
 API keys. Better Auth owns
 password verification, revocable session cookies, and hashed API-key storage.
 The selected IAM Driver resolves the authenticated account or service identity
@@ -12,7 +13,7 @@ to an explicitly provisioned Principal or ServicePrincipal and owns
 For a sign-in procedure, see
 [human administrator sign-in](authentication/service-api-keys.md#sign-in-as-a-human-administrator).
 For non-Agent automation, see the [service-key procedure](authentication/service-api-keys.md).
-The [platform console](console.md) at `/console/` uses these session endpoints. Public signup, OIDC
+The [platform console](console.md) at `/console/` uses these session endpoints. Unrestricted public signup, OIDC
 provisioning or claim mapping, and bearer credentials are unsupported; generic OIDC
 sign-in for enrolled accounts is in [OIDC sign-in](../guides/deploy/oidc-sign-in.md).
 
@@ -102,7 +103,7 @@ not require Origin, and an invalid key never falls back to a session cookie.
 | `GET /api/auth/session`        | Returns safe account identity and a noncredential `sessionKey`, or `data: null` without a valid session.                                                                                       |
 | `POST /api/auth/sign-out`      | Revokes the current session. Protected API requests using that session subsequently return `401`.                                                                                              |
 
-Human-session Namespace IAM writes retain assigning authority through their transaction; see
+Human-session IAM writes retain assigning authority through COMMIT; see
 [Sharing commit guarantees](authorization.md#manage-namespace-policy).
 
 The `sessionKey` names the current session, stays stable across reads, and changes
@@ -243,11 +244,12 @@ sign-out clear prior host-only `openclaw_occ` and `openclaw_occ_shared` cookie
 names so browsers never choose between duplicates.
 
 Native-host requests authenticate the shared OCE session, resolve the exact
-Agent represented by the requested host, authorize exact Agent `administer`, and
-validate the selected version and supported native configuration before
-proxying. OCC strips browser cookies, `Authorization`, API and session keys,
-forwarded identity, and native scope headers before forwarding upstream, so the native
-gateway never receives the OCE session cookie. Native chat or other Agent-host
+Agent represented by the requested host, authorize exact Agent `use` with a
+direct runtime-role assignment, and validate the selected version and supported
+native configuration before proxying. OCC strips browser cookies, `Authorization`,
+API/session keys, forwarded identity, and native identity/role/policy-digest/scope
+headers, then injects the verified human descriptor. The native gateway never
+receives the OCE cookie. Native chat or other Agent-host
 activity does not renew the console session.
 
 ## Account provisioning
@@ -257,14 +259,17 @@ singleton Installation, and stays available with GitHub sign-in enabled. One
 transaction writes the account, Principal, grant, enrollment and an optional
 `"github":{"subject":"<numeric id>"}` identity (`409` if GitHub is off or taken).
 
-An optional `roleId` binds an existing Installation Role (`400` if unknown or
-Namespace-scoped); without one the account has no grants. It cannot create Roles
-or infer grants. Audit records `principalId` and `roleId` or `grant: "none"`.
+An optional `roleId` binds an existing Installation Role (`400` if unknown,
+Namespace-scoped, or a configured `role_config_` Role); without one the account
+has no grants. It cannot create Roles or infer grants. The same transaction adds
+the account to each
+[configured default Group](authorization/default-users.md#group-membership).
+Audit records `principalId`, `roleId` or `grant: "none"`, and any `groupIds`.
 Creation issues no session.
 
-The only Installation Role is the built-in Installation administrator
-(`role_admin_<uuid>`). No API creates another, and the Namespace policy API
-omits this one. Its Installation-scoped binding grants only
+Apart from configured Roles, the only Installation Role is the built-in
+Installation administrator (`role_admin_<uuid>`). No API creates another, and
+the Namespace policy API omits this one. Its Installation-scoped binding grants only
 `installation:administer` and `installation:read`; see
 [Appoint an administrator](../guides/topics/iam.md#appoint-an-administrator).
 A representative provisioning body is:

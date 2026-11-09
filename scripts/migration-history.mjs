@@ -157,6 +157,24 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 67 && completedCount > 67) {
     return "preAgentPluginDriver";
   }
+  if (count === 68 && completedCount > 68) {
+    return "preConnectionTemplates";
+  }
+  if (count === 69 && completedCount > 69) {
+    return "preSavedConnections";
+  }
+  if (count === 70 && completedCount > 70) {
+    return "preDefaultUsers";
+  }
+  if (count === 71 && completedCount > 71) {
+    return "preHarnessOverrides";
+  }
+  if (count === 72 && completedCount > 72) {
+    return "preAccountAdministrationPolicy";
+  }
+  if (count === 73 && completedCount > 73) {
+    return "preFiniteRepositorySessionWithdrawal";
+  }
   if (count === completedCount) {
     return "completed";
   }
@@ -258,6 +276,9 @@ function catalogAtMigrationCount(count, completedCount) {
   }
   if (count === 59) {
     return "preCredentialProxy";
+  }
+  if (count === 74) {
+    return "preRuntimeRoles";
   }
   if (count === 62) {
     return "prePreparedAttemptSettlement";

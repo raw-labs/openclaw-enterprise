@@ -95,13 +95,17 @@ Stories reach error states through real controls after loading fixture data.
 | Navigation components                                                              | Account menu, Namespace switcher, mobile drawer, admin link and denial, OCE branding, simulated OCC version, missing development metadata, debug runtime image identities and unavailable metadata.                                                                                                                                                                                                               |
 | Channels                                                                           | Unconfigured cards, Slack editor with pairing/open/disabled policies, everyone and restricted channel sender access, incomplete sender access, unsupported mixed sender lists, unsupported wildcard channel maps, read-only snapshot, save conflict.                                                                                                                                                              |
 | Credentials                                                                        | Named Secret selection and creation, API-key and Slack Secret switching, denied metadata and grants, partially missing tokens, missing authentication, operator-managed credentials, issued ChatGPT account, model Secret replacement, pending grants, and unknown authentication saves.                                                                                                                          |
-| Native admin                                                                       | Available launch, stopped or unsupported runtime, denied panel hidden. The launch target is an explanatory fixture page.                                                                                                                                                                                                                                                                                          |
+| Native admin                                                                       | Available launch, stopped, UI configuration required, assigned role missing, insufficient pairing permissions, unsupported Compute transport, administrator self-assignment and explicit Refresh recovery, disabled panel hidden, and ordinary-user denial hidden. Launch opens a fixture page.                                                                                                                   |
 | Workspace                                                                          | Four editable deployed files, undeployed Agent, denied reads, initial operate denial, a retained editor after an operate grant or revocation, missing file, unknown write outcome, rereads after a version change.                                                                                                                                                                                                |
 | Stop Agent                                                                         | Confirmation, stopped requested state, permission denial, unknown outcome requiring refresh.                                                                                                                                                                                                                                                                                                                      |
 | Deletion                                                                           | Confirmation, pending cleanup, permission denial, conflict, unknown outcome.                                                                                                                                                                                                                                                                                                                                      |
 
 Pending-read stories use the real client's 15-second timeout; reset them to replay
 loading.
+
+In **Components/Native admin → Administrator Needs Assignment**, self-assign
+`platform-administrator`, then **Refresh access** to show the launch link.
+**Disabled and hidden** and **Denied and hidden** omit this hint.
 
 ## Return navigation
 
@@ -145,6 +149,13 @@ Agent creation, editing, deployment, Stop, and Delete stories are in
 
 Moved to [Agent workflows](console-storybook-agent-workflows.md#create-and-deploy).
 
+### Sharing
+
+Use **Share before first deployment**, **Share while stopped**, **Configured and
+deployed role permissions**, **Change OpenClaw role** and **OpenClaw roles
+unavailable**. Inspect permissions, share a Principal, change its role and remove
+the assignment. Self-assignment is explained above.
+
 ### Return to loaded pages
 
 Moved to [Agent workflows](console-storybook-agent-workflows.md#return-to-loaded-pages).
@@ -186,7 +197,8 @@ Moved to [Agent workflows](console-storybook-agent-workflows.md#delete).
 In **Pages/Settings → Nested Driver values**, expand a Driver and switch between
 **Fields** and **JSON**. Confirm that nesting, arrays, empty values, and redaction
 stay intact and the open groups remain open. Scroll the long page to verify that
-the sidebar and account control reach the bottom. Repeat on a phone and open the
+the account control stays at the viewport bottom. Open its menu at both ends of
+the page, with Debug mode off and on. Repeat on a phone and open the
 navigation drawer; the page must not scroll horizontally.
 
 When changing the Settings Driver access stories, build and serve the preview
@@ -264,8 +276,12 @@ messages and UI markup.
 Open **Pages / Navigation / Debug runtime images**, expand an Agent, and inspect
 the gateway image reference, digest, Enterprise source commit, and upstream
 OpenClaw commit. The sidecar has unknown provenance for both commits.
-Navigate to Namespaces, confirm `debug=true` persists, and repeat in the mobile
-drawer. **Debug metadata unavailable** covers a failed read; ordinary navigation
+Navigate to Namespaces, confirm diagnostics stay enabled, and repeat in the mobile
+drawer. In **Pages / Settings / Account**, turn **Debug mode** on and off.
+**Debug mode enabled** starts with the saved preference enabled; **Browser storage
+unavailable** shows a refused save without enabling diagnostics. Use the live
+Console to verify that the preference survives a reload; each Storybook frame
+starts with its scenario's preference. **Debug metadata unavailable** covers a failed read; ordinary navigation
 stories hide diagnostics. Docker image inspection and the Kubernetes API/worker
 integration suite, not these fixtures, verify Driver behavior.
 

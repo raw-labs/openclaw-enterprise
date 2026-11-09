@@ -432,7 +432,7 @@ test("phone-width routes, resizing and history keep the selected Agent tab visib
   await page.getByRole("tab", { name: "Configuration", exact: true }).click();
   await page.getByText("View admitted native configuration", { exact: true }).click();
   await waitForIdleFetches(page);
-  const disclosure = await page.locator(".native-document").elementHandle();
+  const disclosure = await page.locator("details.native-document").elementHandle();
 
   // Browser history also selects tabs without scrolling them through a click.
   await page.goBack();
@@ -3202,6 +3202,70 @@ test("a source picked while a refresh reads clears the kept lines at once", asyn
   assert.match((await outputStatus.textContent()) ?? "", /^Showing gateway in /u);
 });
 
+test("switching log sources clears settled rate-limit feedback while the next source reads", async (t) => {
+  const logs = await logsFixture(t);
+  logs.computeDriver.state.lines = [line(1, "gateway output before switching")];
+  logs.computeDriver.state.harnessPod = { ready: true };
+  logs.computeDriver.state.harnessLines = [line(1, "agent output before the rate limit")];
+  const { page } = await openRetainedLogs(t, logs);
+  const log = page.getByRole("log", { name: "Runtime log output" });
+  const source = page.locator("#runtime-log-source");
+  const logError = page.locator(".log-error");
+  const outputStatus = page.locator(".log-output-status");
+  const logPath = `/namespaces/${logs.namespace.id}/agents/${logs.agent.id}/deployments/${logs.revisionId}/runtime/logs`;
+  const matchesLogRead = (url: URL) =>
+    url.origin === logs.fixture.origin && url.pathname === logPath;
+  await log.getByText("gateway output before switching").waitFor();
+  await source.selectOption("agent");
+  await log.getByText("agent output before the rate limit").waitFor();
+  await waitForIdleFetches(page);
+
+  await page.route(matchesLogRead, (route) => route.fulfill(rateLimitedResponse(5)), {
+    times: 1,
+  });
+  const [rateLimited] = await Promise.all([
+    page.waitForResponse((response) => matchesLogRead(new URL(response.url()))),
+    page.getByRole("button", { name: "Refresh logs" }).click(),
+  ]);
+  assert.equal(rateLimited.status(), 429);
+  assert.equal(new URL(rateLimited.url()).searchParams.get("source"), "agent");
+  await waitForIdleFetches(page);
+  assert.equal(
+    await logError.textContent(),
+    `Too many requests. Try again in 5 seconds. Request ID: ${rateLimitRequestId}`,
+  );
+
+  logs.computeDriver.state.lines = [line(2, "new gateway output")];
+  const gateway = await holdRequests(t, page, matchesLogRead, {
+    once: true,
+    method: "GET",
+    afterServer: true,
+  });
+  let gatewayResponse: Awaited<typeof gateway.requested>;
+  try {
+    await source.selectOption("gateway");
+    gatewayResponse = await gateway.requested;
+    assert.ok(gatewayResponse, "the Gateway read reached the controller");
+    assert.equal(new URL(gatewayResponse.url()).searchParams.get("source"), "gateway");
+    assert.equal(await source.inputValue(), "gateway");
+    assert.equal(await outputStatus.textContent(), "Reading output…");
+    assert.equal(
+      await logError.isHidden(),
+      true,
+      "the Agent error is hidden during the Gateway read",
+    );
+
+    await page.clock.runFor(5_000);
+    assert.equal(await outputStatus.textContent(), "Reading output…");
+    assert.equal(await logError.isHidden(), true, "the Agent retry hint stays hidden after expiry");
+  } finally {
+    gateway.release();
+  }
+  assert.equal(gatewayResponse.status(), 200);
+  await log.getByText("new gateway output").waitFor();
+  await waitForIdleFetches(page);
+});
+
 test("a status refresh keeps Download disabled while a download is pending", async (t) => {
   const logs = await logsFixture(t);
   logs.computeDriver.state.lines = [line(1, "download stays pending")];
@@ -3822,8 +3886,8 @@ test("a member's Back reuses a followed Logs view, and not once log access is re
   );
   const pane = page.getByRole("log", { name: "Runtime log output" });
   await pane.getByText("member before leaving").waitFor();
-  // The member is refused runtime status, and the view says so. The permission answer already
-  // says the member lacks Agent administer, so native administration is never asked.
+  // Runtime status is refused. Native access independently checks the member’s
+  // per-person assignment once; its audited denial must be retained on Back.
   await page.getByText(/Runtime status requires Agent operate/).waitFor();
   await page.getByRole("button", { name: "Follow" }).click();
   computeDriver.state.lines = [...computeDriver.state.lines, line(2, "member first poll")];
@@ -3833,7 +3897,7 @@ test("a member's Back reuses a followed Logs view, and not once log access is re
   const panel = await pane.elementHandle();
   const nativeAdminReads = () =>
     requests.filter(({ path }) => path.endsWith(`/agents/${agent.id}/native-admin`)).length;
-  assert.equal(nativeAdminReads(), 0);
+  assert.equal(nativeAdminReads(), 1);
   const logPaths = () =>
     requests.filter(({ path }) => path.includes("/runtime/logs")).map(({ path }) => path);
 
@@ -3859,8 +3923,8 @@ test("a member's Back reuses a followed Logs view, and not once log access is re
     readAfterBack.filter((path) => readBeforeLeaving.has(path) || path.includes("tailLines")),
     [],
   );
-  // Back does not ask native administration either (each refusal would be an audited denial).
-  assert.equal(nativeAdminReads(), 0);
+  // Back retains the initial native-access denial instead of auditing it again.
+  assert.equal(nativeAdminReads(), 1);
 
   // Log access is revoked while the member is away: Back must not paint the cached output.
   await leave();

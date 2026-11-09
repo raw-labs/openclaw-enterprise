@@ -1,10 +1,11 @@
 import type { CredentialPolicyWithdrawalOptions } from "@openclaw-enterprise/contracts";
+import type { OpenShellCredentialAttachments } from "../../sandbox/openshell-credential-attachments.ts";
 import { networkPolicySpecToJson } from "../../kubernetes/network-policy.ts";
 import {
   assertExecutionAdmission,
   codexProxiesRepositoryBroker,
   codexRepositoryBrokerNetworkProxy,
-  type PreparedTokenService,
+  type TokenService,
 } from "@openclaw-enterprise/contracts";
 import {
   harnessEgressEnrollment,
@@ -43,6 +44,19 @@ import {
   X509Certificate,
   type KeyObject,
 } from "node:crypto";
+import {
+  agentRuntimeRoles,
+  hasRuntimeRoleConfiguration,
+  humanRuntimeAccess,
+  managedRuntimeRoles,
+  RUNTIME_ROLE_HEADER,
+  RUNTIME_ROLE_POLICY_HEADER,
+  RUNTIME_PERSON_IDENTITY_PREFIX,
+  RUNTIME_SERVICE_IDENTITY,
+  RUNTIME_SERVICE_ROLE,
+  RUNTIME_SERVICE_POLICY,
+  runtimeRolePolicyHash,
+} from "./runtime-access.ts";
 import { BlockList, isIP } from "node:net";
 import { isAbsolute, posix } from "node:path";
 import { isKubernetesNamespaceName, isKubernetesResourceName } from "./resource-name.ts";
@@ -139,6 +153,7 @@ import type {
   OpenClawConfigurationValue,
 } from "@openclaw-enterprise/contracts";
 import {
+  ADMINISTRATOR_RUNTIME_ROLE,
   admittedLoggingLevel,
   credentialSourceMatchesSnapshot,
   revisionCredentialSourceSnapshot,
@@ -222,6 +237,9 @@ import { nodeProgramArguments } from "../node-program.ts";
 import { codexGatewayModelConfiguration } from "../codex-model-configuration.ts";
 import {
   modelProviderBaseUrl,
+  normalizeHarnessSettings,
+  savedModelProvider,
+  DEFAULT_MODEL_BASE_URL,
   modelProviderReferenceSetting,
   MODEL_PROVIDER_REFERENCE_REQUIREMENT,
   modelProviderConfiguration,
@@ -1666,6 +1684,17 @@ function validateResources(value: V1ResourceRequirements, description: string, p
       `${description} ${kind} limit`,
       `${path}.limits.${resource}`,
     );
+    for (const [field, quantity] of [
+      ["requests", request],
+      ["limits", limit],
+    ] as const) {
+      if ((compareResourceQuantities(quantity, "0") ?? 0) < 0) {
+        throw configurationConstraintFailure(
+          `${description} ${kind} ${field} must be non-negative Kubernetes quantity strings, such as ${resource === "cpu" ? "500m" : "128Mi"}.`,
+          `/${path.replaceAll(".", "/")}/${field}/${resource}`,
+        );
+      }
+    }
     const compared = compareResourceQuantities(request, limit);
     if (compared === undefined) {
       throw configurationConstraintFailure(
@@ -3294,13 +3323,11 @@ function gatewayDocumentBeforeLanBind(
 
 /** Compute observes prepared-source readiness; it does not resolve warm credentials. */
 type PreparedTokenReadinessIssuer = Pick<
-  NonNullable<ReturnType<PreparedTokenService["issuer"]>>,
+  NonNullable<ReturnType<TokenService["issuer"]>>,
   "sourceFromRoute" | "ready"
 >;
 type PreparedTokenReadinessService = {
-  issuer(
-    ...args: Parameters<PreparedTokenService["issuer"]>
-  ): PreparedTokenReadinessIssuer | undefined;
+  issuer(...args: Parameters<TokenService["issuer"]>): PreparedTokenReadinessIssuer | undefined;
 };
 
 function preparedTokenReadiness(
@@ -3577,6 +3604,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
   private readonly preparedRepositoryIngress: boolean;
   private readonly preparedTokens: PreparedTokenReadinessService | undefined;
   private readonly credentialGatewayDriver: CredentialGatewayDriver | undefined;
+  private readonly openShellAttachments: OpenShellCredentialAttachments | undefined;
   private readonly protectedExecution: ProtectedExecutionDriver | undefined;
 
   private get proxyDriver() {
@@ -4113,9 +4141,15 @@ export class KubernetesComputeDriver implements ComputeDriver {
       readonly lifecycleDrivers?: readonly Driver[];
       readonly sandboxDriver?: SandboxDriver;
       readonly preparedRepositoryIngress?: true;
-      readonly preparedTokens?: PreparedTokenService;
+      readonly preparedTokens?: TokenService;
       readonly preprovisionedNamespace?: PreprovisionedKubernetesNamespace | undefined;
       readonly credentialGatewayDriver?: CredentialGatewayDriver;
+      /** Internal composition data for the exact built-in same-Backend pair. */
+      readonly openShellAttachments?: {
+        readonly sandboxDriver: SandboxDriver;
+        readonly credentialGatewayDriver: CredentialGatewayDriver;
+        readonly attachments: OpenShellCredentialAttachments;
+      };
       readonly protectedDriver?: InstalledDriver;
       readonly nodeEnrollment?: GatewayNodeEnrollment;
       readonly readNodeCa?: () => Promise<string | undefined>;
@@ -4159,6 +4193,17 @@ export class KubernetesComputeDriver implements ComputeDriver {
       );
     }
     this.credentialGatewayDriver = selection.credentialGatewayDriver;
+    const openShellAttachments = selection.openShellAttachments;
+    if (
+      openShellAttachments !== undefined &&
+      (openShellAttachments.sandboxDriver !== this.sandboxDriver ||
+        openShellAttachments.credentialGatewayDriver !== this.credentialGatewayDriver)
+    ) {
+      throw new ConfigurationFailure(
+        "OpenShell attachments require the exact composed Sandbox and Credential Gateway.",
+      );
+    }
+    this.openShellAttachments = openShellAttachments?.attachments;
     this.nodeEnrollment = selection.nodeEnrollment;
     this.readNodeCa = selection.readNodeCa;
     const lifecycleDrivers = selection.lifecycleDrivers ?? [];
@@ -4473,7 +4518,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     this.verifyGatewayRoutingConfiguration({
       configuration: this.namedGatewayConfigurationDocument(input.configuration),
-      harness: { id: "codex", version: "provisioning", mode: "dedicated" },
+      harness: { mode: "dedicated" },
     });
   }
 
@@ -4668,11 +4713,26 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     const models = nativeOpenAiModelSelections(configuration)?.map(({ reference }) => reference);
     const authentication = harnessModelAuthentication(configuration, embedded);
-    configuration = modelProviderConfiguration(
-      configuration,
-      harness,
-      this.providerForHarness(harness, auth, configuration),
-    );
+    if (
+      stage === "preparation" &&
+      this.usesModelProvider(harness, auth, configuration) !==
+        (savedModelProvider(harness.configuration) !== undefined)
+    ) {
+      throw new ConfigurationFailure(
+        "Saved Harness settings do not match its authentication and model selection.",
+      );
+    }
+    if (!agentSave) {
+      configuration = modelProviderConfiguration(
+        configuration,
+        harness,
+        savedModelProvider(
+          stage === "admission" && harness.configuration === undefined
+            ? this.resolveHarnessConfiguration(harness, auth, configuration)
+            : harness.configuration,
+        ),
+      );
+    }
 
     // Every model selection (fallbacks, subagents, image, PDF, per-channel, ...) and every Agent
     // entry uses the primary model's provider, named by the setting (finding 1291). Dedicated
@@ -4805,7 +4865,12 @@ export class KubernetesComputeDriver implements ComputeDriver {
     // Deployment admission refuses the rest of the gateway shape in its own order.
     const trustedProxy = asRecord(asRecord(asRecord(configuration.gateway)?.auth)?.trustedProxy);
     if (trustedProxy !== undefined) {
-      refuseInvalidTrustedProxyIdentities(trustedProxy, callerSettingError, options);
+      refuseInvalidTrustedProxyIdentities(
+        trustedProxy,
+        callerSettingError,
+        options,
+        managedRuntimeRoles(configuration) !== undefined,
+      );
     }
     if (dedicatedCodex && this.appliesWorkspaceNodeAtRuntime()) {
       requireWorkspaceNodeGatewayPassword(configuration, callerSettingError);
@@ -4829,6 +4894,30 @@ export class KubernetesComputeDriver implements ComputeDriver {
       validateGatewayToolPolicy(configuration, callerSettingError, options);
       refuseKubernetesPluginEntryKeyVariants(configuration);
     }
+  }
+
+  listAgentRuntimeRoles(configuration: OpenClawConfigurationDocument) {
+    return agentRuntimeRoles(configuration);
+  }
+
+  getAgentRuntimeAccess(revision: AgentRevision, principalId: string, runtimeRole: string) {
+    const endpoint = this.getGatewayEndpoint(revision);
+    const humanEndpoint = endpoint === undefined ? undefined : new URL(endpoint);
+    if (humanEndpoint !== undefined) {
+      humanEndpoint.pathname = this.gatewayRoutePath(revision, "people");
+    }
+    return humanRuntimeAccess(
+      {
+        ...revision,
+        configuration: this.kubernetesGatewayConfigurationDocument(revision.configuration),
+      },
+      runtimeRole === ADMINISTRATOR_RUNTIME_ROLE &&
+        !hasRuntimeRoleConfiguration(revision.configuration)
+        ? endpoint
+        : humanEndpoint?.toString(),
+      principalId,
+      runtimeRole,
+    );
   }
 
   getGatewayEndpoint(revision: AgentRevision): string | undefined {
@@ -6167,7 +6256,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     if (admission?.startsWith("model-provider:v1:")) {
       if (provider === undefined || !admission.startsWith(`model-provider:v1:${provider}:`)) {
         throw new ConfigurationFailure(
-          "The Installation model provider changed; deploy a new Agent revision.",
+          "The saved model provider does not match the Agent revision admission.",
         );
       }
     } else if (provider !== undefined) {
@@ -6391,7 +6480,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
           modelProviderConfiguration(
             nativeConfiguration,
             revision.harness,
-            this.providerForHarness(revision.harness, revision.harnessAuth, nativeConfiguration),
+            savedModelProvider(revision.harness.configuration),
           ),
         ),
       ),
@@ -7123,10 +7212,12 @@ export class KubernetesComputeDriver implements ComputeDriver {
           this.sandboxNamespaceForRevision(revision, namespace),
           namespace,
         );
-        const sources = [
+        const boundSources = [
           ...(harnessAuth.credentialSource === undefined ? [] : [harnessAuth.credentialSource]),
           ...credentialSources,
-        ].filter((source) => source.egress === undefined);
+        ];
+        const directAttachments = this.staticOpenAiAttachmentsForRevision(revision, boundSources);
+        const sources = boundSources.filter((source) => source.egress === undefined);
         const credentialContext =
           sources.length === 0
             ? undefined
@@ -7139,7 +7230,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
         const attachments =
           credentialContext === undefined
             ? []
-            : await this.requireCredentialGateway().attachForRevision(credentialContext);
+            : await (directAttachments ?? this.requireCredentialGateway()).attachForRevision(
+                credentialContext,
+              );
         const sourceIds = new Set(credentialContext?.sources.map(({ id }) => id));
         const attachedSourceIds = new Set(attachments.map(({ sourceId }) => sourceId));
         if (
@@ -7429,7 +7522,9 @@ export class KubernetesComputeDriver implements ComputeDriver {
           await withdrawProviderExposure();
         }
         if (credentialContext !== undefined) {
-          const statuses = await this.requireCredentialGateway().attachmentStatus({
+          const statuses = await (
+            directAttachments ?? this.requireCredentialGateway()
+          ).attachmentStatus({
             ...credentialContext,
             sandbox,
           });
@@ -7686,7 +7781,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
           modelProviderConfiguration(
             nativeConfiguration,
             revision.harness,
-            this.providerForHarness(revision.harness, revision.harnessAuth, nativeConfiguration),
+            savedModelProvider(revision.harness.configuration),
           ),
         ),
       ),
@@ -8455,7 +8550,8 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     const sandbox = sandboxDriver.harnessResource({ namespace: sandboxNamespace, revision });
     this.verifySandboxResourceRef(sandbox, revision, namespace);
-    const status = await this.requireCredentialGateway().withdraw({
+    const directAttachments = this.staticOpenAiAttachmentsForRevision(revision, [source]);
+    const status = await (directAttachments ?? this.requireCredentialGateway()).withdraw({
       namespace: sandboxNamespace,
       revision,
       sandbox,
@@ -9098,7 +9194,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     revisionId: string,
   ): Promise<void> {
     // Remove the endpoint before deleting its route-specific authentication policy.
-    for (const suffix of ["node", "sandbox"]) {
+    for (const suffix of ["people", "node", "sandbox"]) {
       const name = `${gatewayName}-${suffix}`;
       await this.deleteGatewayRoutingResource("HTTPRoute", name, ownership, namespace, revisionId);
       await this.deleteGatewayRoutingResource(
@@ -10146,7 +10242,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         (!approved.has(metadata.name) ||
           !isDeepStrictEqual(
             networkPolicySpecToJson(policy.spec as V1NetworkPolicySpec | undefined),
-            approved.get(metadata.name),
+            networkPolicySpecToJson(approved.get(metadata.name) as V1NetworkPolicySpec | undefined),
           ))
       ) {
         throw new OwnershipFailure(
@@ -11279,6 +11375,58 @@ export class KubernetesComputeDriver implements ComputeDriver {
     return catalog.find((entry) => entry.type === sourceType);
   }
 
+  /** Admission selects the route; a changed or missing live source cannot change that route. */
+  private staticOpenAiAttachmentsForRevision(
+    revision: Readonly<AgentRevision>,
+    sources: readonly Readonly<CredentialSource>[],
+  ): OpenShellCredentialAttachments | undefined {
+    const auth = revision.harnessAuth;
+    if (
+      this.openShellAttachments === undefined ||
+      revision.executionAdmission.mode !== "unprotected" ||
+      revision.egressPlan !== undefined ||
+      revision.harness.mode !== "dedicated" ||
+      (revision.harness.id !== "codex" && revision.harness.id !== "openclaw") ||
+      auth.method !== "credential_source" ||
+      auth.sourceType !== "openai" ||
+      auth.loginMode !== "api_key" ||
+      auth.credentialGatewayId !== this.credentialGatewayDriver?.id
+    ) {
+      return undefined;
+    }
+    // OCC lists the Harness credential too. Only its exact snapshot is redundant;
+    // additional, duplicate, or inconsistent admission stays on the public Gateway.
+    // An absent/empty list remains supported for revisions predating this source list.
+    const admitted = revision.credentialSources ?? [];
+    if (
+      admitted.length > 1 ||
+      admitted.some(
+        (snapshot) =>
+          snapshot.sourceId !== auth.sourceId ||
+          snapshot.sourceType !== auth.sourceType ||
+          snapshot.credentialGatewayId !== auth.credentialGatewayId ||
+          snapshot.credentialProxyId !== undefined,
+      )
+    ) {
+      return undefined;
+    }
+    // Selection is final: a source refusal must never retry through Gateway compatibility.
+    const source = sources[0];
+    if (
+      sources.length !== 1 ||
+      source === undefined ||
+      source.ownerCapability !== "credential_gateway" ||
+      source.namespaceId !== revision.namespaceId ||
+      source.egress !== undefined ||
+      !credentialSourceMatchesSnapshot(source, auth)
+    ) {
+      throw new OwnershipFailure(
+        "The direct OpenShell attachment requires the exact admitted Harness source and Namespace.",
+      );
+    }
+    return this.openShellAttachments;
+  }
+
   private requireCredentialGateway(): CredentialGatewayDriver {
     if (this.credentialGatewayDriver === undefined) {
       throw new ConfigurationFailure(
@@ -11298,7 +11446,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
       return [];
     }
     if (source?.type === "openai") {
-      requireModelSourceDestination(source.config, this.options.runtime?.modelProvider);
+      requireModelSourceDestination(
+        source.config,
+        savedModelProvider(revision.harness.configuration),
+      );
     }
     const sourceId = revision.harnessAuth.sourceId;
     const attachment = attachments.find((entry) => entry.sourceId === sourceId);
@@ -13381,6 +13532,14 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       throw new GatewaySettingFailure("gateway", "must be an object");
     }
     const gateway = (gatewayRecord ?? {}) as Record<string, OpenClawConfigurationValue>;
+    let roles;
+    try {
+      roles = managedRuntimeRoles(configuration);
+    } catch (error) {
+      throw new ConfigurationFailure(
+        error instanceof Error ? error.message : "Invalid Gateway roles.",
+      );
+    }
     validateRoutableNativeListener(
       configuration,
       (setting, requirement) => new GatewaySettingFailure(setting, requirement),
@@ -13451,10 +13610,35 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         `must be ${TRUSTED_PROXY_HEADER} when set`,
       );
     }
-    refuseInvalidTrustedProxyIdentities(
-      trustedProxy,
-      (setting, requirement) => new GatewaySettingFailure(setting, requirement),
-    );
+    for (const [field, expected] of [
+      ["managedIdentityPrefixes", [RUNTIME_PERSON_IDENTITY_PREFIX]],
+      ["managedIdentities", [RUNTIME_SERVICE_IDENTITY]],
+    ] as const) {
+      if (
+        trustedProxy[field] !== undefined &&
+        (roles === undefined || !isDeepStrictEqual(trustedProxy[field], expected))
+      ) {
+        throw new ConfigurationFailure(
+          `Kubernetes native trustedProxy.${field} must match the Driver's managed identities and requires gateway.roles.`,
+        );
+      }
+    }
+    if (
+      roles !== undefined &&
+      trustedProxy.allowUsers !== undefined &&
+      !isDeepStrictEqual(trustedProxy.allowUsers, [])
+    ) {
+      throw new GatewaySettingFailure(
+        "gateway.auth.trustedProxy.allowUsers",
+        "must be empty when gateway.roles is configured",
+      );
+    }
+    if (roles === undefined) {
+      refuseInvalidTrustedProxyIdentities(
+        trustedProxy,
+        (setting, requirement) => new GatewaySettingFailure(setting, requirement),
+      );
+    }
     const allowUsers = trustedProxy.allowUsers;
     if (trustedProxy.allowLoopback !== undefined && trustedProxy.allowLoopback !== false) {
       throw new GatewaySettingFailure(
@@ -13472,7 +13656,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       );
     }
     const admittedIdentities = new Set(
-      Array.isArray(allowUsers) ? allowUsers : [TRUSTED_PROXY_IDENTITY],
+      roles !== undefined || !Array.isArray(allowUsers) ? [TRUSTED_PROXY_IDENTITY] : allowUsers,
     );
     if (
       identityScopes !== undefined &&
@@ -13542,11 +13726,27 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     const requiredHeadersWithScopes = (requiredHeaders as readonly string[] | undefined)?.some(
       (header) => header.toLowerCase() === TRUSTED_PROXY_SCOPES_HEADER,
     )
-      ? requiredHeaders
+      ? [...(requiredHeaders as readonly string[])]
       : [
           ...((requiredHeaders as readonly string[] | undefined) ?? []),
           TRUSTED_PROXY_SCOPES_HEADER,
         ];
+    const proxy: Record<string, OpenClawConfigurationValue> = {
+      ...trustedProxy,
+      userHeader: TRUSTED_PROXY_HEADER,
+    };
+    if (roles === undefined) {
+      proxy.allowUsers = allowUsers ?? [TRUSTED_PROXY_IDENTITY];
+      if (admitsHumans) {
+        proxy.requiredHeaders = requiredHeadersWithScopes;
+      }
+    } else {
+      proxy.allowUsers = [];
+      proxy.roleHeader = RUNTIME_ROLE_HEADER;
+      proxy.rolePolicyHashHeader = RUNTIME_ROLE_POLICY_HEADER;
+      proxy.managedIdentityPrefixes = [RUNTIME_PERSON_IDENTITY_PREFIX];
+      proxy.managedIdentities = [RUNTIME_SERVICE_IDENTITY];
+    }
     // OpenClaw binds its MCP Apps sandbox listener on mcp.apps.sandboxPort, else
     // gatewayPort + 1: at startup when MCP Apps are enabled, lazily otherwise. The private
     // status listener binds first, so the Gateway would fail with EADDRINUSE on 18791.
@@ -13576,15 +13776,11 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         bind: gateway.bind === "custom" ? "custom" : "lan",
         trustedProxies: [...this.options.network.gatewayTrustedProxyCidrs],
         allowRealIpFallback: true,
+        ...(roles === undefined ? {} : { roles }),
         auth: {
           ...auth,
           mode: "trusted-proxy",
-          trustedProxy: {
-            ...trustedProxy,
-            ...(admitsHumans ? { requiredHeaders: requiredHeadersWithScopes } : {}),
-            userHeader: TRUSTED_PROXY_HEADER,
-            allowUsers: allowUsers ?? [TRUSTED_PROXY_IDENTITY],
-          },
+          trustedProxy: proxy,
           identityScopes: identityScopes ?? { [TRUSTED_PROXY_IDENTITY]: ["operator.admin"] },
         },
       },
@@ -13602,7 +13798,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       auth?.mode === "trusted-proxy" &&
       trustedProxy?.userHeader === "x-occ-identity" &&
       Array.isArray(trustedProxy.allowUsers) &&
-      trustedProxy.allowUsers.includes("occ-workspace-files") &&
+      (trustedProxy.allowUsers.includes("occ-workspace-files") ||
+        (trustedProxy.allowUsers.length === 0 &&
+          trustedProxy.roleHeader === RUNTIME_ROLE_HEADER)) &&
       Array.isArray(identityScopes) &&
       identityScopes.includes("operator.admin") &&
       deviceAutoApprove?.enabled === true &&
@@ -13720,15 +13918,20 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     return `gateway-${sha256Hex(agentId, 12)}`;
   }
 
-  private gatewayRoutePath(revision: AgentRevision): string {
-    return `/namespaces/${required(revision.namespaceId, "AgentRevision Namespace ID")}/agents/${required(
+  private gatewayRoutePath(
+    revision: AgentRevision,
+    access: "operator" | "people" = "operator",
+  ): string {
+    // Human routes must remain outside the privileged service prefix even when
+    // their HTTPRoute is missing or has not been accepted by Envoy.
+    return `${access === "people" ? "/people" : ""}/namespaces/${required(revision.namespaceId, "AgentRevision Namespace ID")}/agents/${required(
       revision.agentId,
       "Agent ID",
     )}`;
   }
 
   private gatewayRouteHeaderFilter(
-    access: "operator" | "node" | "node-transfer",
+    access: "operator" | "people" | "node" | "node-transfer",
   ): KubernetesRecord {
     return {
       type: "RequestHeaderModifier",
@@ -13740,6 +13943,11 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
                 // The machine identity's exact grant. The Gateway requires this header
                 // once humans are admitted, and a client value must never cap or widen it.
                 { name: TRUSTED_PROXY_SCOPES_HEADER, value: "operator.admin" },
+                { name: RUNTIME_ROLE_HEADER, value: RUNTIME_SERVICE_ROLE },
+                {
+                  name: RUNTIME_ROLE_POLICY_HEADER,
+                  value: runtimeRolePolicyHash(RUNTIME_SERVICE_POLICY),
+                },
               ]
             : []),
           {
@@ -13756,6 +13964,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             ? [
                 TRUSTED_PROXY_SCOPES_HEADER,
                 "x-occ-identity",
+                RUNTIME_ROLE_HEADER,
+                RUNTIME_ROLE_POLICY_HEADER,
                 "x-api-key",
                 "tailscale-user-login",
                 "tailscale-user-name",
@@ -13787,9 +13997,10 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     )}.${routing.envoyNamespace}.svc`;
   }
 
-  private verifyGatewayRoutingConfiguration(
-    revision: Pick<AgentRevision, "configuration" | "harness">,
-  ): void {
+  private verifyGatewayRoutingConfiguration(revision: {
+    readonly configuration: OpenClawConfigurationDocument;
+    readonly harness: Pick<RevisionHarnessDescriptor, "mode">;
+  }): void {
     if (this.options.executionCluster !== undefined && revision.harness.mode !== "dedicated") {
       throw new ConfigurationFailure("Two-cluster execution supports only dedicated Harnesses.");
     }
@@ -13825,7 +14036,10 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     }
     if (
       !Array.isArray(trustedProxy.allowUsers) ||
-      !trustedProxy.allowUsers.includes("occ-workspace-files")
+      !(
+        trustedProxy.allowUsers.includes("occ-workspace-files") ||
+        (trustedProxy.allowUsers.length === 0 && trustedProxy.roleHeader === RUNTIME_ROLE_HEADER)
+      )
     ) {
       throw new ConfigurationFailure(
         "Gateway routing requires native trustedProxy.allowUsers to include occ-workspace-files.",
@@ -13858,7 +14072,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     ownership: Ownership,
     namespace: KubernetesNamespaceAddress,
     service: ManagedKubernetesObject<"Service">,
-    access: "operator" | "node" | "sandbox" = "operator",
+    access: "operator" | "people" | "node" | "sandbox" = "operator",
   ): ManagedKubernetesObject<"HTTPRoute"> | undefined {
     const routing = this.options.gatewayRouting;
     if (routing === undefined) {
@@ -13936,7 +14150,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
                     {
                       path: {
                         type: "Exact",
-                        value: `${this.gatewayRoutePath(revision)}${access === "node" ? "/node" : ""}`,
+                        value: `${this.gatewayRoutePath(revision, access === "people" ? "people" : "operator")}${access === "node" ? "/node" : ""}`,
                       },
                     },
                   ],
@@ -14027,14 +14241,14 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
                       })),
                     ]
                   : []),
-                ...(access === "operator"
+                ...(access === "operator" || access === "people"
                   ? [
                       {
                         matches: [
                           {
                             path: {
                               type: "PathPrefix",
-                              value: `${this.gatewayRoutePath(revision)}/`,
+                              value: `${this.gatewayRoutePath(revision, access)}/`,
                             },
                           },
                         ],
@@ -14073,10 +14287,31 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     if (route !== undefined) {
       await this.reconcile(route, ownership, namespace);
     }
+    const gateway = await this.getOwned("Deployment", name, namespace, ownership);
+    if (hasRuntimeRoleConfiguration(revision.configuration)) {
+      const peopleRoute = this.gatewayRoute(revision, ownership, namespace, service, "people");
+      if (peopleRoute !== undefined) {
+        // A candidate may prepare while its predecessor still serves. Keep the
+        // human endpoint owned by that Gateway until activation replaces it.
+        if (gateway !== undefined) {
+          peopleRoute.metadata.annotations = {
+            ...peopleRoute.metadata.annotations,
+            [AGENT_REVISION_ID_ANNOTATION]: required(
+              gateway.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION],
+              "Serving Gateway revision ID",
+            ),
+            [AGENT_REVISION_ANNOTATION]: required(
+              gateway.metadata.annotations?.[AGENT_REVISION_ANNOTATION],
+              "Serving Gateway revision",
+            ),
+          };
+        }
+        await this.reconcile(peopleRoute, ownership, namespace);
+      }
+    }
     if (this.options.runtime === undefined || revision.harness.mode !== "dedicated") {
       return;
     }
-    const gateway = await this.getOwned("Deployment", name, namespace, ownership);
     if (gateway === undefined) {
       return;
     }
@@ -14261,35 +14496,101 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     return true;
   }
 
-  private providerForHarness(
+  private usesModelProvider(
     harness: RevisionHarnessDescriptor,
     auth: HarnessAuthSnapshot,
     configuration: OpenClawConfigurationDocument,
-  ): ModelProviderConfiguration | undefined {
-    if (this.options.runtime?.modelProvider === undefined) {
-      return undefined;
-    }
+  ): boolean {
+    return (
+      (auth.method === "api_key" ||
+        (auth.method === "credential_source" && auth.loginMode === "api_key")) &&
+      (harness.id === "codex" ||
+        (harness.id === "openclaw" &&
+          nativeOpenAiModelSelections(configuration)?.[0]?.provider === "openai"))
+    );
+  }
+
+  normalizeHarnessOverrides(overrides: Readonly<Record<string, unknown>>) {
+    return normalizeHarnessSettings(overrides);
+  }
+
+  resolveHarnessConfiguration(
+    harness: RevisionHarnessDescriptor,
+    auth: HarnessAuthSnapshot,
+    configuration: OpenClawConfigurationDocument,
+  ): Readonly<Record<string, unknown>> {
+    const overrides = normalizeHarnessSettings(harness.overrides ?? {});
+    const applicable = this.usesModelProvider(harness, auth, configuration);
     if (
-      auth.method !== "api_key" &&
-      !(auth.method === "credential_source" && auth.loginMode === "api_key")
+      overrides.modelProvider !== undefined &&
+      (!applicable || auth.method !== "credential_source")
     ) {
-      return undefined;
+      throw new ConfigurationHarnessError(
+        "An explicit modelProvider override requires source-backed OpenAI API-key authentication.",
+      );
     }
-    if (
-      harness.id === "openclaw" &&
-      harnessModelAuthentication(configuration, harness.mode === "embedded").providerId !== "openai"
-    ) {
-      return undefined;
+    if (!applicable) {
+      return {};
     }
-    return this.options.runtime?.modelProvider;
+    const native = asRecord(asRecord(asRecord(configuration.models)?.providers)?.openai);
+    const protocol =
+      harness.id === "codex"
+        ? "openai-responses"
+        : (native?.api ??
+          nativeOpenAiModelSelections(configuration)?.[0]?.matches[0]?.entry.api ??
+          "openai-responses");
+    const provider =
+      overrides.modelProvider ??
+      normalizeHarnessSettings({
+        modelProvider: this.options.runtime?.modelProvider ?? {
+          protocol,
+          baseUrl: DEFAULT_MODEL_BASE_URL,
+          supportsStandaloneWebSearch: false,
+        },
+      }).modelProvider!;
+    modelProviderConfiguration(configuration, harness, provider);
+    return { modelProvider: provider };
+  }
+
+  validateHarnessCredentialSources(
+    harness: RevisionHarnessDescriptor,
+    sources: readonly Readonly<CredentialSource>[],
+  ): void {
+    const provider = savedModelProvider(harness.configuration);
+    for (const source of sources) {
+      if (source.type === "openai") {
+        requireModelSourceDestination(source.config, provider);
+      }
+    }
   }
 
   private providerAdmission(revision: Readonly<AgentRevision>): string | undefined {
-    const provider = this.providerForHarness(
-      revision.harness,
-      revision.harnessAuth,
-      revision.configuration,
-    );
+    let provider: ModelProviderConfiguration | undefined;
+    try {
+      provider = savedModelProvider(revision.harness.configuration);
+      const requested = normalizeHarnessSettings(revision.harness.overrides);
+      if (
+        !isDeepStrictEqual(requested, revision.harness.overrides) ||
+        (revision.harness.id === "codex" &&
+          (revision.harnessAuth.method === "api_key" ||
+            (revision.harnessAuth.method === "credential_source" &&
+              revision.harnessAuth.loginMode === "api_key")) !==
+            (provider !== undefined)) ||
+        (revision.harness.id === "codex" &&
+          provider !== undefined &&
+          provider.protocol !== "openai-responses") ||
+        (requested.modelProvider !== undefined &&
+          (revision.harnessAuth.method !== "credential_source" ||
+            revision.harnessAuth.loginMode !== "api_key" ||
+            !isDeepStrictEqual(requested.modelProvider, provider)))
+      ) {
+        throw new Error("Inconsistent saved Harness settings");
+      }
+    } catch {
+      throw new ConfigurationFailure(
+        "Saved Harness settings are missing, malformed, or unsupported.",
+      );
+    }
     return provider === undefined
       ? undefined
       : sha256Hex(
@@ -14450,11 +14751,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     revision: AgentRevision,
     repositoryBrokerNetworkPolicy?: CodexRepositoryBrokerNetworkPolicy,
   ): PluginRuntimeSnapshot | undefined {
-    const provider = this.providerForHarness(
-      revision.harness,
-      revision.harnessAuth,
-      revision.configuration,
-    );
+    const provider = savedModelProvider(revision.harness.configuration);
     let openaiBaseUrl: string | undefined;
     if (
       provider !== undefined ||
@@ -16568,6 +16865,10 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
               value: providerEndpoint.workspaceRoot,
             });
           }
+        }
+        if (dedicated) {
+          // The worker bytecode cache can outgrow the Gateway's 64 MiB temporary volume.
+          variables.push({ name: "NODE_DISABLE_COMPILE_CACHE", value: "1" });
         }
         if (configuration?.usesGatewayPasswordEnv === true) {
           variables.push(

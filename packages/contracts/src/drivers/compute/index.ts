@@ -8,6 +8,9 @@ import type { Driver, SelectedDriverRegistration } from "../index.ts";
 import type {
   Agent,
   AgentRevision,
+  AgentRuntimeRole,
+  AgentRuntimeAccess,
+  AgentRuntimeAccessUnavailable,
   CredentialSource,
   CredentialSourceType,
   HarnessAuthSnapshot,
@@ -312,8 +315,25 @@ export interface ComputeDriver extends Driver {
     /** Catalog entry for a `credential_source` binding; absent for every other method. */
     credentialSourceType?: CredentialSourceType,
   ): void;
+  /** Validate and normalize the Driver-owned deployment request without side effects. */
+  normalizeHarnessOverrides?(
+    overrides: Readonly<Record<string, unknown>>,
+  ): Readonly<Record<string, unknown>>;
+  /** Resolve immutable Harness settings before credential and egress admission. */
+  resolveHarnessConfiguration?(
+    harness: RevisionHarnessDescriptor,
+    auth: HarnessAuthSnapshot,
+    configuration: OpenClawConfigurationDocument,
+  ): Readonly<Record<string, unknown>>;
+  /** Check source consent against the resolved settings before any credential delivery. */
+  validateHarnessCredentialSources?(
+    harness: RevisionHarnessDescriptor,
+    sources: readonly Readonly<import("../../index.ts").CredentialSource>[],
+  ): void;
   /**
-   * Withdraw expired Git access or a standing grant durably withdrawn before its first deadline.
+   * Withdraw expired Git access or a durably withdrawn standing or finite grant.
+   * Finite withdrawal requires committed removal from the original admitted set, not merely
+   * changed configuration or unavailable Git evidence.
    * Observe that withdrawal again after a restart. Never grant
    * access, replace the runtime, or repeat an uncertain detach. Return `withdrawn` only after
    * verifying Git is revoked and the same independently authorized inference runtime is ready.
@@ -365,6 +385,14 @@ export interface ComputeDriver extends Driver {
     readonly secretRef: ServiceAccountCredential["secretRef"];
   }): Promise<void>;
   getGatewayEndpoint?(revision: AgentRevision): string | undefined;
+  /** Safe configured role catalog for the exact deployed revision. */
+  listAgentRuntimeRoles?(configuration: OpenClawConfigurationDocument): readonly AgentRuntimeRole[];
+  /** Human transport admission; must fail closed for unknown or unsupported assignments. */
+  getAgentRuntimeAccess?(
+    revision: AgentRevision,
+    principalId: string,
+    runtimeRole: string,
+  ): AgentRuntimeAccess | AgentRuntimeAccessUnavailable | undefined;
   ensureNamespace(namespace: Namespace): Promise<NamespaceEnsureResult>;
   deleteNamespace(namespace: Namespace): Promise<NamespaceDeleteResult>;
   /**
@@ -397,6 +425,8 @@ export interface ComputeDriver extends Driver {
    */
   withdrawHarnessExposure?(revision: Readonly<AgentRevision>, signal: AbortSignal): Promise<void>;
   /** Verify the existing execution without creating, replacing or repairing it. */
+  /** Throws OCC's RepositoryExecutionRequiresRedeployError only when durable evidence
+   * proves repository access cannot resume on this execution. Missing evidence remains undefined. */
   verifyRepositoryExecution?(
     revision: Readonly<AgentRevision>,
     signal: AbortSignal,

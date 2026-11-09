@@ -47,11 +47,29 @@ export const AgentProvisioningWorkId = Type.String({
   maxLength: 200,
   pattern: "^[A-Za-z0-9._~:@/-]{1,200}$",
 });
+export const HarnessSettings = Type.Record(Type.String(), Type.Unknown(), {
+  description: "Nonsecret settings owned and validated by the selected Compute Driver.",
+});
+export const RevisionHarnessSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1 }),
+    version: Type.String({ minLength: 1 }),
+    mode: HarnessExecutionModeSchema,
+    overrides: HarnessSettings,
+    configuration: HarnessSettings,
+  },
+  { additionalProperties: false },
+);
+export const AgentDeploymentBody = Type.Object(
+  { harnessOverrides: Type.Optional(HarnessSettings) },
+  { additionalProperties: false },
+);
 export const FirstDeploymentIntent = Type.Object(
   {
     key: Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._~-]*$" }),
     expectedConfigurationId: ConfigurationId,
     expectedGeneration: ConfigurationGeneration,
+    ...AgentDeploymentBody.properties,
   },
   { additionalProperties: false },
 );
@@ -74,7 +92,8 @@ const generationPattern = `^(?:[1-9][0-9]{0,${maximumGeneration.length - 2}}|${g
 /** Path values stay text until the handler converts the validated decimal generation. */
 export const FirstDeploymentRecoveryTuple = Type.Object(
   {
-    ...FirstDeploymentIntent.properties,
+    key: FirstDeploymentIntent.properties.key,
+    expectedConfigurationId: ConfigurationId,
     expectedGeneration: Type.String({
       pattern: generationPattern,
       maxLength: maximumGeneration.length,
@@ -596,6 +615,7 @@ export const PermissionActionSchema = Type.Union([
   Type.Literal("administer"),
   Type.Literal("read_logs"),
   Type.Literal("manage_policy"),
+  Type.Literal("use"),
 ]);
 
 export const ResourceKindSchema = Type.Union([
@@ -636,6 +656,16 @@ export const CreateIAMRoleBody = Type.Object(
   { additionalProperties: false },
 );
 
+export const RuntimeRoleConfiguration = Type.Object(
+  { id: ConfigurationId, generation: ConfigurationGeneration },
+  { additionalProperties: false },
+);
+
+export const AgentRuntimeRoleSchema = Type.Object(
+  { id: Type.String(), permissions: Type.Record(Type.String(), Type.Unknown()) },
+  { additionalProperties: false },
+);
+
 export const CreateIAMServicePrincipalBody = Type.Object({}, { additionalProperties: false });
 
 export const CreateIAMAccessBindingBody = Type.Object(
@@ -643,8 +673,20 @@ export const CreateIAMAccessBindingBody = Type.Object(
     subjectKind: Type.Literal("identity"),
     subjectId: Type.String({ minLength: 1, maxLength: 200 }),
     roleId: IAMRoleId,
+    runtimeRole: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 128, pattern: "^\\S(?:.*\\S)?$" }),
+    ),
+    runtimeRoleConfiguration: Type.Optional(RuntimeRoleConfiguration),
     resourceKind: NamespacePolicyResourceKindSchema,
     resourceId: Type.String({ minLength: 1, maxLength: 200 }),
+  },
+  { additionalProperties: false },
+);
+
+export const UpdateIAMRuntimeRoleBody = Type.Object(
+  {
+    runtimeRole: Type.String({ minLength: 1, maxLength: 128, pattern: "^\\S(?:.*\\S)?$" }),
+    runtimeRoleConfiguration: RuntimeRoleConfiguration,
   },
   { additionalProperties: false },
 );

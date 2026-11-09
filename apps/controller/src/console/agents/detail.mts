@@ -32,10 +32,11 @@ import {
 import {
   button,
   element,
+  field,
   fieldError,
   focusSaveOutcome,
   isUnavailable,
-  jsonObjectProblem,
+  jsonObjectDiagnostic,
   revealStatus,
   setHidden,
   setStatusTone,
@@ -54,7 +55,7 @@ import {
   renderHarnessAuthSummary,
 } from "./harness-auth.mjs";
 import { renderAgentAccess } from "./access.mjs";
-import { renderNativeAdminAccess } from "./native-admin.mjs";
+import { renderRuntimeAccess } from "./runtime-access.mjs";
 import { createAgentDeletion } from "./deletion.mjs";
 import { createAgentStop } from "./stop.mjs";
 import { gatewaySafetyControls } from "./gateway-safety.mjs";
@@ -517,10 +518,10 @@ const NEUTRAL_VERSION_NOTICES: Record<NeutralOutcome, string> = {
   stopped:
     "Stopped version · read-only admitted snapshot. The Agent was stopped before its deployment finished.",
 };
-// Versions this tab's own Deploy created, keyed like failedVersions, with their version numbers.
+// Version numbers accepted by this tab's Deploy, indexed by Agent path and revision ID.
 // The API accepted each, so a deployer who cannot read one is told it exists and was accepted,
 // not that a link may name a version that does not exist (finding D751).
-const deployedVersions = new Map<string, number>();
+const deployedVersions = new Map<string, Map<string, number>>();
 
 // A recovery link opens a version tab far below the banner it sits in. Only the URL changed and
 // the page stayed at the top, so the link looked dead (finding 1586). The page the link opens,
@@ -1213,8 +1214,7 @@ export async function renderAgentDetail(
     // Until every page is loaded, an unlisted version may simply be older than those shown.
     return unlisted(revisionId) && olderCursor === null;
   }
-  const deployedHere = (revisionId: string) =>
-    deployedVersions.has(failedVersionKey(path, revisionId));
+  const deployedHere = (revisionId: string) => deployedVersions.get(path)?.has(revisionId) ?? false;
   // Versions this page showed as selected for service. Each exists, so a viewed one the reader
   // cannot read is named in words once a stop or another version takes its place (finding 3000).
   const formerCurrent = new Set<string>();
@@ -1224,14 +1224,8 @@ export async function renderAgentDetail(
   // fully loaded (finding 2615).
   function acceptedHiddenVersion(newestListed: number) {
     let accepted: { id: string; revision: number } | undefined;
-    for (const [key, revision] of deployedVersions) {
-      const [agentPath, id] = JSON.parse(key) as [string, string];
-      if (
-        agentPath === path &&
-        revision > newestListed &&
-        revision > (accepted?.revision ?? 0) &&
-        unlisted(id)
-      ) {
+    for (const [id, revision] of deployedVersions.get(path) ?? []) {
+      if (revision > newestListed && revision > (accepted?.revision ?? 0) && unlisted(id)) {
         accepted = { id, revision };
       }
     }
@@ -1619,26 +1613,21 @@ export async function renderAgentDetail(
   if (selected !== "draft") {
     detailPane.append(pageDisclosure);
   }
-  const nativeAdmin = renderNativeAdminAccess(
-    context,
-    path,
-    () => latestPermissionsRead.then((permissions) => permissions?.administer),
-    {
-      // One the caller cannot read is not named by its ID (finding D791).
-      versionLabel: () =>
-        unreadableCurrentLabel() === null ? currentVersionLabel() : "current version",
-      recovery: (status) => {
-        if (status === "stopped" || status === "unsupported") {
-          return versionLink("Open draft", "draft", "configuration");
-        }
-        const latest = visibleRevisions[0];
-        return status === "unavailable" && latest
-          ? versionLink("View deployment", latest.id, "deployment")
-          : null;
-      },
+  const runtimeAccess = renderRuntimeAccess(context, path, {
+    // One the caller cannot read is not named by its ID (finding D791).
+    versionLabel: () =>
+      unreadableCurrentLabel() === null ? currentVersionLabel() : "current version",
+    recovery: (status) => {
+      if (status === "stopped" || status === "unsupported") {
+        return versionLink("Open draft", "draft", "configuration");
+      }
+      const latest = visibleRevisions[0];
+      return status === "unavailable" && latest
+        ? versionLink("View deployment", latest.id, "deployment")
+        : null;
     },
-  );
-  headerActions.append(nativeAdmin.launch, nativeAdmin.unavailable);
+  });
+  headerActions.append(runtimeAccess.launch, runtimeAccess.unavailable);
   const recovery = createDeploymentRecovery(context, {
     path,
     selected,
@@ -1654,7 +1643,7 @@ export async function renderAgentDetail(
   );
   view.replaceChildren(
     recovery.section,
-    nativeAdmin.section,
+    runtimeAccess.section,
     deploymentAttention,
     overviewStatus,
     versionLayout,
@@ -2328,7 +2317,7 @@ export async function renderAgentDetail(
         }
       }
       // Native admin access depends on the serving version, so a finished deployment rereads it.
-      nativeAdmin.refresh();
+      runtimeAccess.refresh();
     }
     if (revisionResult) {
       renderOverview(revisionResult, snapshot);
@@ -2480,7 +2469,7 @@ export async function renderAgentDetail(
     markVersionOutcomes();
     // An unreadable current version is newer beside a succeeded deployment (finding D791).
     renderCurrentVersion();
-    nativeAdmin.updateTarget();
+    runtimeAccess.updateTarget();
     const versionContextLine = selector.querySelector(".agent-version-context");
     if (versionContextLine) {
       setText(versionContextLine, versionContext());
@@ -2840,7 +2829,7 @@ export async function renderAgentDetail(
         labels.get(id) ?? (id === currentRevisionId ? unreadableCurrentLabel() : null) ?? undefined,
     );
     renderCurrentVersion();
-    nativeAdmin.updateTarget();
+    runtimeAccess.updateTarget();
     renderVersions(revisions, snapshot, revisionResult);
     const mostRecent = revisions[0];
     if (activityRevisionId !== (mostRecent?.id ?? null)) {
@@ -2863,10 +2852,19 @@ export async function renderAgentDetail(
       // 1478), so the overview waits for it too rather than move when the banner lands.
       const showPanel = (panel: HTMLElement, failed = false) => {
         if (activityPanel !== panel) {
+          const focused = document.activeElement;
+          const refreshFocused =
+            focused instanceof HTMLButtonElement && focused.parentElement === activityPanel;
           activityPanel.replaceWith(panel);
           activityPanel = panel;
+          // The panel's direct button refreshes whichever deployment is now shown.
+          if (refreshFocused) {
+            panel
+              .querySelector<HTMLButtonElement>(":scope > button")
+              ?.focus({ preventScroll: true });
+          }
         }
-        void Promise.all([nativeAdmin.ready, failed ? callerPermissionsRead : null]).then(
+        void Promise.all([runtimeAccess.ready, failed ? callerPermissionsRead : null]).then(
           revealDetail,
         );
       };
@@ -3028,7 +3026,7 @@ export async function renderAgentDetail(
   // caller may not read: the list returns only readable versions, newest first, and it is newer
   // than each listed one. Its read would only be refused and audited (finding D758).
   async function deployedVersionUnlisted() {
-    const deployed = deployedVersions.get(failedVersionKey(path, selected));
+    const deployed = deployedVersions.get(path)?.get(selected);
     if (deployed === undefined) {
       return false;
     }
@@ -3571,7 +3569,11 @@ export async function renderAgentDetail(
       ).trustedProxy;
       const proxy =
         trustedProxy !== null && typeof trustedProxy === "object" && !Array.isArray(trustedProxy)
-          ? trustedProxyIdentitiesProblem(trustedProxy as Readonly<Record<string, unknown>>)
+          ? trustedProxyIdentitiesProblem(
+              trustedProxy as Readonly<Record<string, unknown>>,
+              undefined,
+              responseFields(responseFields(checked).gateway).roles !== undefined,
+            )
           : undefined;
       if (proxy !== undefined) {
         refusals.set(
@@ -3617,6 +3619,8 @@ export async function renderAgentDetail(
       updateDeployControls();
     }
     function updateDeployControls() {
+      harnessControls.hidden = callerPermissions?.deploy !== true;
+      harnessControls.toggleAttribute("inert", deployPending);
       authenticationForm?.toggleAttribute("inert", Boolean(credentials?.mutationPending()));
       credentials?.section?.toggleAttribute("inert", authenticationSaveState !== "idle");
       const retainedConfiguration = retainedConfigurationState();
@@ -3629,7 +3633,8 @@ export async function renderAgentDetail(
           Boolean(draftEditorNavigationBlock) ||
           Boolean(credentials?.mutationPending());
       }
-      const deployUnavailable = deployIsDisabled();
+      const draftBlocksDeploy = deployIsDisabled();
+      const deployUnavailable = draftBlocksDeploy;
       const rejectedAccess =
         !runtimeAuth && credentialRejected()
           ? credentialFixAccess(agent.harnessAuth, callerPermissions)
@@ -3744,11 +3749,8 @@ export async function renderAgentDetail(
       // An unavailable Deploy is described by the line that says why, or by a refused
       // deployment's alert when that line defers to it (finding D749), and stays in the Tab order
       // while one of them shows (finding 2878).
-      setUnavailable(
-        deploy,
-        deployUnavailable,
-        deployStatus.textContent ? deployStatus : deployFeedback,
-      );
+      const deployReason = deployStatus.textContent ? deployStatus : deployFeedback;
+      setUnavailable(deploy, deployUnavailable, deployReason);
       updateChecklist();
     }
     // The last deployment's model credential was rejected and the draft still uses it.
@@ -3853,9 +3855,105 @@ export async function renderAgentDetail(
                     ? CHECKING_CREDENTIAL_ACCESS_STEP
                     : "Finish in Credentials",
       );
-      setStep(checklistSteps[2], false, "Creates an immutable version from the saved draft");
+      setStep(checklistSteps[2], false, requestedDestination());
     }
     refreshDeployControls = updateDeployControls;
+    const previousRevision =
+      visibleRevisions.find((revision) => revision.id === currentRevisionId) ?? visibleRevisions[0];
+    const retainedHarnessRevision =
+      previousRevision?.harness?.overrides === undefined ? undefined : previousRevision;
+    const harnessChoice = element(
+      "select",
+      {},
+      element("option", { value: "default" }, "Use Installation default"),
+      ...(retainedHarnessRevision
+        ? [
+            element(
+              "option",
+              { value: "retain" },
+              `Retain v${retainedHarnessRevision.revision} requested overrides`,
+            ),
+          ]
+        : []),
+      element("option", { value: "custom" }, "Override model provider"),
+    );
+    harnessChoice.value = retainedHarnessRevision ? "retain" : "default";
+    const providerUrl = element("input", {
+      type: "url",
+      placeholder: "https://models.example.com/v1",
+    });
+    const providerProtocol = element(
+      "select",
+      {},
+      element("option", { value: "openai-responses" }, "Responses"),
+      element("option", { value: "openai-completions" }, "Completions"),
+    );
+    const providerSearch = element("input", { type: "checkbox" });
+    const providerFields = element(
+      "div",
+      { hidden: true },
+      field({ label: "Provider base URL", control: providerUrl }),
+      field({ label: "Provider protocol", control: providerProtocol }),
+      field({ label: "Supports standalone web search", control: providerSearch }),
+      element(
+        "p",
+        { className: "hint" },
+        "Overrides require an API-key Credential Source authorized for this destination. Existing network restrictions apply.",
+      ),
+    );
+    function requestedHarnessOverrides(): Record<string, unknown> {
+      if (harnessChoice.value === "retain") {
+        const overrides = retainedHarnessRevision?.harness.overrides;
+        if (overrides === undefined) {
+          throw new Error(
+            "The previous version's requested overrides are unavailable. Choose the Installation default or enter an override.",
+          );
+        }
+        return overrides;
+      }
+      if (harnessChoice.value === "custom") {
+        return {
+          modelProvider: {
+            protocol: providerProtocol.value,
+            baseUrl: providerUrl.value,
+            supportsStandaloneWebSearch: providerSearch.checked,
+          },
+        };
+      }
+      return {};
+    }
+    function requestedDestination(): string {
+      if (harnessChoice.value === "custom") {
+        return providerUrl.value
+          ? `Requested destination: ${providerUrl.value}`
+          : "Enter a provider URL in Harness destination.";
+      }
+      const retained = retainedHarnessRevision?.harness.overrides.modelProvider;
+      return harnessChoice.value === "retain" &&
+        typeof retained === "object" &&
+        retained !== null &&
+        "baseUrl" in retained
+        ? `Requested destination: ${String(retained.baseUrl)}`
+        : "Use the Installation default at deployment.";
+    }
+    for (const control of [harnessChoice, providerUrl, providerProtocol, providerSearch]) {
+      control.addEventListener("input", () => {
+        providerFields.hidden = harnessChoice.value !== "custom";
+        updateChecklist();
+      });
+    }
+    const harnessControls = element(
+      "details",
+      { className: "card agent-harness-settings" },
+      element("summary", {}, "Harness destination"),
+      field({ label: "Harness settings", control: harnessChoice }),
+      providerFields,
+      element(
+        "p",
+        { className: "hint" },
+        "Deployment validates the request and saves the resolved settings in the new version.",
+      ),
+    );
     const deployStatus = element("p", { className: "muted", role: "status" });
     const deployFeedback = statusBlock("danger", null, null);
     const deploy = button(
@@ -3875,6 +3973,7 @@ export async function renderAgentDetail(
         focusSaveOutcome(draftActions, [], deployStatus);
         let submitted = false;
         try {
+          const harnessOverrides = requestedHarnessOverrides();
           const freshAgent = await readAgent();
           if (!context.isCurrent()) {
             return;
@@ -3944,7 +4043,9 @@ export async function renderAgentDetail(
             return;
           }
           submitted = true;
-          const revision = revisionForPage(await request(`${path}/deploy`, { method: "POST" }));
+          const revision = revisionForPage(
+            await request(`${path}/deploy`, { method: "POST", body: { harnessOverrides } }),
+          );
           if (
             !("configurationGeneration" in revision) ||
             revision.configurationId !== snapshot.id ||
@@ -3952,7 +4053,12 @@ export async function renderAgentDetail(
           ) {
             throw new Error("The admitted version could not be confirmed for this Configuration.");
           }
-          deployedVersions.set(failedVersionKey(path, revision.id), revision.revision);
+          let deployedForPath = deployedVersions.get(path);
+          if (deployedForPath === undefined) {
+            deployedForPath = new Map<string, number>();
+            deployedVersions.set(path, deployedForPath);
+          }
+          deployedForPath.set(revision.id, revision.revision);
           if (context.isCurrent()) {
             deployInFlight = false;
             content.toggleAttribute("inert", false);
@@ -4117,6 +4223,12 @@ export async function renderAgentDetail(
       shownActions.replaceWith(draftActions);
     } else {
       versionSummary.append(draftActions);
+    }
+    const shownHarness = versionSummary.querySelector(":scope > .agent-harness-settings");
+    if (shownHarness) {
+      shownHarness.replaceWith(harnessControls);
+    } else {
+      draftActions.insertAdjacentElement("afterend", harnessControls);
     }
     renderDetailHeading();
     return {
@@ -4375,6 +4487,7 @@ export async function renderAgentDetail(
     settledDetails = next;
     if ("error" in data) {
       versionSummary.querySelector(":scope > .agent-draft-actions")?.remove();
+      versionSummary.querySelector(":scope > .agent-harness-settings")?.remove();
       renderDetailHeading();
     }
     details = next;
@@ -5638,6 +5751,8 @@ export async function renderAgentDetail(
       if (!draft) {
         details.push(
           ["Harness", `${snapshot.harness.id} · ${snapshot.harness.version}`],
+          ["Requested Harness overrides", JSON.stringify(snapshot.harness.overrides)],
+          ["Resolved Harness settings", JSON.stringify(snapshot.harness.configuration)],
           ["Compute", `${snapshot.compute.id} · ${snapshot.compute.implementation}`],
         );
       }
@@ -6193,13 +6308,13 @@ export async function renderAgentDetail(
     }
 
     function parseEditor(reportInvalid = false) {
-      const problem = jsonObjectProblem(editor.value);
-      if (problem === undefined) {
-        return JSON.parse(editor.value) as OpenClawConfigurationDocument;
+      const diagnostic = jsonObjectDiagnostic(editor.value);
+      if (diagnostic.kind === "valid") {
+        return diagnostic.value;
       }
       if (reportInvalid) {
         // One message, under the editor, which keeps focus so the JSON can be fixed in place.
-        editorError.show(problem);
+        editorError.show(diagnostic.message);
         feedback.textContent = "";
         feedbackLocked = true;
         editor.focus();
@@ -6377,9 +6492,20 @@ export async function renderAgentDetail(
         if (context.isCurrent()) {
           pending = false;
           updateState();
-          render();
+          // A conflict keeps the same editor. Rebuilding it detaches a reader's focused
+          // textarea and deactivates its selection before recovery can check focus.
+          if (reloadRequired && body.contains(editor)) {
+            cancel.after(reload);
+          } else {
+            render();
+          }
           const refused = feedback.dataset.tone === "danger";
           feedback.setAttribute("role", refused ? "alert" : "status");
+          const focusMoved =
+            reloadRequired &&
+            document.activeElement?.isConnected &&
+            document.activeElement !== document.body &&
+            document.activeElement !== feedback;
           if (refusedInEditor && container.isConnected) {
             editor.focus({ preventScroll: true });
             editor.scrollIntoView({ block: "nearest" });
@@ -6387,7 +6513,7 @@ export async function renderAgentDetail(
             // A refusal Reload cannot fix (a 403, say) is an alert that takes focus and comes
             // into view; under the fold, nothing seemed to happen (finding 1991).
             revealStatus(feedback, container);
-          } else if (container.isConnected) {
+          } else if (container.isConnected && !focusMoved) {
             // A conflict or failure leaves Reload draft (or Save again) as the next step
             // (finding 1481).
             focusSaveOutcome(container, [reload, save], feedback);

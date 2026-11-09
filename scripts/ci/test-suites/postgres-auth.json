@@ -27,7 +27,8 @@
     "tests/integration/postgres-sign-in-unmatched-callbacks.test.mjs",
     "tests/integration/postgres-github-session-cookie.test.mjs",
     "tests/integration/postgres-service-api-keys.test.mjs",
-    "tests/integration/postgres-auth-binding.test.mjs"
+    "tests/integration/postgres-auth-binding.test.mjs",
+    "tests/integration/postgres-github-team-enrollment.test.ts"
   ],
   "files": [
     {
@@ -36,11 +37,14 @@
         "PostgreSQL native admin shared session and HTTP proxy work across two OCC API replicas",
         "PostgreSQL native admin WebSocket lease closes at the next renewal after parent logout",
         "PostgreSQL native admin WebSocket lease closes at the next renewal after parent session expiry",
-        "PostgreSQL native admin WebSocket lease closes at the next renewal after IAM administer restriction",
+        "PostgreSQL native admin WebSocket lease closes at the next renewal after IAM use restriction",
         "PostgreSQL native admin WebSocket lease closes as a dependency failure during an IAM outage",
         "PostgreSQL native admin WebSocket lease closes at the next renewal after Agent stop",
         "PostgreSQL native admin WebSocket lease closes at the next renewal after active revision replacement",
-        "PostgreSQL native admin WebSocket closes on API shutdown and disabled redeploy denies reuse"
+        "PostgreSQL native admin WebSocket closes on API shutdown and disabled redeploy denies reuse",
+        "PostgreSQL role changes and revocation close existing proxy leases across replicas",
+        "PostgreSQL runtime-role updates retain the assigning session until commit",
+        "PostgreSQL persists only one exact human assignment and limits updates to the runtime role"
       ]
     },
     {
@@ -171,6 +175,12 @@
       "path": "tests/integration/postgres-auth-binding.test.mjs",
       "expectedTests": [
         "PostgreSQL auth binding pins transactions, rolls back failures, and preserves caller pool ownership"
+      ]
+    },
+    {
+      "path": "tests/integration/postgres-github-team-enrollment.test.ts",
+      "expectedTests": [
+        "GitHub team enrollment creates one account with configured Group access and refuses unsafe enrollment"
       ]
     }
   ]
