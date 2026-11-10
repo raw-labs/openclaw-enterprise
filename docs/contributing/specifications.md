@@ -254,7 +254,7 @@ Plan filenames and historical commit links retain their original names.
 | `2026-09-28-installation-profiles-design`    | [RFC-0018](../../specs/rfcs/0018-installation-profiles-design/index.md) |
 | `0021-driver-configuration-contributions.md` | [RFC-0022](../../specs/rfcs/0022-driver-configuration-contributions.md) |
 | `0027-shared-model-provider.md`              | [RFC-0028](../../specs/rfcs/0028-shared-model-provider.md)              |
-| `0029-temporary-embedded-channel-trial.md`   | [RFC-0031](../../specs/rfcs/0031-temporary-embedded-channel-trial.md)   |
+| `0029-temporary-embedded-channel-trial.md`   | [RFC-0033](../../specs/rfcs/0033-temporary-embedded-channel-trial.md)   |
 
 Earlier versions of the Credential Proxy proposal used these provisional paths.
 RFC-0019, RFC-0021 and RFC-0022 are now assigned to other proposals.

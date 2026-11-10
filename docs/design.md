@@ -86,7 +86,7 @@ are implemented. Single-cluster Kubernetes execution places Gateway and Harness 
 namespace with separate Pods, identities and storage. External access-gateway admission, workload
 token authentication to OCC, and general credential-free model inference remain
 planned. The two-cluster profile is experimental.
-The [embedded-channel trial](../specs/rfcs/0031-temporary-embedded-channel-trial.md)
+The [embedded-channel trial](../specs/rfcs/0033-temporary-embedded-channel-trial.md)
 is a proposed, default-off evaluation exception to channel credential separation;
 it is unsupported for production and does not change the regular architecture.
 
@@ -228,11 +228,13 @@ release cannot enforce this path; qualify the exact pair before rollout.
 
 ### Native admin pilot exception
 
-Trusted human operators with exact-Agent `administer` permission can enter the
-[stock OpenClaw admin UI](reference/agent-native-admin.md) through an opt-in pilot.
-OCC checks admission and session retention, but does not authorize or audit each
-native command. Operators share the selected gateway's exposed conversations
-and credentials; this grants no access to another Agent or platform IAM.
+Human sessions with exact-Agent `operate` can enter native chat; `administer`
+selects the [stock OpenClaw admin UI](reference/agent-native-admin.md). OCC checks
+admission and session retention and selects an administrative route or a chat
+route capped at `operator.sessions.write` under the shared native identity.
+The runtime enforces that ceiling; OCC does not authorize or audit
+each native command. Users share the selected gateway’s exposed conversations;
+this grants no access to another Agent or platform IAM.
 
 Operators can provide a separate [human access path](reference/drivers/kubernetes-compute/gateway-authentication.md)
 to the shared Agent. This path does not grant OCC access.
