@@ -2565,7 +2565,12 @@ async function teamsDirectorySelection(t: TestContext, browserType: BrowserType)
     nativeValues("teams-directory", { harnessId: "codex" }),
     { executionMode: "dedicated" },
   );
-  const { page } = await newPage(t, fixture, { browserType });
+  // The local HTTPS fixture is self-signed; Chromium uses its exact SPKI launch flag.
+  // WebKit has no equivalent per-leaf flag. This editor test does not qualify TLS trust.
+  const { page } = await newPage(t, fixture, {
+    browserType,
+    ...(browserType.name() === "webkit" ? { context: { ignoreHTTPSErrors: true } } : {}),
+  });
   assert.equal(page.context().browser()!.browserType().name(), browserType.name());
   await openDraft(page, fixture, agent, "Teams directory Agent");
   await page.getByRole("button", { name: "Configure Microsoft Teams" }).click();

@@ -40,9 +40,11 @@ import type {
 import type { createConsoleAppFixture } from "../helpers/console-app.mjs";
 
 type Fixture = Awaited<ReturnType<typeof createConsoleAppFixture>>;
-type PageFixture =
-  | (Pick<Fixture, "registerCleanupBeforeAppClose"> & { sharedByFile?: false })
-  | { sharedByFile: true };
+type PageFixture = Pick<Fixture, "browserArgs"> &
+  (
+    | (Pick<Fixture, "registerCleanupBeforeAppClose"> & { sharedByFile?: false })
+    | { sharedByFile: true }
+  );
 type LoginFixture = Pick<Fixture, "origin" | "credentials"> & { sharedByFile?: boolean };
 type Credentials = Pick<LoginFixture["credentials"], "email" | "password">;
 type Grant = readonly [Permission["action"], Permission["resourceKind"]];
@@ -315,46 +317,53 @@ async function launchBrowser(options: { args?: string[]; browserType?: BrowserTy
 
 // One Chromium for every test in a file (CI runs each file in its own process), launched on
 // first use and closed after the file's last test: `after` here runs when the module loads, so it
-// attaches to the root test. An explicit browser type or launch arguments use a separate browser.
-// Each test still gets its own context (cookies, storage, viewport,
+// attaches to the root test. newPage uses it unless a test passes launch arguments, which need a
+// browser of their own. Shared browsers are keyed by fixture certificate arguments so one
+// fixture cannot widen another fixture's trust. Each test still gets its own context (cookies, storage, viewport,
 // routes); this only saves the launch and close, about 0.2 CPU-s a test. A failed launch, or a
 // browser that has crashed or disconnected, is launched again for the next caller.
-let sharedLaunch: Promise<Browser> | undefined;
+const sharedLaunches = new Map<string, Promise<Browser>>();
 after(async () => {
-  await (await sharedLaunch?.catch(() => null))?.close();
+  await Promise.all(
+    [...sharedLaunches.values()].map(async (pending) => {
+      await (await pending.catch(() => null))?.close();
+    }),
+  );
 });
 
-async function sharedBrowser() {
-  const pending = sharedLaunch;
+async function sharedBrowser(args: string[] = []) {
+  const key = JSON.stringify(args);
+  const pending = sharedLaunches.get(key);
   if (pending !== undefined) {
     const browser = await pending.catch(() => null);
     if (browser?.isConnected()) {
       return browser;
     }
-    if (sharedLaunch === pending) {
-      sharedLaunch = undefined;
+    if (sharedLaunches.get(key) === pending) {
+      sharedLaunches.delete(key);
     }
   }
-  if (sharedLaunch === undefined) {
-    const launching = launchBrowser().then(
+  let launching = sharedLaunches.get(key);
+  if (launching === undefined) {
+    launching = launchBrowser({ args }).then(
       (browser) => {
         browser.on("disconnected", () => {
-          if (sharedLaunch === launching) {
-            sharedLaunch = undefined;
+          if (sharedLaunches.get(key) === launching) {
+            sharedLaunches.delete(key);
           }
         });
         return browser;
       },
       (error) => {
-        if (sharedLaunch === launching) {
-          sharedLaunch = undefined;
+        if (sharedLaunches.get(key) === launching) {
+          sharedLaunches.delete(key);
         }
         throw error;
       },
     );
-    sharedLaunch = launching;
+    sharedLaunches.set(key, launching);
   }
-  return sharedLaunch;
+  return launching;
 }
 
 // The file's shared browser, for callers that pass it as newPage's `browser` option. newPage
@@ -370,7 +379,7 @@ export async function newPage(
     args?: string[];
     browserType?: BrowserType;
     launch?: () => Promise<Browser>;
-    browser?: () => Promise<Browser>;
+    browser?: (args?: string[]) => Promise<Browser>;
     context?: Parameters<Browser["newContext"]>[0];
   } = {},
 ) {
@@ -388,8 +397,17 @@ export async function newPage(
   const shared =
     options.args === undefined && options.launch === undefined && options.browserType === undefined;
   const browser = shared
-    ? await (options.browser ?? sharedBrowser)()
-    : await (options.launch?.() ?? launchBrowser(options));
+    ? await (options.browser ?? sharedBrowser)(fixture.browserArgs)
+    : await (options.launch?.() ??
+        launchBrowser({
+          ...options,
+          args: [
+            ...(options.browserType === undefined || options.browserType.name() === "chromium"
+              ? fixture.browserArgs
+              : []),
+            ...(options.args ?? []),
+          ],
+        }));
   const resources: {
     context?: BrowserContext;
     diagnostics?: Awaited<ReturnType<typeof watchBrowserContext>>;
@@ -447,9 +465,9 @@ function assertCredentials(credentials: unknown): asserts credentials is Credent
 // a file app (fileConsoleApp) signed in as its administrator loads the file's session cookies
 // instead, so the file makes one password sign-in rather than one a test. A tab that has
 // already loaded a page signs in through the form, so a test that signs in again on the same tab
-// keeps that tab's session storage and history across the sign-in. So does a fixture served
-// over TLS or under another host name, whose cookies are what such a test checks. Tests about
-// the sign-in page itself use the form directly or loginThroughForm.
+// keeps that tab's session storage and history across the sign-in. A fixture under a custom
+// host also uses the form, for tests of its cookie boundary. Tests about the sign-in page
+// itself use the form directly or loginThroughForm.
 
 export async function login(
   page: Page,
@@ -461,8 +479,8 @@ export async function login(
   const origin = new URL(fixture.origin);
   if (
     page.url() !== "about:blank" ||
-    origin.protocol !== "http:" ||
-    origin.hostname !== "127.0.0.1"
+    origin.protocol !== "https:" ||
+    origin.hostname !== "console.oce.localhost"
   ) {
     await loginForm(page, fixture, path, credentials);
     return;
