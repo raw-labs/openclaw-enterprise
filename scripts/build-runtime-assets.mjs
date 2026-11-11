@@ -220,7 +220,7 @@ if (command === "inputs") {
     [
       join(root, "scripts/lib/docker-plugin-selection.mjs"),
       join(root, "extensions"),
-      "codex,slack",
+      "codex,slack,msteams",
       "--required-bundled",
       join(root, "package.json"),
     ],
@@ -360,7 +360,7 @@ if (command === "inputs") {
         packageManager: pkg.packageManager,
         platform: process.platform,
         architecture: process.arch,
-        plugins: ["codex", "slack"],
+        plugins: ["codex", "slack", "msteams"],
       },
       null,
       2,

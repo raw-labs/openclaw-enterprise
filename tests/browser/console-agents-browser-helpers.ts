@@ -21,6 +21,7 @@ import type { TestContext } from "node:test";
 import type {
   APIResponse,
   Browser,
+  BrowserType,
   BrowserContext,
   ElementHandle,
   Locator,
@@ -297,14 +298,17 @@ async function artifactDirectory(t: TestContext) {
   return directory;
 }
 
-async function launchBrowser(options: { args?: string[] } = {}) {
+async function launchBrowser(options: { args?: string[]; browserType?: BrowserType } = {}) {
+  const browserType = options.browserType ?? chromium;
   const browserExecutable =
     process.env.OCC_TEST_BROWSER_EXECUTABLE === undefined ||
     process.env.OCC_TEST_BROWSER_EXECUTABLE.length === 0
       ? undefined
       : process.env.OCC_TEST_BROWSER_EXECUTABLE;
-  const browser = await chromium.launch({
-    ...(browserExecutable === undefined ? {} : { executablePath: browserExecutable }),
+  const browser = await browserType.launch({
+    ...(browserType !== chromium || browserExecutable === undefined
+      ? {}
+      : { executablePath: browserExecutable }),
     headless: true,
     ...(options.args === undefined ? {} : { args: options.args }),
   });
@@ -373,6 +377,7 @@ export async function newPage(
   fixture: PageFixture,
   options: {
     args?: string[];
+    browserType?: BrowserType;
     launch?: () => Promise<Browser>;
     browser?: (args?: string[]) => Promise<Browser>;
     context?: Parameters<Browser["newContext"]>[0];
@@ -380,14 +385,29 @@ export async function newPage(
 ) {
   const artifacts = await artifactDirectory(t);
   assert.ok(
+    options.browserType === undefined ||
+      (options.browser === undefined && options.launch === undefined),
+    "pass a browser type only with launch arguments",
+  );
+  assert.ok(
     [options.browser, options.args, options.launch].filter((option) => option !== undefined)
       .length <= 1,
     "pass one of a shared browser, launch arguments, or a dedicated browser factory",
   );
-  const shared = options.args === undefined && options.launch === undefined;
+  const shared =
+    options.args === undefined && options.launch === undefined && options.browserType === undefined;
   const browser = shared
     ? await (options.browser ?? sharedBrowser)(fixture.browserArgs)
-    : await (options.launch?.() ?? launchBrowser(options));
+    : await (options.launch?.() ??
+        launchBrowser({
+          ...options,
+          args: [
+            ...(options.browserType === undefined || options.browserType.name() === "chromium"
+              ? fixture.browserArgs
+              : []),
+            ...(options.args ?? []),
+          ],
+        }));
   const resources: {
     context?: BrowserContext;
     diagnostics?: Awaited<ReturnType<typeof watchBrowserContext>>;

@@ -13,7 +13,7 @@ interface DirectoryEvidence {
 // eslint-disable-next-line no-control-regex -- directory IDs must exclude ASCII control characters.
 const idControls = /[\u0000-\u001f\u007f]/;
 const ownerId = /^(?:agt|cfg)_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const commonFields = ["kind", "secretId", "agentId", "configurationId"];
+const commonFields = ["provider", "context", "kind", "secretId", "agentId", "configurationId"];
 const lookupFields = [...commonFields, "query", "cursor"];
 const hydrationFields = [...commonFields, "ids"];
 
@@ -86,6 +86,28 @@ export function serveChannelDirectory(
   }
   if (!secrets.has(body.secretId)) {
     return fixtureError(400, "INVALID_REQUEST", "The simulated Secret is not in this preview.");
+  }
+  if (body.provider === "msteams") {
+    const candidates =
+      body.kind === "users"
+        ? [
+            { id: "44444444-4444-4444-8444-444444444444", name: "Alex Chen" },
+            { id: "55555555-5555-4555-8555-555555555555", name: "Sam Rivers" },
+          ]
+        : [
+            { id: "19:demo@thread.tacv2", name: "General" },
+            { id: "19:engineering@thread.tacv2", name: "Engineering" },
+          ];
+    const query = ("query" in body ? (body.query ?? "") : "").toLowerCase();
+    return fixtureResponse({
+      workspaceId: "19:demo@thread.tacv2",
+      candidates: candidates.filter((candidate) =>
+        "ids" in body
+          ? body.ids.includes(candidate.id)
+          : [candidate.id, candidate.name].some((part) => part.toLowerCase().includes(query)),
+      ),
+      complete: true,
+    });
   }
   const ids = "ids" in body ? body.ids : undefined;
   const query = "query" in body ? body.query : undefined;

@@ -717,6 +717,7 @@ function directoryLookup() {
   return (input: Partial<Parameters<OpenClawController["lookupChannelDirectory"]>[2]>) =>
     controller.lookupChannelDirectory(administrator, "ns_directory", {
       secretId: "secret_directory",
+      provider: "slack",
       kind: "users",
       ...input,
     });
