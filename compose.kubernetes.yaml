@@ -17,6 +17,9 @@ services:
       OCC_DATABASE_URL: postgresql://occ_app:occ-app-local@postgres:5432/openclaw_enterprise
       OCC_CONFIG_PATH: /run/openclaw-development/installation.yaml
       OCC_WORKER_READINESS_PATH: /tmp/openclaw-worker-ready
+      OCC_AUTH_BASE_URL: ${OCC_DEVELOPMENT_BROWSER_ORIGIN:?Browser origin is required}
+      OCC_AGENT_NATIVE_ADMIN_ENABLED: "true"
+      OCC_AGENT_NATIVE_ADMIN_DOMAIN: ${OCC_DEVELOPMENT_AGENT_NATIVE_ADMIN_DOMAIN:?Agent native admin domain is required}
     command: ["apps/controller/src/worker.mjs"]
     volumes:
       - ${OCC_DEVELOPMENT_INSTALLATION_CONFIG:?Installation configuration path is required}:/run/openclaw-development/installation.yaml:ro,z

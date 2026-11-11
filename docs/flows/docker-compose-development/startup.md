@@ -330,9 +330,9 @@ before `--no-build` startup. Both Compose Kubernetes profiles assign browser TLS
 files to the proxy UID/GID; OpenShell routing files use the API/worker UID/GID.
 Ownership follows each reader's image and Compose user setting, preserving mode `0600`.
 
-The hybrid snapshot adds `compose.native-admin.yaml`. Its CA signs only the
-installation's console and wildcard Agent hosts. `browser-proxy` terminates loopback
-HTTPS; Agent `ClusterIP` Services remain behind Envoy.
+`compose.native-admin.yaml` supplies loopback HTTPS for Console and wildcard Agent
+hosts; Agent Services stay behind Envoy. Kubernetes worker admission settings
+belong to `compose.kubernetes.yaml`, not this shared browser overlay.
 
 `apps/controller/src/composition/development-postgres.ts:composePostgresDevelopment`
 passes `OCC_AUTH_BASE_URL` into development admission.

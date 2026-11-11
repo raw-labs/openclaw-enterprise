@@ -10,12 +10,6 @@ services:
       OCC_AUTH_BASE_URL: ${OCC_DEVELOPMENT_BROWSER_ORIGIN:?Browser origin is required}
       OCC_AGENT_NATIVE_ADMIN_DOMAIN: ${OCC_DEVELOPMENT_AGENT_NATIVE_ADMIN_DOMAIN:?Agent native admin domain is required}
 
-  worker-kubernetes:
-    environment:
-      OCC_AUTH_BASE_URL: ${OCC_DEVELOPMENT_BROWSER_ORIGIN:?Browser origin is required}
-      OCC_AGENT_NATIVE_ADMIN_ENABLED: "true"
-      OCC_AGENT_NATIVE_ADMIN_DOMAIN: ${OCC_DEVELOPMENT_AGENT_NATIVE_ADMIN_DOMAIN:?Agent native admin domain is required}
-
   browser-proxy:
     build:
       context: .

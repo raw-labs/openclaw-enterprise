@@ -2065,7 +2065,7 @@ const notReappliedCases = [
       ...values,
       channels: { slack: { ...values.channels.slack, enabled: false } },
     }),
-    note: "Your channel Secret choices were not reapplied: Slack is off in the reloaded Configuration.",
+    note: "Your channel Secret choices were not reapplied: channels are off in the reloaded Configuration.",
   },
   {
     name: "Slack uses named accounts",
