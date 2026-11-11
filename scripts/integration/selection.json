@@ -316,6 +316,23 @@
         "tests/integration/ci-prepare.test.mjs"
       ],
       "notes": "Sandbox transform, Gateway security defaults, then Compute native administration preparation. Real cluster equality protects upstream defaults; native proxy state is read from the real Pod rather than retired NODE_USE_ENV_PROXY."
+    },
+    {
+      "id": "channel-browser-and-compose-worker-reconciliation",
+      "pullRequests": [2, 12],
+      "commits": ["0bd09e4f18a6b40969d27b87123e1ae6c8e844c6"],
+      "paths": [
+        ".github/actions/run-ci-lane/action.yml",
+        "compose.kubernetes.yaml",
+        "compose.native-admin.yaml",
+        "tests/browser/console-agent-detail.test.ts",
+        "tests/browser/console-agent-saves.test.ts",
+        "tests/browser/console-agents.test.ts",
+        "tests/browser/console-disabled-reasons.test.ts",
+        "tests/browser/console-runtime-credentials.test.ts",
+        "tests/integration/configuration-controller.test.mjs"
+      ],
+      "notes": "Keep Kubernetes worker native admission settings in the Kubernetes overlay, not the shared Docker browser overlay. Install real WebKit for the Teams directory browser lane. Scope Slack-only assertions and use current channel credential gating/messages; retain proxy-owned environment rejection."
     }
   ],
   "publishedMigrationPrefix": {
@@ -806,7 +823,8 @@
         "node scripts/integration/check-selection.mjs"
       ],
       "environment": "Task-local Go, NSS tools and Chromium shared libraries. TLS browser wrapper preserves sandboxing and only supplies shared-library lookup. CI runner diagnostics use env -u OPENCLAW_SERVICE_MARKER because its inherited value aliases ordinary public service names. No product assertion or security probe weakened.",
-      "repair": "After ordering repair: four real PostgreSQL/Kubernetes ownership/lifecycle cases, three real provisioning cases including embedded channels through redeploy/stop, and retained-job case passed without skips (eight total). All 64 PostgreSQL provisioning cases passed with explicit Gateway defaults assertions. Host-only chart parity and QA runner selection each passed. Lint/typecheck, docs, formatting and existing selection checks passed."
+      "repair": "After ordering repair: four real PostgreSQL/Kubernetes ownership/lifecycle cases, three real provisioning cases including embedded channels through redeploy/stop, and retained-job case passed without skips (eight total). All 64 PostgreSQL provisioning cases passed with explicit Gateway defaults assertions. Host-only chart parity and QA runner selection each passed. Lint/typecheck, docs, formatting and existing selection checks passed.",
+      "channelComposeRepair": "Compose/development packaging: 76 passed. Configuration API: 286 passed. Credential/save/disabled-reason browser files: 103 passed; seven targeted browser regressions passed. CI preparation: 107 passed. No skips. Teams directory Chromium passed; local WebKit host prerequisite missing, with real WebKit installation added to its CI lane. Lint, typecheck, formatting, docs, workspace isolation and suite audit passed."
     },
     "limits": [
       "Exact-head remote qualification follows push; local tests do not establish native image or real cluster results.",
@@ -817,6 +835,11 @@
         "commit": "cddddaf556416a6f8ef237670d26520a0371267f",
         "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43039926689",
         "notes": "Real k3d equality caught Compute preparation receiving pre-security-default values. Preserve the defaults as hook input; keep cluster assertions unchanged and add explicit provisioning assertions. Update retired Node proxy and chart-worker/QA runner expectations to current contracts."
+      },
+      {
+        "commit": "42f997b0e8072c8c96f0c347046b78a37fbb5a24",
+        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43041586088",
+        "notes": "Browser lanes found stale Slack-only selectors/messages after Teams support, an obsolete operator-only Teams gate assertion, and missing WebKit. Conformance exposed Kubernetes worker added without build to Docker-only Compose and a proxy-owned environment variable masking an unrelated binding assertion. Fixed without weakening product validation, authorization or browser security probes."
       }
     ]
   },
