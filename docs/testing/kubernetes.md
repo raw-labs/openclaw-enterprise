@@ -13,9 +13,9 @@ Use disposable local k3d with enforcing NetworkPolicies. Fixtures exclude real g
 ## Local Kubernetes installation
 
 Install k3d, kubectl, Helm, `certutil`, and Chromium with sandbox support.
-Use a disposable container engine with image-build capacity. The
+Use a disposable image-building container engine. The
 Keycloak cases need free, bindable loopback port 443 and must not run beside
-the standalone Keycloak lane. Run these commands from the trusted checkout root:
+the standalone Keycloak lane. Run from the trusted checkout root:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -62,6 +62,7 @@ Run sequentially against this database without skips.
 Missing selectors or database skip cases; partial selectors fail. Coverage:
 API, worker, Driver, RBAC, storage, lifecycle and network isolation.
 Verify cloud volume detach and node fencing separately.
+See [channel cases](channel-runtime.md).
 
 For live OAuth, use [OpenShell OAuth](openshell-oauth.md) and
 [credentialed runtime](openshell.md). Delete only your disposable cluster:

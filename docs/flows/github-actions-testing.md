@@ -68,7 +68,7 @@ graph TD
 retain cases, environment and cleanup but cannot satisfy full-lane aggregation,
 including one-file lanes (`validateLaneEvidence`).
 
-`CI Impact` selects coverage; `Suite Audit and Static Checks` verifies checkout identity in every mode. Ordinary CI uses the event checkout without external service credentials. The [coverage map](../testing/ci/required-checks.md#scenarios) lists lanes and `runtime-image-fixture`. Workflows select runners; Kubernetes requires a NetworkPolicy-enforcing kernel.
+`CI Impact` selects coverage; `Suite Audit and Static Checks` verifies checkout identity in every mode. Ordinary CI uses the event checkout without external service credentials. The [coverage map](../testing/ci/required-checks.md#scenarios) lists lanes and `runtime-image-fixture`. Workflows select runners; Kubernetes requires a NetworkPolicy-enforcing kernel. [Configuration](../testing/ci/configuration.md#local-runner-overrides) owns scoped runner overrides and CI-only AppArmor cleanup, including the reusable Full Integration execution matrices.
 
 Pull requests compare the verified merge with its first parent using that parent’s
 policy; the second parent must match the event head. Canonical main pushes use `before` policy
@@ -349,11 +349,5 @@ awaits an approved resource ledger.
 - 2026-10-21 04:42: Preserve submillisecond Docker event order. (authoring-run/458f4777-70d1-4992-a922-ab387c6a4aba - e8185dac805b737363c7178d3068b310a53a7c24)
 
 - 2026-10-14 22:31: Complete all selection. (authoring-run/d5130a41-8ae6-4a80-aef3-32d61a53348c - 9b50982b75a578d6967ee12befb1fa3904e20a38)
-
-- 2026-10-14 14:09: Remove environment approvals. (authoring-run/ff0eb53f-ceb9-43fc-a81a-c1bc88b5c9fb - 909b0b9d4)
-
-- 2026-10-14 14:04: Scope PAT authentication and OpenShell prerequisites. (authoring-run/dba0a6cb-33d9-40fd-b38b-e20cddf4b75f - 96a2b79fa)
-
-- 2026-10-14 16:37: Document hosted QA image cleanup. (authoring-run/0733d076-37af-4fd5-ade5-869487072f47 - 1c406aef)
 
 [GitHub Actions testing documentation history](github-actions-testing/history.md) preserves the older dated entries.

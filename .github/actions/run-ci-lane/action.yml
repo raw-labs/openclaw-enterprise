@@ -173,6 +173,15 @@ runs:
       uses: ./.github/actions/setup-ci-tools
       with:
         profile: ${{ inputs.profile }}
+    - name: Install CI Codex AppArmor profile
+      id: install-codex-apparmor
+      if: inputs.lane == 'images-runtime-startup'
+      shell: bash
+      run: |
+        if docker info --format '{{json .SecurityOptions}}' | jq -e 'any(.[]; contains("apparmor"))' >/dev/null; then
+          sudo apparmor_parser --add scripts/ci/codex-bwrap.apparmor
+          echo 'OCC_TEST_CODEX_APPARMOR_PROFILE=oce-ci-codex-bwrap' >> "$GITHUB_ENV"
+        fi
     - name: Install registry transport for image tests
       id: install-registry-transport
       if: inputs.lane == 'images-packaging' || inputs.runtime-artifact-id != ''
@@ -461,6 +470,11 @@ runs:
       if: always()
       shell: bash
       run: node scripts/ci/cleanup.mjs --state "$RUNNER_TEMP/state/${{ inputs.lane }}.json" --results "$RUNNER_TEMP/results/${{ inputs.lane }}.json"
+    - name: Remove CI Codex AppArmor profile
+      id: remove-codex-apparmor
+      if: always() && inputs.lane == 'images-runtime-startup' && env.OCC_TEST_CODEX_APPARMOR_PROFILE == 'oce-ci-codex-bwrap'
+      shell: bash
+      run: sudo apparmor_parser --remove scripts/ci/codex-bwrap.apparmor
     - name: Stop memory sampling
       if: always() && steps.memory-sampler.outputs.pid != ''
       continue-on-error: true
@@ -627,6 +641,7 @@ runs:
           test-docker=${{ steps.test-docker.conclusion }}
           builder=${{ steps.builder.conclusion }}
           setup-ci-tools=${{ steps.setup-ci-tools.conclusion }}
+          install-codex-apparmor=${{ steps.install-codex-apparmor.conclusion }}
           install-registry-transport=${{ steps.install-registry-transport.conclusion }}
           kubernetes-bridge=${{ steps.kubernetes-bridge.conclusion }}
           install-dependencies=${{ steps.install-dependencies.conclusion }}
@@ -652,6 +667,7 @@ runs:
           install-browser-certificates=${{ steps.install-browser-certificates.conclusion }}
           run-lane=${{ steps.run-lane.conclusion }}
           cleanup-lane=${{ steps.cleanup-lane.conclusion }}
+          remove-codex-apparmor=${{ steps.remove-codex-apparmor.conclusion }}
           image_reconciliation=${{ steps.image_reconciliation.conclusion }}
           retain-image-reconciliation=${{ steps.retain-image-reconciliation.conclusion }}
           retain-runtime-fixture=${{ steps.retain-runtime-fixture.conclusion }}

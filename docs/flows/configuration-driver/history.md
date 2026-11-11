@@ -30,3 +30,7 @@ This record preserves the dated changes to the Configuration Driver and Agent re
 - 2026-08-19 15:12: Documented singleton startup configuration, Driver schemas, exact Namespace ConfigMap CRUD, and immutable Agent revision admission. (01a01b65-5e90-78f0-b899-ce53454884c6 - 1e048452d44be143677c4a2b83c959979126846c)
 - 2026-08-19 15:24: Clarified lazy ConfigMap authorization and unavailable live-cluster proof. (01a01b65-5e90-78f0-b899-ce53454884c6 - 1e048452d44be143677c4a2b83c959979126846c)
 - 2026-08-19 16:19: Simplified runtime Driver selection and tracked version stability across Compute configuration changes as future work. (01a01b65-5e90-78f0-b899-ce53454884c6 - 0e8413ee880a21a2db9b83cbf952f6d565378d67)
+
+- 2026-10-10 11:29: Refuse Kubernetes native listeners that pass local readiness but cannot serve Pod-IP routes before version creation. (authoring-run/f29e292f-76cb-44a1-88b5-e0244f9164fc - f8a837e33b5c03bc0c92065e979485ee06960150)
+- 2026-10-09 19:00: Configuration create and update refuse an `agents` roster every deployment refuses, with deployment's text, through the shared `requireDeployableRoster`; an existing row still reads and deploys as before. (q35-roster-save, finding 874)
+- 2026-10-09 15:00: A failed Configuration delete or update compensates only while the metadata row is unchanged, so a delete or update another request committed after the lock was released is never undone and leaves no orphan ConfigMap. (fix-944-945)

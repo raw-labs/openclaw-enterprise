@@ -8,6 +8,7 @@ import { KubernetesComputeDriver } from "../../apps/controller/src/drivers/compu
  *   authentication?: import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesComputeDriverOptions["authentication"],
  *   repositoryCredentials?: boolean, gatewayRuntime?: boolean, channelRuntime?: boolean,
  *   routed?: boolean, privateStatus?: boolean, gatewayTrustedProxyCidrs?: string[],
+ *   gatewayRouting?: import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesGatewayRoutingOptions,
  *   modelProvider?: import("../../apps/controller/src/drivers/compute/model-provider.ts").ModelProviderConfiguration,
  *   servicePrincipalCredentials?: import("../../apps/controller/src/drivers/compute/kubernetes/index.ts").KubernetesComputeDriverOptions["servicePrincipalCredentials"],
  * }} [options]
@@ -29,6 +30,7 @@ export function createTestKubernetesComputeDriver(
     authentication = { mode: "inCluster" },
     gatewayTrustedProxyCidrs = ["127.0.0.1/32"],
     modelProvider,
+    gatewayRouting,
     servicePrincipalCredentials = { mode: "disabled" },
     sandboxDriver,
     credentialGatewayDriver,
@@ -45,18 +47,19 @@ export function createTestKubernetesComputeDriver(
   const runtime =
     repositoryCredentials || channelRuntime || gatewayRuntime || modelProvider !== undefined;
   const placed = runtime && routed;
+  const configuredRouting =
+    gatewayRouting ??
+    (placed
+      ? {
+          hostname: "agents.example.test",
+          gatewayName: "gateways",
+          gatewayNamespace: "controller",
+          envoyNamespace: "envoy",
+        }
+      : undefined);
   return new KubernetesComputeDriver(
     {
-      ...(placed
-        ? {
-            gatewayRouting: {
-              hostname: "agents.example.test",
-              gatewayName: "gateways",
-              gatewayNamespace: "controller",
-              envoyNamespace: "envoy",
-            },
-          }
-        : {}),
+      ...(configuredRouting === undefined ? {} : { gatewayRouting: configuredRouting }),
       authentication,
       images: { gateway: "gateway:local", agent: "agent:local", requireImmutableDigest: false },
       resources: {

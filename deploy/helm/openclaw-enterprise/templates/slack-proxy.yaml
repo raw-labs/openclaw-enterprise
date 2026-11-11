@@ -49,6 +49,8 @@ spec:
               value: {{ .Values.slackProxy.teamsFileHosts | toJson | quote }}
             - name: OCC_SLACK_PROXY_PORT
               value: {{ .Values.slackProxy.port | quote }}
+            - name: OCC_CHANNEL_PROXY_TEAMS_ENABLED
+              value: {{ .Values.slackProxy.teamsEnabled | quote }}
           ports:
             - name: proxy
               containerPort: {{ .Values.slackProxy.port }}

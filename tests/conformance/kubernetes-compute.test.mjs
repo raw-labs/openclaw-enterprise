@@ -6937,6 +6937,9 @@ test("gateway chat routes enforce a distinct exact-Agent scope ceiling", () => {
     );
     assert.ok(headers.remove.includes("authorization"));
     assert.ok(headers.remove.includes("cookie"));
+    // Gateway API forbids setting and removing the same header in one filter.
+    assert.ok(!headers.remove.includes("x-occ-identity"));
+    assert.ok(!headers.remove.includes("x-openclaw-scopes"));
     assert.deepEqual(rule.backendRefs, [
       { group: "", kind: "Service", name: service.metadata.name, port: 8080 },
     ]);
@@ -18314,7 +18317,10 @@ for (const cutover of ["already deployed", "during Deployment deletion", "during
         async listNamespacedPod() {
           return { items: [] };
         },
-        async readNamespacedService() {
+        async readNamespacedService({ name: requestedName }) {
+          if (requestedName !== name) {
+            throw missing();
+          }
           return read("Service");
         },
         async readNamespacedServiceAccount() {
@@ -19861,6 +19867,10 @@ test("retirement preserves active storage and node routing and deletes exact own
         deletions.push(["PersistentVolumeClaim", request]);
       },
       async readNamespacedService({ name }) {
+        if (name === `${gatewayName}-msteams`) {
+          const callback = teamsResources.get("Service");
+          return callback === undefined ? missing() : structuredClone(callback);
+        }
         if (name === agentName) {
           return structuredClone(agentService);
         }
@@ -19868,6 +19878,13 @@ test("retirement preserves active storage and node routing and deletes exact own
           return missing();
         }
         return structuredClone(observedService);
+      },
+      async patchNamespacedService({ body }) {
+        assert.equal(body.metadata.name, `${gatewayName}-msteams`);
+        teamsResources.set("Service", {
+          ...structuredClone(body),
+          metadata: { ...body.metadata, uid: "Service-node-uid", resourceVersion: "1" },
+        });
       },
       async deleteNamespacedService(request) {
         deletions.push(["Service", request]);
@@ -19889,7 +19906,18 @@ test("retirement preserves active storage and node routing and deletes exact own
       },
     },
     networking: {
-      readNamespacedNetworkPolicy: missing,
+      async patchNamespacedNetworkPolicy({ body }) {
+        assert.equal(body.metadata.name, `${gatewayName}-msteams`);
+        teamsResources.set("NetworkPolicy", {
+          ...structuredClone(body),
+          metadata: { ...body.metadata, uid: "NetworkPolicy-node-uid", resourceVersion: "1" },
+        });
+      },
+      async readNamespacedNetworkPolicy({ name }) {
+        const callback =
+          name === `${gatewayName}-msteams` ? teamsResources.get("NetworkPolicy") : undefined;
+        return callback === undefined ? missing() : structuredClone(callback);
+      },
     },
     objects: {
       async read({ kind, metadata }) {
@@ -20188,7 +20216,9 @@ test("retirement preserves active storage and node routing and deletes exact own
     deletions.map(([kind, { spec }]) => [kind, spec.metadata.name]),
     [
       ["HTTPRoute", `${gatewayName}-msteams`],
+      ["Service", `${gatewayName}-msteams`],
       ["SecurityPolicy", `${gatewayName}-msteams`],
+      ["NetworkPolicy", `${gatewayName}-msteams`],
     ],
   );
   deletions.length = 0;
@@ -23988,4 +24018,70 @@ test("an active embedded revision whose stored Gateway tool policy predates the 
     "a new deployment",
   );
   assert.throws(() => driver.validateConfiguration(revision.configuration), refused, "save");
+});
+
+test("embedded channels require a trusted boolean and retain native provider selection", () => {
+  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
+  const channels = { proxyUrl: "http://10.42.0.15:3128" };
+  const embedded = { id: "openclaw", version: "1.0.0", mode: "embedded" };
+  const configuration = {
+    agents: { defaults: { model: "anthropic/claude-sonnet-4-5" } },
+    channels: { slack: { enabled: true } },
+  };
+  for (const flag of [undefined, false]) {
+    const driver = createKubernetesComputeDriver(
+      options({
+        runtime: {
+          ...runtime,
+          channels: {
+            ...channels,
+            ...(flag === undefined ? {} : { experimentalEmbeddedChannels: flag }),
+          },
+        },
+      }),
+    );
+    assert.throws(
+      () =>
+        driver.validateHarnessAuth(embedded, apiKeyAuth, {
+          ...configuration,
+          runtime: { channels: { experimentalEmbeddedChannels: true } },
+        }),
+      /channels require a dedicated Agent workload/,
+    );
+    assert.deepEqual(driver.agentProvisioning.executionModes, ["dedicated"]);
+  }
+  for (const flag of ["true", 1, null]) {
+    assert.throws(
+      () =>
+        createKubernetesComputeDriver(
+          options({
+            runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: flag } },
+          }),
+        ),
+      (error) => error.name === "ConfigurationValidationError",
+    );
+  }
+  const trial = createKubernetesComputeDriver(
+    options({
+      runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: true } },
+    }),
+  );
+  assert.doesNotThrow(() => trial.validateHarnessAuth(embedded, apiKeyAuth, configuration));
+  assert.deepEqual(trial.agentProvisioning.executionModes, ["dedicated", "embedded"]);
+  assert.throws(
+    () =>
+      trial.validateHarnessAuth(embedded, apiKeyAuth, {
+        ...configuration,
+        agents: { defaults: { model: "codex/gpt-6-astra" } },
+      }),
+    /compatible model provider/,
+  );
+  assert.throws(
+    () =>
+      trial.validateHarnessAuth(embedded, apiKeyAuth, {
+        ...configuration,
+        agents: { defaults: { model: "openrouter/model" } },
+      }),
+    /compatible model provider/,
+  );
 });

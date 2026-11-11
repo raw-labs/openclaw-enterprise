@@ -20,6 +20,24 @@ need no provider secrets. Runner labels, tool pins, triggers, timeouts, and job
 permissions are set in the [workflow files](../../../.github/workflows);
 [test lane definitions](../../../scripts/ci/test-suites.json) list required inputs.
 
+## Local runner overrides
+
+Set `CI_RUNNER` for Suite Audit and Static Checks, and `CI_LARGE_RUNNER` for
+matrix lanes, advisory QA and same-source qualification. Unset variables retain
+the workflow defaults. Select ephemeral Linux runners with sufficient resources,
+enforcing NetworkPolicies for k3d and browser sandbox support.
+`CI_RUNNER_FILE_CONCURRENCY` bounds ordinary CI/advisory test-file concurrency
+from 1 through 32. `CI_SANDBOX_RUNNER` selects `images-runtime-startup` separately;
+otherwise it follows the large-runner selection. Ordinary CI and same-source
+qualification use the same selection.
+
+On AppArmor hosts, that lane installs the named
+[CI container profile](../../../scripts/ci/codex-bwrap.apparmor), then removes it
+after container cleanup. It retains Docker's default process, `/proc` and `/sys`
+restrictions while allowing Bubblewrap nested mounts under the reviewed seccomp
+profile and dropped capabilities. It does not select an unconfined policy,
+change host sysctls or change production container policy.
+
 <a id="integration-environments"></a>
 
 ## Environments

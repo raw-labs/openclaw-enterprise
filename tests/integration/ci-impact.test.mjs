@@ -1462,24 +1462,29 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
   // qualifies two CPUs.
   const jobs = loadYaml(".github/workflows/full-integration-execution.yml").jobs;
   const job = jobs["pr-safe-same-sha"];
-  const runnerFor = (target, lane) => {
+  const runnerFor = (target, lane, vars = {}) => {
     const runner = target["runs-on"];
     return runner.startsWith("${{")
       ? runInNewContext(runner.replace(/^\$\{\{\s*|\s*\}\}$/g, ""), {
           matrix: { lane },
+          vars,
           startsWith: (value, prefix) => value.startsWith(prefix),
         })
       : runner;
   };
   const ciRunners = new Map(laneTable().map((row) => [row.lane, row.runner]));
-  const lanes = JSON.parse(read("scripts/ci/full-integration-lanes.json")).map(
-    (entry) => entry.lane,
-  );
+  const lanes = [
+    ...JSON.parse(read("scripts/ci/full-integration-lanes.json")),
+    ...jobs["image-lanes-same-sha"].strategy.matrix.include,
+  ].map((entry) => entry.lane);
   const pinned = lanes.filter(
     (lane) =>
-      lane === "postgres-auth" || lane.startsWith("k3d-fixture-") || lane === "k3d-observability",
+      lane === "postgres-auth" ||
+      lane === "images-runtime-startup" ||
+      lane.startsWith("k3d-fixture-") ||
+      lane === "k3d-observability",
   );
-  for (const lane of ["postgres-auth", "k3d-observability"]) {
+  for (const lane of ["postgres-auth", "images-runtime-startup", "k3d-observability"]) {
     assert.ok(pinned.includes(lane), lane);
   }
   for (const lane of pinned) {
@@ -1497,6 +1502,31 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
   for (const { lane } of images.strategy.matrix.include) {
     assert.equal(runnerFor(images, lane), ciRunners.get(lane), lane);
   }
+  const ciExpression = loadYaml(".github/workflows/ci.yml").jobs["pr-safe"]["runs-on"].replace(
+    /^\$\{\{\s*|\s*\}\}$/g,
+    "",
+  );
+  // Selecting an installed runner must also carry into same-source qualification;
+  // otherwise the PR passes on one kernel while qualification queues on another.
+  for (const lane of pinned) {
+    const vars = { CI_LARGE_RUNNER: "configured-large-runner" };
+    const expected = "configured-large-runner";
+    assert.equal(runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars), expected);
+    assert.equal(
+      runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
+      runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars),
+    );
+  }
+  const vars = { CI_LARGE_RUNNER: "configured-large-runner", CI_SANDBOX_RUNNER: "sandbox-runner" };
+  const lane = "images-runtime-startup";
+  assert.equal(
+    runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars),
+    "sandbox-runner",
+  );
+  assert.equal(
+    runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
+    "sandbox-runner",
+  );
 });
 
 test("Suite Audit and Static Checks runs the audit and every check the lanes skip", () => {
