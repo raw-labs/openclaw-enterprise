@@ -1252,6 +1252,7 @@
             ],
             "hidden": [
               "contributing/rfc-template",
+              "contributing/downstream-integration",
               "guides/deploy/local-repository-credentials",
               "guides/deploy/local-compose-kubernetes",
               "guides/deploy/local-sandbox-network-policy",

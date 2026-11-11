@@ -206,7 +206,9 @@ export async function composePostgresDevelopment(
           : { pluginSourceReader: drivers.pluginSourceReader }),
         recordOperations: true,
         ...(config.nativeAdmin?.enabled === true
-          ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! }
+          ? {
+              nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)!,
+            }
           : {}),
         defaultPresets: drivers?.defaultPresets ?? [],
         bundledPresetVersions: drivers?.bundledPresetVersions ?? [],

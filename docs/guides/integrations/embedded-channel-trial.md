@@ -12,16 +12,15 @@ add the opt-in to the existing trusted site-input JSON:
 
 ```json
 {
+  "proxy": { "url": "http://192.0.2.10:3128" },
   "channels": {
-    "runtimeProxyUrl": "http://192.0.2.10:3128",
     "experimentalEmbeddedChannels": true
   }
 }
 ```
 
 Render with `--profile openclaw`; the option also works with `codex` when selecting
-embedded OpenClaw Agents. It requires `runtimeProxyUrl` or the existing
-`managedSlackProxy: true` input. Omit the option or set it to false to keep the default
+embedded OpenClaw Agents. It requires `proxy.url` or `proxy.bundled: true`. Omit the option or set it to false to keep the default
 refusal. Preflight warns about the shared-credential risk when enabled. Apply the
 paired startup YAML and Helm values in the guide's order so API and worker load
 the same configuration. The option does not configure Teams ingress or broaden
@@ -34,7 +33,7 @@ configuration:
 runtime:
   transportSecretPrefix: transport
   gatewayStorageClassName: local-path
-  channels:
+  proxy:
     proxyUrl: "http://192.0.2.10:3128"
     experimentalEmbeddedChannels: true
 ```
@@ -104,5 +103,5 @@ remove its retained state, and revoke or rotate provider credentials. Do not tre
 stop as a provider-token revocation or a wipe of plugin-maintained caches.
 
 The removal condition is a supported dedicated native path supplying the required
-models and integrations. The [proposed RFC](../../../specs/rfcs/0037-temporary-embedded-channel-trial.md)
+models and integrations. The [proposed RFC](../../../specs/rfcs/0038-temporary-embedded-channel-trial.md)
 records the risk and owner decision; it does not claim maintainer acceptance.

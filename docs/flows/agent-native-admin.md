@@ -102,12 +102,10 @@ plan and identity. The worker creates and deploys the Agent.
 `scripts/first-agent.ts:nativeConfiguration`
 `scripts/first-agent.ts:ensureManagedConfiguration`
 
-With launcher-owned Compose/OpenShell browser state, the helper saves disabled
-Configuration generation 1, creates the Agent, then derives its origin. Before
-deployment, generation 2 enables `controlUi`, pins origins, and grants
-`occ-workspace-files` trusted-proxy `operator.admin` with device auto-approval.
-Identity grants supply admin independently of device scopes.
-An existing helper-owned name cannot change this selection.
+The helper saves a disabled Configuration, creates the Agent, and derives its
+origin. Before deployment it enables `controlUi`, pins origins and configures
+trusted-proxy administration. An existing helper-owned name cannot change this
+selection; see [first-Agent setup](../guides/deploy/native-admin.md).
 
 ### 0.5. Deployment admission prepares the Agent copy
 
@@ -115,33 +113,24 @@ An existing helper-owned name cannot change this selection.
 `packages/occ/src/index.ts:deployAgentWithAuthorization`
 `apps/controller/src/drivers/compute/kubernetes/index.ts:configureAgent`
 
-API and worker derive trusted Installation origins through `nativeAdminTarget`.
-Helm supplies matching inputs. For the Compose/OpenShell profile,
-`compose.native-admin.yaml:services` supplies the same enablement, Agent domain
-and public HTTPS origin to the controller and Kubernetes worker. Cookie settings
-remain API-only. Deployment and provisioning pass the allocated
-Agent and frozen Sandbox copy to Compute through `agentRuntimeConfiguration`.
-Agent save remains unchanged. Kubernetes prepares gateway identity, device
-approval and exact origins; conflicts refuse admission and opt-outs stay disabled.
-OCC then applies logging and validation, freezing the result in an Agent revision.
-The source Configuration and history stay unchanged. `admitRevision` records
-separate Compute metadata; the runtime renders a writable copy.
+API and worker derive matching `nativeAdminTarget` inputs from Helm or Compose. Deployment passes the allocated Agent and
+Sandbox-transformed Configuration through `agentRuntimeConfiguration`. Kubernetes
+Compute adds exact origins and approval policy; conflicts refuse admission and
+opt-outs stay disabled. OCC applies logging and validation, then freezes the
+Agent revision. Saved Configurations remain unchanged. See
+[preparation rules](../reference/drivers/compute-admission.md).
 
 ### 1. Console renders native admin availability
 
 `apps/controller/src/console/agents/native-admin.mts:renderNativeAdminAccess`
 
-Agent detail reads `${path}/native-admin` when `operate` or `administer` is allowed
-or unknown. Disabled/denied access stays hidden; other refusals explain why.
-Only `available` enables **Open chat** or **Open Agent UI**. Shared-cookie mode
-uses `noopener noreferrer`. Host-only exchange opens a window and completes
-step 5a, accepting challenges only from that window and origin. Redemption
-clears `window.opener`; errors close the pending window. An audited `403` in tab `sessionStorage` suppresses reads
-until logout, sign-in, or a new tab. `activeRevisionId` or `desiredRuntimeState`
-changes refresh access; concurrent requests coalesce into one follow-up.
-Browsing a historical version does not change the selected destination.
-Stopped/unsupported states offer **Open draft**. Unavailable states offer
-**View deployment** for readable versions, otherwise **Refresh access**.
+Agent detail reads `${path}/native-admin` when either permission is allowed or
+unknown. Only `available` permits launch. Shared-cookie mode uses `noopener
+noreferrer`; host-only exchange follows step 5a and clears `window.opener` on
+redemption. Errors close the pending window. An audited denial suppresses
+reads until sign-in changes. Lifecycle changes refresh access; concurrent reads
+coalesce. Version browsing preserves the destination. Refused
+states offer draft, deployment or refresh controls when authorized.
 
 OCE owns durable configuration. Runtime notices come from
 `apps/controller/src/drivers/compute/runtime-startup.ts:gatewayManagedModeEnvironment`;
@@ -152,8 +141,7 @@ see [Gateway managed mode](../reference/agents/gateway-managed-mode.md).
 `apps/controller/src/http/native-admin.ts:nativeAdminStatusOperation`
 
 `createNativeAdminAccess` owns host interception, upgrades and socket shutdown.
-A getter supplies the controller after bootstrap. Shared route
-admission remains in `apps/controller/src/index.ts`.
+The controller getter follows bootstrap; `apps/controller/src/index.ts` owns route admission.
 
 `GET /namespaces/:namespaceId/agents/:agentId/native-admin` requires a human session and exact-Agent `operate` or `administer`, not `read`. Administration takes precedence over chat. Authorization and existence checks precede even `disabled`.
 
@@ -313,7 +301,7 @@ admin Configuration remains Pod-local.
 
 ## Related docs
 
-- [Proposed Compute preparation contract](../../specs/rfcs/0024-native-admin-deployment-preparation.md)
+- [Proposed Compute preparation contract](../../specs/rfcs/0039-native-admin-deployment-preparation.md)
 - [Agent native admin UI](../reference/agent-native-admin.md)
 - [Platform console](../reference/console.md#open-the-native-admin-ui)
 - [Gateway routing with Envoy](../reference/gateway-routing.md#native-admin-ui-routing)

@@ -45,3 +45,5 @@ historical specifications.
 For Microsoft Teams, see [Agent setup](guides/integrations/teams.md),
 [callback execution](flows/agent-channel-ingress.md), and
 [verification limits](testing/teams.md).
+
+Fork maintainers: [maintain the downstream integration branch](contributing/downstream-integration.md).

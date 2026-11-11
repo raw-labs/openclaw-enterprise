@@ -185,11 +185,11 @@ receipt without extra calls. Ordinary and disabled-Slack controls remain. Additi
 cases cover exact Secret checks, draft/Driver drift, late dependency failure,
 revocation, and the canonical generation boundary.
 
-The separate `tests/integration/postgres-platform-state.test.mjs` control checks
-persisted recovery through a reopened adapter, reconcile counts, and one distinct
-successful deploy audit row. Its sender is synthetic. The HTTP fixture does not test PostgreSQL persistence.
+`tests/integration/postgres-platform-state.test.mjs` checks persisted recovery,
+reconcile counts and distinct deploy audit evidence with a synthetic sender.
+The HTTP fixture does not prove PostgreSQL persistence.
 
-Run focused Configuration conformance and integration checks:
+Run Configuration checks:
 
 ```bash
 node --test tests/conformance/configuration-occ.test.mjs tests/conformance/kubernetes-configuration.test.mjs tests/conformance/filesystem-configuration.test.ts

@@ -37,20 +37,26 @@ gatewayRouting:
         podSelector:
           matchLabels:
             app: public-ingress
-slackProxy:
+gatewayProxy:
   enabled: true
-  teamsEnabled: true
+  allowedHosts:
+    - login.microsoftonline.com
+    - login.botframework.com
+    - api.botframework.com
+    - smba.trafficmanager.net
+    - graph.microsoft.com
 ```
 
 Keep the existing private gateway settings. In the Installation's selected
 Compute Driver configuration, set `gatewayRouting.channels.hostname` to the
-same hostname and configure `runtime.channels.proxyUrl` and `managedProxy`
-for the chart-managed proxy as described in the [Slack proxy setup](slack.md#configure-both-slack-proxies).
+same hostname and configure `runtime.proxy.proxyUrl` and `managedProxy`
+for the chart-managed proxy as described in the [Gateway proxy setup](gateway-proxy.md).
 An external reviewed proxy can replace it. Allow TCP/443 CONNECT to
 `login.microsoftonline.com`, `login.botframework.com`, `api.botframework.com`,
 `smba.trafficmanager.net`, and `graph.microsoft.com`.
-The chart-managed proxy admits those exact Microsoft hosts only when
-`teamsEnabled` is true; it does not allow arbitrary Microsoft domains.
+The bundled proxy defaults to Slack destinations only. Replace
+`gatewayProxy.allowedHosts` with the destinations needed by all enabled integrations;
+include the Slack defaults if Slack must continue to work.
 
 ## Configure and deploy the Agent
 
@@ -122,21 +128,23 @@ network requirements. Live outgoing file delivery remains unqualified.
 Attachments remain unqualified for live Teams use. For a controlled trial,
 review the actual attachment URL and every redirect hostname without copying
 signed URLs into logs. Add only the required exact storage hosts to
-`slackProxy.teamsFileHosts`, with `slackProxy.teamsEnabled: true`, for example:
+`gatewayProxy.allowedHosts`, preserving the messaging and directory destinations above:
 
 ```yaml
-slackProxy:
-  enabled: true
-  teamsEnabled: true
-  teamsFileHosts:
+gatewayProxy:
+  allowedHosts:
+    - login.microsoftonline.com
+    - login.botframework.com
+    - api.botframework.com
+    - smba.trafficmanager.net
+    - graph.microsoft.com
     - tenant.sharepoint.com
     - files.blob.core.windows.net
 ```
 
-The list defaults to empty and accepts at most 32 exact lowercase subdomains of
-`sharepoint.com`, `sharepoint-df.com`, `1drv.com`, `onedrive.com` or
-`blob.core.windows.net`. Wildcards and bare parent domains are refused. Add each
-required redirect hostname separately. This policy applies to every client
+The shared proxy accepts up to 256 lowercase host entries, including explicit
+wildcard policies. For attachments, use exact reviewed storage and redirect hosts;
+do not grant a broad storage wildcard. The policy applies to every client
 admitted to the Installation's proxy, not just this Agent.
 
 The managed proxy validates every resolved IPv4 answer as public and connects
@@ -144,7 +152,7 @@ to the validated numeric address under one DNS/connect deadline. Private or
 reserved answers, mixed public/private answers, IPv6-only destinations and
 resolution timeouts fail closed.
 
-Set `runtime.channels.guardedFetchProxy: true` in trusted Compute configuration
+Set `runtime.proxy.guardedFetchProxy: true` in trusted Compute configuration
 and redeploy the Agent only after reviewing the selected proxy's destination
 policy. An external proxy must also reject private/reserved addresses, validate
 DNS answers and pin the connected address. The declaration defaults to `false`.
@@ -193,8 +201,9 @@ visibility limits.
 
 The production API needs its channel directory proxy to permit
 `login.microsoftonline.com:443` and `graph.microsoft.com:443`. With the managed
-proxy, enable both `slackProxy.enabled` and `slackProxy.teamsEnabled`. This is
-separate from the Agent's runtime proxy. Missing directory consent or egress
+proxy, add these destinations to `gatewayProxy.allowedHosts`. The API shares
+the selected Gateway proxy by default; `channelDirectory.proxyUrl` can select a
+separate reviewed endpoint. Missing directory consent or egress
 leaves exact-ID entry available and does not make Graph access a deployment
 prerequisite.
 

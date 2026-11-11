@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - codex/raw-integration
   merge_group:
   workflow_dispatch:
 
@@ -354,7 +355,7 @@ jobs:
     needs: impact
     if: ${{ (needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests') && needs.impact.outputs.has-matrix == 'true' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ matrix.lane == 'images-runtime-startup' && vars.CI_SANDBOX_RUNNER || vars.CI_LARGE_RUNNER || matrix.runner }}
+    runs-on: ${{ matrix.lane == 'images-runtime-startup' && vars.CI_SANDBOX_RUNNER || (matrix.lane == 'postgres-auth' || matrix.lane == 'images-runtime-startup') && vars.CI_COMPAT_RUNNER || vars.CI_LARGE_RUNNER || matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
@@ -397,7 +398,7 @@ jobs:
     needs: [impact, runtime-artifact]
     if: ${{ (needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests') && needs.impact.outputs.has-images == 'true' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.lane == 'images-runtime-startup' && vars.CI_SANDBOX_RUNNER || matrix.lane == 'images-runtime-startup' && vars.CI_COMPAT_RUNNER || vars.CI_LARGE_RUNNER || matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false

@@ -515,3 +515,103 @@ test(
     }
   },
 );
+
+test(
+  "allowed names resolving to private, reserved, mixed, or IPv6 addresses cannot open tunnels",
+  testOptions,
+  async (t) => {
+    const upstream = await listen(t, () =>
+      assert.fail("a rejected DNS answer reached the upstream"),
+    );
+    for (const addresses of [
+      [{ address: "127.0.0.1", family: 4 }],
+      [{ address: "10.2.3.4", family: 4 }],
+      [{ address: "100.64.0.1", family: 4 }],
+      [{ address: "169.254.169.254", family: 4 }],
+      [{ address: "172.16.0.1", family: 4 }],
+      [{ address: "192.168.0.1", family: 4 }],
+      [{ address: "192.0.2.1", family: 4 }],
+      [{ address: "198.18.0.1", family: 4 }],
+      [{ address: "198.51.100.1", family: 4 }],
+      [{ address: "203.0.113.1", family: 4 }],
+      [{ address: "224.0.0.1", family: 4 }],
+      [{ address: "240.0.0.1", family: 4 }],
+      [{ address: "0.0.0.1", family: 4 }],
+      [{ address: "192.0.0.1", family: 4 }],
+      [{ address: "2606:4700:4700::1111", family: 6 }],
+      [{ address: "::ffff:127.0.0.1", family: 6 }],
+      [
+        { address: "93.184.216.34", family: 4 },
+        { address: "10.0.0.1", family: 4 },
+      ],
+    ]) {
+      const proxy = await startGatewayProxy(t, {
+        upstreamPort: upstream.address().port,
+        dnsAnswers: { "slack.com": addresses },
+      });
+      assert.match(
+        await connectThroughProxy(proxy.port, "slack.com:443"),
+        /^HTTP\/1\.1 403 Forbidden/,
+      );
+      assert.equal(proxy.child.exitCode, null, proxy.stderr());
+    }
+  },
+);
+
+test(
+  "failed or empty DNS answers return 502 without stopping the proxy",
+  testOptions,
+  async (t) => {
+    const upstream = await listen(t, () => assert.fail("a failed lookup reached the upstream"));
+    for (const answer of ["failure", []]) {
+      const proxy = await startGatewayProxy(t, {
+        upstreamPort: upstream.address().port,
+        dnsAnswers: { "slack.com": answer },
+      });
+      assert.match(
+        await connectThroughProxy(proxy.port, "slack.com:443"),
+        /^HTTP\/1\.1 502 Bad Gateway/,
+      );
+      assert.match(
+        await connectThroughProxy(proxy.port, "127.0.0.1:443"),
+        /^HTTP\/1\.1 403 Forbidden/,
+      );
+      assert.equal(proxy.child.exitCode, null, proxy.stderr());
+    }
+  },
+);
+
+test("a stalled DNS lookup is bounded by the connection deadline", testOptions, async (t) => {
+  const upstream = await listen(t, () => assert.fail("a stalled lookup reached the upstream"));
+  const proxy = await startGatewayProxy(t, {
+    upstreamPort: upstream.address().port,
+    dnsAnswers: { "slack.com": "pending" },
+  });
+  assert.match(
+    await within(connectThroughProxy(proxy.port, "slack.com:443"), "DNS deadline", 15_000),
+    /^HTTP\/1\.1 502 Bad Gateway/,
+  );
+  // A resolver which never calls back must not keep shutdown waiting for this request.
+  const closed = new Promise((resolve) => proxy.child.once("close", resolve));
+  proxy.child.kill();
+  assert.equal(await within(closed, "proxy shutdown"), 0);
+});
+
+test("a disconnected client cannot open an upstream when DNS completes", async (t) => {
+  let resolved;
+  t.mock.method(dns, "lookup", (_host, _options, callback) => {
+    resolved = callback;
+  });
+  t.mock.method(net, "connect", () => assert.fail("late DNS opened an upstream"));
+  const client = new net.Socket();
+  const closed = new Promise((resolve) => client.once("close", resolve));
+  t.after(() => client.destroy());
+  const proxy = createGatewayProxyServer();
+  proxy.emit("connect", { url: "slack.com:443" }, client, Buffer.alloc(0));
+  assert.equal(typeof resolved, "function");
+  // OS DNS resolution may outlive the request. Its result must not revive a closed tunnel.
+  client.destroy();
+  await closed;
+  resolved(null, [{ address: "93.184.216.34", family: 4 }]);
+  await nextTurn();
+});

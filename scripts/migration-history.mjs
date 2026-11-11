@@ -148,38 +148,32 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 25) {
     return "main";
   }
-  if (count === 65 && completedCount > 65) {
-    return "preAgentDeployIntent";
-  }
-  if (count === 66 && completedCount > 66) {
-    return "preAgentCredentialSourceLimit";
-  }
-  if (count === 67 && completedCount > 67) {
-    return "preAgentPluginDriver";
-  }
-  if (count === 68 && completedCount > 68) {
+  if (count === 72 && completedCount > 72) {
     return "preConnectionTemplates";
   }
-  if (count === 69 && completedCount > 69) {
+  if (count === 73 && completedCount > 73) {
     return "preSavedConnections";
   }
-  if (count === 70 && completedCount > 70) {
+  if (count === 74 && completedCount > 74) {
     return "preDefaultUsers";
   }
-  if (count === 71 && completedCount > 71) {
+  if (count === 75 && completedCount > 75) {
     return "preHarnessOverrides";
   }
-  if (count === 72 && completedCount > 72) {
+  if (count === 76 && completedCount > 76) {
     return "preAccountAdministrationPolicy";
   }
-  if (count === 73 && completedCount > 73) {
+  if (count === 77 && completedCount > 77) {
     return "preFiniteRepositorySessionWithdrawal";
   }
-  if (count === 74 && completedCount > 74) {
+  if (count === 78 && completedCount > 78) {
     return "preHumanAuthenticationResults";
   }
-  if (count === 75 && completedCount > 75) {
+  if (count === 79 && completedCount > 79) {
     return "preNativeBrowserAccess";
+  }
+  if (count === 80 && completedCount > 80) {
+    return "preRuntimeRoleRetirement";
   }
   if (count === completedCount) {
     return "completed";
@@ -262,37 +256,29 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 52) {
     return "preComputePreparationFailureEvidence";
   }
-  if (count === 53) {
-    return "preCredentialSourcePat";
-  }
-  if (count === 54) {
-    return "preComputeRevisionAdmission";
-  }
-  if (count === 55) {
-    return "preHeldAuthenticationSession";
-  }
-  if (count === 56) {
-    return "preCanonicalHarnessAuth";
-  }
-  if (count === 57) {
-    return "preSandboxPolicies";
-  }
-  if (count === 58) {
-    return "preSandboxPolicyAdministrator";
-  }
-  if (count === 59) {
-    return "preCredentialProxy";
-  }
-  if (count === 62) {
-    return "prePreparedAttemptSettlement";
-  }
-  if (count === 64) {
-    return "preSelectedRepositorySet";
-  }
-  if (count === 63) {
-    return "preGatewayManagedMode";
-  }
-  refuse("an incomplete or unsupported development history is installed");
+  return (
+    {
+      53: "preRuntimeRoles",
+      54: "preHeldAuthenticationSession",
+      55: "preGatewayOutbound",
+      56: "preEmbeddedChannelOutbound",
+      57: "preCredentialSourcePat",
+      58: "preComputeRevisionAdmission",
+      59: "preCanonicalHarnessAuth",
+      60: "preSandboxPolicies",
+      61: "preSandboxPolicyAdministrator",
+      62: "preCredentialProxy",
+      63: "preRepositoryCredentialAuthority",
+      64: "preCredentialDeliveryCustody",
+      65: "prePreparedAttemptSettlement",
+      66: "preGatewayManagedMode",
+      67: "preSelectedRepositorySet",
+      68: "preAgentDeployIntent",
+      69: "preAgentCredentialSourceLimit",
+      70: "preAgentPluginDriver",
+      71: "preInstallationGatewayProxy",
+    }[count] ?? `migrationCount${count}`
+  );
 }
 
 async function requireUnambiguousTerminologyData(client) {

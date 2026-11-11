@@ -1,0 +1,964 @@
+{
+  "version": 1,
+  "repository": "raw-labs/openclaw-enterprise",
+  "integrationBranch": "codex/raw-integration",
+  "upstream": {
+    "repository": "openclaw/openclaw-enterprise",
+    "commit": "57da2349c5c27d412cd9f4c91488364b52ecb930"
+  },
+  "batch": {
+    "startingIntegration": "c14c33ab437582ffc7641d9dc9c4184247d50a16",
+    "steps": [
+      {
+        "operation": "Refresh integration to upstream 57da2349 and preserve published migrations",
+        "commit": "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0",
+        "input": "57da2349c5c27d412cd9f4c91488364b52ecb930"
+      },
+      {
+        "operation": "Refresh selected Installation profiles and Preset starters",
+        "commit": "b8e29c2e688d774c8b1cb404da6d3eba2b1ef19a",
+        "input": "7dc75b4ae4235a3fa410df522994a81efe78318e"
+      },
+      {
+        "operation": "Refresh selected native plugin permission preservation",
+        "commit": "eb14c8f30c2f6f4fd4e7d3219ff7c12f3f617f3d",
+        "input": "6fcc31f4cccd05f8d026f685f7d10b7bdbc5ee1d"
+      },
+      {
+        "operation": "Refresh per-person runtime roles against current upstream",
+        "commit": "34673c8a2a6b131d2d4625f5782e806346aeb9f4",
+        "input": "28b9699b5834fc401a84fcdbc7a2edaed17fd890"
+      },
+      {
+        "operation": "Refresh Microsoft Teams integration and current browser helpers",
+        "commit": "d3a1c157e72fce08c385fc21f3a167bec8af7190",
+        "input": "f0c8dc88d2ccd6120a9b3839b242195bfb28962e"
+      },
+      {
+        "operation": "Refresh the explicitly gated embedded channel trial",
+        "commit": "1e9946fa3cdd29be7f4286a2ec82ba2b0a35d75a",
+        "input": "40a11012d4a7f17cddc8ac1690dc5ffe974a5a51"
+      },
+      {
+        "operation": "Refresh the selected optional Gateway proxy implementation",
+        "commit": "c2217999ffe7413194f60448726d63994680ecc0",
+        "input": "c2bc69f00812f68015ed6b24ee3156fe3a29a52f"
+      }
+    ],
+    "preservedMigrationPrefix": {
+      "commit": "c14c33ab437582ffc7641d9dc9c4184247d50a16",
+      "entryCount": 72
+    }
+  },
+  "features": [
+    {
+      "number": 1,
+      "title": "Per-person native roles",
+      "author": "miguelbranco80",
+      "headRef": "codex/per-person-gateway-roles",
+      "commit": "28b9699b5834fc401a84fcdbc7a2edaed17fd890",
+      "status": "included",
+      "comparisonBase": "7db5638975981ec1400f1a4ba52da77d5fd33dce",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "main",
+      "draft": false,
+      "forkState": "open"
+    },
+    {
+      "number": 2,
+      "title": "Microsoft Teams channels",
+      "author": "miguelbranco80",
+      "headRef": "codex/teams-support",
+      "commit": "f0c8dc88d2ccd6120a9b3839b242195bfb28962e",
+      "status": "included",
+      "comparisonBase": "7db5638975981ec1400f1a4ba52da77d5fd33dce",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "main",
+      "draft": false,
+      "forkState": "open"
+    },
+    {
+      "number": 11,
+      "title": "Installation profiles and Preset starters",
+      "author": "miguelbranco80",
+      "headRef": "codex/installation-customization",
+      "commit": "7dc75b4ae4235a3fa410df522994a81efe78318e",
+      "status": "included",
+      "comparisonBase": "7db5638975981ec1400f1a4ba52da77d5fd33dce",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "codex/installation-customization-base",
+      "draft": false,
+      "forkState": "open"
+    },
+    {
+      "number": 12,
+      "title": "First-deployment native administration",
+      "author": "miguelbranco80",
+      "headRef": "codex/native-admin-first-deploy",
+      "commit": "37fac70dfb784351544189ad07909588b327ef47",
+      "status": "included",
+      "comparisonBase": "fbfc834267fddf9094a8f92f7f61b1d775f7dae9",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "codex/native-admin-first-deploy-base",
+      "draft": false,
+      "forkState": "closed",
+      "retentionReason": "Closed unmerged, as is upstream proposal #2259. Current upstream prepares explicit nativeAdmin provisioning, not UI-enabled reusable Configurations at deployment. Retain automatic preparation, integrated with current runtime roles; no source PR is reopened or changed."
+    },
+    {
+      "number": 15,
+      "title": "Native plugin permission preservation",
+      "author": "miguelbranco80",
+      "headRef": "codex/console-native-plugin-allowlist",
+      "commit": "6fcc31f4cccd05f8d026f685f7d10b7bdbc5ee1d",
+      "status": "included",
+      "comparisonBase": "7db5638975981ec1400f1a4ba52da77d5fd33dce",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "codex/native-plugin-upstream-base",
+      "draft": false,
+      "forkState": "open"
+    },
+    {
+      "number": 17,
+      "title": "Temporary embedded channel evaluation",
+      "author": "miguelbranco80",
+      "headRef": "codex/eval-embedded-channels",
+      "commit": "40a11012d4a7f17cddc8ac1690dc5ffe974a5a51",
+      "status": "included",
+      "comparisonBase": "7db5638975981ec1400f1a4ba52da77d5fd33dce",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "codex/eval-upstream-a7aa9219f",
+      "draft": true,
+      "forkState": "open"
+    },
+    {
+      "number": 36,
+      "title": "One bundled or external Gateway outbound proxy",
+      "author": "miguelbranco80",
+      "headRef": "openclaw/delta-claw",
+      "commit": "c2bc69f00812f68015ed6b24ee3156fe3a29a52f",
+      "status": "included",
+      "comparisonBase": "7db5638975981ec1400f1a4ba52da77d5fd33dce",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "main",
+      "draft": true,
+      "forkState": "open"
+    }
+  ],
+  "absorbedFeatures": [
+    {
+      "number": 16,
+      "title": "Assigning-session protection",
+      "author": "miguelbranco80",
+      "status": "absorbed-upstream",
+      "forkState": "closed",
+      "forkCommit": "aceca2cb05ca07ce545429a69cbc7e241aaa13a4",
+      "priorSelectedCommit": "1cfbcf02ce798a02f6ba1bc5b5ac5d0e47756d9b",
+      "upstreamPullRequest": 2311,
+      "upstreamCommit": "0918f660452a84d13ea389d7d5fa19243200ace3"
+    },
+    {
+      "number": 19,
+      "title": "Deployment inventory with retained repository cleanup",
+      "author": "miguelbranco80",
+      "status": "absorbed-upstream",
+      "forkState": "closed",
+      "forkCommit": "71822d221404df036db072027a716ba58cd5aee2",
+      "priorSelectedCommit": "edb197e6976a5737742cf7ee7fad43e3b06d5810",
+      "upstreamPullRequest": 2572,
+      "upstreamCommit": "ee1320c9d2655126c69329477fa0c4abcbe29564"
+    },
+    {
+      "number": 13,
+      "title": "Configuration Secret grants",
+      "author": "miguelbranco80",
+      "status": "absorbed-upstream",
+      "forkState": "open",
+      "forkCommit": "36113e8ddd62a52f48775ebd1024c81199a1e5a9",
+      "priorSelectedCommit": "cbf561154c48aef94df1fe2f91661b6122fab49b",
+      "upstreamPullRequest": 4231,
+      "upstreamCommit": "5b8901213714a5b0d99f82af8eae1d425ee7cd18",
+      "reason": "User retired the downstream create-time expansion. Upstream Default users IAM and deployment-time bound-credential grants supply the supported path, including exact caller operate checks. Upstream #2255 closed unmerged; the fork PR remains open and unchanged."
+    }
+  ],
+  "excluded": [
+    {
+      "number": 35,
+      "title": "RFC: Managed outbound HTTPS for dedicated Gateways",
+      "commit": "d958c1845677a08c71493f8693594524ab2fa747",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 34,
+      "title": "RFC: Temporary channel trial in embedded OpenClaw",
+      "commit": "406c8edecc9031c8c0167ecc308bda1057d08ee5",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 33,
+      "title": "RFC: Preserve native plugin permissions when switching Harness",
+      "commit": "2184593d0c65fe5eceb78a5cd76ea473a783a215",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 32,
+      "title": "RFC: Grant access to accepted Configuration Secrets",
+      "commit": "02e967f14f7c12b1f2147cb93d3e164370075416",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 31,
+      "title": "RFC: Prepare native administration on first deployment",
+      "commit": "3b3e8ee2185aa261f866c424228dc6174578e662",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 30,
+      "title": "RFC: Custom Installation profiles and Preset quick-start",
+      "commit": "3962e1a0eec8cdcb3b628213c2b562207d73a7a2",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 29,
+      "title": "RFC: Microsoft Teams channels for Dedicated Agents",
+      "commit": "831e9386bd49492331e46323c2562e422dc1cb50",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 28,
+      "title": "RFC: Per-person native roles",
+      "commit": "bcdaf2c191b945a76d92c6ead8a53c6f8a3ce4d0",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 27,
+      "title": "Impl: Temporary test environments through Crabbox (RFC PR #26)",
+      "commit": "0c438a5a1fa5019bdbbe1a574d8f6aae5aeb8d1f",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 26,
+      "title": "RFC: Temporary test environments through Crabbox",
+      "commit": "eca41a92634810442c34afb6e820a6512d1243c7",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 25,
+      "title": "Experiment: Dedicated Gateway containment via OpenShell Sandbox",
+      "commit": "a89a1fad4870962f10bc999858f59d91f55c9584",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 24,
+      "title": "Experiment: Dedicated Gateway outbound controls via a standalone OpenShell proxy",
+      "commit": "e2c7401605450e29e9c7b014c87a797264b4dd89",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 23,
+      "title": "[EXPERIMENT] Gateway egress through OpenShell for embedded OpenClaw",
+      "commit": "6c5c8d668b403db397940bc3417b798ab9f56d3b",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 22,
+      "title": "RFC: Dedicated Gateway outbound controls via the selected Credential Proxy",
+      "commit": "b7eb5abd8382674f153134f0a7b165ec47b1a8c6",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 21,
+      "title": "Experiment: Dedicated Gateway and embedded OpenClaw containment via OpenShell",
+      "commit": "628d01783e0585ddfce531bbebc378534b6192a3",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 20,
+      "title": "RFC: Dedicated Gateway outbound HTTPS via a custom proxy",
+      "commit": "de345baaf4401969cdd47f49c16deafe0013c8aa",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 37,
+      "title": "fix: backfill plugin Driver ownership for deployed Agent upgrades",
+      "commit": "e949f8d868d14905b4806f17530916cfb5507223",
+      "reason": "Outside the authorized selected integration input set."
+    },
+    {
+      "number": 38,
+      "title": "RFC: One optional Gateway outbound proxy",
+      "commit": "cd78fa018710a119a9a8b4eb9ce8828611792ca3",
+      "reason": "Not selected for this refresh. Proposal text from #38 is already present in selected #36; no independent input added."
+    }
+  ],
+  "compatibility": [
+    {
+      "id": "native-role-first-admission",
+      "pullRequests": [1, 12, 16],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "paths": [
+        "apps/controller/src/http/iam.ts",
+        "tests/integration/native-admin-access.test.mjs",
+        "tests/integration/native-admin-k3d-real.test.mjs"
+      ],
+      "notes": "Preserve exact runtime role assignments and use authority alongside first-deployment policy preparation and upstream assigning-session protection."
+    },
+    {
+      "id": "slack-teams-shared-gateway-proxy",
+      "pullRequests": [2, 17, 36],
+      "commits": ["82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e"],
+      "paths": [
+        "apps/controller/src/drivers/channel/index.ts",
+        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "tests/fixtures/teams-attachment-download.mjs"
+      ],
+      "notes": "Keep bundled provider directory dispatch, exact Secret projections, Teams callback validation and trusted embedded opt-in. Native routing uses the operator-selected proxy; provider enablement does not add allowed hosts."
+    },
+    {
+      "id": "embedded-profile-admission",
+      "pullRequests": [11, 17, 36],
+      "commits": [
+        "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
+        "3de37f3bfeb5499ecfb26faabdff6de7a4464096"
+      ],
+      "paths": [
+        "scripts/render-installation-profile.mjs",
+        "tests/integration/profile-renderer.test.mjs",
+        "docs/guides/integrations/embedded-channel-trial.md"
+      ],
+      "notes": "Retain runtime.channels.experimentalEmbeddedChannels and paired profile output. Require a selected native Gateway proxy, not retired per-revision outbound."
+    },
+    {
+      "id": "published-persistence-ledger",
+      "pullRequests": [1, 16, 17, 18],
+      "commits": [
+        "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818",
+        "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0"
+      ],
+      "paths": [
+        "scripts/migration-history.mjs",
+        "tests/integration/postgres-migration-compatibility.test.mjs",
+        "migrations/meta/_canonical-history.json"
+      ],
+      "notes": "Preserve all 72 starting SQL/journal identities; append five upstream evolutions as 0073\u20130077. Preserve runtime roles, shared Installation proxy and the retired outbound history."
+    },
+    {
+      "id": "teams-console-plugin-admission",
+      "pullRequests": [2, 15],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "paths": ["tests/helpers/console-app.mjs"],
+      "notes": "Keep current Teams conflict recovery and directory coverage under real plugin permission, Secret binding and callback runtime admission."
+    },
+    {
+      "id": "integration-ci-and-current-docs",
+      "pullRequests": [1, 2, 11, 12, 13, 15, 17, 18],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/codeql.yml",
+        "docs/contributing/downstream-integration.md",
+        "docs/flows/agent-channel-runtime.md"
+      ],
+      "notes": "Qualify this combined source, retain current upstream CI lanes and unique RFC identities, and document the composed channel lifecycle."
+    },
+    {
+      "id": "refreshed-fixtures-and-fork-sandbox-runners",
+      "pullRequests": [2, 17, 18],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/full-integration.yml",
+        "tests/integration/ci-impact.test.mjs",
+        "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
+        "tests/conformance/secret-occ.test.mjs",
+        "tests/integration/configuration-controller.test.mjs",
+        "tests/browser/console-agent-detail-2.test.ts"
+      ],
+      "notes": "Keep Chromium and Codex sandbox probes enabled on a compatible configured runner. Restore the established real managed-proxy embedded scenario with Slack-only and Teams-only cutovers. Supply explicit provider/plugin/Secret/runtime prerequisites and scope provider-specific assertions; preserve current Teams credential readiness and proxy refusal behavior. No production code or migration changes in this repair."
+    },
+    {
+      "id": "native-image-ci-sandbox-setup",
+      "pullRequests": [],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "paths": [".github/workflows/container-check.yml", "docs/testing/ci.md"],
+      "notes": "Nonpublishing native AMD64 runtime uses the configured compatibility runner; ARM64 stays native. Reuse the existing reviewed CI AppArmor profile setup/cleanup for both runtime jobs. Pin OS-packaged local OCI import tooling on Ubuntu22/24; preserve source/config digest checks, native architecture, all sandbox and startup tests, and separate publication gates. No product, recipe, source pin, migration or repository variable changed."
+    },
+    {
+      "id": "native-oci-import-docker-api",
+      "pullRequests": [],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "paths": [
+        "scripts/ci/container-release.mjs",
+        "docs/testing/ci.md",
+        "docs/flows/container-publication.md"
+      ],
+      "notes": "Convert the immutable OCI export to a private temporary Docker archive with the selected Skopeo, load it through the current Docker CLI, and remove the archive immediately. The original export digest, loaded config ID, native architecture, full startup suite and cleanup remain mandatory. No model/runtime implementation, recipe, source pin, migration or publication authorization changed."
+    },
+    {
+      "id": "upstream-deployment-grants-and-refreshed-contracts",
+      "pullRequests": [1, 2, 11, 12, 13, 15, 17, 36],
+      "commits": [
+        "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0",
+        "15aa414d9b14cb51a361a2d96ca5c1087ff720d1"
+      ],
+      "paths": [
+        "apps/controller/src/console/agents/create.mts",
+        "packages/iam/src/index.ts",
+        "tests/integration/kubernetes-compute-real.test.mjs",
+        "tests/browser/console-agent-presets.test.ts",
+        "docs/flows/platform-console/agent-creation.md"
+      ],
+      "notes": "Use upstream staged-channel create grants and deployment-time bound-credential grants instead of retired PR13 expansion. Preserve Installation-wide Default users Groups, per-person runtime roles, native plugin policy round trips, Teams and shared proxy selection. Kubernetes revocation coverage now removes the actual deploy-created grant and requires ordinary redeployment to restore it; final-head cluster CI is required."
+    }
+  ],
+  "publishedMigrationPrefix": {
+    "commit": "90e30b8c6922732ba456ed102b5c72a79fa84b8c",
+    "entryCount": 62
+  },
+  "migrationMappings": [
+    {
+      "pullRequest": 1,
+      "source": "migrations/0056_agent_runtime_roles.sql",
+      "integrated": "migrations/0054_agent_runtime_roles.sql",
+      "sha256": "4bfb764c6f1a73bc67f31e993ce05d2b9d97c8b44e92ce436c84884c24f999f0",
+      "sourceCommit": "1ae26c0146b397622f9d65cde72f63c5afbd8282",
+      "publishedAt": "90e30b8c6922732ba456ed102b5c72a79fa84b8c",
+      "reason": "Retain immutable migration bytes already published in the integration ledger, even though the refreshed source branch has rewritten history."
+    },
+    {
+      "pullRequest": 18,
+      "source": "migrations/0054_gateway_outbound.sql",
+      "integrated": "migrations/0056_gateway_outbound.sql",
+      "sha256": "426da30fa2dc3a010905318b95dc146c4bd7a461b8c48cb9f5dca9d12523ef52",
+      "sourceCommit": "b0c299f7e8a9cdb992500fa39d32dddea9271ed0",
+      "publishedAt": "90e30b8c6922732ba456ed102b5c72a79fa84b8c",
+      "reason": "Retain immutable migration bytes already published in the integration ledger, even though the refreshed source branch has rewritten history."
+    }
+  ],
+  "integrationMigrations": [
+    {
+      "path": "migrations/0057_embedded_channel_outbound.sql",
+      "commit": "3ecc6dec0d6e04645fbd9a4450c39425b676fde2",
+      "pullRequests": [17, 18],
+      "sha256": "c3b47c6e8496b6bbdaafe6e9fe4bbf5a89ff5fa4155afc679da872ea37a2248a",
+      "reason": "Allow embedded channelsOnly revision snapshots while retaining dedicated-only additional outbound authority. Existing source migration bytes and integration identities remain unchanged."
+    },
+    {
+      "path": "migrations/0072_installation_gateway_proxy.sql",
+      "commit": "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
+      "pullRequests": [36],
+      "sha256": "c2234ccaab335e36b5bdccd3d32e25168a18f9f205120af98de7715230f075c7",
+      "reason": "Forward retirement of Agent outbound selection and snapshots. No published migration is rewritten."
+    }
+  ],
+  "upstreamMigrationMappings": [
+    {
+      "source": "migrations/0054_credential_source_pat.sql",
+      "integrated": "migrations/0058_credential_source_pat.sql",
+      "sha256": "02ef4ffbdd21bb1c5e66c84c1c3dfe04c48f1936e18bab9c2de81c8ffe3c8d9d",
+      "commit": "8948bbc4bc844cf9df6b36e68eb046f1a3b68c51",
+      "reason": "Append unchanged upstream SQL after the published integration migrations; retain their identifiers, receipt order and bytes.",
+      "sourceCommit": "04f9c1dcdcb4dfae730e0fb8de8a6cdc7087d277"
+    },
+    {
+      "source": "migrations/0056_held_authentication_session.sql",
+      "integrated": "migrations/0055_held_authentication_session.sql",
+      "sha256": "dbdc63b9dd9d750a743b51a7f1cbd199d08a7977a57a73435dda722eb2bfdb36",
+      "commit": "7f26c4c2e1d3373343f0f78119bc1728e5f9aa97",
+      "reason": "The upstream assigning-session migration is already present under its published integration identity.",
+      "sourceCommit": "04f9c1dcdcb4dfae730e0fb8de8a6cdc7087d277"
+    },
+    {
+      "source": "migrations/0055_compute_revision_admission.sql",
+      "integrated": "migrations/0059_compute_revision_admission.sql",
+      "sourceSha256": "ad091e4c3a9de192f79f9170b009497db0cd5f0f0d287dfbc81a00d5e1fc8ea7",
+      "sha256": "49cad1d92a96a36a688cc4ed0d770bf51ac2c9263df67b24b30d9b865215c906",
+      "transforms": [
+        {
+          "from": "- 'repository_credentials') = '{}'::jsonb",
+          "to": "- 'repository_credentials' - 'gateway_outbound') = '{}'::jsonb",
+          "reason": "Retain already-published role and channel snapshot invariants during upstream migration."
+        },
+        {
+          "from": "    AND occ.harness_auth_is_valid(admitted_spec->'harness_auth', namespace_id, true)",
+          "to": "    AND (NOT (admitted_spec ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(admitted_spec->'gateway_outbound') AND (admitted_spec #>> '{harness,mode}' = 'dedicated' OR admitted_spec #>> '{gateway_outbound,selection,mode}' = 'channelsOnly')))\n    AND occ.harness_auth_is_valid(admitted_spec->'harness_auth', namespace_id, true)",
+          "reason": "Retain already-published role and channel snapshot invariants during upstream migration."
+        }
+      ],
+      "commit": "7f26c4c2e1d3373343f0f78119bc1728e5f9aa97",
+      "sourceCommit": "04f9c1dcdcb4dfae730e0fb8de8a6cdc7087d277"
+    },
+    {
+      "source": "migrations/0057_canonical_harness_auth.sql",
+      "integrated": "migrations/0060_canonical_harness_auth.sql",
+      "sourceSha256": "f4098bc5233e0ce0bbc0666af9ef723d747fd0c4ed7f6667b4ac19f769543433",
+      "sha256": "f4098bc5233e0ce0bbc0666af9ef723d747fd0c4ed7f6667b4ac19f769543433",
+      "transforms": [],
+      "commit": "7f26c4c2e1d3373343f0f78119bc1728e5f9aa97",
+      "sourceCommit": "04f9c1dcdcb4dfae730e0fb8de8a6cdc7087d277"
+    },
+    {
+      "source": "migrations/0058_sandbox_policies.sql",
+      "integrated": "migrations/0061_sandbox_policies.sql",
+      "sourceSha256": "21940032ee3277cbc40ff422359099e6eaa0abef6dfa78d06740671fda5f431f",
+      "sha256": "e2085f7735e7413e26a45a193d6aa5b64a9f3caf7783d4aa88a6cea922a4d2e6",
+      "transforms": [
+        {
+          "from": "'read_logs','manage_policy'))",
+          "to": "'read_logs','manage_policy','use'))",
+          "reason": "Retain already-published role and channel snapshot invariants during upstream migration."
+        }
+      ],
+      "commit": "7f26c4c2e1d3373343f0f78119bc1728e5f9aa97",
+      "sourceCommit": "04f9c1dcdcb4dfae730e0fb8de8a6cdc7087d277"
+    },
+    {
+      "source": "migrations/0059_administrator_sandbox_policy_grants.sql",
+      "integrated": "migrations/0062_administrator_sandbox_policy_grants.sql",
+      "sourceSha256": "5693d93865d61360d2b8943846cfbfb5590c9e52e90f89eac50fec7bd3672498",
+      "sha256": "5693d93865d61360d2b8943846cfbfb5590c9e52e90f89eac50fec7bd3672498",
+      "transforms": [],
+      "commit": "7f26c4c2e1d3373343f0f78119bc1728e5f9aa97",
+      "sourceCommit": "04f9c1dcdcb4dfae730e0fb8de8a6cdc7087d277"
+    },
+    {
+      "source": "migrations/0060_credential_proxy_admission.sql",
+      "integrated": "migrations/0063_credential_proxy_admission.sql",
+      "sha256": "8fb68e0c541bf20f4262dccf2d8892fcaf7b616e95fea22e60447e062a7f6339",
+      "sourceSha256": "db0cc3ca1748de99a92f1864428848f9e6461382df5369004608622fb393b891",
+      "transforms": [
+        {
+          "from": "- 'egress_plan' - 'execution_admission') = '{}'::jsonb",
+          "to": "- 'egress_plan' - 'execution_admission' - 'gateway_outbound') = '{}'::jsonb",
+          "reason": "Preserve published Gateway outbound snapshots and the explicitly enabled embedded channelsOnly boundary."
+        },
+        {
+          "from": "    AND (\n      NOT (admitted_spec ? 'plugins')",
+          "to": "    AND (NOT (admitted_spec ? 'gateway_outbound') OR (occ.gateway_outbound_snapshot_valid(admitted_spec->'gateway_outbound') AND (admitted_spec #>> '{harness,mode}' = 'dedicated' OR admitted_spec #>> '{gateway_outbound,selection,mode}' = 'channelsOnly')))\n    AND (\n      NOT (admitted_spec ? 'plugins')",
+          "reason": "Preserve published Gateway outbound snapshots and the explicitly enabled embedded channelsOnly boundary."
+        }
+      ],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0061_repository_credential_authority.sql",
+      "integrated": "migrations/0064_repository_credential_authority.sql",
+      "sha256": "9112cbb85635fe7d0aaa3d7b59ba074834c83afd482fc27cd7bcfe7bc1c038d5",
+      "sourceSha256": "9112cbb85635fe7d0aaa3d7b59ba074834c83afd482fc27cd7bcfe7bc1c038d5",
+      "transforms": [],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0062_credential_delivery_custody.sql",
+      "integrated": "migrations/0065_credential_delivery_custody.sql",
+      "sha256": "8620776aa1b4ecc8f640258015d88c0ff21afa3e75d2ca7cf26aabb69c7dc772",
+      "sourceSha256": "8620776aa1b4ecc8f640258015d88c0ff21afa3e75d2ca7cf26aabb69c7dc772",
+      "transforms": [],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0063_prepared_attempt_settlement.sql",
+      "integrated": "migrations/0066_prepared_attempt_settlement.sql",
+      "sha256": "af9fc293091700eb148a4c45826daa0903598399a730de23a25f7c81b49a7db6",
+      "sourceSha256": "af9fc293091700eb148a4c45826daa0903598399a730de23a25f7c81b49a7db6",
+      "transforms": [],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0064_gateway_managed_mode.sql",
+      "integrated": "migrations/0067_gateway_managed_mode.sql",
+      "sha256": "e73a21fc94abd66ec93540293708d76e5f0c1f8946c9d9994fcf81a6b9058329",
+      "sourceSha256": "e73a21fc94abd66ec93540293708d76e5f0c1f8946c9d9994fcf81a6b9058329",
+      "transforms": [],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0065_selected_repository_set.sql",
+      "integrated": "migrations/0068_selected_repository_set.sql",
+      "sha256": "4c1bb4e42c6b23f3ef30c66e98ff892d952986e20c2855d5dd1732b9f5854496",
+      "sourceSha256": "4c1bb4e42c6b23f3ef30c66e98ff892d952986e20c2855d5dd1732b9f5854496",
+      "transforms": [],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0066_agent_deploy_intent.sql",
+      "integrated": "migrations/0069_agent_deploy_intent.sql",
+      "sha256": "c9f8b1618efb5d9f576266fb3dd49e2d6641d0934aebf49a9b286fa7cca22c7b",
+      "sourceSha256": "c9f8b1618efb5d9f576266fb3dd49e2d6641d0934aebf49a9b286fa7cca22c7b",
+      "transforms": [],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0067_agent_credential_source_limit.sql",
+      "integrated": "migrations/0070_agent_credential_source_limit.sql",
+      "sha256": "f4f49b8e2c1a7b5a499a0274eb9be49bcd80d8d8be7a7e49aaef2f6f67d209e1",
+      "sourceSha256": "f4f49b8e2c1a7b5a499a0274eb9be49bcd80d8d8be7a7e49aaef2f6f67d209e1",
+      "transforms": [],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0068_agent_plugin_driver.sql",
+      "integrated": "migrations/0071_agent_plugin_driver.sql",
+      "sha256": "4ae7aeabcbdccad1f4aafef523e992740e467c055f7f7a9ab9a1f5adb202341c",
+      "sourceSha256": "4ae7aeabcbdccad1f4aafef523e992740e467c055f7f7a9ab9a1f5adb202341c",
+      "transforms": [],
+      "sourceCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+      "commit": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0",
+      "reason": "Append selected upstream evolution after all62 published migration identities; retain existing role and outbound invariants."
+    },
+    {
+      "source": "migrations/0069_connection_templates.sql",
+      "integrated": "migrations/0073_connection_templates.sql",
+      "sourceCommit": "57da2349c5c27d412cd9f4c91488364b52ecb930",
+      "sourceSha256": "c0cc7c64e1c13a00b07f56c624cb12fb09746439eb5bf8ad7ed3e9f3ad70299a",
+      "sha256": "c0cc7c64e1c13a00b07f56c624cb12fb09746439eb5bf8ad7ed3e9f3ad70299a",
+      "commit": "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0",
+      "reason": "Append upstream evolution without renumbering or rewriting published integration migrations."
+    },
+    {
+      "source": "migrations/0070_saved_connections.sql",
+      "integrated": "migrations/0074_saved_connections.sql",
+      "sourceCommit": "57da2349c5c27d412cd9f4c91488364b52ecb930",
+      "sourceSha256": "d365de5ec6046c7e0ff274c8527b3598c0bf1560a9b3ffc675103d6b3912da4d",
+      "sha256": "d365de5ec6046c7e0ff274c8527b3598c0bf1560a9b3ffc675103d6b3912da4d",
+      "commit": "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0",
+      "reason": "Append upstream evolution without renumbering or rewriting published integration migrations."
+    },
+    {
+      "source": "migrations/0071_default_users.sql",
+      "integrated": "migrations/0075_default_users.sql",
+      "sourceCommit": "57da2349c5c27d412cd9f4c91488364b52ecb930",
+      "sourceSha256": "a4f7c22caf4f9dcb548cad3f3a069a0f66ea941a0b43f9fe2087b5f72803cce9",
+      "sha256": "a4f7c22caf4f9dcb548cad3f3a069a0f66ea941a0b43f9fe2087b5f72803cce9",
+      "commit": "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0",
+      "reason": "Append upstream evolution without renumbering or rewriting published integration migrations."
+    },
+    {
+      "source": "migrations/0072_harness_revision_settings.sql",
+      "integrated": "migrations/0076_harness_revision_settings.sql",
+      "sourceCommit": "57da2349c5c27d412cd9f4c91488364b52ecb930",
+      "sourceSha256": "bb7a1b4480f0566ecf56f47f5789ba681994ffa2a5cba5eda14d38be8973eb7c",
+      "sha256": "bb7a1b4480f0566ecf56f47f5789ba681994ffa2a5cba5eda14d38be8973eb7c",
+      "commit": "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0",
+      "reason": "Append upstream evolution without renumbering or rewriting published integration migrations."
+    },
+    {
+      "source": "migrations/0073_account_administration_policy.sql",
+      "integrated": "migrations/0077_account_administration_policy.sql",
+      "sourceCommit": "57da2349c5c27d412cd9f4c91488364b52ecb930",
+      "sourceSha256": "7c27834941b7a38bc8537fffd1a59cb98dba98f3e32e16c639bec9d4829d910a",
+      "sha256": "7c27834941b7a38bc8537fffd1a59cb98dba98f3e32e16c639bec9d4829d910a",
+      "commit": "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0",
+      "reason": "Append upstream evolution without renumbering or rewriting published integration migrations."
+    }
+  ],
+  "migrationReconciliations": [
+    {
+      "pullRequest": 1,
+      "sourceCommit": "28b9699b5834fc401a84fcdbc7a2edaed17fd890",
+      "source": "migrations/0074_agent_runtime_roles.sql",
+      "reason": "Latest source only renames the previously selected role evolution. Existing integration 0054 plus the appended upstream Sandbox policy evolution provide the same state; retain all published bytes.",
+      "sourceSha256": "c0ed57c833cf749be65b1d8f673380b869fb36bc6327610c3079563011b240ee"
+    },
+    {
+      "pullRequest": 18,
+      "sourceCommit": "dfeb2e3060a5d95718af0f90766e601932ce04fa",
+      "source": "migrations/0069_gateway_outbound.sql",
+      "reason": "Current source includes compute admission and Sandbox policy state. Appended upstream evolution preserves the published outbound SQL and embedded channelsOnly invariant.",
+      "sourceSha256": "583a4a0e52142af9921c7238e478ebe6acbc362bdf0a358df4bc26f1d6fd1a2b"
+    }
+  ],
+  "retiredFeatures": [
+    {
+      "number": 18,
+      "title": "Gateway outbound access",
+      "author": "miguelbranco80",
+      "headRef": "codex/gateway-outbound",
+      "commit": "dfeb2e3060a5d95718af0f90766e601932ce04fa",
+      "status": "replaced",
+      "comparisonBase": "717e8bf2a3ef3fa4d4fa7e53cc6927500533ddbd",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "codex/gateway-outbound-upstream-d3ccc5478",
+      "draft": false,
+      "forkState": "open",
+      "replacedBy": 36,
+      "reason": "User directed replacement of per-Agent/revision Gateway outbound with one operator-selected native Gateway proxy. Historical migrations retain provenance, not active behavior."
+    }
+  ],
+  "historicalReconstruction": {
+    "startingCommit": "9876baa21d9b21fec6a4320369d1738b2de03d44",
+    "steps": [
+      {
+        "pullRequest": 11,
+        "commit": "73b249ade96c468a1fe88f49c3c16f0f3743ad0a",
+        "input": "8439dcf5938b10bc33aa3da197994c9ba6be5496"
+      },
+      {
+        "pullRequest": 13,
+        "commit": "a81b7e1908fa73221eb6aac19c6cff606e7ed781",
+        "input": "cbf561154c48aef94df1fe2f91661b6122fab49b"
+      },
+      {
+        "pullRequest": 15,
+        "commit": "b7f81e6a718dabc6e729ecfb4acc4a129016c603",
+        "input": "5d2f880367add254241f4bcfb947a29ff581397b"
+      },
+      {
+        "pullRequest": 1,
+        "commit": "7bfdbff85fe4e454153c5d2ad2f7f032e87de631",
+        "input": "41aa9f659be13f1293f3bac30abb9461598ce2f0"
+      },
+      {
+        "pullRequest": 18,
+        "commit": "2cc1c0bcb2be29c291d6f0c86def68cffd62ee36",
+        "input": "dfeb2e3060a5d95718af0f90766e601932ce04fa"
+      },
+      {
+        "pullRequest": 2,
+        "commit": "fcb4ca1f7c3d271794f9c29b6be71551369d0698",
+        "input": "aaa5c43e7ea6a397b254fd95fa52097b02d45bbb"
+      },
+      {
+        "pullRequest": 17,
+        "commit": "5a27904ebfd18e745d256908a8ac78d8522d23a3",
+        "input": "5d8b402f23d9f010d6646c95796ffd42a13dd0bf"
+      },
+      {
+        "pullRequest": 12,
+        "commit": "6cc9b1ff27cd336da6b1d33fefd0844fdaf1f150",
+        "input": "37fac70dfb784351544189ad07909588b327ef47",
+        "reconciliationBase": "965e6ee0e8c6b40e028c70bd4cab93453a44c6f0"
+      }
+    ],
+    "reconciliationCommit": "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818",
+    "historyJoin": "de333c6bcc1db23ffceeb79b9d48a4f9068daaf7",
+    "reason": "Compose from the shared current upstream baseline to avoid stale merge bases concealing refreshed feature code, then join the preserved published history without rewriting it."
+  },
+  "previousQualification": {
+    "policy": "Qualify the final integration commit with exact-head CI,CodeQL,and allfour native controller/runtime architecture outcomes. Local and source PR checks do not qualify publication or deployment.",
+    "previousTestedCommit": "bd1736b0f1e4183c43ab4fc93df82708b2724afb",
+    "previousRuns": {
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38884190226",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38884190034",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/38884451023"
+    },
+    "requiredChecks": [
+      "CI Required on the published SHA",
+      "CodeQL on the published SHA",
+      "Native controller and runtime checks on AMD64 and ARM64; no publication"
+    ],
+    "limits": [
+      "Embedded lifecycle uses the authenticated API, PostgreSQL worker and real scoped Kubernetes resources with a protocol runtime fixture and synthetic provider credentials.",
+      "Public proxy checks verify actual DNS, CONNECT and certificate-verified TLS, not Slack Socket Mode or Microsoft Teams SDK delivery.",
+      "Live provider messaging, consent, public Teams ingress and model execution require their separate authorized integration prerequisites."
+    ],
+    "failedCandidates": [
+      {
+        "commit": "27dc2e809dce380c2f00017c9f1f0f88c10fd448",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39430946127",
+        "repairCommit": "84d848fb96346418cdf4ddde4be7ade0e70c7bb2",
+        "notes": "Six failed lanes: two sandbox setup failures, one obsolete embedded shared-proxy fixture and composed provider/UI fixture or assertion mismatches. Targeted parity, controller and browser regressions pass locally; real sandbox and cluster outcomes require final-head CI."
+      },
+      {
+        "commit": "be8c3013516a1825e588b0309a7ff28a74a9d7f3",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39433464392",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39433458604",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39435308191",
+        "repairCommit": "a1a9a7c1caf3e2fbebfabe6a9f42b18d50125201",
+        "notes": "All22 source lanes, First Agent Smoke and CodeQL passed. Native AMD64 sandbox probe hit Ubuntu24 user-namespace restrictions. Native ARM64 passed142/144 cases but two nested Docker sandbox cases lacked the reviewed CI AppArmor profile. Repair only native workflow setup and its documentation; qualify the resulting SHA."
+      },
+      {
+        "commit": "8133a601183e95798543ebcc631df2a0af6ceaa4",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39439403911",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39439404020",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/39439972096",
+        "repairCommit": "1a8ab641fbd2cc8d153e3840cda81da3770fee6d",
+        "notes": "Source CI and CodeQL passed. Native AMD64 local image import failed because distro Skopeo1.4.1 used Docker API1.22 while the daemon requires1.24+. Use a temporary Docker archive and the native Docker CLI; keep all digest/config/architecture checks and qualify the resulting SHA."
+      },
+      {
+        "commit": "0dbfccb42f793ab0cdecb27291c4983b1d038618",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42073156549",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42073156502",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42073176489",
+        "notes": "Static checks found a stale generated Agent operation count. The cluster embedded-channel lifecycle still selected the retired shared proxy. Regenerate the API reference and use the real revision-owned proxy with exact Secret delivery, revision cutover and withdrawal assertions. Qualify the repaired final SHA."
+      },
+      {
+        "commit": "4c3d38f1afb405cab96db22933a2fea12fcf1aad",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42074221913",
+        "notes": "The real embedded Pod passed exact Secret delivery. The new revision-cutover assertion incorrectly required the Gateway-only agent-revision-id annotation on the outbound proxy. Check the common Pod template revision label instead; retain exact revision ownership and full withdrawal checks."
+      },
+      {
+        "commit": "66fb077ee849e740c1eef0857397f6bb7c146d37",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42075528396",
+        "notes": "Embedded deployment, replacement and stale-retirement fencing passed. Teams disablement incorrectly treated the committed active pointer as completed Kubernetes activation. Await real callback withdrawal and the exact ready replacement Pod, and verify the disabled credential is absent inside that Pod."
+      },
+      {
+        "commit": "81f16f4c33d58255ff7656b97b7c1e03bd273b01",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42076588565",
+        "notes": "The shared serving assertion also read the old Deployment immediately after the active-pointer commit. Observe the exact ready revision Pod and callback before checking projection and fencing at every cutover, including reenablement. Keep all real resource and credential assertions."
+      },
+      {
+        "commit": "cb956aa878915413e8c79f481cec2d31e49f914c",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42077755119",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42077755050",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42078677862",
+        "notes": "Database and Kubernetes lifecycle lanes passed. Three source lanes found stale single-provider UI/conformance expectations and missing WebKit preparation. The earlier native AMD64 run42074279022 passed246/247 cases; its Teams media fixture used host-only certificate permissions and obsolete shared-proxy options. Keep the runtime unprivileged, permit read-only synthetic certificate access and select exact Graph/SharePoint destinations with the generic proxy. The repaired targeted native media case passes locally; qualify the resulting final SHA on both architectures."
+      }
+    ],
+    "localChecks": {
+      "database": "PostgreSQL18.6 real populated upgrades and fresh/repeat serialization:45 passed,0 skipped. Final CI still required.",
+      "ui": {
+        "stories": [
+          "Components/Channels/Teams Editor",
+          "Components/Channels/Teams Missing Secret",
+          "Pages/Agent Detail/Sharing",
+          "Pages/Agent Detail/Gateway Network"
+        ],
+        "proof": "Rebuilt Storybook, headless Chromium walkthrough and screenshots/video outside checkout; simulated API/runtime state only."
+      },
+      "pageLengthReview": "Current references and flows between1500 and2500 visible words retain one coherent contract/lifecycle; repeated history and background removed. No new length allowance."
+    }
+  },
+  "qualification": {
+    "policy": "Refresh only codex/raw-integration. Source PRs and fork main remain read-only. Exact-head CI, CodeQL and nonpublishing native AMD64/ARM64 qualification follow publication.",
+    "previousTestedCommit": "c14c33ab437582ffc7641d9dc9c4184247d50a16",
+    "requiredChecks": [
+      "CI Required on the published SHA",
+      "CodeQL on the published SHA",
+      "Native controller and runtime on AMD64 and ARM64; no publication"
+    ],
+    "localChecks": {
+      "commands": [
+        "pnpm typecheck",
+        "pnpm lint",
+        "pnpm format:check",
+        "pnpm docs:check",
+        "pnpm openapi:check",
+        "pnpm check:workspace",
+        "node scripts/ci/run-tests.mjs audit",
+        "node scripts/integration/check-selection.mjs"
+      ],
+      "results": "Compute: 413 passed. Helm/profiles: 246 passed. Agent-creation/member browser checks: 92 passed, plus three retained native-plugin browser regressions passed. CI policy: 76 passed. PostgreSQL migration compatibility: 209 passed, zero skips. PostgreSQL Default users/deployment credential grants: five passed, zero skips. Local proxy/Teams/IAM/native-admin cases passed in the focused combined run.",
+      "ui": {
+        "stories": [
+          "Pages/Create Agent/Custom Preset quick-start",
+          "Pages/Create Agent/Preset with saved model credential"
+        ],
+        "proof": "Rebuilt Storybook; inspected desktop previews and screenshots; recorded and replayed a 17-second Preset-to-draft walkthrough. Captures remain outside the checkout and are delivered in the task conversation. Simulated UI only; persistence and permission checks have separate browser/database proof."
+      },
+      "environment": "Browser libraries extracted into a task-local directory. CI deadline test used a scoped date command backed by the real Node clock because this host date prints nanoseconds for %s%3N; no source assertion was weakened.",
+      "pageLengthReview": "References and flows above 1500 words retain one coherent contract or lifecycle. Removed duplicate changelog entries and redundant prose to satisfy the 2500-word limit; no new exception.",
+      "ciRepair": "Slack directory: 22 passed, zero skipped. CI policy/runner selection: 76 passed, zero skipped. Existing runner overrides now also cover the new shared runtime-image producer and ordinary image consumers, with compatible sandbox selection in same-source qualification.",
+      "additionalFixtureRepair": "Workspace-volume, public GitHub reader profile and Configuration controller suites: 313 passed, zero skips. Use the current deployment renderer argument order, shared bundled proxy selection, and an ordinary application variable for unrelated-save checks. Explicitly assert HTTP_PROXY refusal."
+    },
+    "limits": [
+      "No source PR merge, image publication, release or deployment.",
+      "Provider-specific live messaging and real model execution are not established by local fixture checks.",
+      "The updated real Kubernetes post-admission Secret-revocation fixture awaits final-head CI; local PostgreSQL and browser proof do not substitute for it."
+    ],
+    "failedCandidates": [
+      {
+        "commit": "f2a4e024db4948cfc9aed60f013ee74917623fd3",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42491986627",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42491986562",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/42491998126",
+        "notes": "All real k3d lanes and PostgreSQL migration CI passed. Checks/Conformance 2 found an obsolete Slack directory proxy error prefix after the generic proxy rename. The new shared-runtime producer and ordinary image consumers omitted the fork runner overrides. Align the exact error expectation and preserve configured build/kernel selection; qualify the repaired SHA. The completed Conformance 1 log also exposed the old renderer positional signature, retired profile channels.managedSlackProxy, and HTTP_PROXY acceptance fixtures. Reproduce and repair those fixtures without relaxing current validation."
+      }
+    ],
+    "codeqlAccounting": {
+      "observedCandidate": "f2a4e024db4948cfc9aed60f013ee74917623fd3",
+      "baseline": "c14c33ab437582ffc7641d9dc9c4184247d50a16",
+      "baselineResults": 92,
+      "candidateResults": 89,
+      "newFingerprints": 3,
+      "removedFingerprints": 6,
+      "notes": [
+        "Upstream runtime-artifact OCI metadata reader has an lstat/readFile race finding. It remains open; no claim of security clearance.",
+        "The generic API dispatcher has an authorization rate-limiting finding after upstream route changes. It remains open and needs security triage.",
+        "A generated source string in the CI runner test has a sanitization finding; it is test-only code, not a production endpoint. No alert was dismissed."
+      ],
+      "limits": "Successful analyzer jobs are not a zero-findings result. Final-head analyzers and any security gates remain required."
+    }
+  },
+  "previousBatches": [
+    {
+      "startingIntegration": "35ec11e43de7ea2de94354db26b774610ede22d7",
+      "steps": [
+        {
+          "operation": "Retire PR18 behavior while preserving published SQL and other selected features",
+          "commit": "580db852ce142be8b54ca4f643fb24aaa729b0bf",
+          "input": "dfeb2e3060a5d95718af0f90766e601932ce04fa"
+        },
+        {
+          "operation": "Merge PR36 exact head and reconcile Teams, embedded trial and canonical persistence",
+          "commit": "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
+          "input": "891b0d704af01e49d3f6a809476383ef2474050b"
+        }
+      ],
+      "preservedMigrationPrefix": {
+        "commit": "35ec11e43de7ea2de94354db26b774610ede22d7",
+        "entryCount": 71
+      }
+    },
+    {
+      "startingIntegration": "35b12b4b282c3eb3ef533269b03614dc5d9bbee4",
+      "steps": [
+        {
+          "operation": "Advance PR36; retain Teams dispatch and embedded-channel profile configuration",
+          "commit": "3de37f3bfeb5499ecfb26faabdff6de7a4464096",
+          "input": "7056ecf30c2189f4a09f94b6bef6a3fcbcaac421"
+        }
+      ],
+      "preservedMigrationPrefix": {
+        "commit": "35b12b4b282c3eb3ef533269b03614dc5d9bbee4",
+        "entryCount": 72
+      }
+    }
+  ],
+  "previousQualifications": [
+    {
+      "policy": "Refresh PR36 in the integration branch only; source PRs and fork main remain read-only. Exact-head CI follows publication.",
+      "previousTestedCommit": "35ec11e43de7ea2de94354db26b774610ede22d7",
+      "requiredChecks": [
+        "combined source CI",
+        "CodeQL finding accounting",
+        "native AMD64 and ARM64 image qualification",
+        "disposable real OCE lifecycle and proxy behavior"
+      ],
+      "limits": [
+        "The latest PR36 fixes are integrated; combined runtime-image startup and real-instance verification remain separate checks.",
+        "No image publication, deployment, source PR merge or existing-instance cleanup performed."
+      ],
+      "localChecks": {
+        "commands": [
+          "pnpm typecheck",
+          "pnpm lint",
+          "pnpm format:check",
+          "pnpm docs:check",
+          "pnpm check:workspace",
+          "node scripts/ci/run-tests.mjs audit",
+          "node scripts/integration/check-selection.mjs",
+          "node --test tests/integration/profile-renderer.test.mjs tests/integration/profile-preflight-chart-parity.test.mjs tests/integration/production-kubernetes-packaging.test.mjs",
+          "node --test tests/conformance/gateway-proxy-reset.test.mjs tests/conformance/gateway-proxy-tunnel.test.mjs tests/integration/teams-directory.test.mjs"
+        ],
+        "results": "Selected Helm/profile suites: 243 passed, one stale Codex warning assertion corrected and full profile suite rerun successfully. Proxy/Teams checks: 13 passed, zero skipped. Types, lint, format, docs, workspace, CI inventory and selection passed.",
+        "proofLimits": "Rendered Helm and profile configuration, local proxy transport and authorized Teams directory behavior; not live Microsoft delivery or built-image runtime startup."
+      }
+    }
+  ]
+}

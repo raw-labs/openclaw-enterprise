@@ -300,7 +300,8 @@ test(
     assert.deepEqual(next.slice(0, -1), previous);
     const { tag, when } = next.at(-1);
     const last = previous.at(-1);
-    assert.equal(Number(tag.slice(0, 4)), Number(last.tag.slice(0, 4)) + 1);
+    assert.equal(Number(tag.slice(0, 4)), last.idx + 1);
+    assert.ok(!previous.some((entry) => entry.tag === tag), "The full migration tag must be new");
     assert.ok(when > last.when, "Drizzle must see the next migration as pending");
   },
 );
@@ -1954,6 +1955,7 @@ async function assertUpgradedRevisionReadable(db) {
 async function canonicalData(db) {
   const result = { presets: [] };
   const migrationOwnedColumns = {
+    iam_access_bindings: ["runtime_role"],
     account: ["authentication_version", "identity_only"],
     agents: [
       "repository_bindings",
@@ -1964,6 +1966,7 @@ async function canonicalData(db) {
       "credential_sources",
       "sandbox_policy_editing",
       "gateway_managed_mode",
+      "gateway_outbound",
     ],
     agent_revisions: ["gateway_managed_mode"],
     controller_work: ["work_kind"],
@@ -2006,7 +2009,7 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "harness_history", { prefix: 71 });
+    const db = await historyDatabase(context, fixture, "harness_history", { prefix: 75 });
     const namespace = `ns_${randomUUID()}`;
     // Seed the old shape under its original constraint, then upgrade in place.
     const { agent, revision } = await seedCanonicalAgent(db, namespace, {
@@ -2062,7 +2065,7 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const db = await historyDatabase(context, await migrationHistoryFixture(), "separate", {
-      prefix: 73,
+      prefix: 77,
     });
     const verify = () => runHistoryCommand(db, "production", "--require-current");
     const predecessor = await historySnapshot(db);
@@ -2171,40 +2174,40 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [63, "preGatewayManagedMode"],
-      [64, "preSelectedRepositorySet"],
-      [65, "preAgentDeployIntent"],
-      [66, "preAgentCredentialSourceLimit"],
-      [67, "preAgentPluginDriver"],
-      [68, "preConnectionTemplates"],
-      [69, "preSavedConnections"],
-      [70, "preDefaultUsers"],
-      [71, "preHarnessOverrides"],
-      [72, "preAccountAdministrationPolicy"],
-      [73, "preFiniteRepositorySessionWithdrawal"],
-      [74, "preHumanAuthenticationResults"],
-      [75, "preNativeBrowserAccess"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [66, "preGatewayManagedMode"],
+      [67, "preSelectedRepositorySet"],
+      [68, "preAgentDeployIntent"],
+      [69, "preAgentCredentialSourceLimit"],
+      [70, "preAgentPluginDriver"],
+      [72, "preConnectionTemplates"],
+      [73, "preSavedConnections"],
+      [74, "preDefaultUsers"],
+      [75, "preHarnessOverrides"],
+      [76, "preAccountAdministrationPolicy"],
+      [77, "preFiniteRepositorySessionWithdrawal"],
+      [78, "preHumanAuthenticationResults"],
+      [79, "preNativeBrowserAccess"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
         const namespaceId = await seedCanonicalData(db, {
           preset: prefix >= 25,
-          computeAdmission: prefix >= 55,
+          computeAdmission: prefix >= 59,
           // 0060 requires an execution admission on every revision written after it.
-          executionAdmission: prefix >= 62,
+          executionAdmission: prefix >= 63,
           // 0072 requires settings on new rows; earlier prefixes retain their historical shape.
-          harnessSettings: prefix >= 72,
+          harnessSettings: prefix >= 76,
         });
         const assertSourceOwners =
-          prefix === 59
+          prefix === 62
             ? await retainGatewaySourcesAcrossProxyAdmission(db.app, db.migrator, namespaceId)
             : undefined;
         const before = await canonicalData(db);
@@ -2286,7 +2289,7 @@ test(
             ],
           );
         }
-        if (prefix === 59) {
+        if (prefix === 62) {
           const upgradedReceipts = await historyReceipts(db.migrator);
           const sessions = await db.app.query("SELECT count(*)::integer AS count FROM occ.session");
           child.diagnostic(
@@ -2318,7 +2321,7 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "externalchatgpt", { prefix: 56 });
+    const db = await historyDatabase(context, fixture, "externalchatgpt", { prefix: 59 });
     const namespaceId = await seedCanonicalData(db);
     const sourceId = `cs_${randomUUID()}`;
     await db.app.query(
@@ -2676,15 +2679,15 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [75, "preNativeBrowserAccess"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [79, "preNativeBrowserAccess"],
     ]) {
       void context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -2878,8 +2881,8 @@ test(
 
     // Tables created after restoring a published prefix retain their native catalog spelling.
     for (const [prefix, history] of [
-      [74, "preHumanAuthenticationResults"],
-      [75, "preNativeBrowserAccess"],
+      [78, "preHumanAuthenticationResults"],
+      [79, "preNativeBrowserAccess"],
     ]) {
       const previous = await historyDatabase(context, fixture, "previous", { prefix });
       const restored = await restoreHistoryArchive(
@@ -2960,24 +2963,24 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [75, "preNativeBrowserAccess"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [79, "preNativeBrowserAccess"],
     ]) {
       void context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });
         if (prefix) {
           await seedCanonicalData(db, {
             preset: prefix >= 25,
-            computeAdmission: prefix >= 55,
-            executionAdmission: prefix >= 62,
-            harnessSettings: prefix >= 72,
+            computeAdmission: prefix >= 59,
+            executionAdmission: prefix >= 63,
+            harnessSettings: prefix >= 76,
           });
         }
         const before = await historySnapshot(db);
@@ -2992,13 +2995,13 @@ test(
         // All three pending receipts, schema changes and main-row annotations roll back.
         // Reject native browser trigger creation after its tables and grants; all of 0076 must roll back.
         const rollbackTag = [
-          [75, "CREATE TRIGGER"],
-          [58, "GRANT"],
-          [57, "CREATE TABLE"],
-          [56, "CREATE FUNCTION"],
-          [55, "CREATE TRIGGER"],
-          [54, "ALTER TABLE"],
-          [53, "CREATE FUNCTION"],
+          [79, "CREATE TRIGGER"],
+          [61, "GRANT"],
+          [60, "CREATE TABLE"],
+          [59, "CREATE FUNCTION"],
+          [54, "CREATE TRIGGER"],
+          [58, "ALTER TABLE"],
+          [57, "CREATE FUNCTION"],
           [50, "GRANT"],
           [41, "ALTER TABLE"],
           [38, "CREATE FUNCTION"],
@@ -3008,7 +3011,7 @@ test(
           [0, "ALTER FUNCTION"],
         ].find(([minimum]) => prefix >= minimum)[1];
         const failAt =
-          prefix >= 58
+          prefix >= 61
             ? "IF to_regclass('occ.credential_delivery_reductions') IS NULL THEN RETURN; END IF;"
             : "";
         await historyAdmin(
@@ -3061,24 +3064,24 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "proxypreview", { prefix: 59 });
+    const db = await historyDatabase(context, fixture, "proxypreview", { prefix: 62 });
     const manifest = JSON.parse(
       await readFile(join(migrationsDirectory, "meta/_canonical-history.json"), "utf8"),
     );
     assert.deepEqual(
-      manifest.entries.slice(58, 63).map(({ tag }) => tag),
+      manifest.entries.slice(61, 66).map(({ tag }) => tag),
       [
-        "0059_administrator_sandbox_policy_grants",
-        "0060_credential_proxy_admission",
-        "0061_repository_credential_authority",
-        "0062_credential_delivery_custody",
-        "0063_prepared_attempt_settlement",
+        "0062_administrator_sandbox_policy_grants",
+        "0063_credential_proxy_admission",
+        "0064_repository_credential_authority",
+        "0065_credential_delivery_custody",
+        "0066_prepared_attempt_settlement",
       ],
     );
     await seedCanonicalData(db, { preset: true, computeAdmission: true });
     const before = await historySnapshot(db);
     const data = await canonicalData(db);
-    assert.equal(before.receipts.length, 59);
+    assert.equal(before.receipts.length, 62);
     assert.deepEqual(await runHistoryMigration(db, "production", "--check"), {
       ok: true,
       history: "preCredentialProxy",
@@ -3114,9 +3117,9 @@ test(
         [preview.slice(start, end), 1787000000060 + start],
       );
       const receipts = await historyReceipts(db.migrator);
-      assert.deepEqual(receipts.slice(0, 59), before.receipts);
+      assert.deepEqual(receipts.slice(0, 62), before.receipts);
       assert.deepEqual(
-        receipts.slice(59).map(({ hash, created_at }) => [hash, Number(created_at)]),
+        receipts.slice(62).map(({ hash, created_at }) => [hash, Number(created_at)]),
         preview.slice(0, end).map((hash, index) => [hash, 1787000000060 + index]),
       );
       await assertHistoryRefused(db, receiptRefusal);
@@ -3143,8 +3146,8 @@ test(
     const upgradedData = await canonicalData(db);
     assert.deepEqual(upgradedData, upgradedCanonicalData(data));
     assert.deepEqual(
-      completed.receipts.slice(59).map(({ hash, created_at }) => [hash, Number(created_at)]),
-      manifest.entries.slice(59).map(({ sha256, when }) => [sha256, when]),
+      completed.receipts.slice(62).map(({ hash, created_at }) => [hash, Number(created_at)]),
+      manifest.entries.slice(62).map(({ sha256, when }) => [sha256, when]),
     );
 
     // A valid first and last receipt cannot vouch for the interior 0061 receipt.
@@ -3197,7 +3200,7 @@ test(
       /catalog objects or effective grants differ for preCredentialProxy/,
     );
     assert.deepEqual(await canonicalData(db), upgradedData);
-    for (const receipt of completed.receipts.slice(59)) {
+    for (const receipt of completed.receipts.slice(62)) {
       await db.migrator.query(
         "INSERT INTO drizzle.__drizzle_migrations(id,hash,created_at) VALUES($1,$2,$3)",
         [receipt.id, receipt.hash, receipt.created_at],
@@ -3244,7 +3247,7 @@ test(
       ["catalog-object", 25, "CREATE TABLE occ.unexplained(id integer)"],
       [
         "draft-pull-privilege",
-        62,
+        65,
         "GRANT DELETE ON occ.prepared_repository_draft_pulls TO occ_app",
       ],
       ["ledger-grant", 25, "GRANT SELECT ON drizzle.__drizzle_migrations TO occ_app"],
@@ -3938,3 +3941,83 @@ if (
     },
   );
 }
+
+test(
+  "Retiring custom runtime roles preserves existing operation grants without escalating assignments",
+  requiresHistoryPostgres,
+  async (context) => {
+    const fixture = await migrationHistoryFixture();
+    const db = await historyDatabase(context, fixture, "retireroles", { prefix: 77 });
+    await seedCanonicalData(db, {
+      preset: true,
+      computeAdmission: true,
+      executionAdmission: true,
+      harnessSettings: true,
+    });
+    const { id: agent, namespace_id: namespace } = (
+      await db.app.query("SELECT id, namespace_id FROM occ.agents LIMIT 1")
+    ).rows[0];
+    await db.app.query(`INSERT INTO occ.iam_identities(id,kind,issuer,subject)
+      VALUES ('retire-human','principal','migration-fixture','retire-human')`);
+    await db.app.query(
+      `INSERT INTO occ.iam_roles(id,namespace_id,name,permissions)
+      VALUES ('retire-entry',$1,'Runtime entry',
+        '[{"action":"read","resourceKind":"agent"},{"action":"use","resourceKind":"agent"}]'),
+        ('retire-operator',$1,'Existing operator','[{"action":"operate","resourceKind":"agent"}]')`,
+      [namespace],
+    );
+    // A former native role assignment is not an upstream operate grant. Keep a
+    // separate legitimate grant to prove retirement neither removes nor invents it.
+    await db.app.query(
+      `INSERT INTO occ.iam_access_bindings
+      (id,namespace_id,identity_subject_id,role_id,resource_kind,resource_id,runtime_role)
+      VALUES ('retire-assignment',$1,'retire-human','retire-entry','agent',$2,'platform-administrator'),
+             ('retire-operation',$1,'retire-human','retire-operator','agent',$2,NULL)`,
+      [namespace, agent],
+    );
+    await db.app.query(
+      `INSERT INTO occ.iam_restrictions(id,namespace_id,action,resource_kind,effect)
+      VALUES ('retire-use',$1,'use','agent','deny'), ('retire-denial',$1,'administer','agent','deny')`,
+      [namespace],
+    );
+    const before = await historyReceipts(db.migrator);
+    assert.deepEqual(await runHistoryMigration(db, "production"), {
+      ok: true,
+      history: "preFiniteRepositorySessionWithdrawal",
+    });
+    await assertCompletedHistory(db, before);
+    assert.deepEqual(
+      (
+        await db.app.query(
+          "SELECT id,role_id FROM occ.iam_access_bindings WHERE id LIKE 'retire-%' ORDER BY id",
+        )
+      ).rows,
+      [{ id: "retire-operation", role_id: "retire-operator" }],
+    );
+    assert.deepEqual(
+      (
+        await db.app.query(
+          "SELECT id,permissions FROM occ.iam_roles WHERE id LIKE 'retire-%' ORDER BY id",
+        )
+      ).rows,
+      [
+        { id: "retire-entry", permissions: [{ action: "read", resourceKind: "agent" }] },
+        { id: "retire-operator", permissions: [{ action: "operate", resourceKind: "agent" }] },
+      ],
+    );
+    assert.deepEqual(
+      (
+        await db.app.query(
+          "SELECT id,action FROM occ.iam_restrictions WHERE id LIKE 'retire-%' ORDER BY id",
+        )
+      ).rows,
+      [{ id: "retire-denial", action: "administer" }],
+    );
+    const completed = await historySnapshot(db);
+    assert.deepEqual(await runHistoryMigration(db, "production"), {
+      ok: true,
+      history: "completed",
+    });
+    assert.deepEqual(await historySnapshot(db), completed);
+  },
+);

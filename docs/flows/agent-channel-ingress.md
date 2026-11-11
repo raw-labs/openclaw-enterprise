@@ -66,7 +66,7 @@ bindings remain allowed; preparation repeats the requirements.
 that serving Deployment owns a Teams callback.
 `configuration-rules.ts:requireChannelProxyEnvironment` refuses Agent-authored
 proxy environment overrides. With an enabled channel, `deployment` supplies the
-selected proxy and, only when `runtime.channels.guardedFetchProxy` is true, the
+selected proxy and, only when `runtime.proxy.guardedFetchProxy` is true, the
 native `OPENCLAW_PROXY_ACTIVE=1` trust marker. That marker delegates guarded
 fetch DNS/IP enforcement throughout the Gateway to the reviewed proxy.
 

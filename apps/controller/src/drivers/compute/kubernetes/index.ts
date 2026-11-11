@@ -14117,7 +14117,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           "cookie",
           "forwarded",
           "x-forwarded-for",
-          ...(access !== "operator"
+          ...(access !== "operator" && access !== "chat"
             ? [
                 TRUSTED_PROXY_SCOPES_HEADER,
                 "x-occ-identity",

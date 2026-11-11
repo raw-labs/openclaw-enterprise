@@ -18,6 +18,28 @@ const DEFAULT_ALLOWED_HOSTS = [
   "*.slack-msgs.com",
 ];
 
+// Match the Helm proxy's public IPv4 egress boundary. Validate every DNS answer before
+// opening a socket, then connect to that numeric address so DNS cannot change underneath it.
+const blockedAddresses = new net.BlockList();
+for (const [address, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+]) {
+  blockedAddresses.addSubnet(address, prefix, "ipv4");
+}
+
 function validateAllowedHosts(hosts) {
   if (
     !Array.isArray(hosts) ||

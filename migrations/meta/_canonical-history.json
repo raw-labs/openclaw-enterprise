@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "source": "1985586676c42cd359b9ecc22e22ce8f0e30034d",
+  "source": "7e1ac6d88e3893c3d4e6444fb3b9b9776519a3fb",
   "entries": [
     {
       "idx": 0,
@@ -430,185 +430,225 @@
       "idx": 53,
       "version": "7",
       "when": 1787000000054,
-      "tag": "0054_credential_source_pat",
+      "tag": "0054_agent_runtime_roles",
       "breakpoints": true,
-      "sha256": "02ef4ffbdd21bb1c5e66c84c1c3dfe04c48f1936e18bab9c2de81c8ffe3c8d9d"
+      "sha256": "4bfb764c6f1a73bc67f31e993ce05d2b9d97c8b44e92ce436c84884c24f999f0"
     },
     {
       "idx": 54,
       "version": "7",
       "when": 1787000000055,
-      "tag": "0055_compute_revision_admission",
+      "tag": "0055_held_authentication_session",
       "breakpoints": true,
-      "sha256": "ad091e4c3a9de192f79f9170b009497db0cd5f0f0d287dfbc81a00d5e1fc8ea7"
+      "sha256": "dbdc63b9dd9d750a743b51a7f1cbd199d08a7977a57a73435dda722eb2bfdb36"
     },
     {
       "idx": 55,
       "version": "7",
       "when": 1787000000056,
-      "tag": "0056_held_authentication_session",
+      "tag": "0056_gateway_outbound",
       "breakpoints": true,
-      "sha256": "dbdc63b9dd9d750a743b51a7f1cbd199d08a7977a57a73435dda722eb2bfdb36"
+      "sha256": "426da30fa2dc3a010905318b95dc146c4bd7a461b8c48cb9f5dca9d12523ef52"
     },
     {
       "idx": 56,
       "version": "7",
       "when": 1787000000057,
-      "tag": "0057_canonical_harness_auth",
+      "tag": "0057_embedded_channel_outbound",
       "breakpoints": true,
-      "sha256": "f4098bc5233e0ce0bbc0666af9ef723d747fd0c4ed7f6667b4ac19f769543433"
+      "sha256": "c3b47c6e8496b6bbdaafe6e9fe4bbf5a89ff5fa4155afc679da872ea37a2248a"
     },
     {
       "idx": 57,
       "version": "7",
       "when": 1787000000058,
-      "tag": "0058_sandbox_policies",
+      "tag": "0058_credential_source_pat",
       "breakpoints": true,
-      "sha256": "21940032ee3277cbc40ff422359099e6eaa0abef6dfa78d06740671fda5f431f"
+      "sha256": "02ef4ffbdd21bb1c5e66c84c1c3dfe04c48f1936e18bab9c2de81c8ffe3c8d9d"
     },
     {
       "idx": 58,
       "version": "7",
       "when": 1787000000059,
-      "tag": "0059_administrator_sandbox_policy_grants",
+      "tag": "0059_compute_revision_admission",
       "breakpoints": true,
-      "sha256": "5693d93865d61360d2b8943846cfbfb5590c9e52e90f89eac50fec7bd3672498"
+      "sha256": "49cad1d92a96a36a688cc4ed0d770bf51ac2c9263df67b24b30d9b865215c906"
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787000000060,
+      "tag": "0060_canonical_harness_auth",
+      "breakpoints": true,
+      "sha256": "f4098bc5233e0ce0bbc0666af9ef723d747fd0c4ed7f6667b4ac19f769543433"
     },
     {
       "idx": 60,
       "version": "7",
-      "when": 1787000000060,
-      "tag": "0060_credential_proxy_admission",
+      "when": 1787000000061,
+      "tag": "0061_sandbox_policies",
       "breakpoints": true,
-      "sha256": "db0cc3ca1748de99a92f1864428848f9e6461382df5369004608622fb393b891"
+      "sha256": "e2085f7735e7413e26a45a193d6aa5b64a9f3caf7783d4aa88a6cea922a4d2e6"
     },
     {
       "idx": 61,
       "version": "7",
-      "when": 1787000000061,
-      "tag": "0061_repository_credential_authority",
+      "when": 1787000000062,
+      "tag": "0062_administrator_sandbox_policy_grants",
       "breakpoints": true,
-      "sha256": "9112cbb85635fe7d0aaa3d7b59ba074834c83afd482fc27cd7bcfe7bc1c038d5"
+      "sha256": "5693d93865d61360d2b8943846cfbfb5590c9e52e90f89eac50fec7bd3672498"
     },
     {
       "idx": 62,
       "version": "7",
-      "when": 1787000000062,
-      "tag": "0062_credential_delivery_custody",
+      "when": 1787000000063,
+      "tag": "0063_credential_proxy_admission",
       "breakpoints": true,
-      "sha256": "8620776aa1b4ecc8f640258015d88c0ff21afa3e75d2ca7cf26aabb69c7dc772"
+      "sha256": "8fb68e0c541bf20f4262dccf2d8892fcaf7b616e95fea22e60447e062a7f6339"
     },
     {
       "idx": 63,
       "version": "7",
-      "when": 1787000000063,
-      "tag": "0063_prepared_attempt_settlement",
+      "when": 1787000000064,
+      "tag": "0064_repository_credential_authority",
       "breakpoints": true,
-      "sha256": "af9fc293091700eb148a4c45826daa0903598399a730de23a25f7c81b49a7db6"
+      "sha256": "9112cbb85635fe7d0aaa3d7b59ba074834c83afd482fc27cd7bcfe7bc1c038d5"
     },
     {
       "idx": 64,
       "version": "7",
-      "when": 1787000000064,
-      "tag": "0064_gateway_managed_mode",
+      "when": 1787000000065,
+      "tag": "0065_credential_delivery_custody",
       "breakpoints": true,
-      "sha256": "e73a21fc94abd66ec93540293708d76e5f0c1f8946c9d9994fcf81a6b9058329"
+      "sha256": "8620776aa1b4ecc8f640258015d88c0ff21afa3e75d2ca7cf26aabb69c7dc772"
     },
     {
       "idx": 65,
       "version": "7",
-      "when": 1787000000065,
-      "tag": "0065_selected_repository_set",
+      "when": 1787000000066,
+      "tag": "0066_prepared_attempt_settlement",
       "breakpoints": true,
-      "sha256": "4c1bb4e42c6b23f3ef30c66e98ff892d952986e20c2855d5dd1732b9f5854496"
+      "sha256": "af9fc293091700eb148a4c45826daa0903598399a730de23a25f7c81b49a7db6"
     },
     {
       "idx": 66,
       "version": "7",
-      "when": 1787000000066,
-      "tag": "0066_agent_deploy_intent",
+      "when": 1787000000067,
+      "tag": "0067_gateway_managed_mode",
       "breakpoints": true,
-      "sha256": "c9f8b1618efb5d9f576266fb3dd49e2d6641d0934aebf49a9b286fa7cca22c7b"
+      "sha256": "e73a21fc94abd66ec93540293708d76e5f0c1f8946c9d9994fcf81a6b9058329"
     },
     {
       "idx": 67,
       "version": "7",
-      "when": 1787000000067,
-      "tag": "0067_agent_credential_source_limit",
+      "when": 1787000000068,
+      "tag": "0068_selected_repository_set",
       "breakpoints": true,
-      "sha256": "f4f49b8e2c1a7b5a499a0274eb9be49bcd80d8d8be7a7e49aaef2f6f67d209e1"
+      "sha256": "4c1bb4e42c6b23f3ef30c66e98ff892d952986e20c2855d5dd1732b9f5854496"
     },
     {
       "idx": 68,
       "version": "7",
-      "when": 1787000000068,
-      "tag": "0068_agent_plugin_driver",
+      "when": 1787000000069,
+      "tag": "0069_agent_deploy_intent",
       "breakpoints": true,
-      "sha256": "4ae7aeabcbdccad1f4aafef523e992740e467c055f7f7a9ab9a1f5adb202341c"
+      "sha256": "c9f8b1618efb5d9f576266fb3dd49e2d6641d0934aebf49a9b286fa7cca22c7b"
     },
     {
       "idx": 69,
       "version": "7",
-      "when": 1787000000069,
-      "tag": "0069_connection_templates",
+      "when": 1787000000070,
+      "tag": "0070_agent_credential_source_limit",
       "breakpoints": true,
-      "sha256": "c0cc7c64e1c13a00b07f56c624cb12fb09746439eb5bf8ad7ed3e9f3ad70299a"
+      "sha256": "f4f49b8e2c1a7b5a499a0274eb9be49bcd80d8d8be7a7e49aaef2f6f67d209e1"
     },
     {
       "idx": 70,
       "version": "7",
-      "when": 1787000000070,
-      "tag": "0070_saved_connections",
+      "when": 1787000000071,
+      "tag": "0071_agent_plugin_driver",
       "breakpoints": true,
-      "sha256": "d365de5ec6046c7e0ff274c8527b3598c0bf1560a9b3ffc675103d6b3912da4d"
+      "sha256": "4ae7aeabcbdccad1f4aafef523e992740e467c055f7f7a9ab9a1f5adb202341c"
     },
     {
       "idx": 71,
       "version": "7",
-      "when": 1787000000071,
-      "tag": "0071_default_users",
+      "when": 1787000000072,
+      "tag": "0072_installation_gateway_proxy",
       "breakpoints": true,
-      "sha256": "a4f7c22caf4f9dcb548cad3f3a069a0f66ea941a0b43f9fe2087b5f72803cce9"
+      "sha256": "c2234ccaab335e36b5bdccd3d32e25168a18f9f205120af98de7715230f075c7"
     },
     {
       "idx": 72,
       "version": "7",
-      "when": 1787000000072,
-      "tag": "0072_harness_revision_settings",
+      "when": 1787000000073,
+      "tag": "0073_connection_templates",
       "breakpoints": true,
-      "sha256": "bb7a1b4480f0566ecf56f47f5789ba681994ffa2a5cba5eda14d38be8973eb7c"
+      "sha256": "c0cc7c64e1c13a00b07f56c624cb12fb09746439eb5bf8ad7ed3e9f3ad70299a"
     },
     {
       "idx": 73,
       "version": "7",
-      "when": 1787000000073,
-      "tag": "0073_account_administration_policy",
+      "when": 1787000000074,
+      "tag": "0074_saved_connections",
       "breakpoints": true,
-      "sha256": "7c27834941b7a38bc8537fffd1a59cb98dba98f3e32e16c639bec9d4829d910a"
+      "sha256": "d365de5ec6046c7e0ff274c8527b3598c0bf1560a9b3ffc675103d6b3912da4d"
     },
     {
       "idx": 74,
       "version": "7",
-      "when": 1787000000074,
-      "tag": "0074_finite_repository_session_withdrawal",
+      "when": 1787000000075,
+      "tag": "0075_default_users",
       "breakpoints": true,
-      "sha256": "7f5d25ad2b158eb488b746b375ad2b7e33e28ccdbc81318c5573fe377517cfed"
+      "sha256": "a4f7c22caf4f9dcb548cad3f3a069a0f66ea941a0b43f9fe2087b5f72803cce9"
     },
     {
       "idx": 75,
       "version": "7",
-      "when": 1787000000075,
-      "tag": "0075_human_authentication_results",
+      "when": 1787000000076,
+      "tag": "0076_harness_revision_settings",
       "breakpoints": true,
-      "sha256": "d8a027626a89246efdb5a49e173bd19a1bac87401850ff136723becbfea4c20f"
+      "sha256": "bb7a1b4480f0566ecf56f47f5789ba681994ffa2a5cba5eda14d38be8973eb7c"
     },
     {
       "idx": 76,
       "version": "7",
-      "when": 1787000000076,
-      "tag": "0076_native_browser_access",
+      "when": 1787000000077,
+      "tag": "0077_account_administration_policy",
+      "breakpoints": true,
+      "sha256": "7c27834941b7a38bc8537fffd1a59cb98dba98f3e32e16c639bec9d4829d910a"
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1787000000078,
+      "tag": "0078_finite_repository_session_withdrawal",
+      "breakpoints": true,
+      "sha256": "7f5d25ad2b158eb488b746b375ad2b7e33e28ccdbc81318c5573fe377517cfed"
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1787000000079,
+      "tag": "0079_human_authentication_results",
+      "breakpoints": true,
+      "sha256": "d8a027626a89246efdb5a49e173bd19a1bac87401850ff136723becbfea4c20f"
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1787000000080,
+      "tag": "0080_native_browser_access",
       "breakpoints": true,
       "sha256": "5ba98d253eb755b61548a60471475a45d704622059db76fe5b769461ab628aec"
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1787000000081,
+      "tag": "0081_retire_custom_runtime_roles",
+      "breakpoints": true,
+      "sha256": "f68d295732b712572994d3d6f212eac41d2a5e8cd9d9b6d02018cf68091724cf"
     }
   ],
   "initialSchemaStates": {
@@ -667,49 +707,47 @@
       "e667773ff50cc16fe4ca002923d2f4080f3a05ec9956c55fbe93468c9bd195a7",
       "3770b2c4b812f3c57c23efb5dba782cf9dead7c2624b3466f0f22f27e141a15b"
     ],
-    "1989ad2291a59e5d15e7f35fd008677449cac6cd11e653605b3d48675655dba9": [
-      "bbd3cd9111e30cea7ef14aef5b3e3931aec60153face63042c9637bac915f152",
-      "49d31158680d6c22d1e8672e582a6ea8518b7c6cb8c94125aabb550e111df220"
+    "b88ff5cca2d51acbc19b5136b296025e23bcccd8409524112afee4a123cbbb33": [
+      "c23ceb9e1743ab274321cb17a06e013f5a9c94fc2e40ec007a34edf5844f23f5",
+      "bfe43ec376c57f8c66e0a8018fafa03475793cc80ac4d0baa3b879f86090a9b7"
     ],
-    "b3d9b0b499a4ea4a0cab68cd2836ab6ceba96be82c3f2bb6faac5e7fcb2a06c4": [
-      "b4b910d5ee9a960c7e04e15f67de57099824a4520fc78d70e05a03784f2578cd",
-      "7bdc8785ed987aa51c70d912e72db9f8542f9bfe0203f8a1d1a3b5c4622eebbe"
+    "175a1ede94b2168d47f1c03dfee9b4960acde2563e6d2e68a73464f3c061604f": [
+      "11e87e79965268c2633bc112f5d6224a172b04c5c9d6cd67d36aa86772b26a90",
+      "aee40e1ce21de25a8fecc42f8e84c11a3303477603f4714a6b85143038fbec6c"
     ],
-    "451fc5103dcacb194c7decfd419da6444995d78ddbd4f44ee4f69217b4cb6c5b": [
-      "165f0af55446f21086a75defc11d8451bc06500493d3241db50dc19d3d93f486",
-      "3fcb47801057d81e978101111e1cc921b39e075c97b12e891aea3fc26de49a57"
+    "f3d67e2fa25e0ccccfa4e3ad612667f61e6cf56a8f64d6841ec9ac986a964cc0": [
+      "024c55872a2ff171e4a2e0f33194d7ed4e795ce8f43a0117779ccd8d4110750e",
+      "fb00ceed525a7b75a029c16b3c16e0febc87432295034f48d8327be2cf350b09"
     ],
-    "c1e2e44e89e14f9408c939d4e2caf72d49dabc200df617f52b11a7050c36828c": [
-      "9f1eb723dcad8f8641d7944efd0ddc2b498f763d1e0b3dc0bc69d4e73ce37b48",
-      "87764896563ff43de259eacd2a28427738f5554f664a98dd5b130b4b1f47a21f"
+    "530cabd8126e0b845ef524b362398d94e9b1a21bdaf92e2c685da1c63753504e": [
+      "79878f09f6affb1dc707634ed4f0870082efe9afec1bc1a6b659af3bc8ac51d6",
+      "3aa7ca60bbb44206e1c3350a119b73f840fa589a20ab26c610f81e23aeda1d84",
+      "eb80385b7101e1a7539f8c20b186ef1dd1355f051bc9fa1634a12fe27b6f9106",
+      "1339d10237befa371c96671fd50f30fd9e2cb48cd0b50050d5ef68ca2f7d2c98"
     ],
-    "c806edfa92f7889a92783f40ea6d0dbed281250ebdc632a363d724f12a2d1d33": [
-      "5c4f9b4c567040dd3cad250cccc2e5513971a6de45b4e165c7045a2f20d843ac",
-      "a66ee595b09ad279b59d53f39461675e433dfb37f2854ea2776a4c45b9bffbd1"
+    "57709694437c74efb1f39767137b76ff0221952d50f8874ec9b7b87b6d71a820": [
+      "c8a28a8c2402896d97578cb3e53af02cbc179e2481f7eb166948a59cfb6255c9",
+      "d5e4aa66bf39232fdafed15d8adb16037cf5563e0506f66c7b3f6b46891aaac7"
     ],
-    "9398601c17f3ae475fc41fafd162e6da4383fe37ac25318bd03efc7dfb161600": [
-      "ff76815181a0cb39335474ed1ed8f50e701e80d665423dd56bf3dc6efee27ed2",
-      "a2a3c52041ca2aa225251fb643895d1c60a928723e18f68c4453ce7bccc5c9e2"
+    "869f02f1001e12e23b145e5dbf3a46d69eff0c717a0700433ecab475edf2c385": [
+      "64bce18b9b0df97abd0fb918f383364e2f6dbf9d8c5372b1b505ac79d17ae626",
+      "a63432f7736de29875b513bbfd3301656566aa92296fa384bdc48d358f40fb92",
+      "8be68e9caed736c33ded6a75fd2b9fa24d09b813a665647984b1b40cdee3fa9d"
     ],
-    "d2bd6eeba2ea3063bd043a75e52699dbd79dd35187fa3ff1f2f111dfa71946f5": [
-      "6c519dd29ab8fd881584b88418eed28efd8b2a78e50ce3a4b0d0cdc979f42a4b",
-      "a26adb245177854014f7a6a8a20820910e781305e0ffd31481be828c13fdfbe6",
-      "cb091d1434a85f484fe9c0ea40e215c51b9b80f04c1544376a9991c0d5d28078"
-    ],
-    "3c4fbf128dd283e684211b88abf6c5dbd102463e7eec1dfcf5e7172180c611ed": [
-      "aa1c2ef6ac155ac55c5e3ecea6e14c69489d545893dcb05453df17ed9cb49d1a",
-      "35e58241d2983bd4fc147d33258696016190972b54fd75d58e2821f031facd06",
-      "e49f7d68ea7114a24cc7250d84eb8d98ec8253fcf486635c479888a109ea6733",
-      "6956ee10610cf9510a9e5c8f1322d3c6dcf73489118e2b3ca72c9549855538b5"
+    "c3400032dbff5f43c5a381df1a3fc5d78a010bd5a9123c334632428de15185ab": [
+      "73a09f97d07981a7de3915eca903df5b69e0d1dc8a67578f0652750581d168a4",
+      "175478b899165d7e989482d09f0bfc1c915e9ea250a7ab1fabee8376cd57c9cf",
+      "d6c0ac9f340ef4665bf2e810194a00ac25c661ad9e13e55ccce64782f52cef21",
+      "e2f0f68350492efdebce8bbb064428b1fd64d272eb3717e2651de66f829bb5d2"
     ]
   },
   "catalogs": {
-    "completed": "3c4fbf128dd283e684211b88abf6c5dbd102463e7eec1dfcf5e7172180c611ed",
     "empty": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "prePresetsMain": "7fe2e7ccc13ce974d03137b5117752ff03e7c001d2916d50c300ddbdf826207a",
     "main": "bd490d16dd23ec1ea722bb370155e9454fb52187bd2b16cd8a0fe277e3e41bde",
     "repositoryCredentials": "5f9359057412199ea7a5659bdedbef664fb6da7bcd99d7a552f01a5782b904ea",
     "workspaceSetup": "3d7801c345eea875fb79adba4e04a4e2b24bad49ffe6ada62cc58117c5cce134",
+    "completed": "530cabd8126e0b845ef524b362398d94e9b1a21bdaf92e2c685da1c63753504e",
     "repositoryRetention": "a66448129d9ae2adf076f1d7887d3c7151cdc68f635c6fac7984d4254604d074",
     "agentProvisioning": "baac9e369ace8610f96948c1a930e6387431b1d0a33cefa3893765e52f8f7a52",
     "backendCompleted": "a2ba6fc82fbf0047cea491efad4a9e58eacaed7c29ce8528accff331569c51dd",
@@ -735,27 +773,35 @@
     "preCredentialWithdrawalRequester": "50e7e165459306033af8d6aa074ad8d7df4fc2ff4065ef454b2f3f1a12768577",
     "preProvisioningDeploymentOutcome": "eb024f6c9697e8796d9633de0400495f41a2ad2378a2d8d6512feb7b99db9e73",
     "preComputePreparationFailureEvidence": "d04407ae6939193a1d9cb99e8fe6bf77d4cd1a2b38ff58650f1c4bd5034b18f9",
-    "preCredentialSourcePat": "5aa1681236a41d763405d596daeed3921a2b8932090534f6dacf85c488279f34",
-    "preComputeRevisionAdmission": "52b65cf1a9e0539f3c133d9a25f0da0ee8b2ca51f981934bef44e670134d8083",
-    "preHeldAuthenticationSession": "153f6ef879f86781ce3355594b5dca10364fb6d118c079280655242459e041b8",
-    "preCanonicalHarnessAuth": "f2ebd947c770ed1eab2628742752b924c203cdd038094d3f162db411099e2c8d",
-    "preSandboxPolicies": "2a66cf512e621405a10b1c8629303220523e1dcc2d2aa90bc857855ed1d26504",
-    "preSandboxPolicyAdministrator": "34374bccb6342bc15262d9d8e77abf1c3a0e317a2623b2bda541d1d06202a3ff",
-    "preCredentialProxy": "34374bccb6342bc15262d9d8e77abf1c3a0e317a2623b2bda541d1d06202a3ff",
-    "prePreparedAttemptSettlement": "df4fafcfd49395d0522b53a3b1a6abe828b53e91843a6d24d8cd0e9490aa84cc",
-    "preGatewayManagedMode": "ead0bf1743197edac2cd369f4822fec0d9686d4c215b8f6dcc16745c9addf155",
-    "preSelectedRepositorySet": "15676f224ccd3cbd54e1d541db393b12297e3b2aa8e8eb70b192b5350c4c3c59",
-    "preAgentDeployIntent": "fd7ca52d240d5431c76167a39aa5187cd3631d6dceee959b260f7c82cc1edf40",
-    "preAgentCredentialSourceLimit": "8706a0299f3ff74eb7c2b5861a746ded4ce6484ca8df4e617a8fd2e5061bb998",
-    "preAgentPluginDriver": "c74762d7f4d45b4215f42fcc8cf9e43d01fae03dbb80522d84c4e17370a2f7c3",
-    "preConnectionTemplates": "8fc3e20bcb36ad9b2afe8ab96077139b12b50c825dd18ff323603d0e0540b250",
-    "preSavedConnections": "1989ad2291a59e5d15e7f35fd008677449cac6cd11e653605b3d48675655dba9",
-    "preDefaultUsers": "b3d9b0b499a4ea4a0cab68cd2836ab6ceba96be82c3f2bb6faac5e7fcb2a06c4",
-    "preNativeBrowserAccess": "d2bd6eeba2ea3063bd043a75e52699dbd79dd35187fa3ff1f2f111dfa71946f5",
-    "preHarnessOverrides": "451fc5103dcacb194c7decfd419da6444995d78ddbd4f44ee4f69217b4cb6c5b",
-    "preAccountAdministrationPolicy": "c1e2e44e89e14f9408c939d4e2caf72d49dabc200df617f52b11a7050c36828c",
-    "preFiniteRepositorySessionWithdrawal": "c806edfa92f7889a92783f40ea6d0dbed281250ebdc632a363d724f12a2d1d33",
-    "preHumanAuthenticationResults": "9398601c17f3ae475fc41fafd162e6da4383fe37ac25318bd03efc7dfb161600"
+    "preRuntimeRoles": "5aa1681236a41d763405d596daeed3921a2b8932090534f6dacf85c488279f34",
+    "preHeldAuthenticationSession": "edb33a9589120fe790330bb931ab1abb6dafea4d6fb93769678317b33223db18",
+    "preGatewayOutbound": "4adecbe08d7bf8221a5fb047ab5d2d7fc741ecd7c78f4e70056e87864783d1d5",
+    "preEmbeddedChannelOutbound": "e77455c678262e4f58e8a12e8c28ce59680f35812c7aeab063502108e5fbe768",
+    "preCredentialSourcePat": "21215a502a06304661ea33897f38fe66ef92d35a7a39b464ffbd5b1c739f2410",
+    "preComputeRevisionAdmission": "06d47d8adaa9f0d6340af6813097144b98e94825990b0bedb65a16d53f83365f",
+    "preCanonicalHarnessAuth": "78586d305c6ad7382894eed8a2733832252bab600d9c28ff1d9fa2c0f583c83c",
+    "preSandboxPolicies": "bf9ddb2090b96332b6e8525707ec4bac98ca77813f51f54c1048abd4e02c92f0",
+    "preSandboxPolicyAdministrator": "b7cae22ff81eca9f73a436b60cac4f8ec26d1674b0d568f1e6073c7a8308882b",
+    "publishedIntegration": "b7cae22ff81eca9f73a436b60cac4f8ec26d1674b0d568f1e6073c7a8308882b",
+    "preCredentialProxy": "b7cae22ff81eca9f73a436b60cac4f8ec26d1674b0d568f1e6073c7a8308882b",
+    "preRepositoryCredentialAuthority": "9be68dc227ceef4c6a5c75cf013760227f699cb8187b054779885e4ae92842e0",
+    "preCredentialDeliveryCustody": "0cf06aa00293590eebd7ca8b540b2b6bec058c56a11f7ea68d12d59d877493c5",
+    "prePreparedAttemptSettlement": "7222f681ee4a95c3c1dece3d1b580c3450c965d8c38e539b888759305ed9691d",
+    "preGatewayManagedMode": "80488b4467020cb226ae44bf9cd27c12cb819d86dd310b0e58496a671fcc423d",
+    "preSelectedRepositorySet": "9877988f8bcd1f5112ad637b6674bd36c31bc815de55f0e6d2fbbac9344d261d",
+    "preAgentDeployIntent": "702d71fd350d70b9135f3a7232c638f78640a1cbdc6dbf563b978d44382189b1",
+    "preAgentCredentialSourceLimit": "ef93e71de1f6c50730a403e24ea037c9f730ba339703305add1a52e93a5ad2dc",
+    "preAgentPluginDriver": "24db64540d6831729f5ba4756aa7eb83b462fc580fffa63a25a9c31711c03b6c",
+    "preInstallationGatewayProxy": "175a1ede94b2168d47f1c03dfee9b4960acde2563e6d2e68a73464f3c061604f",
+    "preConnectionTemplates": "b88ff5cca2d51acbc19b5136b296025e23bcccd8409524112afee4a123cbbb33",
+    "preSavedConnections": "06a312be715ea1c781f0d618e6b6a30d1422a46937144eec99f4d4bd13fcc468",
+    "preDefaultUsers": "2be551a670203d7a2ecd8c7ad87d4bc702d3d7598092b19c415d9d60ffcf2043",
+    "preHarnessOverrides": "6cf9137a55b230d4e3a3e70d39148ee5e9a866af4598f2984f670b3140e91c6e",
+    "preAccountAdministrationPolicy": "7a0e6c3179908d0e6b232098480265588b21775a6f43c47b668c765bb86d4180",
+    "preFiniteRepositorySessionWithdrawal": "f3d67e2fa25e0ccccfa4e3ad612667f61e6cf56a8f64d6841ec9ac986a964cc0",
+    "preHumanAuthenticationResults": "57709694437c74efb1f39767137b76ff0221952d50f8874ec9b7b87b6d71a820",
+    "preNativeBrowserAccess": "869f02f1001e12e23b145e5dbf3a46d69eff0c717a0700433ecab475edf2c385",
+    "preRuntimeRoleRetirement": "c3400032dbff5f43c5a381df1a3fc5d78a010bd5a9123c334632428de15185ab"
   },
   "ledgerCatalogs": {
     "initialized": "62946da6b1fc2b06df09e97dda4cf1831f170a2f3d5ff35a9f107af206c425dc",
@@ -764,7 +810,7 @@
   "catalogEvidence": {
     "postgres": "18.6",
     "drizzleOrm": "0.45.4",
-    "method": "Historical catalogs retain their recorded qualification. The catalog through 0075 was measured on PostgreSQL 18.6 after stock Drizzle execution with occ_migrator. Logical restore aliases were measured using pg_dump and pg_restore for canonical and Provider histories through 0075 and upgraded canonical restores from prefixes 51 and 74. The native catalog through 0076 was measured on PostgreSQL 18.6 with stock Drizzle. Its logical restore aliases were measured from completed canonical and Provider archives and restored canonical prefixes 51, 74, and 75 upgraded to 0076."
+    "method": "Historical catalogs retain their recorded qualification. The completed catalog and logical restore were measured on PostgreSQL 18.6 after stock Drizzle execution with occ_migrator and effective occ_app privileges."
   },
   "compatibleLineages": {
     "providerCompleted": {

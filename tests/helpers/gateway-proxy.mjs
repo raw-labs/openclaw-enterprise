@@ -21,7 +21,13 @@ import { temporaryDirectory } from "./temporary-directory.mjs";
  */
 export async function startGatewayProxy(
   t,
-  { fixedPort = false, upstreamPort, upstreamHosts = ["slack.com"], allowedHosts } = {},
+  {
+    fixedPort = false,
+    upstreamPort,
+    upstreamHosts = ["slack.com"],
+    allowedHosts,
+    dnsAnswers = {},
+  } = {},
 ) {
   const preload =
     upstreamPort === undefined
@@ -36,10 +42,6 @@ export async function startGatewayProxy(
       port,
       allowedHosts,
     ).finally(() => reservation?.release());
-    if (expectStartupFailure) {
-      assert.equal(proxy.port, undefined, "invalid proxy configuration must fail before listening");
-      return proxy;
-    }
     if (proxy.port === undefined && fixedPort && attempt < 5 && /EADDRINUSE/.test(proxy.stderr())) {
       continue;
     }
@@ -86,7 +88,7 @@ async function spawnGatewayProxy(t, preload, port, allowedHosts) {
   return { child, port: listening, stderr: () => stderr };
 }
 
-async function writeDnsFixture(t, upstreamPort, upstreamHosts) {
+async function writeDnsFixture(t, upstreamPort, upstreamHosts, dnsAnswers) {
   const directory = await temporaryDirectory(t, "openclaw-gateway-proxy-test-");
   const path = join(directory, "dns-fixture.mjs");
   await writeFile(

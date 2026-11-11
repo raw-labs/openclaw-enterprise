@@ -392,14 +392,16 @@ spec:
             - name: NODE_EXTRA_CA_CERTS
               value: /etc/openclaw/gateway-ca/ca.crt
             {{- end }}
-            - name: OCC_AGENT_NATIVE_ADMIN_ENABLED
-              value: {{ ternary "true" "false" $.Values.agentNativeAdmin.enabled | quote }}
-            {{- if $.Values.agentNativeAdmin.enabled }}
-            - name: OCC_AGENT_NATIVE_ADMIN_DOMAIN
-              value: {{ $.Values.agentNativeAdmin.domain | quote }}
-            {{- end }}
             - name: OCC_AUTH_BASE_URL
               value: {{ $.Values.auth.baseUrl | quote }}
+            - name: OCC_AGENT_NATIVE_ADMIN_ENABLED
+              value: {{ ternary "true" "false" $.Values.agentNativeAdmin.enabled | quote }}
+            - name: OCC_AGENT_NATIVE_ADMIN_DOMAIN
+              value: {{ $.Values.agentNativeAdmin.domain | quote }}
+            {{- if eq $.Values.agentNativeAdmin.sessionMode "host-only-exchange" }}
+            - name: OCC_AGENT_NATIVE_ADMIN_SESSION_MODE
+              value: "host-only-exchange"
+            {{- end }}
             {{- if eq $component "api" }}
             - name: OCC_HOST
               valueFrom:
@@ -408,8 +410,6 @@ spec:
             - name: OCC_PORT
               value: {{ $.Values.api.port | quote }}
             {{- include "openclaw.secretEnv" (dict "name" "OCC_AUTH_SECRET" "secretName" $.Values.auth.secretName "key" $.Values.auth.secretKey) | nindent 12 }}
-            - name: OCC_AUTH_BASE_URL
-              value: {{ $.Values.auth.baseUrl | quote }}
             {{- if and $.Values.auth.google $.Values.auth.google.enabled }}
             {{- include "openclaw.secretEnv" (dict "name" "OCC_AUTH_GOOGLE_CLIENT_ID" "secretName" $.Values.auth.google.secretName "key" $.Values.auth.google.clientIdKey) | nindent 12 }}
             {{- include "openclaw.secretEnv" (dict "name" "OCC_AUTH_GOOGLE_CLIENT_SECRET" "secretName" $.Values.auth.google.secretName "key" $.Values.auth.google.clientSecretKey) | nindent 12 }}
@@ -475,16 +475,8 @@ spec:
             {{- end }}
             - name: OCC_API_HTTPS_EGRESS_OPEN
               value: {{ include "openclaw.api.httpsEgressOpen" $ | quote }}
-            - name: OCC_AGENT_NATIVE_ADMIN_ENABLED
-              value: {{ ternary "true" "false" $.Values.agentNativeAdmin.enabled | quote }}
             - name: OCC_AGENT_RUNTIME_LOGS_ENABLED
               value: {{ ternary "true" "false" $.Values.agentRuntimeLogs.enabled | quote }}
-            - name: OCC_AGENT_NATIVE_ADMIN_DOMAIN
-              value: {{ $.Values.agentNativeAdmin.domain | quote }}
-            {{- if eq $.Values.agentNativeAdmin.sessionMode "host-only-exchange" }}
-            - name: OCC_AGENT_NATIVE_ADMIN_SESSION_MODE
-              value: "host-only-exchange"
-            {{- end }}
             {{- else }}
             - name: OCC_WORKER_READINESS_PATH
               value: /run/openclaw-worker/ready

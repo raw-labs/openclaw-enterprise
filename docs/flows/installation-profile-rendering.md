@@ -224,7 +224,7 @@ opt-in adds the GitHub Backend, Repo Driver,
 and worker peer expected by the broker sidecar.
 
 An explicit `channels.experimentalEmbeddedChannels` value reaches Compute's
-`runtime.channels` for either proxy path. Omission leaves the default refusal;
+`runtime.proxy` for either proxy path. Omission leaves the default refusal;
 true adds a shared-credential, unsupported-production preflight warning. Agent
 native JSON cannot set this Installation option. Its bytes enter the paired checksum.
 

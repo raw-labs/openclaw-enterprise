@@ -8968,7 +8968,7 @@ test("dedicated Codex projects the account-owned token through the common PAT lo
   assert.equal(agentEnvironment.SLACK_BOT_TOKEN, undefined);
   assert.equal(agentEnvironment.MSTEAMS_APP_PASSWORD, undefined);
 
-  driver.validateEnabledChannels({
+  driver.enabledChannels({
     configuration: { channels: { slack: {}, msteams: {} } },
     harness: { id: "codex", version: "1.0.0", mode: "dedicated" },
     harnessAuth: apiKeyAuth,
@@ -12336,7 +12336,7 @@ test("native channel providers require Secret bindings and project guarded proxy
         configuredRevision.secretBindings,
       ),
     );
-    driver.validateEnabledChannels(configuredRevision);
+    driver.enabledChannels(configuredRevision);
     const expectedSecretEnvironment = expectedSecrets.map((name) =>
       secretEnvironment.find((item) => item.name === name),
     );
@@ -12451,7 +12451,7 @@ test("native channel providers require Secret bindings and project guarded proxy
     secretBindings,
     secretDriverId: "secret-kubernetes",
   };
-  managedDriver.validateEnabledChannels(managedRevision);
+  managedDriver.enabledChannels(managedRevision);
   const managedGateway = managedDriver.deployment(
     `gateway-${suffix}`,
     { namespaceId: tenant.id, agentId },
@@ -24084,7 +24084,7 @@ test("embedded channels require a trusted boolean and retain native provider sel
       options({
         runtime: {
           ...runtime,
-          channels: {
+          proxy: {
             ...channels,
             ...(flag === undefined ? {} : { experimentalEmbeddedChannels: flag }),
           },
@@ -24095,7 +24095,7 @@ test("embedded channels require a trusted boolean and retain native provider sel
       () =>
         driver.validateHarnessAuth(embedded, apiKeyAuth, {
           ...configuration,
-          runtime: { channels: { experimentalEmbeddedChannels: true } },
+          runtime: { proxy: { experimentalEmbeddedChannels: true } },
         }),
       /channels require a dedicated Agent workload/,
     );
@@ -24106,7 +24106,7 @@ test("embedded channels require a trusted boolean and retain native provider sel
       () =>
         createKubernetesComputeDriver(
           options({
-            runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: flag } },
+            runtime: { ...runtime, proxy: { ...channels, experimentalEmbeddedChannels: flag } },
           }),
         ),
       (error) => error.name === "ConfigurationValidationError",
@@ -24114,7 +24114,7 @@ test("embedded channels require a trusted boolean and retain native provider sel
   }
   const trial = createKubernetesComputeDriver(
     options({
-      runtime: { ...runtime, channels: { ...channels, experimentalEmbeddedChannels: true } },
+      runtime: { ...runtime, proxy: { ...channels, experimentalEmbeddedChannels: true } },
     }),
   );
   assert.doesNotThrow(() => trial.validateHarnessAuth(embedded, apiKeyAuth, configuration));
@@ -24134,6 +24134,9 @@ test("embedded channels require a trusted boolean and retain native provider sel
         agents: { defaults: { model: "openrouter/model" } },
       }),
     /compatible model provider/,
+  );
+});
+
 test("Installation-selected native Gateway proxy rejects Agent overrides in admission", () => {
   const driver = createKubernetesComputeDriver(
     options({

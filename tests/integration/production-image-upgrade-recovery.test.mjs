@@ -7255,7 +7255,7 @@ await describe("production image upgrade recovery", { concurrency: 2 }, async ()
       { name: "OCC_CHANNEL_DIRECTORY_PROXY_URL", value: "http://198.51.100.25:3128" },
     ];
     await writeFile(join(f.directory, "state.json"), JSON.stringify(state));
-    const run = (...args) => f.run("--candidate-values", candidatePath, ...args);
+    const run = (...args) => f.run(...args);
     const pending = await loseHelmResponseWithCompletedHook(f, run);
     return { f, run, pending, policy, key: `${policy.kind}/${policy.metadata.name}` };
   }
@@ -7349,9 +7349,7 @@ await describe("production image upgrade recovery", { concurrency: 2 }, async ()
     initial.recoveryBaselineResources = [previous];
     initial.recoveryCandidateResources = [candidate];
     await writeFile(join(f.directory, "state.json"), JSON.stringify(initial));
-    await f.failNext("lost-helm-response");
-    await assert.rejects(f.run(), injectedFault);
-    const pending = await completedHookInPendingRelease(f);
+    const pending = await loseHelmResponseWithCompletedHook(f);
     const run = (...args) => f.run(...args);
     pending.recoveryResources[
       "Deployment/configuration-worker"

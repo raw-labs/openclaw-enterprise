@@ -1507,7 +1507,7 @@ test(
       network,
       runtime: {
         ...runtime,
-        channels: { ...runtime.channels, experimentalEmbeddedChannels: true },
+        proxy: { ...runtime.proxy, experimentalEmbeddedChannels: true },
       },
     });
     const optedIn = await createProvisioningApiFixture(context, driver, controller.authentication);
@@ -1598,7 +1598,7 @@ test(
       );
       assert.equal(
         environment.find(({ name }) => name === "HTTPS_PROXY").value,
-        runtime.channels.proxyUrl,
+        runtime.proxy.proxyUrl,
       );
       assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
@@ -1632,7 +1632,7 @@ test(
       network,
       runtime: {
         ...runtime,
-        channels: { ...runtime.channels, experimentalEmbeddedChannels: true },
+        proxy: { ...runtime.proxy, experimentalEmbeddedChannels: true },
       },
     });
     const withoutCallback = await createProvisioningApiFixture(
