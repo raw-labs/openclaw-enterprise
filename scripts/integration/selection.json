@@ -343,6 +343,17 @@
         "tests/helpers/ci-prepare-fixture-command.mjs"
       ],
       "notes": "Include the WebKit installer in ordered first-failure reporting. A cancelled preparation with no created cluster gets the real k3d empty inventory from its fixture; production cleanup continues rejecting malformed inventories."
+    },
+    {
+      "id": "retirement-preserves-current-policy-authority",
+      "pullRequests": [1],
+      "commits": ["9776468292b730fb3d0a3d6910d56606d0b2c34f"],
+      "paths": [
+        "migrations/0081_retire_custom_runtime_roles.sql",
+        "migrations/meta/_canonical-history.json",
+        "tests/integration/postgres-migration-compatibility.test.mjs"
+      ],
+      "notes": "The newly introduced retirement migration must remove only use, not the supported manage_policy action. Upgrade regression seeds an existing policy denial before retirement and proves it survives. Remeasure PostgreSQL18.6 native/logical-restored catalogs; no changes to the starting 77 SQL files or journal/canonical entry metadata."
     }
   ],
   "publishedMigrationPrefix": {
@@ -386,10 +397,10 @@
     },
     {
       "path": "migrations/0081_retire_custom_runtime_roles.sql",
-      "commit": "534ac074ab6fc255a120354060ab6baf8e60fcbd",
+      "commit": "9776468292b730fb3d0a3d6910d56606d0b2c34f",
       "pullRequests": [1],
-      "sha256": "f68d295732b712572994d3d6f212eac41d2a5e8cd9d9b6d02018cf68091724cf",
-      "reason": "Remove retired role assignments/use permissions without escalation; retain existing independent operate/administer grants."
+      "sha256": "a4ee21806910fccf314839a9ccf6dc1909c858cdd8e3a369978564e561126635",
+      "reason": "This batch retirement removes obsolete runtime assignments/use permissions without escalation; preserves independent operate/administer grants and current manage_policy restrictions. Corrected before batch qualification; the starting 77-entry published ledger is unchanged."
     }
   ],
   "upstreamMigrationMappings": [
@@ -835,7 +846,8 @@
       "environment": "Task-local Go, NSS tools and Chromium shared libraries. TLS browser wrapper preserves sandboxing and only supplies shared-library lookup. CI runner diagnostics use env -u OPENCLAW_SERVICE_MARKER because its inherited value aliases ordinary public service names. No product assertion or security probe weakened.",
       "repair": "After ordering repair: four real PostgreSQL/Kubernetes ownership/lifecycle cases, three real provisioning cases including embedded channels through redeploy/stop, and retained-job case passed without skips (eight total). All 64 PostgreSQL provisioning cases passed with explicit Gateway defaults assertions. Host-only chart parity and QA runner selection each passed. Lint/typecheck, docs, formatting and existing selection checks passed.",
       "channelComposeRepair": "Compose/development packaging: 76 passed. Configuration API: 286 passed. Credential/save/disabled-reason browser files: 103 passed; seven targeted browser regressions passed. CI preparation: 107 passed. No skips. Teams directory Chromium passed; local WebKit host prerequisite missing, with real WebKit installation added to its CI lane. Lint, typecheck, formatting, docs, workspace isolation and suite audit passed.",
-      "ciFixtureRepair": "K3d preparation/cancellation: 59 passed, zero skipped. CI impact/policy: 77 passed, zero skipped with the task-local real millisecond clock adapter (host date emits nanoseconds for %s%3N). Lint/format passed. Prior remote head passed the Teams directory browser file with actual WebKit installed, plus both conformance/browser functional regressions; remaining failures were these two CI-wiring/fixture issues."
+      "ciFixtureRepair": "K3d preparation/cancellation: 59 passed, zero skipped. CI impact/policy: 77 passed, zero skipped with the task-local real millisecond clock adapter (host date emits nanoseconds for %s%3N). Lint/format passed. Prior remote head passed the Teams directory browser file with actual WebKit installed, plus both conformance/browser functional regressions; remaining failures were these two CI-wiring/fixture issues.",
+      "restrictionRepair": "Real PostgreSQL migration/restore suite: 206 passed, zero skipped. Real sandbox-policy HTTP/database file: 33 passed, zero skipped. Existing manage_policy restriction survives upgrade while use and runtime assignments retire without escalation. Original 77 migration SQL files/journal/canonical entries verified identical. Native/full and historical logical restores remeasured. Lint, typecheck, formatting, suite audit passed."
     },
     "limits": [
       "Exact-head remote qualification follows push; local tests do not establish native image or real cluster results.",
@@ -856,6 +868,11 @@
         "commit": "d92661adb93c7e5a3f3ba075a91919dd92783a6b",
         "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43044519688",
         "notes": "Functional browser tests, including real WebKit Teams directory selection, passed. CI summary needs every consequential step ID and conclusion in order. Cancellation raced before fixture cluster creation, exposing an invalid mock inventory [{}] instead of real empty inventory []; preserve production rejection and fix the fixture."
+      },
+      {
+        "commit": "4c2cc560ddf628f39bc818cbf5f1bc8886a2610e",
+        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43046967671",
+        "notes": "Superseded before qualification. PostgreSQL platform on predecessor d92661adb (run43044519688, job130604976737) exposed the same new retirement SQL omitting manage_policy from the restriction action set. Correct this batch migration and catalog evidence, extend the real upgrade case; preserve all 77 starting entries. Failed unqualified candidate receipts are not an accepted release history."
       }
     ]
   },
