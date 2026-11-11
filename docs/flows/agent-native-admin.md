@@ -109,6 +109,24 @@ deployment, generation 2 enables `controlUi`, pins origins, and grants
 Identity grants supply admin independently of device scopes.
 An existing helper-owned name cannot change this selection.
 
+### 0.5. Deployment admission prepares the Agent copy
+
+`apps/controller/src/gateway/native-admin-origin.ts:nativeAdminOriginResolver`
+`packages/occ/src/index.ts:deployAgentWithAuthorization`
+`apps/controller/src/drivers/compute/kubernetes/index.ts:configureAgent`
+
+API and worker derive trusted Installation origins through `nativeAdminTarget`.
+Helm supplies matching inputs. For the Compose/OpenShell profile,
+`compose.native-admin.yaml:services` supplies the same enablement, Agent domain
+and public HTTPS origin to the controller and Kubernetes worker. Cookie settings
+remain API-only. Deployment and provisioning pass the allocated
+Agent and frozen Sandbox copy to Compute through `agentRuntimeConfiguration`.
+Agent save remains unchanged. Kubernetes prepares gateway identity, device
+approval and exact origins; conflicts refuse admission and opt-outs stay disabled.
+OCC then applies logging and validation, freezing the result in an Agent revision.
+The source Configuration and history stay unchanged. `admitRevision` records
+separate Compute metadata; the runtime renders a writable copy.
+
 ### 1. Console renders native admin availability
 
 `apps/controller/src/console/agents/native-admin.mts:renderNativeAdminAccess`
@@ -295,6 +313,7 @@ admin Configuration remains Pod-local.
 
 ## Related docs
 
+- [Proposed Compute preparation contract](../../specs/rfcs/0024-native-admin-deployment-preparation.md)
 - [Agent native admin UI](../reference/agent-native-admin.md)
 - [Platform console](../reference/console.md#open-the-native-admin-ui)
 - [Gateway routing with Envoy](../reference/gateway-routing.md#native-admin-ui-routing)

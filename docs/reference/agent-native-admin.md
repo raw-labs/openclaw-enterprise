@@ -60,7 +60,7 @@ Browser preparation does not change the creator's Agent permissions.
 
 ## Requirements
 
-- `agentNativeAdmin.enabled: true` in Helm, which sets `OCC_AGENT_NATIVE_ADMIN_ENABLED=true` on the API.
+- `agentNativeAdmin.enabled: true` in Helm, which sets `OCC_AGENT_NATIVE_ADMIN_ENABLED=true` on the API and worker.
 - `agentNativeAdmin.domain` set to the Agent host suffix, such as `agents.oce.example.com`, without scheme, wildcard, port, or path. Helm passes it as `OCC_AGENT_NATIVE_ADMIN_DOMAIN`. Use a previously unused DNS suffix for the first pilot rollout; the proxy blocks new service-worker registration but does not evict service workers that a prior experiment registered on the same origin.
 - HTTPS Console and Agent DNS hosts that share a non-public suffix. In shared-cookie mode OCC derives the cookie domain automatically; see [shared sessions](authentication.md#native-admin-shared-sessions). The Agent suffix is required even when browser access is disabled.
 - Private gateway routing (enabled by default). [Prepare its prerequisites](../guides/deploy/workspace-routing.md#requirements) and [Envoy routing](gateway-routing.md) before installation. Helm rejects native admin when routing is disabled; the API needs each Agent's private route.
@@ -73,6 +73,37 @@ Local development uses the existing loopback HTTPS proxy for Console sessions in
 Compose and Kubernetes-only profiles. Compose with Kubernetes Compute and
 OpenShell also enables native Agent routing. The first-Agent helper’s
 `--control-ui` option supplies the Agent’s native configuration.
+
+## First-deployment configuration
+
+With Installation access and private Kubernetes routing enabled, OCC prepares
+native administration when `gateway.controlUi.enabled` is `true`. Both Standard
+Presets enable it. At deployment, Kubernetes Compute adds its trusted-proxy
+identity, administrator device approval, exact Agent `allowedOrigins` entry and
+`gateway.publicOrigin`. OCC derives origins from Installation, Namespace and
+Agent IDs, preserving public scheme and port. Guided provisioning uses the
+same admission path after Agent allocation.
+
+The immutable Agent revision receives this policy. Reusable Configuration
+values/generations and historical revisions stay unchanged. Agents sharing a
+Configuration receive separate origins; redeployment does not accumulate sibling
+origins. Existing Agents adopt it on their next explicit deployment, without an
+automatic rollout.
+
+Disabled or omitted UI, disabled device approval or disabled Installation access
+leaves policy unprepared. Unsafe device-auth or host-header fallback settings do
+not enable managed access. Conflicting authentication, approval scopes,
+`publicOrigin`, wildcard origins or another origin inside the Agent domain
+refuses deployment with a setting-specific message. This includes the Console
+origin when its hostname is under the Agent suffix: the browser opens the native
+UI at the Agent origin. Omit managed origins from reusable Configurations.
+Compatible SecretRefs, loopback policy, other exact origins, model, Harness,
+plugin settings and Secret bindings are preserved. Drivers without the hook
+retain existing availability requirements.
+
+This prepares full native administrator authority, including its supported
+terminal. It adds no OCE grants, changes no native tool restrictions and does not
+support external-sign-in profiles.
 
 ## Authorization and availability
 

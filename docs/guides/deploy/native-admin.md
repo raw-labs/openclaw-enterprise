@@ -140,16 +140,14 @@ a duplicate-cookie refusal. See [shared sessions](../../reference/authentication
 
 For host-only exchange, verify `OCC_AGENT_NATIVE_ADMIN_SESSION_MODE=host-only-exchange` is present and `OCC_AUTH_COOKIE_DOMAIN` is absent. The Console session cookie must have no `Domain` attribute and must not be sent to the Agent host. **Open chat** or **Open Agent UI** establishes a separate host-only Agent cookie; see [session exchange](../../reference/agent-native-admin.md#host-only-session-exchange).
 
-Kubernetes Compute renders baseline gateway trust from Installation settings.
-Native admin availability still checks the explicit Agent policy below; keep
-its matching identity fields and opt-in settings in the saved Configuration.
+<a id="configure-each-agent"></a>
 
-## Configure each Agent
+## Deploy each Agent
 
 For a new Agent, use **Enable browser chat** on Create Agent. Use the procedure below for existing Agents after the API feature and wildcard route are enabled. Native browser availability requires the Agent's native configuration to trust the exact derived Agent origin. In an existing authenticated console browser session, open the status URL before the final compatible redeploy:
 
 ```text
-https://occ.example.com/namespaces/<namespaceId>/agents/<agentId>/native-admin
+GET /namespaces/<namespaceId>/agents/<agentId>/native-admin
 ```
 
 For browser devtools, the same check is:
@@ -193,7 +191,7 @@ Keep existing model, Harness, channel, gateway, Secret reference, and allowed or
 
 The editor preserves Secret bindings. If someone saves a newer Configuration first, OCC refuses your stale save. Choose **Reload draft**, check your edits against the current values, then save only the changes you still intend. See [Configuration update conflicts](../../reference/configuration.md#create-read-update-and-delete) for the API contract.
 
-Do not set unsupported gateway authentication fields, `controlUi.dangerouslyDisableDeviceAuth`, or `controlUi.dangerouslyAllowHostHeaderOriginFallback`. Deploy the updated Agent revision, then call the status route again and expect `data.status: "available"` with the same `data.origin`. For `stopped` or `unavailable`, follow the [troubleshooting checks](#troubleshooting) before changing configuration.
+For uncertain saves, follow [Configuration editor recovery](../console/configuration-plugins-and-files.md#configuration-tab).
 
 Keep durable configuration changes in OCE. For compatible Kubernetes gateways,
 native edits affect a Pod-local copy and are discarded when the Pod is replaced

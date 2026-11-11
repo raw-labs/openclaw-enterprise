@@ -203,6 +203,12 @@ export type RepositoryWorkerRestartDisposition =
   "original-worker-required" | "reverification-supported" | "not-applicable" | "unknown";
 
 export interface ComputeDriver extends Driver {
+  /** Transform only an allocated Agent's admitted revision, not its reusable Configuration. */
+  configureAgent?(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+    context: { readonly nativeAdminOrigin?: string },
+  ): Readonly<OpenClawConfigurationDocument>;
+
   /** Read existing owner evidence without adopting, refreshing, or verifying a live execution. */
   repositoryWorkerRestartDisposition?(
     revision: Readonly<AgentRevision>,

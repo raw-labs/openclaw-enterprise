@@ -44,7 +44,7 @@ console uses the current origin and has no separate environment settings.
 - `OCC_AUTH_TRUSTED_PROXY_CIDRS` — Production-only, off by default: comma-separated ingress or load balancer CIDRs. IPv4-mapped IPv6 counts as IPv4 (prefix 1–32); entries covering every IPv4 or every IPv6 address are refused. Trusted peers may report client addresses for sign-in limits; see [trusted proxies](../settings/production.md#external-sign-in-and-trusted-proxies).
 - `OCC_AUTH_TRUSTED_PROXY_PRESET` — `ingress-nginx` (default) or `aws` (Application Load Balancer), both reading `X-Forwarded-For`, or `generic`. A Network Load Balancer that preserves client addresses needs no trusted proxy.
 - `OCC_AUTH_CLIENT_IP_HEADER` — Lowercase header carrying the client address, such as `x-real-ip`; required by `generic` only.
-- `OCC_AGENT_NATIVE_ADMIN_ENABLED` — Enables the Agent native admin pilot; default: `false`.
+- `OCC_AGENT_NATIVE_ADMIN_ENABLED` — Enables the Agent native admin pilot and API/worker deployment preparation; default: `false`.
 - `OCC_AGENT_RUNTIME_LOGS_ENABLED` — `false` makes the Agent runtime status and log routes answer `501`; default: `true`. Set by the chart's `agentRuntimeLogs.enabled`.
 - `OCC_AGENT_NATIVE_ADMIN_SESSION_MODE` — `shared-cookie` (default) or guarded OIDC `host-only-exchange`; see [native access](../agent-native-admin.md#host-only-session-exchange).
 - `OCC_AGENT_NATIVE_ADMIN_DOMAIN` — Agent hostname suffix; required for shared browser sessions even when native access is disabled.
