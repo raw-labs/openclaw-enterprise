@@ -365,6 +365,17 @@
         "tests/integration/runtime-image-startup.test.mjs"
       ],
       "notes": "Use the generic Gateway proxy helper with exact Teams media hosts; share only synthetic certificates with the non-root image. Simulate public DNS and numeric routing only inside the disposable TLS fixture; preserve production private-address rejection, host policy and exact Codex transport lifecycle assertions."
+    },
+    {
+      "id": "native-smoke-import-current-docker-cli",
+      "pullRequests": [],
+      "commits": ["5a1c1c8356947529c6286a592dcde06858b3b40f"],
+      "paths": [
+        "scripts/ci/container-release.mjs",
+        "tests/integration/container-release.test.mjs",
+        "docs/flows/container-publication.md"
+      ],
+      "notes": "Use Skopeo Docker-archive conversion and the installed Docker CLI instead of the old direct-daemon client. Preserve converted/loaded config identity, ordered layer verification, native architecture, sandbox/startup/version probes and platform receipt gates. No runtime recipe, source pin, security boundary or publication authorization changed."
     }
   ],
   "publishedMigrationPrefix": {
@@ -859,7 +870,8 @@
       "channelComposeRepair": "Compose/development packaging: 76 passed. Configuration API: 286 passed. Credential/save/disabled-reason browser files: 103 passed; seven targeted browser regressions passed. CI preparation: 107 passed. No skips. Teams directory Chromium passed; local WebKit host prerequisite missing, with real WebKit installation added to its CI lane. Lint, typecheck, formatting, docs, workspace isolation and suite audit passed.",
       "ciFixtureRepair": "K3d preparation/cancellation: 59 passed, zero skipped. CI impact/policy: 77 passed, zero skipped with the task-local real millisecond clock adapter (host date emits nanoseconds for %s%3N). Lint/format passed. Prior remote head passed the Teams directory browser file with actual WebKit installed, plus both conformance/browser functional regressions; remaining failures were these two CI-wiring/fixture issues.",
       "restrictionRepair": "Real PostgreSQL migration/restore suite: 206 passed, zero skipped. Real sandbox-policy HTTP/database file: 33 passed, zero skipped. Existing manage_policy restriction survives upgrade while use and runtime assignments retire without escalation. Original 77 migration SQL files/journal/canonical entries verified identical. Native/full and historical logical restores remeasured. Lint, typecheck, formatting, suite audit passed.",
-      "runtimeProxyFixtureRepair": "Reproduced both image-lane failures using the SHA/config/digest-verified CI runtime artifact from 5b41445f5. Same genuine image after fixture repair: Teams guarded download and scoped Codex transport cases both passed, zero skips. Proxy conformance: 15 passed, zero skips. Lint, typecheck, formatting and suite audit passed. No product code, security boundary, runtime source pin or new flow changed."
+      "runtimeProxyFixtureRepair": "Reproduced both image-lane failures using the SHA/config/digest-verified CI runtime artifact from 5b41445f5. Same genuine image after fixture repair: Teams guarded download and scoped Codex transport cases both passed, zero skips. Proxy conformance: 15 passed, zero skips. Lint, typecheck, formatting and suite audit passed. No product code, security boundary, runtime source pin or new flow changed.",
+      "nativeImportRepair": "Existing adversarial loaded-image substitution regression and release harness: 23 passed, zero skipped. Same Skopeo1.4.1 fails direct-daemon transport and passes archive/CLI. Genuine native AMD64 runtime artifact from beae39758/run43055016659: sealed blob/receipt/config/layer identity verified and Node24.22.1 started after repaired import. Lint, typecheck, formatting, docs/link/length checks, workspace isolation and suite audit passed. This local import proof is not full native runtime smoke qualification."
     },
     "limits": [
       "Exact-head remote qualification follows push; local tests do not establish native image or real cluster results.",
@@ -890,6 +902,11 @@
         "commit": "5b41445f5515d102ffd18e8cdcbb4143e60db3e0",
         "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43049117127",
         "notes": "All non-image lanes and other image checks passed. Teams media fixture imported removed Slack-specific helper; its synthetic certificates needed non-root readability. Native proxy fixture resolved its disposable origin to a private Docker address correctly denied by the hardened proxy. Repair only fixture routing/material; retain real native SDK, TLS, redirects, host denial, no-fallback and exact internal transport assertions."
+      },
+      {
+        "commit": "beae397585ca918f6b51c613b1c313025ca2c0a6",
+        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43055016659",
+        "notes": "Ordinary CI passed all 25 primary jobs and CodeQL analyzers passed. Native AMD64 import failed before runtime tests. Skopeo1.4.1 direct-daemon failure reproduced locally: client API1.22 below daemon API1.40. The same old Skopeo succeeds via Docker archive/CLI. Actual sealed native AMD64 OCI from this run was hash/receipt-verified, imported with the repaired path, loaded config/layers verified and Node24.22.1 started. Requalify the repaired final head on both native architectures."
       }
     ]
   },
