@@ -9,82 +9,33 @@ const SHUTDOWN_DRAIN_MS = 2_000;
 // How long a client may take to read what is still queued for it, and close its side, after
 // the proxy has finished writing to it.
 const CLIENT_DRAIN_TIMEOUT_MS = 10_000;
-const ALLOWED_SUFFIXES = [".slack.com", ".slack-edge.com", ".slack-msgs.com"];
-const ALLOWED_HOSTS = new Set(["slack.com", "slack-edge.com", "slack-msgs.com"]);
-// Public-cloud text messaging only: no broad Microsoft or SharePoint wildcard.
-const TEAMS_HOSTS = new Set([
-  "login.microsoftonline.com",
-  "login.botframework.com",
-  "api.botframework.com",
-  "smba.trafficmanager.net",
-  "graph.microsoft.com",
-]);
-const teamsEnabled = process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED === "true";
-if (
-  process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED !== undefined &&
-  !["true", "false"].includes(process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED)
-) {
-  throw new Error("OCC_CHANNEL_PROXY_TEAMS_ENABLED must be true or false.");
-}
-const TEAMS_FILE_HOST_SUFFIXES = [
-  ".sharepoint.com",
-  ".sharepoint-df.com",
-  ".1drv.com",
-  ".onedrive.com",
-  ".blob.core.windows.net",
+const DEFAULT_ALLOWED_HOSTS = [
+  "slack.com",
+  "*.slack.com",
+  "slack-edge.com",
+  "*.slack-edge.com",
+  "slack-msgs.com",
+  "*.slack-msgs.com",
 ];
-const teamsFileHosts = readTeamsFileHosts(process.env.OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS);
-// Match the Helm proxy's public IPv4 egress boundary. Validate every DNS answer before
-// opening a socket, then connect to that numeric address so DNS cannot change underneath it.
-const blockedAddresses = new net.BlockList();
-for (const [address, prefix] of [
-  ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
-  ["127.0.0.0", 8],
-  ["169.254.0.0", 16],
-  ["172.16.0.0", 12],
-  ["192.0.0.0", 24],
-  ["192.0.2.0", 24],
-  ["192.168.0.0", 16],
-  ["198.18.0.0", 15],
-  ["198.51.100.0", 24],
-  ["203.0.113.0", 24],
-  ["224.0.0.0", 4],
-  ["240.0.0.0", 4],
-]) {
-  blockedAddresses.addSubnet(address, prefix, "ipv4");
-}
 
-function readTeamsFileHosts(value) {
-  if (value === undefined) {
-    return new Set();
-  }
-  let hosts;
-  try {
-    hosts = JSON.parse(value);
-  } catch {
-    throw new Error(
-      "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS must be a JSON list of exact Microsoft storage hostnames.",
-    );
-  }
+function validateAllowedHosts(hosts) {
   if (
     !Array.isArray(hosts) ||
-    hosts.length > 32 ||
-    (!teamsEnabled && hosts.length > 0) ||
+    hosts.length > 256 ||
     hosts.some(
       (host) =>
         typeof host !== "string" ||
         host.length > 253 ||
-        !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host) ||
-        !TEAMS_FILE_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix)),
+        (host !== "*" &&
+          !/^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
+            host,
+          )),
     )
   ) {
     throw new Error(
-      "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS requires Teams and at most 32 exact lowercase Microsoft storage hostnames.",
+      "Gateway proxy allowedHosts must be at most 256 entries: lowercase DNS names, optionally prefixed with *., or * for all hosts.",
     );
   }
-  return new Set(hosts);
 }
 
 function parsePort(value) {
@@ -92,11 +43,11 @@ function parsePort(value) {
     return DEFAULT_PORT;
   }
   if (!/^[0-9]+$/.test(value)) {
-    throw new Error("OCC_SLACK_PROXY_PORT must be an integer TCP port.");
+    throw new Error("OCC_GATEWAY_PROXY_PORT must be an integer TCP port.");
   }
   const port = Number(value);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new Error("OCC_SLACK_PROXY_PORT must be between 0 and 65535.");
+    throw new Error("OCC_GATEWAY_PROXY_PORT must be between 0 and 65535.");
   }
   return port;
 }
@@ -113,15 +64,16 @@ function parseConnectTarget(target) {
   return { host: match[1].toLowerCase(), port };
 }
 
-function isAllowedSlackConnectTarget(target) {
+function isAllowedConnectTarget(target, allowedHosts) {
   const parsed = parseConnectTarget(target);
-  if (parsed === undefined || parsed.port !== 443) {
-    return false;
-  }
   return (
-    ALLOWED_HOSTS.has(parsed.host) ||
-    (teamsEnabled && (TEAMS_HOSTS.has(parsed.host) || teamsFileHosts.has(parsed.host))) ||
-    ALLOWED_SUFFIXES.some((suffix) => parsed.host.endsWith(suffix))
+    parsed !== undefined &&
+    parsed.port === 443 &&
+    allowedHosts.some(
+      (host) =>
+        host === "*" ||
+        (host.startsWith("*.") ? parsed.host.endsWith(host.slice(1)) : parsed.host === host),
+    )
   );
 }
 
@@ -175,7 +127,11 @@ function closeClientWhenDrained(clientSocket, drainTimeoutMs) {
   clientSocket.once("close", () => clearTimeout(timer));
 }
 
-export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS } = {}) {
+export function createGatewayProxyServer({
+  clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS,
+  allowedHosts = DEFAULT_ALLOWED_HOSTS,
+} = {}) {
+  validateAllowedHosts(allowedHosts);
   const server = createServer((request, response) => {
     response.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
     response.end("CONNECT required\n");
@@ -186,7 +142,7 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
     // EPIPE or ECONNRESET while the 403 is written; without a listener
     // that error exits the process.
     closeOnSocketError(clientSocket);
-    if (!isAllowedSlackConnectTarget(request.url)) {
+    if (!isAllowedConnectTarget(request.url, allowedHosts)) {
       reject(clientSocket, 403, "Forbidden");
       closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
       return;
@@ -273,8 +229,12 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const port = parsePort(process.env.OCC_SLACK_PROXY_PORT);
-  const server = createSlackProxyServer();
+  const port = parsePort(process.env.OCC_GATEWAY_PROXY_PORT);
+  const allowedHosts =
+    process.env.OCC_GATEWAY_PROXY_ALLOWED_HOSTS === undefined
+      ? DEFAULT_ALLOWED_HOSTS
+      : JSON.parse(process.env.OCC_GATEWAY_PROXY_ALLOWED_HOSTS);
+  const server = createGatewayProxyServer({ allowedHosts });
   const sockets = new Set();
   server.on("connection", (socket) => {
     sockets.add(socket);
@@ -299,6 +259,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(port, "0.0.0.0", () => {
     const address = server.address();
     const selectedPort = typeof address === "object" && address !== null ? address.port : port;
-    process.stderr.write(`Slack proxy listening on ${selectedPort}\n`);
+    process.stderr.write(`Gateway proxy listening on ${selectedPort}\n`);
   });
 }

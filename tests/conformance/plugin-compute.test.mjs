@@ -4813,7 +4813,6 @@ test("Kubernetes dedicated Codex agent mounts plugin-free runtime without plugin
       plane: "control",
     }),
     [],
-    [],
     { name: "plugin-runtime-agent-plugin-compute", runtime },
   );
 
@@ -4898,7 +4897,6 @@ for (const withBroker of [false, true]) {
       false,
       undefined,
       undefined,
-      [],
       [],
       { name: "plugin-runtime-gateway-plugin-compute", runtime },
     );
@@ -5165,7 +5163,6 @@ test("Kubernetes dedicated Codex gateway mounts bridge runtime and prior plugin 
     undefined,
     undefined,
     [],
-    [],
     { name: "plugin-runtime-gateway-plugin-compute", runtime },
     [{ pluginId: "codex-plugin:linear@openai-curated-remote", code: "PLUGIN_AUTH_REQUIRED" }],
   );
@@ -5246,7 +5243,6 @@ test("Kubernetes plugin-free Codex gateway receives explicit Agent approvers", (
       false,
       undefined,
       undefined,
-      [],
       [],
       { name: "plugin-runtime-gateway-plugin-free", runtime },
     );

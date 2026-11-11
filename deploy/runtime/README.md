@@ -370,3 +370,5 @@ built with their host as bundled; no compatibility override or plugin download
 is used. The Teams startup case exercises actual SDK authentication in the
 assembled image; see [Teams verification](../../docs/testing/teams.md). Live
 Microsoft delivery and public Kubernetes ingress remain separate acceptance checks.
+
+[Internal proxy bridge](../../docs/flows/gateway-outbound-proxy.md).
