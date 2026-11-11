@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import dns from "node:dns";
 import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import https from "node:https";
+import net from "node:net";
+import { promisify } from "node:util";
 
 const role = process.argv[2];
 if (role === "origin") {
@@ -12,6 +15,24 @@ if (role === "origin") {
     )
     .listen(443, "0.0.0.0", () => console.log("origin ready"));
 } else if (role === "proxy") {
+  // Simulate a public origin while routing its pinned numeric connection to the
+  // disposable TLS server. Keep the real proxy's private-address rejection intact.
+  const origin = await promisify(dns.lookup)("allowed.proxy.test", { family: 4 });
+  const publicAddress = "93.184.216.34";
+  const originalLookup = dns.lookup;
+  dns.lookup = (hostname, options, callback) => {
+    if (net.isIP(hostname)) {
+      return originalLookup(hostname, options, callback);
+    }
+    assert.ok(["allowed.proxy.test", "denied.proxy.test"].includes(hostname));
+    assert.deepEqual(options, { family: 4, all: true, verbatim: true });
+    queueMicrotask(() => callback(null, [{ address: publicAddress, family: 4 }]));
+  };
+  const originalConnect = net.connect;
+  net.connect = (options) => {
+    assert.deepEqual(options, { host: publicAddress, family: 4, port: 443 });
+    return originalConnect({ ...options, host: origin.address });
+  };
   const { createGatewayProxyServer } = await import("/proof/gateway-proxy.mjs");
   createGatewayProxyServer({ allowedHosts: ["allowed.proxy.test"] }).listen(3128, "0.0.0.0", () =>
     console.log("proxy ready"),

@@ -814,6 +814,11 @@ test(
       run: execute,
     });
     await rm(join(directory, "ca-key.pem"));
+    // Only synthetic fixture material is shared with the non-root runtime.
+    await chmod(directory, 0o755);
+    for (const name of ["ca.pem", "cert.pem", "key.pem"]) {
+      await chmod(join(directory, name), 0o644);
+    }
     const repository = fileURLToPath(new URL("../../", import.meta.url));
     const result = await runDocker([
       "run",
