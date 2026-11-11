@@ -18046,7 +18046,7 @@ export class OpenClawController {
     const computeConfiguration =
       agent === undefined || compute.configureAgent === undefined
         ? securedConfiguration
-        : compute.configureAgent(frozenValues(sandboxConfiguration), {
+        : compute.configureAgent(frozenValues(securedConfiguration), {
             ...(nativeAdminOrigin === undefined ? {} : { nativeAdminOrigin }),
           });
     return frozenValues(

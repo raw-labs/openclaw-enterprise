@@ -5191,6 +5191,9 @@ test(
     assert.equal(revision.id, status.revisionId);
     const installation = await fixture.state.loadInstallation();
     const origin = `https://${deriveNativeAdminHost(installation.id, { namespaceId: namespace.id, id: status.agentId }, "agents.oce.localhost")}:9443`;
+    // Compute preparation must retain the defaults admitted before its hook.
+    assert.equal(revision.configuration.tools.exec.applyPatch.workspaceOnly, true);
+    assert.equal(revision.configuration.agents.defaults.sandbox.mode, "off");
     assert.equal(nativeAdminConfigurationSupported(revision, origin), true);
     assert.equal(revision.configuration.gateway.publicOrigin, origin);
     assert.deepEqual(revision.configuration.gateway.controlUi.allowedOrigins, [

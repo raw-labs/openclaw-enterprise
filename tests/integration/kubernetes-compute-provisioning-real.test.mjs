@@ -1385,7 +1385,7 @@ test(
       gatewayStorageClassName: "local-path",
       // Current Compute admission owns the endpoint; keep synthetic keys offline.
       modelProvider: { protocol: "openai-responses", baseUrl: "https://127.0.0.1:9/v1" },
-      channels: { proxyUrl: "http://10.42.0.15:3128" },
+      proxy: { proxyUrl: "http://10.42.0.15:3128" },
     };
     const network = {
       dns: { namespace: "kube-system", podLabels: { "k8s-app": "kube-dns" } },
@@ -1600,7 +1600,26 @@ test(
         environment.find(({ name }) => name === "HTTPS_PROXY").value,
         runtime.proxy.proxyUrl,
       );
-      assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
+      // The generic proxy is native Gateway configuration, not Node-wide fetch interception.
+      const configuredProxy = await kubectl(
+        "exec",
+        pod.metadata.name,
+        "--namespace",
+        placement,
+        "--",
+        "node",
+        "-e",
+        "console.log(JSON.stringify(JSON.parse(require('node:fs').readFileSync(process.env.OPENCLAW_CONFIG_PATH, 'utf8')).proxy))",
+      );
+      assert.deepEqual(JSON.parse(configuredProxy), {
+        enabled: true,
+        proxyUrl: runtime.proxy.proxyUrl,
+        loopbackMode: "gateway-only",
+      });
+      assert.equal(
+        environment.some(({ name }) => name === "NODE_USE_ENV_PROXY"),
+        false,
+      );
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
       assert.equal(
         (await resources("deployments", placement)).filter(

@@ -2118,7 +2118,7 @@ assert.equal(commands, 0);
       [
         "qa",
         "qa-matrix",
-        "blacksmith-8vcpu-ubuntu-2404",
+        "${{ vars.CI_LARGE_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}",
         "integration-qa-pr",
         "qa-advisory-${{ matrix.installation }}",
       ],

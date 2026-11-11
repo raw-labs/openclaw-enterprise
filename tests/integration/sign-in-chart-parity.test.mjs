@@ -1688,7 +1688,7 @@ test(
       assert.equal(settings.OCC_AUTH_COOKIE_DOMAIN, undefined);
       assert.equal(
         signInSettings(deploymentEnv(objects, "worker")).OCC_AGENT_NATIVE_ADMIN_SESSION_MODE,
-        undefined,
+        "host-only-exchange",
       );
       await startsUp(resolveSecrets(settings), `host-only native admin ${enabled}`);
       for (const provider of [

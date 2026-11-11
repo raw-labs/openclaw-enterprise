@@ -113,11 +113,11 @@ selection; see [first-Agent setup](../guides/deploy/native-admin.md).
 `packages/occ/src/index.ts:deployAgentWithAuthorization`
 `apps/controller/src/drivers/compute/kubernetes/index.ts:configureAgent`
 
-API and worker derive matching `nativeAdminTarget` inputs from Helm or Compose. Deployment passes the allocated Agent and
-Sandbox-transformed Configuration through `agentRuntimeConfiguration`. Kubernetes
+API and worker derive `nativeAdminTarget` from Helm or Compose. Deployment passes the Agent and
+Sandbox-transformed Configuration through `agentRuntimeConfiguration`. After Gateway
+security defaults, Kubernetes
 Compute adds exact origins and approval policy; conflicts refuse admission and
-opt-outs stay disabled. OCC applies logging and validation, then freezes the
-Agent revision. Saved Configurations remain unchanged. See
+opt-outs stay disabled. OCC applies logging and validation, then freezes the revision. Saved Configurations remain unchanged. See
 [preparation rules](../reference/drivers/compute-admission.md).
 
 ### 1. Console renders native admin availability
