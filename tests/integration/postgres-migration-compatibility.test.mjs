@@ -3975,9 +3975,11 @@ test(
              ('retire-operation',$1,'retire-human','retire-operator','agent',$2,NULL)`,
       [namespace, agent],
     );
+    // The current sandbox-policy restriction must survive removal of only the retired use action.
     await db.app.query(
       `INSERT INTO occ.iam_restrictions(id,namespace_id,action,resource_kind,effect)
-      VALUES ('retire-use',$1,'use','agent','deny'), ('retire-denial',$1,'administer','agent','deny')`,
+      VALUES ('retire-use',$1,'use','agent','deny'), ('retire-denial',$1,'administer','agent','deny'),
+             ('retire-policy',$1,'manage_policy','agent','deny')`,
       [namespace],
     );
     const before = await historyReceipts(db.migrator);
@@ -4011,7 +4013,10 @@ test(
           "SELECT id,action FROM occ.iam_restrictions WHERE id LIKE 'retire-%' ORDER BY id",
         )
       ).rows,
-      [{ id: "retire-denial", action: "administer" }],
+      [
+        { id: "retire-denial", action: "administer" },
+        { id: "retire-policy", action: "manage_policy" },
+      ],
     );
     const completed = await historySnapshot(db);
     assert.deepEqual(await runHistoryMigration(db, "production"), {
