@@ -12,11 +12,11 @@ images; individual Agents cannot choose their own implementations.
 1. Use bundled Kubernetes Compute and Kubernetes Secret for a new Installation
    or for [local Agent deployment](../../guides/quickstart.md). The
    [production Installation example](../../guides/deploy/production-installation.md#configure-the-installation)
-   shows a complete YAML document with the required OCC and Driver settings.
+   shows the required OCC and Driver settings.
    If you need embedded OpenClaw on existing Linux hosts with credentials
    supplied on those hosts, start with [SSH Compute](ssh-compute.md) instead.
 2. Select the required Configuration, IAM, Compute, and Secret implementations.
-   The table below lists each capability and its allowed choices. Omit optional
+   The table lists supported choices. Omit optional
    Sandbox, Credential Gateway, ServiceAccount, Plugin, and Repo selections
    unless you need them.
 3. Set `OCC_CONFIG_PATH` to the absolute path of that trusted YAML and select
@@ -388,3 +388,5 @@ The [Driver package loader](../../../apps/controller/src/composition/driver-pack
 resolves installed packages and checks their factories;
 [Installation composition](../../../apps/controller/src/composition/installation-config.ts)
 validates selections and constructs the runtime bundle.
+
+Namespace setup follows the [registration lifecycle](namespace-lifecycle.md).
