@@ -303,6 +303,19 @@
         ".github/workflows/codeql.yml"
       ],
       "notes": "Preserve all 77 published migration identities and SQL; append three exact upstream evolutions and explicit role retirement. Preserve configured fork runners and real sandbox qualification without publication."
+    },
+    {
+      "id": "gateway-defaults-deployment-hook-ordering",
+      "pullRequests": [12, 17, 36],
+      "commits": ["ff398b552f412e879f9b6a8ef64f553db9f7edf1"],
+      "paths": [
+        "packages/occ/src/index.ts",
+        "tests/integration/postgres-agent-provisioning.test.mjs",
+        "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
+        "tests/integration/sign-in-chart-parity.test.mjs",
+        "tests/integration/ci-prepare.test.mjs"
+      ],
+      "notes": "Sandbox transform, Gateway security defaults, then Compute native administration preparation. Real cluster equality protects upstream defaults; native proxy state is read from the real Pod rather than retired NODE_USE_ENV_PROXY."
     }
   ],
   "publishedMigrationPrefix": {
@@ -792,11 +805,19 @@
         "node scripts/ci/run-tests.mjs audit",
         "node scripts/integration/check-selection.mjs"
       ],
-      "environment": "Task-local Go, NSS tools and Chromium shared libraries. TLS browser wrapper preserves sandboxing and only supplies shared-library lookup. CI runner diagnostics use env -u OPENCLAW_SERVICE_MARKER because its inherited value aliases ordinary public service names. No product assertion or security probe weakened."
+      "environment": "Task-local Go, NSS tools and Chromium shared libraries. TLS browser wrapper preserves sandboxing and only supplies shared-library lookup. CI runner diagnostics use env -u OPENCLAW_SERVICE_MARKER because its inherited value aliases ordinary public service names. No product assertion or security probe weakened.",
+      "repair": "After ordering repair: four real PostgreSQL/Kubernetes ownership/lifecycle cases, three real provisioning cases including embedded channels through redeploy/stop, and retained-job case passed without skips (eight total). All 64 PostgreSQL provisioning cases passed with explicit Gateway defaults assertions. Host-only chart parity and QA runner selection each passed. Lint/typecheck, docs, formatting and existing selection checks passed."
     },
     "limits": [
       "Exact-head remote qualification follows push; local tests do not establish native image or real cluster results.",
       "No live Slack/Teams delivery or external model execution claimed."
+    ],
+    "failedCandidates": [
+      {
+        "commit": "cddddaf556416a6f8ef237670d26520a0371267f",
+        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43039926689",
+        "notes": "Real k3d equality caught Compute preparation receiving pre-security-default values. Preserve the defaults as hook input; keep cluster assertions unchanged and add explicit provisioning assertions. Update retired Node proxy and chart-worker/QA runner expectations to current contracts."
+      }
     ]
   },
   "previousBatches": [
