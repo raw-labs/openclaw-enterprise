@@ -229,6 +229,7 @@ runs:
       shell: bash
       run: bash scripts/ci/setup-tools.sh browser
     - name: Install Teams directory WebKit browser
+      id: install-teams-webkit
       if: inputs.lane == 'checks-browser-2'
       shell: bash
       run: pnpm exec playwright install --with-deps webkit
@@ -651,6 +652,7 @@ runs:
           install-dependencies=${{ steps.install-dependencies.conclusion }}
           save-pnpm-store=${{ steps.save-pnpm-store.conclusion }}
           install-browser=${{ steps.install-browser.conclusion }}
+          install-teams-webkit=${{ steps.install-teams-webkit.conclusion }}
           setup-go=${{ steps.setup-go.conclusion }}
           workspace-check=${{ steps.workspace-check.conclusion }}
           static-lint=${{ steps.static-lint.conclusion }}

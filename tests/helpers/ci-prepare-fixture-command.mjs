@@ -844,7 +844,10 @@ async function fakeCommand({
       return finish("apiVersion: v1\n");
     }
     if (equals(args, ["cluster", "list", "-o", "json"])) {
-      return finish(JSON.stringify(state.clusterDeleted ? [] : [{ name: state.cluster }]));
+      // Cancellation can happen before creation; real k3d lists no cluster then.
+      return finish(
+        JSON.stringify(!state.cluster || state.clusterDeleted ? [] : [{ name: state.cluster }]),
+      );
     }
     if (equals(args, ["cluster", "delete", state.cluster])) {
       state.clusterDeleted = true;
