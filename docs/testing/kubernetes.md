@@ -13,9 +13,9 @@ Use disposable local k3d with enforcing NetworkPolicies. Fixtures exclude real g
 ## Local Kubernetes installation
 
 Install k3d, kubectl, Helm, `certutil`, and Chromium with sandbox support.
-Use a disposable container engine with image-build capacity. The
+Use a disposable image-building container engine. The
 Keycloak cases need free, bindable loopback port 443 and must not run beside
-the standalone Keycloak lane. Run these commands from the trusted checkout root:
+the standalone Keycloak lane. Run from the trusted checkout root:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -130,12 +130,14 @@ the variable. For a custom Codex Responses endpoint, use:
   --base-url https://openrouter.ai/api/v1 --model-id z-ai/glm-5.3-flash
 ```
 
-Use `./scripts/k3d info` for connections and `./scripts/k3d reset` to reset
-its test data. Run `./scripts/k3d down` to remove helper-owned resources,
-including after a failed preparation. The helper leaves the default kubeconfig,
-active context, and unrelated resources unchanged. `OCC_K3D_CONTAINER_ENGINE`
-selects `docker` or `podman`; `OCC_K3D_STATE_DIR` overrides its state directory.
-For image upgrades see [local k3d image upgrades](../guides/deploy/local-k3d-image-upgrade.md).
+`./scripts/k3d info` shows connections; `reset` retains images.
+Fresh preparation pins images against kubelet collection. Recreate older
+environments with `./scripts/k3d down --harness codex`, then reprepare (`openclaw`
+for that harness). This deletes that environment; use before image changes or
+after preparation failures. Default kubeconfig/context and unrelated resources
+stay unchanged. `OCC_K3D_CONTAINER_ENGINE` selects `docker`/`podman`;
+`OCC_K3D_STATE_DIR` sets its directory.
+See [local k3d image upgrades](../guides/deploy/local-k3d-image-upgrade.md).
 
 ### Run the real-runtime suite directly
 
