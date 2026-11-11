@@ -197,15 +197,15 @@ workflow, run/attempt, CI, base, platform and digest. Receivers verify that iden
 and referenced OCI blobs, rejecting preexisting `platform.json`.
 `built-runtime-*` cannot qualify for publication. Controllers retain one-job build/smoke.
 
-`scripts/ci/container-release.mjs:smoke` requires the selected native architecture.
-It binds the OCI export to the build digest, loads it with Skopeo, checks the
-loaded config and architecture, and runs startup tests by immutable image ID
-with native deadlines. For containerd, `scripts/upgrade-image-identity.py` exports
-and hash-verifies the manifest/config against the original OCI config, binding
-configuration and ordered layer diff IDs. The legacy store compares config IDs
-directly. Successful smoke writes `platform.json`, binding source, workflow,
-run/attempt, CI, image, base and platform digest. Failed smoke cannot upload
-`platform-*` artifacts; recovery requires both runtime smoke jobs to succeed.
+`scripts/ci/container-release.mjs:smoke` requires the native architecture and
+expected OCI digest. Skopeo converts the export to a temporary Docker archive.
+The Docker CLI loads it after config-digest verification, avoiding Skopeo
+daemon API limits. Smoke checks loaded architecture/config, then runs
+startup tests by immutable ID with native deadlines. For containerd,
+`scripts/upgrade-image-identity.py` hash-verifies exported manifest/config
+against the original, including ordered layer diff IDs. Legacy stores compare config IDs. Success writes `platform.json`, binding source, workflow,
+run/attempt, CI, image, base and platform digest. Failure cannot upload
+`platform-*`; recovery requires both runtime smoke jobs to pass.
 
 `.github/workflows/container-publish.yml:jobs.assemble` downloads both qualified
 platform artifacts from this run/attempt. `container-release.mjs:assemble`

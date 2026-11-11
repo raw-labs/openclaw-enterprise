@@ -608,7 +608,24 @@ async function smoke(directory, env) {
   }
   assert.equal(manifest.mediaType, "application/vnd.oci.image.manifest.v1+json");
   const tag = `localhost/enterprise-${env.IMAGE}:prepared-${arch}`;
-  skopeo(["copy", `oci:${directory}`, `docker-daemon:${tag}`], { stdio: "inherit" });
+  const importDirectory = await mkdtemp(join(tmpdir(), "oce-native-image-import-"));
+  try {
+    // Older Skopeo daemon clients cannot negotiate the current Docker API floor.
+    // Convert locally and let the installed Docker CLI perform the verified load.
+    const archive = join(importDirectory, "image.tar");
+    skopeo(["copy", `oci:${directory}`, `docker-archive:${archive}:${tag}`], {
+      stdio: "inherit",
+    });
+    const converted = JSON.parse(skopeo(["inspect", "--raw", `docker-archive:${archive}`]));
+    assert.equal(
+      converted.config.digest,
+      manifest.config.digest,
+      "Converted image configuration differs from the sealed OCI export.",
+    );
+    execFileSync("docker", ["image", "load", "--input", archive], { stdio: "inherit" });
+  } finally {
+    await rm(importDirectory, { recursive: true, force: true });
+  }
   let prepared;
   try {
     const [loaded] = JSON.parse(execFileSync("docker", ["image", "inspect", tag]));

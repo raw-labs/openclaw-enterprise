@@ -1180,6 +1180,7 @@ esac`,
     "docker",
     `
 case "$2" in
+  load) ;;
   inspect) cat "$SMOKE_FIXTURE/inspect.json" ;;
   save) cat "$SMOKE_FIXTURE/export.tar" ;;
   rm) ;;
