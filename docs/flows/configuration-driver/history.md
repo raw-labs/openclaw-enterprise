@@ -8,6 +8,12 @@ This record preserves the dated changes to the Configuration Driver and Agent re
 
 ## Changelog
 
+- 2026-10-10 11:29: Refuse Kubernetes native listeners that pass local readiness but cannot serve Pod-IP routes before version creation. (authoring-run/f29e292f-76cb-44a1-88b5-e0244f9164fc - f8a837e33b5c03bc0c92065e979485ee06960150)
+
+- 2026-10-09 19:00: Configuration create and update refuse an `agents` roster every deployment refuses, with deployment's text, through the shared `requireDeployableRoster`; an existing row still reads and deploys as before. (q35-roster-save, finding 874)
+
+- 2026-10-09 15:00: OCC rechecks metadata after the failed Configuration delete or update transaction releases its row locks. OCC skips compensation if the recheck detects a changed or deleted row. Compensation proceeds if the recheck fails. (fix-944-945)
+
 - 2026-10-09 13:00: Configuration create and delete register their compensation before the write and undo only what `inspectExact` shows they stored or removed, so a write that applied but answered an error leaves no orphan ConfigMap or metadata without one. (fix-916)
 - 2026-10-09 12:00: Provisioning resends a Configuration create still missing after its 90-second settle window, and a Configuration update's compensation is registered before the replace, so a replace that applied but answered an error is rolled back too. (fix-911)
 - 2026-10-06 15:00: Deployment admission refuses a native gateway setting Kubernetes Compute cannot deploy, naming it, instead of failing every preparation attempt. (dogfood-r36/deploy-gateway-settings)
