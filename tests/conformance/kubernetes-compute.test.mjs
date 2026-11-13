@@ -37,6 +37,7 @@ import {
   gatewayRuntimeEntrypoint,
 } from "../../apps/controller/src/drivers/compute/kubernetes/runtime-entrypoints.ts";
 import {
+  compactNodeChildArguments,
   nodeProgramArguments,
   withoutLineComments,
 } from "../../apps/controller/src/drivers/compute/node-program.ts";
@@ -142,7 +143,12 @@ import { writeSafeKubeconfig, writeUnsafeKubeconfigs } from "../helpers/unsafe-k
 import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 import { ControllerWorker } from "../../apps/controller/src/worker.ts";
 import { createRuntimeLogDriverFixture } from "./kubernetes-runtime-log-fixture.ts";
-import { createDedicatedDeployKubernetesFixture } from "./kubernetes-dedicated-deploy-fixture.ts";
+import {
+  createDedicatedDeployKubernetesFixture,
+  nativeHarnessResource,
+  nativeSandboxIdentity,
+  readyNativeHarnessPod,
+} from "./kubernetes-dedicated-deploy-fixture.ts";
 import { createEmbeddedReplacementKubernetesFixture } from "./kubernetes-embedded-replacement-fixture.ts";
 import { OPENCLAW_CONFIG_ENVIRONMENT_COMMIT } from "../../apps/controller/src/drivers/compute/kubernetes/openclaw-config-environment.ts";
 import { readOpenclawSource } from "../../scripts/lib/openclaw-source.mjs";
@@ -1732,22 +1738,13 @@ async function verifyManagedRelease({
     };
     let worker;
     const sandboxDriver = {
-      id: "native-sandbox",
-      implementation: "openshell",
-      capability: "sandbox",
-      supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-      facets: ["networking", "filesystem", "process"],
+      ...nativeSandboxIdentity(),
       async workspaceNodePeerLabels() {
         return undefined;
       },
       async provisionHarness({ requirements, namespace, revision }) {
         worker = requirements;
-        return {
-          namespaceName: namespace.name,
-          resourceName: "native-harness",
-          agentId: revision.agentId,
-          revisionId: revision.id,
-        };
+        return nativeHarnessResource({ namespace, revision });
       },
     };
     const fixture = dedicatedFirstDeployFixture({
@@ -1817,22 +1814,13 @@ async function verifyManagedRelease({
 test("provider-owned Harness preparation waits to renew expired setup until its Gateway is ready", async (t) => {
   const provisions = [];
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async workspaceNodePeerLabels() {
       return undefined;
     },
     async provisionHarness(context) {
       provisions.push(context);
-      return {
-        namespaceName: context.namespace.name,
-        resourceName: "native-harness",
-        agentId: context.revision.agentId,
-        revisionId: context.revision.id,
-      };
+      return nativeHarnessResource(context);
     },
   };
   const { driver, revision, namespace, state, gatewayName, prepare, markReady, read, save } =
@@ -1920,11 +1908,7 @@ test("provider-owned Harness preparation waits to renew expired setup until its 
 test("native OpenClaw preparation and activation use only outbound Sandbox enrollment", async () => {
   const provisions = [];
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async workspaceNodePeerLabels({ revision: target }) {
       return provisions.some(({ revision: { id } }) => id === target.id)
         ? supervisorPeerLabels(target.id)
@@ -1932,12 +1916,7 @@ test("native OpenClaw preparation and activation use only outbound Sandbox enrol
     },
     async provisionHarness(context) {
       provisions.push(context);
-      return {
-        namespaceName: context.namespace.name,
-        resourceName: "native-harness",
-        agentId: context.revision.agentId,
-        revisionId: context.revision.id,
-      };
+      return nativeHarnessResource(context);
     },
     async harnessEndpoint() {
       assert.fail("native OpenClaw has no inbound Harness endpoint");
@@ -2155,12 +2134,7 @@ test("native OpenClaw preparation and activation use only outbound Sandbox enrol
   const podPending = await prepare();
   assert.equal(podPending.ready, false);
   assert.equal(podPending.pendingReason, undefined);
-  state.providerPod = {
-    apiVersion: "v1",
-    kind: "Pod",
-    metadata: { name: "native-harness", namespace, labels: provisions[0].requirements.labels },
-    status: { conditions: [{ type: "Ready", status: "True" }] },
-  };
+  state.providerPod = readyNativeHarnessPod(namespace, provisions[0].requirements.labels);
   // A Ready Pod whose node has not connected names that wait (finding 1629): the
   // deployment reads WORKSPACE_NODE_PENDING instead of a bare REVISION_INCOMPLETE,
   // but only while the Gateway is ready too ("Workloads are ready").
@@ -2255,22 +2229,13 @@ test("native OpenClaw preparation and activation use only outbound Sandbox enrol
 test("native Sandbox enrollment waits for the bound Gateway before reporting readiness", async () => {
   const provisions = [];
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async workspaceNodePeerLabels({ revision }) {
       return provisions.length > 0 ? supervisorPeerLabels(revision.id) : undefined;
     },
     async provisionHarness(context) {
       provisions.push(context);
-      return {
-        namespaceName: context.namespace.name,
-        resourceName: "native-harness",
-        agentId: context.revision.agentId,
-        revisionId: context.revision.id,
-      };
+      return nativeHarnessResource(context);
     },
   };
   const fixture = dedicatedFirstDeployFixture({
@@ -2286,12 +2251,7 @@ test("native Sandbox enrollment waits for the bound Gateway before reporting rea
   assert.equal((await prepare()).ready, false);
   markReady(gatewayName);
   assert.equal((await prepare()).ready, false);
-  state.providerPod = {
-    apiVersion: "v1",
-    kind: "Pod",
-    metadata: { name: "native-harness", namespace, labels: provisions.at(-1).requirements.labels },
-    status: { conditions: [{ type: "Ready", status: "True" }] },
-  };
+  state.providerPod = readyNativeHarnessPod(namespace, provisions.at(-1).requirements.labels);
   assert.equal((await prepare()).pendingReason, "WORKSPACE_NODE_PENDING");
   // The node enrolls after this pass rendered its initial Gateway. Pod readiness alone must
   // not publish that unbound Gateway as a usable native Agent.
@@ -2328,11 +2288,7 @@ test("Kubernetes native Sandbox provisioning fails a revision on the worker's he
   let answer = { state: "starting" };
   let withdrawalFailure;
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async workspaceNodePeerLabels({ revision: target }) {
       return provisions.some(({ revision: { id } }) => id === target.id)
         ? supervisorPeerLabels(target.id)
@@ -2340,12 +2296,7 @@ test("Kubernetes native Sandbox provisioning fails a revision on the worker's he
     },
     async provisionHarness(context) {
       provisions.push(context);
-      return {
-        namespaceName: context.namespace.name,
-        resourceName: "native-harness",
-        agentId: context.revision.agentId,
-        revisionId: context.revision.id,
-      };
+      return nativeHarnessResource(context);
     },
     async harnessEndpoint() {
       assert.fail("native OpenClaw has no inbound Harness endpoint");
@@ -2390,12 +2341,7 @@ test("Kubernetes native Sandbox provisioning fails a revision on the worker's he
   // Nothing is observed before the provider's Pod is Ready.
   assert.equal((await prepare()).pendingReason, undefined);
   assert.deepEqual(observations, []);
-  state.providerPod = {
-    apiVersion: "v1",
-    kind: "Pod",
-    metadata: { name: "native-harness", namespace, labels: provisions[0].requirements.labels },
-    status: { conditions: [{ type: "Ready", status: "True" }] },
-  };
+  state.providerPod = readyNativeHarnessPod(namespace, provisions[0].requirements.labels);
   // A worker that is still starting keeps the named wait; the read carries the transport
   // token the worker's verifier hashes.
   const nodePending = await prepare();
@@ -2505,11 +2451,7 @@ test("Kubernetes Sandbox provisioning fails a revision at once when the provider
     "OpenShell workspace initialization refused.",
   );
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async workspaceNodePeerLabels() {
       return undefined;
     },
@@ -2581,11 +2523,7 @@ test("Kubernetes native Sandbox redeploy reads the held failure before its own n
   const withdrawals = [];
   let answer = { state: "starting" };
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async workspaceNodePeerLabels({ revision: target }) {
       return provisions.some(({ revision: { id } }) => id === target.id)
         ? supervisorPeerLabels(target.id)
@@ -2593,12 +2531,7 @@ test("Kubernetes native Sandbox redeploy reads the held failure before its own n
     },
     async provisionHarness(context) {
       provisions.push(context);
-      return {
-        namespaceName: context.namespace.name,
-        resourceName: "native-harness",
-        agentId: context.revision.agentId,
-        revisionId: context.revision.id,
-      };
+      return nativeHarnessResource(context);
     },
     async harnessEndpoint() {
       assert.fail("native OpenClaw has no inbound Harness endpoint");
@@ -2658,12 +2591,7 @@ test("Kubernetes native Sandbox redeploy reads the held failure before its own n
   assert.ok(provisions.every(({ workspaceNodeEnrolled }) => workspaceNodeEnrolled === false));
   assert.deepEqual(withdrawals, []);
   assert.equal(state.setupCalls, 0, "the Agent's device needs no new setup");
-  state.providerPod = {
-    apiVersion: "v1",
-    kind: "Pod",
-    metadata: { name: "native-harness", namespace, labels: provisions[0].requirements.labels },
-    status: { conditions: [{ type: "Ready", status: "True" }] },
-  };
+  state.providerPod = readyNativeHarnessPod(namespace, provisions[0].requirements.labels);
   const nodePending = await prepare();
   assert.equal(nodePending.ready, false);
   assert.equal(nodePending.pendingReason, "WORKSPACE_NODE_PENDING");
@@ -2716,16 +2644,10 @@ test("Kubernetes native Sandbox redeploy reads the held failure before its own n
   assert.equal(provisions.length, 1);
   assert.equal(provisions[0].workspaceNodeEnrolled, false);
   recovered.state.possessionAvailable = undefined;
-  recovered.state.providerPod = {
-    apiVersion: "v1",
-    kind: "Pod",
-    metadata: {
-      name: "native-harness",
-      namespace: recovered.namespace,
-      labels: provisions[0].requirements.labels,
-    },
-    status: { conditions: [{ type: "Ready", status: "True" }] },
-  };
+  recovered.state.providerPod = readyNativeHarnessPod(
+    recovered.namespace,
+    provisions[0].requirements.labels,
+  );
   answer = { state: "failed", runtimeFailure: heldFailure };
   const recoveredFailure = await recovered.prepare();
   assert.equal(recoveredFailure.ready, false);
@@ -2775,16 +2697,10 @@ test("Kubernetes native Sandbox redeploy reads the held failure before its own n
     assert.equal((await uncertain.prepare()).ready, false);
     uncertain.markReady(uncertain.gatewayName);
     if (!expired) {
-      uncertain.state.providerPod = {
-        apiVersion: "v1",
-        kind: "Pod",
-        metadata: {
-          name: "native-harness",
-          namespace: uncertain.namespace,
-          labels: provisions.at(-1).requirements.labels,
-        },
-        status: { conditions: [{ type: "Ready", status: "True" }] },
-      };
+      uncertain.state.providerPod = readyNativeHarnessPod(
+        uncertain.namespace,
+        provisions.at(-1).requirements.labels,
+      );
     }
     if (expired) {
       await assert.rejects(
@@ -2955,11 +2871,7 @@ test("Kubernetes Compute withdraws a native Harness exposure outside a preparati
   const withdrawals = [];
   let withdrawalFailure;
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async provisionHarness() {
       assert.fail("no preparation pass runs here");
     },
@@ -3714,11 +3626,7 @@ test("activation waits for the first repository Git credential install and the n
   const clock = { now: 1_000_000 };
   const provisions = [];
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async workspaceNodePeerLabels({ revision: target }) {
       return provisions.some(({ revision: { id } }) => id === target.id)
         ? supervisorPeerLabels(target.id)
@@ -3733,12 +3641,7 @@ test("activation waits for the first repository Git credential install and the n
     ),
     async provisionHarness(context) {
       provisions.push(context);
-      return {
-        namespaceName: context.namespace.name,
-        resourceName: "native-harness",
-        agentId: context.revision.agentId,
-        revisionId: context.revision.id,
-      };
+      return nativeHarnessResource(context);
     },
   };
   const git = { route: { state: "pending", reason: "awaiting_material" }, installedAt: undefined };
@@ -3790,12 +3693,7 @@ test("activation waits for the first repository Git credential install and the n
   markReady(gatewayName);
   assert.equal((await prepare()).ready, false);
   assert.equal(provisions.length, 1);
-  state.providerPod = {
-    apiVersion: "v1",
-    kind: "Pod",
-    metadata: { name: "native-harness", namespace, labels: provisions[0].requirements.labels },
-    status: { conditions: [{ type: "Ready", status: "True" }] },
-  };
+  state.providerPod = readyNativeHarnessPod(namespace, provisions[0].requirements.labels);
   assert.equal((await prepare()).pendingReason, "WORKSPACE_NODE_PENDING");
   state.connected = true;
   // A verified route still waiting for its first material is ready to activate (finding 2139).
@@ -4416,21 +4314,12 @@ test("a pending dedicated deploy names a full Namespace Pod quota", async () => 
 // Harness Deployment.
 test("the Pod quota check reads only the revision's own workload Deployments", async () => {
   const sandboxDriver = {
-    id: "native-sandbox",
-    implementation: "openshell",
-    capability: "sandbox",
-    supportsHarnessExecutionMode: DEDICATED_OPENCLAW_SUPPORT,
-    facets: ["networking", "filesystem", "process"],
+    ...nativeSandboxIdentity(),
     async workspaceNodePeerLabels() {
       return undefined;
     },
     async provisionHarness(context) {
-      return {
-        namespaceName: context.namespace.name,
-        resourceName: "native-harness",
-        agentId: context.revision.agentId,
-        revisionId: context.revision.id,
-      };
+      return nativeHarnessResource(context);
     },
   };
   const openclaw = (mode) => ({
@@ -20700,17 +20589,27 @@ test(
     required: typeof require("node:fs").readFileSync };
 process.stdout.write(JSON.stringify(observed));
 process.exitCode = 3;`;
-    const pieces = nodeProgramArguments(program);
-    assert.ok(pieces.length > 2);
     assert.equal(spawnSync(process.execPath, ["-e", program]).error?.code, "E2BIG");
-    const loaded = spawnSync(process.execPath, ["-e", ...pieces], { encoding: "utf8" });
     const direct = spawnSync(process.execPath, ["-e", program.slice(padding.length)], {
       encoding: "utf8",
     });
-    assert.equal(loaded.stderr, "");
-    assert.deepEqual([loaded.status, loaded.stdout], [direct.status, direct.stdout]);
-    assert.deepEqual(JSON.parse(loaded.stdout), { argv: [], file: "[eval]", required: "function" });
-    assert.equal(loaded.status, 3);
+    for (const pack of [nodeProgramArguments, compactNodeChildArguments]) {
+      const [loader, ...pieces] = pack(program);
+      assert.ok(pieces.length > 1, pack.name);
+      assert.ok(
+        pieces.every((piece) => Buffer.byteLength(piece) <= 32 * 1024),
+        pack.name,
+      );
+      const loaded = spawnSync(process.execPath, ["-e", loader, ...pieces], { encoding: "utf8" });
+      assert.equal(loaded.stderr, "", pack.name);
+      assert.deepEqual([loaded.status, loaded.stdout], [direct.status, direct.stdout], pack.name);
+      assert.deepEqual(JSON.parse(loaded.stdout), {
+        argv: [],
+        file: "[eval]",
+        required: "function",
+      });
+      assert.equal(loaded.status, 3);
+    }
   },
 );
 

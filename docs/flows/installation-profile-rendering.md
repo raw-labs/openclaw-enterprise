@@ -1,7 +1,7 @@
 ---
 created: 2026-09-28
-updated: 2026-11-05
-last_updated_session: authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f
+updated: 2026-11-13
+last_updated_session: authoring-run/6240a4c1-6718-4317-861f-b786ad5020b9
 ---
 
 # Installation Profile Rendering Flow
@@ -267,7 +267,10 @@ Input-loading failures exit without a preflight report.
 The preflight report lists warnings, external prerequisites, and the next
 operator steps. It tells the operator to update the Installation startup Secret
 before the Helm upgrade, so API and worker pod-template annotations roll when
-startup-only configuration changes. The report does not claim live readiness:
+startup-only configuration changes. The Slack proxy reads its configuration from its
+Pod template. Removing the checksum annotation from a previously annotated proxy
+triggers one rollout. Later Installation checksum changes preserve its Pod template.
+The report does not claim live readiness:
 Helm rendering, Secret creation, runtime proof, hosted discovery, Slack consumer
 activation, and repository registry creation need separate evidence.
 
@@ -308,6 +311,8 @@ activation, and repository registry creation need separate evidence.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-13: Document how Installation checksum changes affect the Slack proxy during chart upgrades. (authoring-run/6240a4c1-6718-4317-861f-b786ad5020b9, accompanying change)
 
 - 2026-11-05 01:49: Retain current provider routing and validation while carrying the trusted embedded channel trial. (authoring-run/6ba484b9-b1ba-4d77-a190-fac68c6d696f - 94346f8101230627f206ed9731f2c32beba27bad)
 
