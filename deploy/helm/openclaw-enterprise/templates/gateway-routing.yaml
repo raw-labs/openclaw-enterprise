@@ -2,7 +2,7 @@
 {{- $routing := .Values.gatewayRouting }}
 {{- $gatewayName := include "openclaw.gatewayRouting.gatewayName" . }}
 {{- $serviceName := include "openclaw.gatewayRouting.serviceName" . }}
-{{- $hostname := default (printf "%s.%s.svc" $serviceName $routing.envoyNamespace) $routing.hostname }}
+{{- $hostname := include "openclaw.gatewayRouting.hostname" . }}
 {{- $tlsSecretName := include "openclaw.gatewayRouting.tlsSecretName" . }}
 {{- $routeNamespaceLabel := include "openclaw.gatewayRouting.routeNamespaceLabel" . }}
 {{- $rootSecretName := include "openclaw.gatewayRouting.rootSecretName" . }}
@@ -109,6 +109,27 @@ spec:
         kinds:
           - group: gateway.networking.k8s.io
             kind: HTTPRoute
+    {{- if $routing.channels.enabled }}
+    - name: channels
+      hostname: {{ $routing.channels.hostname | quote }}
+      port: {{ $routing.channels.listenerPort }}
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: {{ $routing.channels.tlsSecretName | quote }}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              openclaw-enterprise.io/gateway: {{ $routeNamespaceLabel | quote }}
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+    {{- end }}
     {{- if $routing.sandbox.enabled }}
     - name: sandbox
       hostname: {{ printf "*.%s" $routing.sandbox.domain | quote }}
@@ -223,17 +244,17 @@ spec:
       gateway.envoyproxy.io/owning-gateway-name: {{ $gatewayName | quote }}
   policyTypes: [Ingress, Egress]
   ingress:
+    {{- if $routing.channels.enabled }}
+    - from:
+        {{- toYaml $routing.channels.ingressPeers | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $routing.channels.listenerPort }}
+    {{- end }}
     {{- if $routing.sandbox.enabled }}
     - from:
         {{- range $index, $peer := $routing.sandbox.ingressPeers -}}
-        {{- if kindIs "map" $peer -}}
-        {{- range $selectorName := list "namespaceSelector" "podSelector" -}}
-        {{- $selector := index $peer $selectorName -}}
-        {{- if and (kindIs "map" $selector) (hasKey $selector "matchLabels") -}}
-        {{- $_ := include "openclaw.networkPolicy.matchLabels" (dict "name" (printf "gatewayRouting.sandbox.ingressPeers[%d].%s.matchLabels" $index $selectorName) "value" $selector.matchLabels) -}}
-        {{- end -}}
-        {{- end -}}
-        {{- end -}}
+        {{- include "openclaw.networkPolicy.peer" (dict "name" (printf "gatewayRouting.sandbox.ingressPeers[%d]" $index) "value" $peer) -}}
         {{- end -}}
         {{- toYaml $routing.sandbox.ingressPeers | nindent 8 }}
       ports:

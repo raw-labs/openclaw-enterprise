@@ -1,33 +1,54 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import net from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { availablePort } from "./available-port.mjs";
+import { reservedPortArgs, reservePort } from "./available-port.mjs";
+import { temporaryDirectory } from "./temporary-directory.mjs";
 
 /**
  * Starts the bundled Slack proxy (apps/controller/src/slack-proxy.mjs) as a child process and
  * resolves once it logs the port it bound. By default OCC_SLACK_PROXY_PORT is 0; with
- * `fixedPort` the helper picks a free port, passes it, and requires the proxy to bind exactly
- * that port (another process can take a picked port first, so EADDRINUSE picks again). The
- * test's cleanup sends the proxy SIGTERM. With `upstreamPort`, the child resolves each of
- * `upstreamHosts` (default slack.com) to 127.0.0.1 and its connections to those hosts on port
- * 443 reach that loopback port instead; a connection to any other host throws in the child, so
- * a test can never reach the network. Returns the child, the listening port and `stderr()`,
+ * `fixedPort` the helper holds a free port with reservePort() until the proxy has bound it,
+ * passes it, and requires the proxy to bind exactly that port. Without SO_REUSEPORT the
+ * reservation holds nothing and another process can take the port first, so EADDRINUSE picks
+ * again. The test's cleanup sends the proxy SIGTERM. With `upstreamPort`, the child resolves
+ * each of `upstreamHosts` (default slack.com) to a public fixture address and its pinned numeric connections on
+ * port 443 reach that loopback port instead; a connection to any other host throws in the child,
+ * `dnsAnswers` can override responses with public/private addresses, failure or pending.
+ * A test can never reach the network. Returns the child, the listening port and `stderr()`,
  * what the proxy has written so far.
  */
 export async function startSlackProxy(
   t,
-  { fixedPort = false, upstreamPort, upstreamHosts = ["slack.com"] } = {},
+  {
+    fixedPort = false,
+    upstreamPort,
+    upstreamHosts = ["slack.com"],
+    dnsAnswers = {},
+    teamsEnabled = false,
+    teamsFileHosts,
+    expectStartupFailure = false,
+  } = {},
 ) {
   const preload =
     upstreamPort === undefined
       ? []
-      : ["--import", await writeDnsFixture(t, upstreamPort, upstreamHosts)];
+      : ["--import", await writeDnsFixture(t, upstreamPort, upstreamHosts, dnsAnswers)];
   for (let attempt = 1; ; attempt += 1) {
-    const port = fixedPort ? await availablePort({ host: "0.0.0.0" }) : 0;
-    const proxy = await spawnSlackProxy(t, preload, port);
+    const reservation = fixedPort ? await reservePort({ host: "0.0.0.0" }) : undefined;
+    const port = reservation?.port ?? 0;
+    const proxy = await spawnSlackProxy(
+      t,
+      [...(reservation ? reservedPortArgs(reservation) : []), ...preload],
+      port,
+      teamsEnabled,
+      teamsFileHosts,
+    ).finally(() => reservation?.release());
+    if (expectStartupFailure) {
+      assert.equal(proxy.port, undefined, "invalid proxy configuration must fail before listening");
+      return proxy;
+    }
     if (proxy.port === undefined && fixedPort && attempt < 5 && /EADDRINUSE/.test(proxy.stderr())) {
       continue;
     }
@@ -41,10 +62,15 @@ export async function startSlackProxy(
   }
 }
 
-async function spawnSlackProxy(t, preload, port) {
+async function spawnSlackProxy(t, preload, port, teamsEnabled, teamsFileHosts) {
   const child = spawn(process.execPath, [...preload, "apps/controller/src/slack-proxy.mjs"], {
     cwd: new URL("../../", import.meta.url),
-    env: { ...process.env, OCC_SLACK_PROXY_PORT: String(port) },
+    env: {
+      ...process.env,
+      OCC_SLACK_PROXY_PORT: String(port),
+      OCC_CHANNEL_PROXY_TEAMS_ENABLED: String(teamsEnabled),
+      OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS: teamsFileHosts,
+    },
     stdio: ["ignore", "ignore", "pipe"],
   });
   t.after(() => child.kill());
@@ -68,33 +94,40 @@ async function spawnSlackProxy(t, preload, port) {
   return { child, port: listening, stderr: () => stderr };
 }
 
-async function writeDnsFixture(t, upstreamPort, upstreamHosts) {
-  const directory = await mkdtemp(join(tmpdir(), "openclaw-slack-proxy-test-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+async function writeDnsFixture(t, upstreamPort, upstreamHosts, dnsAnswers) {
+  const directory = await temporaryDirectory(t, "openclaw-slack-proxy-test-");
   const path = join(directory, "dns-fixture.mjs");
   await writeFile(
     path,
     `import dns from "node:dns";
 const upstreamHosts = new Set(${JSON.stringify(upstreamHosts)});
+const answers = ${JSON.stringify(dnsAnswers)};
+const publicAddress = "93.184.216.34";
 const originalLookup = dns.lookup;
 dns.lookup = (hostname, options, callback) => {
-  if (!upstreamHosts.has(hostname)) {
+  // Node also calls lookup while binding the proxy's literal listen address.
+  if (net.isIP(hostname)) {
     return originalLookup(hostname, options, callback);
   }
-  if (typeof options === "function") {
-    options(null, "127.0.0.1", 4);
+  if (options?.family !== 4 || !options?.all || !options?.verbatim) {
+    throw new Error("test fixture requires complete IPv4 DNS answers");
+  }
+  const answer = answers[hostname];
+  if (answer === "pending") {
     return;
   }
-  if (options?.all) {
-    callback(null, [{ address: "127.0.0.1", family: 4 }]);
+  if (answer === "failure" || (!upstreamHosts.has(hostname) && answer === undefined)) {
+    queueMicrotask(() => callback(Object.assign(new Error("fixture DNS failure"), {code:"ENOTFOUND"})));
     return;
   }
-  callback(null, "127.0.0.1", 4);
+  queueMicrotask(() => {
+    callback(null, answer ?? [{address:publicAddress, family:4}]);
+  });
 };
 import net from "node:net";
 const originalConnect = net.connect;
 net.connect = (...args) => {
-  if (upstreamHosts.has(args[0]?.host) && args[0]?.port === 443) {
+  if (args[0]?.host === publicAddress && args[0]?.family === 4 && args[0]?.port === 443) {
     return originalConnect({ ...args[0], host: "127.0.0.1", port: ${upstreamPort} }, ...args.slice(1));
   }
   if (typeof args[0]?.host === "string") {
@@ -118,7 +151,7 @@ export async function requestThroughProxy(port, request) {
   let response = "";
   try {
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("proxy response timeout")), 10_000);
+      const timeout = setTimeout(() => reject(new Error("proxy response timeout")), 15_000);
       const finish = () => {
         clearTimeout(timeout);
         resolve();

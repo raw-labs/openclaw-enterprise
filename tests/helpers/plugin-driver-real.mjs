@@ -1,4 +1,4 @@
-import { defaultAgentModel } from "../../apps/controller/src/console/agents/starter-model.mjs";
+import { defaultAgentModel } from "../../apps/controller/src/console/agents/starter-model.mts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -14,13 +14,22 @@ import { ensureDevelopmentBootstrap } from "./bootstrap-installation.mjs";
 import { createHarnessConfiguration } from "./harness-configuration.mjs";
 import { grantAgentSecretOperate } from "./postgres-harness-auth.mjs";
 import {
+  createEnvoyWorkspaceGatewayPlan,
+  ensureEnvoyGatewayControllers,
+  startWorkspaceGatewayHostRelay,
+} from "./envoy-workspace-gateway.mjs";
+import {
   createKubernetesInstallationConfiguration,
   createRealKubernetesFixture,
   kubernetesHash as hash,
+  productionGatewayMemoryLimit,
 } from "./kubernetes-real.mjs";
+import { createGatewaySessionEvidence } from "./plugin-gateway-session-evidence.ts";
+
+export { ConversationReplyError } from "./plugin-gateway-session-evidence.ts";
 
 const authSecret = "plugin-driver-real-auth-secret-32-bytes";
-const authBaseURL = "http://127.0.0.1";
+const authBaseURL = "https://console.oce.localhost";
 const proofPrefix = "occ-plugin-01a08228";
 
 export const realPluginProofSelected = process.env.OCC_TEST_PLUGIN_DRIVER_REAL === "1";
@@ -154,11 +163,19 @@ function installationAdministratorServicePrincipal(iamState) {
   return principal;
 }
 
-function createAgentPluginApi({ request, namespaceId }) {
+function createAgentPluginApi({ request, namespaceId, gatewayAuth }) {
   async function createAgent({ harnessId, executionMode, name, harnessAuth, backendId }) {
+    const values = nativeConfiguration(harnessId);
+    if (gatewayAuth !== undefined) {
+      values.gateway = {
+        ...values.gateway,
+        ...gatewayAuth,
+        auth: { ...gatewayAuth.auth, password: values.gateway.auth.password },
+      };
+    }
     const configuration = await request("POST", `/namespaces/${namespaceId}/configurations`, {
       kind: "agent",
-      values: nativeConfiguration(harnessId),
+      values,
     });
     assert.equal(configuration.status, 201, JSON.stringify(configuration.error));
     const agent = await request("POST", `/namespaces/${namespaceId}/agents`, {
@@ -239,6 +256,7 @@ function installationConfiguration({
   pluginDriverId,
   pluginDriverConfiguration,
   codexServiceAccountImport,
+  workspaceGateway,
 }) {
   const configuration = createKubernetesInstallationConfiguration({
     authentication,
@@ -249,13 +267,20 @@ function installationConfiguration({
     codexSeccompProfile: process.env.OCC_TEST_KUBERNETES_CODEX_SECCOMP_PROFILE,
   });
   if (pluginDriverId === "codex-plugin") {
-    configuration.drivers.compute.configuration.resources.gateway.limits.memory = "4Gi";
+    configuration.drivers.compute.configuration.resources.gateway.limits.memory =
+      productionGatewayMemoryLimit;
     configuration.drivers.compute.configuration.resources.agent.limits.memory = "2Gi";
   }
   configuration.drivers.secret.configuration.authentication = authentication;
   configuration.drivers.configuration.id = "configuration-kubernetes-plugin-real";
   configuration.drivers.compute.id = "compute-kubernetes-plugin-real";
-  configuration.drivers.plugin = { id: pluginDriverId, configuration: pluginDriverConfiguration };
+  configuration.drivers.plugin = [{ id: pluginDriverId, configuration: pluginDriverConfiguration }];
+  if (workspaceGateway !== undefined) {
+    configuration.drivers.compute.configuration.gatewayRouting = workspaceGateway.routing;
+    configuration.drivers.compute.configuration.network.gatewayTrustedProxyCidrs =
+      workspaceGateway.nativeOptions.gatewayAuth.trustedProxies;
+    delete configuration.drivers.compute.configuration.network.gatewayClients;
+  }
   configuration.drivers.compute.configuration.network.pluginStatusProxySourceCidrs =
     pluginProofPluginStatusProxyCidrs();
   if (codexServiceAccountImport !== undefined) {
@@ -436,254 +461,17 @@ function sanitizedPluginProofWorkerEvents(events, revisionId) {
       revisionId: event.revisionId,
       outcome: event.outcome,
       code: event.code,
+      step: event.step,
+      status: event.status,
+      errorClass: event.errorClass,
+      dependency: event.dependency,
+      cause: event.cause,
+      reason: event.reason,
+      method: event.method,
+      grpcStatus: event.grpcStatus,
+      validationCategory: event.validationCategory,
     }));
 }
-
-const sessionEvidenceScript = String.raw`
-  const { DatabaseSync } = require("node:sqlite");
-  const sessionKey = process.argv[1];
-  const marker = process.argv[2];
-  const toolName = process.argv[3];
-  const resultPattern = process.argv[4];
-  const databasePath = "/home/node/.openclaw/agents/main/agent/openclaw-agent.sqlite";
-  const db = new DatabaseSync(databasePath, { readOnly: true });
-  function contains(value, needle) {
-    if (!needle) return false;
-    if (typeof value === "string") return value.includes(needle);
-    if (Array.isArray(value)) return value.some((entry) => contains(entry, needle));
-    if (value && typeof value === "object") {
-      return Object.values(value).some((entry) => contains(entry, needle));
-    }
-    return false;
-  }
-  function textOf(content) {
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) {
-      return content
-        .filter((block) => block && block.type === "text" && typeof block.text === "string")
-        .map((block) => block.text)
-        .join("\n");
-    }
-    return "";
-  }
-  function hasStructuredResult(value) {
-    if (Array.isArray(value)) {
-      return value.some((entry) => hasStructuredResult(entry));
-    }
-    if (value && typeof value === "object") {
-      if (value.type === "text" && typeof value.text === "string") {
-        return hasStructuredResult(value.text);
-      }
-      return Object.keys(value).length > 0;
-    }
-    if (typeof value !== "string") return false;
-    const trimmed = value.trim();
-    if (trimmed.length === 0) return false;
-    try {
-      return hasStructuredResult(JSON.parse(trimmed));
-    } catch {
-      return false;
-    }
-  }
-  function matchesToolName(name) {
-    if (typeof name !== "string") return false;
-    if (toolName) return name === toolName;
-    return /(^|[._:-])list[_-]?calendars$/i.test(name);
-  }
-  // A row that is not JSON establishes nothing. One written before the evidence window must not
-  // fail the evidence of a passing run (finding 2029); one inside it fails the evidence below.
-  function parseEvent(text) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return undefined;
-    }
-  }
-  try {
-    db.exec("PRAGMA busy_timeout=5000");
-    const session = db.prepare("SELECT current_session_id, entry_json FROM session_nodes WHERE session_key = ?").get(sessionKey);
-    if (!session) {
-      process.stdout.write(JSON.stringify({ databasePath, sessionKey, exists: false }));
-      process.exit(0);
-    }
-    const entry = JSON.parse(session.entry_json);
-    const promptTools =
-      entry?.systemPromptReport?.source === "run" &&
-      Array.isArray(entry.systemPromptReport.tools?.entries)
-        ? entry.systemPromptReport.tools.entries
-            .map((tool) => tool?.name)
-            .filter((name) => typeof name === "string")
-        : undefined;
-    const allRows = db
-      .prepare("SELECT seq, event_json FROM transcript_events WHERE session_id = ? ORDER BY seq")
-      .all(session.current_session_id);
-    // Repeated calls share a session; an earlier allowed result cannot prove this turn.
-    const start = allRows.findLastIndex((row) => {
-      const event = parseEvent(row.event_json);
-      return event?.type === "message" && event.message?.role === "user" && contains(event.message, marker);
-    });
-    const rows = start < 0 ? [] : allRows.slice(start);
-    // Every user message that carries the marker, in or before the window, so a turn without
-    // its prompt mirror shows where the prompt went (finding 2019): a second, unmirrored copy
-    // after the mirrored one moves the window past it. The newest ten.
-    const markerUserMessages = allRows
-      .map((row, index) => ({ row, index, event: parseEvent(row.event_json) }))
-      .filter(({ event }) => event?.type === "message" && event.message?.role === "user" && contains(event.message, marker))
-      .slice(-10)
-      .map(({ row, index, event }) => ({
-        seq: row.seq,
-        inWindow: index >= start,
-        mirrorIdentity: event.message.__openclaw?.mirrorIdentity ?? null,
-        mirrorOrigin: event.message.__openclaw?.mirrorOrigin ?? null,
-        idempotencyKey: typeof event.message.idempotencyKey === "string" ? event.message.idempotencyKey : null,
-        timestamp: event.message.timestamp ?? null,
-      }));
-    const messages = [];
-    const calls = [];
-    const results = [];
-    const eventTypeCounts = {};
-    const roleCounts = {};
-    const contentBlockTypeCounts = {};
-    const observedToolNames = new Set();
-    const resultToolNames = new Set();
-    const finalAssistantDiagnostics = {
-      mentionsUnavailable: false,
-      mentionsAuth: false,
-    };
-    const codexTurns = new Map();
-    function turn(prefix) {
-      const current = codexTurns.get(prefix) ?? {
-        turnPrefix: prefix,
-        promptSeen: false,
-        terminalAssistantSeen: false,
-        toolCallMirrorSeen: false,
-        toolResultMirrorSeen: false,
-      };
-      codexTurns.set(prefix, current);
-      return current;
-    }
-    function prefixForMirrorIdentity(identity, suffix) {
-      return typeof identity === "string" && identity.endsWith(suffix)
-        ? identity.slice(0, -suffix.length)
-        : undefined;
-    }
-    function prefixForToolMirrorIdentity(identity, suffix) {
-      if (typeof identity !== "string" || !identity.endsWith(suffix)) return undefined;
-      const withoutSuffix = identity.slice(0, -suffix.length);
-      const marker = ":tool:";
-      const index = withoutSuffix.lastIndexOf(marker);
-      return index === -1 ? undefined : withoutSuffix.slice(0, index);
-    }
-    for (const row of rows) {
-      const event = parseEvent(row.event_json);
-      // A row in the window that is not JSON could hide a tool call, so a check that this turn made
-      // none must not pass over it.
-      if (event === undefined) {
-        throw new Error("transcript row " + row.seq + " in the evidence window is not JSON");
-      }
-      // Non-message rows, including null payloads, cannot establish tool or turn evidence.
-      eventTypeCounts[event?.type ?? "unknown"] = (eventTypeCounts[event?.type ?? "unknown"] ?? 0) + 1;
-      if (event?.type !== "message") continue;
-      const message = event.message;
-      const hasMarker = contains(message, marker);
-      const mirrorIdentity = message?.__openclaw?.mirrorIdentity;
-      roleCounts[message.role ?? "unknown"] = (roleCounts[message.role ?? "unknown"] ?? 0) + 1;
-      const promptPrefix = prefixForMirrorIdentity(mirrorIdentity, ":prompt");
-      if (message.role === "user" && hasMarker && promptPrefix !== undefined) {
-        turn(promptPrefix).promptSeen = true;
-      }
-      const assistantPrefix = prefixForMirrorIdentity(mirrorIdentity, ":assistant");
-      if (message.role === "assistant" && hasMarker && assistantPrefix !== undefined) {
-        turn(assistantPrefix).terminalAssistantSeen = true;
-      }
-      messages.push({
-        seq: row.seq,
-        role: message.role,
-        hasMarker,
-        stopReason: message.stopReason,
-        mirrorIdentity,
-      });
-      if (message.role === "assistant" && Array.isArray(message.content)) {
-        for (const block of message.content) {
-          const blockType = block?.type ?? "unknown";
-          contentBlockTypeCounts[blockType] = (contentBlockTypeCounts[blockType] ?? 0) + 1;
-          if (typeof block?.name === "string") observedToolNames.add(block.name);
-          if (block?.type === "toolCall" && matchesToolName(block.name)) {
-            const toolPrefix = prefixForToolMirrorIdentity(mirrorIdentity, ":call");
-            if (toolPrefix !== undefined) turn(toolPrefix).toolCallMirrorSeen = true;
-            calls.push({ seq: row.seq, id: block.id, name: block.name, mirrorIdentity });
-          }
-        }
-        if (hasMarker) {
-          const text = textOf(message.content).toLowerCase();
-          finalAssistantDiagnostics.mentionsUnavailable ||=
-            /unavailable|not available|unable|cannot|can't|could not|no access|not connected|not installed/.test(text);
-          finalAssistantDiagnostics.mentionsAuth ||=
-            /auth|permission|credential|login|connect|unauthoriz/.test(text);
-        }
-      }
-      if (message.role === "toolResult" && calls.some((call) => call.id === message.toolCallId)) {
-        const resultPrefix = prefixForToolMirrorIdentity(mirrorIdentity, ":result");
-        if (resultPrefix !== undefined) turn(resultPrefix).toolResultMirrorSeen = true;
-        results.push({
-          seq: row.seq,
-          toolCallId: message.toolCallId,
-          toolName: message.toolName,
-          isError: message.isError === true,
-          // Native Codex emits this terminal reason when MCP approval is denied.
-          deniedByUser: textOf(message.content).includes("user rejected MCP tool call"),
-          matchesResult: resultPattern
-            ? contains(message, resultPattern) || textOf(message.content).includes(resultPattern)
-            : hasStructuredResult(message.content),
-          mirrorIdentity,
-          // Codex records risk and authorization only with a completed judgement; a
-          // reviewer that failed closed or timed out leaves them out (finding 1980).
-          approvalReviews: (message.details?.approvalReviews ?? []).map((review) => ({
-            id: review.id,
-            status: review.status,
-            ...(typeof review.riskLevel === "string" ? { riskLevel: review.riskLevel } : {}),
-            ...(typeof review.userAuthorization === "string"
-              ? { userAuthorization: review.userAuthorization }
-              : {}),
-            ...(typeof review.rationale === "string"
-              ? { rationale: review.rationale.slice(0, 500) }
-              : {}),
-          })),
-        });
-      }
-      if (message.role === "toolResult" && typeof message.toolName === "string") {
-        resultToolNames.add(message.toolName);
-      }
-    }
-    process.stdout.write(JSON.stringify({
-      databasePath,
-      sessionKey,
-      sessionId: session.current_session_id,
-      exists: true,
-      promptReportSource: entry?.systemPromptReport?.source,
-      promptToolNames: promptTools,
-      messageCount: messages.length,
-      userMarkerSeen: messages.some((message) => message.role === "user" && message.hasMarker),
-      assistantMarkerSeen: messages.some((message) => message.role === "assistant" && message.hasMarker),
-      assistantError: messages.some((message) => message.role === "assistant" && message.stopReason === "error"),
-      calls,
-      results,
-      codexTurns: Array.from(codexTurns.values()),
-      markerUserMessages,
-      diagnostics: {
-        eventCount: rows.length,
-        eventTypeCounts,
-        roleCounts,
-        contentBlockTypeCounts,
-        observedToolNames: Array.from(observedToolNames).sort(),
-        resultToolNames: Array.from(resultToolNames).sort(),
-        finalAssistantDiagnostics,
-      },
-    }));
-  } finally {
-    db.close();
-  }
-`;
 
 // Codex's automatic reviewer reports a judgement as approved or denied with a risk level
 // and user authorization. When the review itself cannot finish (session, parse or prompt
@@ -744,6 +532,24 @@ export function automaticReviewerErrored(results) {
         (result.approvalReviews ?? []).length > 0 &&
         result.approvalReviews.every((review) => approvalReviewKind(review) === "reviewer-error"),
     )
+  );
+}
+
+function completedCodexRun(turn) {
+  return turn?.promptSeen && (turn.terminalAssistantSeen || turn.gatewayRunCompletion);
+}
+
+// For a later reply, a different valid pair can establish that the run completed.
+// It cannot establish which tool produced the result we are reporting.
+function completedCodexToolPair(turn, call, result) {
+  return (
+    completedCodexRun(turn) &&
+    (turn.terminalAssistantSeen ||
+      (typeof call.id === "string" &&
+        call.id.trim().length > 0 &&
+        result.toolCallId === call.id &&
+        call.seq < result.seq &&
+        result.mirrorIdentity === call.mirrorIdentity.slice(0, -":call".length) + ":result"))
   );
 }
 
@@ -824,17 +630,25 @@ async function useLocalPluginRuntimeAppServerToken() {
 const codexNativeCatalogScript = String.raw`
 ${PLUGIN_RUNTIME_HELPERS}
 ${codexLocalAppServerTokenScript}
+let catalogStage = "local app-server authentication";
 (async () => {
   await useLocalPluginRuntimeAppServerToken();
-  // Startup has already resolved and installed A from this native catalog.
-  const listed = await codexAppServerRequest("plugin/list", {});
-  const requestedIds = new Set(JSON.parse(process.argv[1]));
+  const deadline = Date.now() + CODEX_PLUGIN_RUNTIME_INSTALL_DEADLINE_MS;
   const entries = [];
-  for (const entry of pluginRuntimeTranslator.codexCatalogEntries(listed)) {
-    if (!requestedIds.has(entry.id)) continue;
-    const [params] = pluginRuntimeTranslator.codexReadParamsForSelections({
-      [entry.id]: { enabled: true, toolDefaults: { approval: "provider_default", reviewer: "auto" } },
-    }, listed);
+  for (const id of new Set(JSON.parse(process.argv[1]))) {
+    // Look up only the requested plugin, through the same paginated search as startup.
+    catalogStage = "plugin/search";
+    let params;
+    try {
+      [params] = await searchCodexSelectionParams({ [id]: {} }, codexAppServerRequest, deadline);
+    } catch (error) {
+      // The plugin-driver scenario supplies alternative candidates that may be absent.
+      if (error.message === "Codex plugin catalog did not contain the selected plugin.") {
+        continue;
+      }
+      throw error;
+    }
+    catalogStage = "plugin/read";
     try {
       const detail = await codexAppServerRequest("plugin/read", params);
       if (!isPlainObject(detail?.plugin) || !Array.isArray(detail.plugin.apps)) {
@@ -843,15 +657,39 @@ ${codexLocalAppServerTokenScript}
       const appIds = detail.plugin.apps
         .map((app) => app?.id)
         .filter((id) => typeof id === "string" && id.length > 0);
-      entries.push({ ...entry, remotePluginId: params.pluginName,
+      entries.push({ id, remotePluginId: params.pluginName,
         detailAvailable: true, appCount: detail.plugin.apps.length, appIds });
     } catch {
-      entries.push({ ...entry, remotePluginId: params.pluginName, detailAvailable: false });
+      entries.push({ id, remotePluginId: params.pluginName, detailAvailable: false });
     }
   }
   process.stdout.write(JSON.stringify({ entries }));
-})().catch(() => {
-  process.stderr.write("Native Codex catalog query failed.");
+})().catch((error) => {
+  // RPC errors can contain upstream response text. Emit only locally classified facts.
+  const timedOut = error.message?.startsWith("Codex app-server plugin runtime request timed out during ");
+  const reason = timedOut ? "timed out" : "failed";
+  const categories = new Map([
+    ["Codex app-server plugin runtime transport failed.", "transport-failed"],
+    ["Codex app-server plugin runtime transport closed.", "transport-closed"],
+    ["Codex app-server plugin runtime response was invalid JSON.", "invalid-json"],
+    ["Codex app-server plugin runtime response was malformed.", "malformed-response"],
+    ["Codex plugin search deadline expired.", "search-deadline"],
+    ["Codex plugin search repeated its cursor.", "repeated-cursor"],
+    ["Local plugin runtime status is unavailable.", "local-status-unavailable"],
+    ["Local plugin runtime status is not ready.", "local-status-not-ready"],
+  ]);
+  const rpcError = error instanceof CodexAppServerRequestError;
+  const category = timedOut ? "request-timeout" :
+    rpcError ? "rpc-error" : categories.get(error.message) ?? "unknown";
+  // Keep only a numeric HTTP status, never the surrounding upstream text or URLs.
+  const httpStatus = rpcError && typeof error.message === "string"
+    ? error.message.slice(0, 4096).match(/\b(?:HTTP(?:\/\d(?:\.\d)?)?\s+|status(?:\s+code)?[:=]?\s+)([45]\d{2})\b/i)?.[1]
+    : undefined;
+  const rpcMethod = rpcError && ["initialize", "plugin/search", "plugin/read"].includes(error.method)
+    ? ", RPC method: " + error.method : "";
+  const status = httpStatus === undefined ? "" : ", HTTP status: " + httpStatus;
+  process.stderr.write("Native Codex catalog query " + reason + " during " + catalogStage +
+    " (category: " + category + rpcMethod + status + ").");
   process.exitCode = 1;
 });
 `;
@@ -987,6 +825,219 @@ function assertDiagnosticText(value, secrets) {
   return text;
 }
 
+// The native catalog is SessionMeta, not the legacy thread_dynamic_tools table.
+export function parseCodexPolicyMetadata(line, expectedThreadId) {
+  const entry = JSON.parse(line);
+  assert.equal(entry.type, "session_meta", "the rollout head must be native SessionMeta");
+  const metadata = entry.payload;
+  assert.equal(metadata?.id, expectedThreadId, "SessionMeta must identify the requested thread");
+  const specs = metadata.dynamic_tools ?? [];
+  assert.ok(Array.isArray(specs), "SessionMeta dynamic_tools must be an array");
+  const tools = specs.flatMap((spec) => {
+    assert.ok(spec.type === "namespace" || spec.type === "function", "unknown native tool spec");
+    const entries = spec.type === "namespace" ? spec.tools : [spec];
+    assert.ok(Array.isArray(entries), "native namespace must contain tools");
+    return entries.map((tool) => {
+      assert.equal(tool.type, "function");
+      assert.ok(typeof tool.name === "string" && tool.name.length > 0);
+      return { namespace: spec.type === "namespace" ? spec.name : null, name: tool.name };
+    });
+  });
+  return {
+    threadId: metadata.id,
+    parentThreadId: metadata.parent_thread_id ?? null,
+    forkedFromId: metadata.forked_from_id ?? null,
+    tools,
+  };
+}
+
+export async function readCodexPolicyRolloutHead(path) {
+  const { access } = await import("node:fs/promises");
+  const { createReadStream } = await import("node:fs");
+  const { createZstdDecompress } = await import("node:zlib");
+  assert.ok(typeof path === "string" && /\.jsonl(?:\.zst)?$/.test(path));
+  // Codex's reader prefers the plain counterpart if compression left both present.
+  const plain = path.replace(/\.zst$/, "");
+  let selected = plain;
+  try {
+    await access(plain);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+    selected = `${plain}.zst`;
+  }
+  const input = createReadStream(selected);
+  const stream = selected.endsWith(".zst") ? input.pipe(createZstdDecompress()) : input;
+  if (stream !== input) {
+    input.on("error", (error) => stream.destroy(error));
+  }
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  try {
+    for await (const chunk of stream) {
+      bytes += chunk.length;
+      assert.ok(bytes <= 4 * 1024 * 1024, "native rollout metadata exceeds the fixture read limit");
+      text += decoder.decode(chunk, { stream: true });
+      const end = text.indexOf("\n");
+      if (end !== -1) {
+        return text.slice(0, end);
+      }
+    }
+    throw new Error("native rollout has no complete SessionMeta record");
+  } finally {
+    stream.destroy();
+    input.destroy();
+  }
+}
+
+export function findCodexPolicyChild(parent, childMarker) {
+  const completedTurns = parent.turns.filter(
+    (turn) => turn.status === "completed" && turn.error === null,
+  );
+  const completedItems = completedTurns.flatMap((turn) => turn.items);
+  const collabSpawns = completedItems.filter(
+    (item) => item.type === "collabAgentToolCall" && item.tool === "spawnAgent",
+  );
+  const completedSpawns = collabSpawns.filter((item) => item.status === "completed");
+  const senderBoundSpawns = completedSpawns.filter((item) => item.senderThreadId === parent.id);
+  const spawns = senderBoundSpawns.filter((item) => item.prompt?.includes(childMarker));
+  // V2 records the started child rather than a collaboration call with its prompt.
+  // Bind that native identity to the turn carrying this test's unique child task.
+  const activities = completedTurns.flatMap((turn) =>
+    turn.items.filter((item) => item.type === "subAgentActivity").map((item) => ({ turn, item })),
+  );
+  const startedActivities = activities.filter(({ item }) => item.kind === "started");
+  const taskActivities = startedActivities.filter(({ turn }) =>
+    turn.items.some(
+      (item) =>
+        item.type === "userMessage" &&
+        item.content.some((part) => part.type === "text" && part.text.includes(childMarker)),
+    ),
+  );
+  assert.equal(
+    spawns.length + taskActivities.length,
+    1,
+    `one completed native spawn must match the child task: ${JSON.stringify({
+      counts: {
+        turns: parent.turns.length,
+        completedErrorNullTurns: completedTurns.length,
+        collabSpawns: collabSpawns.length,
+        completedSpawns: completedSpawns.length,
+        senderBoundSpawns: senderBoundSpawns.length,
+        markerBoundSpawns: spawns.length,
+        subAgentActivities: activities.length,
+        startedSubAgents: startedActivities.length,
+        taskBoundSubAgents: taskActivities.length,
+      },
+      itemTypes: [...new Set(completedItems.map((item) => item.type))].slice(0, 20),
+      activities: activities.slice(-10).map(({ turn, item }) => ({
+        parentTurnId: turn.id,
+        childThreadId: item.agentThreadId,
+        kind: ["started", "interacted", "interrupted", "completed"].includes(item.kind)
+          ? item.kind
+          : "unknown",
+      })),
+      recentTurns: parent.turns.slice(-10).map((turn) => ({
+        status: ["completed", "inProgress", "failed", "interrupted"].includes(turn.status)
+          ? turn.status
+          : "unknown",
+        hasError: turn.error !== null && turn.error !== undefined,
+        errorIsNull: turn.error === null,
+      })),
+    })}`,
+  );
+  if (spawns.length === 1) {
+    assert.equal(
+      spawns[0].receiverThreadIds.length,
+      1,
+      "the spawn must identify exactly one child",
+    );
+    return spawns[0].receiverThreadIds[0];
+  }
+  const childId = taskActivities[0].item.agentThreadId;
+  assert.ok(
+    typeof childId === "string" && childId.length > 0,
+    "the activity must identify its child",
+  );
+  return childId;
+}
+
+export function assertCodexPolicyChild({
+  parent,
+  child,
+  parentMetadata,
+  childMetadata,
+  childMarker,
+  childResult,
+}) {
+  assert.equal(child.id, findCodexPolicyChild(parent, childMarker));
+  assert.notEqual(child.id, parent.id);
+  assert.equal(child.parentThreadId, parent.id);
+  assert.equal(child.forkedFromId, null, "this proof requires a fresh child, not forked history");
+  assert.equal(parentMetadata.threadId, parent.id);
+  assert.equal(childMetadata.threadId, child.id);
+  assert.equal(childMetadata.parentThreadId, parent.id);
+  assert.equal(childMetadata.forkedFromId, null);
+  assert.ok(
+    parentMetadata.tools.some((tool) => tool.name === "agents_list"),
+    "the parent Gateway catalog is the positive control",
+  );
+  assert.deepEqual(
+    childMetadata.tools,
+    [],
+    "the fresh child must not inherit Gateway dynamic tools",
+  );
+  const completed = child.turns.find(
+    (turn) =>
+      turn.status === "completed" &&
+      turn.error === null &&
+      turn.items.some((item) => item.type === "agentMessage" && item.text.includes(childMarker)) &&
+      turn.items.some(
+        (item) =>
+          item.type === "commandExecution" &&
+          item.status === "completed" &&
+          item.exitCode === 0 &&
+          item.aggregatedOutput?.includes(`42 ${childResult}`),
+      ),
+  );
+  assert.ok(
+    completed,
+    "the child's own completed turn must contain the successful native command and reply",
+  );
+  return {
+    parentThreadId: parent.id,
+    childThreadId: child.id,
+    childTurnId: completed.id,
+    nativeCommandSucceeded: true,
+    parentGatewayTools: parentMetadata.tools,
+    childGatewayTools: [],
+  };
+}
+
+export async function assertNativeCronRunSucceeded({ request, waitFor, jobId }) {
+  const accepted = await request("cron.run", { id: jobId, mode: "force", waitTimeoutMs: 5_000 });
+  assert.equal(accepted.ok, true, "human command request must succeed");
+  assert.equal(accepted.enqueued, true, "human command request must enqueue a run");
+  assert.equal(typeof accepted.runId, "string", "human command request must identify its run");
+  assert.ok(accepted.runId.length > 0, "human command run ID must not be empty");
+  const run = await waitFor(
+    "human command run completion",
+    async () => {
+      const page = await request("cron.runs", { id: jobId, runId: accepted.runId, limit: 1 });
+      const entry = page.entries?.[0];
+      return entry?.action === "finished" ? entry : undefined;
+    },
+    60_000,
+  );
+  assert.equal(run?.action, "finished", "human command run must finish");
+  assert.equal(run.jobId, jobId, "human command result must belong to its control job");
+  assert.equal(run.runId, accepted.runId, "human command result must belong to its enqueued run");
+  assert.equal(run.status, "ok", "human command run must succeed");
+  return { jobId, runId: accepted.runId, status: run.status };
+}
+
 export function createNativePluginAssertions({
   gatewayUrl,
   execGateway,
@@ -1000,6 +1051,9 @@ export function createNativePluginAssertions({
     proofMode === "openclaw" || proofMode === "codex",
     "native plugin proof mode must be openclaw or codex.",
   );
+
+  const { sessionEvidence, readCodexSessionBinding, readConversationReply } =
+    createGatewaySessionEvidence({ execGateway, proofMode });
 
   async function assertGatewayChatCompletionsEnabled(agent) {
     const execution = await execGateway(agent, ["node", "-e", gatewayHttpConfigScript]);
@@ -1053,6 +1107,62 @@ export function createNativePluginAssertions({
         throw error;
       }
     });
+  }
+
+  async function captureRuntimeFailureLogs(logTarget, secrets = []) {
+    if (readRuntimeLogs && recordRuntimeLogs && logTarget.revisionId) {
+      // OCC authorizes and redacts each exact revision read. Apply the existing QA
+      // redactor again for fixture secrets before writing the public evidence artifact.
+      try {
+        for (const value of secrets) {
+          if (typeof value === "string" && value) {
+            registerQaSecret(value);
+          }
+        }
+        const sources = [];
+        for (const source of ["gateway", "agent"]) {
+          // Stay within OCC's two log reads/second per principal and Agent.
+          await delay(500);
+          try {
+            const page = await readRuntimeLogs({ ...logTarget, source });
+            const lines = page.records.map((record) => {
+              if (record.type === "line") {
+                const { type, time, level, message, fields } = record;
+                return JSON.stringify({ type, time, level, message, fields });
+              }
+              const { type, time, reason, count } = record;
+              return JSON.stringify({ type, time, reason, count });
+            });
+            sources.push({
+              source,
+              lines: redactedQaTail(lines.join("\n"), process.env, {
+                lines: 80,
+                lineChars: 900,
+              }),
+            });
+          } catch {
+            sources.push({ source, unavailable: true });
+          }
+        }
+        await recordRuntimeLogs({ ...logTarget, sources });
+      } catch {
+        // Diagnostic reads/writes must never replace the original turn failure.
+      }
+    }
+  }
+
+  async function withRuntimeFailureLogs(agent, action) {
+    const logTarget = {
+      namespaceId: agent.namespaceId,
+      agentId: agent.id,
+      revisionId: agent.revision?.id,
+    };
+    try {
+      return await action();
+    } catch (error) {
+      await captureRuntimeFailureLogs(logTarget);
+      throw error;
+    }
   }
 
   async function normalGatewayTurn({
@@ -1208,45 +1318,7 @@ export function createNativePluginAssertions({
       }
       return content;
     } catch (error) {
-      if (readRuntimeLogs && recordRuntimeLogs && logTarget.revisionId) {
-        // OCC authorizes and redacts each exact revision read. Apply the existing QA
-        // redactor again for fixture secrets before writing the public evidence artifact.
-        try {
-          for (const value of [password, ...secrets]) {
-            if (typeof value === "string" && value) {
-              registerQaSecret(value);
-            }
-          }
-          const sources = [];
-          for (const source of ["gateway", "agent"]) {
-            // Stay within OCC's two log reads/second per principal and Agent.
-            await delay(500);
-            try {
-              const page = await readRuntimeLogs({ ...logTarget, source });
-              const lines = page.records.map((record) => {
-                if (record.type === "line") {
-                  const { type, time, level, message, fields } = record;
-                  return JSON.stringify({ type, time, level, message, fields });
-                }
-                const { type, time, reason, count } = record;
-                return JSON.stringify({ type, time, reason, count });
-              });
-              sources.push({
-                source,
-                lines: redactedQaTail(lines.join("\n"), process.env, {
-                  lines: 80,
-                  lineChars: 900,
-                }),
-              });
-            } catch {
-              sources.push({ source, unavailable: true });
-            }
-          }
-          await recordRuntimeLogs({ ...logTarget, sources });
-        } catch {
-          // Diagnostic reads/writes must never replace the original turn failure.
-        }
-      }
+      await captureRuntimeFailureLogs(logTarget, [password, ...secrets]);
       throw error;
     } finally {
       abort.abort();
@@ -1256,17 +1328,26 @@ export function createNativePluginAssertions({
     }
   }
 
-  async function sessionEvidence(agent, { sessionKey, turnMarker, toolName, resultPattern }) {
-    const execution = await execGateway(agent, [
+  async function readCodexThreadMetadata(agent, thread) {
+    assert.equal(proofMode, "codex");
+    assert.ok(typeof thread.id === "string" && thread.id.length > 0);
+    assert.ok(typeof thread.path === "string", "native thread/read must return its rollout path");
+    const execution = await execCodex(agent, [
       "node",
       "-e",
-      sessionEvidenceScript,
-      sessionKey,
-      turnMarker,
-      toolName ?? "",
-      resultPattern ?? "",
+      `
+      const assert = require("node:assert/strict");
+      ${parseCodexPolicyMetadata.toString()}
+      ${readCodexPolicyRolloutHead.toString()}
+      (async () => {
+        const line = await readCodexPolicyRolloutHead(process.argv[1]);
+        process.stdout.write(JSON.stringify(parseCodexPolicyMetadata(line, process.argv[2])));
+      })().catch(() => { process.stderr.write("Native SessionMeta evidence read failed."); process.exitCode = 1; });
+    `,
+      thread.path,
+      thread.id,
     ]);
-    return { runtime: execution.label, ...JSON.parse(execution.stdout) };
+    return JSON.parse(execution.stdout);
   }
 
   async function assertSessionToolCallEvidence(agent, options) {
@@ -1287,28 +1368,16 @@ export function createNativePluginAssertions({
       false,
       `${options.sessionKey} assistant turn must succeed.`,
     );
-    if (proofMode === "openclaw") {
-      assert.ok(
-        Array.isArray(evidence.promptToolNames),
-        `${options.sessionKey} must have a run-sourced systemPromptReport.tools.entries snapshot.`,
-      );
-      assert.ok(
-        evidence.promptToolNames.includes(options.toolName),
-        `${options.sessionKey} prompt tools must advertise ${options.toolName}: ${JSON.stringify({
-          runtime: evidence.runtime,
-          sessionId: evidence.sessionId,
-          promptReportSource: evidence.promptReportSource,
-          promptToolNames: evidence.promptToolNames,
-        })}`,
-      );
-    }
-    const matched = evidence.calls.find((call) =>
-      evidence.results.some(
-        (result) =>
-          result.toolCallId === call.id &&
-          result.isError === false &&
-          result.matchesResult === true,
-      ),
+    const matched = evidence.calls.find(
+      (call) =>
+        ((options.expectedArguments === undefined && options.codeModeCall === undefined) ||
+          call.matchesArguments === true) &&
+        evidence.results.some(
+          (result) =>
+            result.toolCallId === call.id &&
+            result.isError === false &&
+            result.matchesResult === true,
+        ),
     );
     if (!matched) {
       // Lead with the review outcome so the first line says whether a reviewer judged
@@ -1318,6 +1387,8 @@ export function createNativePluginAssertions({
           {
             runtime: evidence.runtime,
             sessionId: evidence.sessionId,
+            promptReportSource: evidence.promptReportSource,
+            promptToolNames: evidence.promptToolNames,
             calls: evidence.calls,
             results: evidence.results,
             diagnostics: evidence.diagnostics,
@@ -1331,12 +1402,41 @@ export function createNativePluginAssertions({
       error.approvalReviewSummary = describeApprovalReviews(evidence.results);
       throw error;
     }
+    if (proofMode === "openclaw") {
+      assert.ok(
+        Array.isArray(evidence.promptToolNames),
+        `${options.sessionKey} must have a run-sourced systemPromptReport.tools.entries snapshot: ${JSON.stringify(
+          {
+            runtime: evidence.runtime,
+            sessionId: evidence.sessionId,
+            promptReport: evidence.promptReportShape,
+          },
+        )}`,
+      );
+      assert.ok(
+        evidence.promptToolNames.includes(matched.name),
+        `${options.sessionKey} prompt tools must advertise ${matched.name}: ${JSON.stringify({
+          runtime: evidence.runtime,
+          sessionId: evidence.sessionId,
+          promptReportSource: evidence.promptReportSource,
+          promptToolNames: evidence.promptToolNames,
+        })}`,
+      );
+    }
     const result = evidence.results.find(
       (candidate) =>
         candidate.toolCallId === matched.id &&
         candidate.isError === false &&
         candidate.matchesResult === true,
     );
+    if (options.expectedExitCode !== undefined) {
+      assert.equal(
+        result.exitCode,
+        options.expectedExitCode,
+        `native tool ${matched.name} must exit with code ${options.expectedExitCode}: ${JSON.stringify(result.resultDetails)}`,
+      );
+    }
+    let codexTurn;
     if (proofMode === "codex") {
       const callPrefix = codexToolTurnPrefix(matched.mirrorIdentity, ":call");
       const resultPrefix = codexToolTurnPrefix(result?.mirrorIdentity, ":result");
@@ -1344,19 +1444,19 @@ export function createNativePluginAssertions({
         callPrefix && callPrefix === resultPrefix,
         `${options.sessionKey} Codex native tool call/result must share one mirrored turn.`,
       );
-      const turn = evidence.codexTurns.find((candidate) => candidate.turnPrefix === callPrefix);
+      codexTurn = evidence.codexTurns.find((candidate) => candidate.turnPrefix === callPrefix);
       assert.ok(
-        turn?.promptSeen &&
-          turn.terminalAssistantSeen &&
-          turn.toolCallMirrorSeen &&
-          turn.toolResultMirrorSeen,
-        `${options.sessionKey} Codex native turn must include prompt, tool call, tool result, and terminal assistant mirror identities: ${JSON.stringify(
+        completedCodexToolPair(codexTurn, matched, result) &&
+          codexTurn.toolCallMirrorSeen &&
+          codexTurn.toolResultMirrorSeen,
+        `${options.sessionKey} Codex run must include a native prompt and tool call/result plus an owned terminal reply: ${JSON.stringify(
           {
             runtime: evidence.runtime,
             sessionId: evidence.sessionId,
             turnPrefix: callPrefix,
-            turn,
+            turn: codexTurn,
             markerUserMessages: evidence.markerUserMessages,
+            markerAssistantMessages: evidence.markerAssistantMessages,
           },
         )}`,
       );
@@ -1378,24 +1478,45 @@ export function createNativePluginAssertions({
       sessionId: evidence.sessionId,
       toolName: matched.name,
       toolCallId: matched.id,
+      ...(matched.targetId ? { targetId: matched.targetId, targetName: matched.targetName } : {}),
+      ...(options.expectedCatalog ? { catalog: result.catalog } : {}),
       promptAdvertised: proofMode === "openclaw",
-      ...(proofMode === "codex" ? { codexMirrorTurnVerified: true } : {}),
+      ...(proofMode === "openclaw"
+        ? { promptReport: { ...evidence.promptReportShape, toolNames: evidence.promptToolNames } }
+        : {}),
+      ...(codexTurn?.terminalAssistantSeen ? { codexMirrorTurnVerified: true } : {}),
+      ...(codexTurn?.gatewayRunCompletion
+        ? { codexGatewayRunCompletion: codexTurn.gatewayRunCompletion }
+        : {}),
       resultMatched: true,
+      ...(options.codeModeCall ? { codeModeProgramVerified: result.codeModeProgramVerified } : {}),
+      ...(options.expectedExitCode === undefined ? {} : { exitCode: result.exitCode }),
       approvedReviewIds: approvedReviews.map((review) => review.id),
     };
   }
 
-  async function assertSessionToolDeniedEvidence(agent, options) {
+  async function assertSessionToolFailureEvidence(agent, options) {
     const evidence = await sessionEvidence(agent, options);
     assert.equal(evidence.userMarkerSeen, true);
     assert.equal(evidence.assistantMarkerSeen, true);
     assert.equal(
       evidence.calls.length,
       1,
-      "the denied turn must attempt exactly the requested read",
+      `the denied turn must attempt exactly the requested tool: ${JSON.stringify(evidence.diagnostics)}`,
     );
     assert.equal(evidence.results.length, 1, "the denied call must have a terminal result");
     assert.equal(evidence.results[0].toolCallId, evidence.calls[0].id);
+    assert.equal(
+      evidence.results[0].matchesTarget,
+      true,
+      "the refusal must belong to the attempted target",
+    );
+    if (proofMode === "openclaw") {
+      assert.ok(
+        evidence.promptToolNames?.includes(evidence.calls[0].name),
+        "the run must advertise the actual attempted tool or dispatcher",
+      );
+    }
     if (proofMode === "codex") {
       const prefix = codexToolTurnPrefix(evidence.calls[0].mirrorIdentity, ":call");
       assert.ok(
@@ -1404,22 +1525,27 @@ export function createNativePluginAssertions({
       );
       const turn = evidence.codexTurns.find((value) => value.turnPrefix === prefix);
       assert.ok(
-        turn?.promptSeen &&
-          turn.terminalAssistantSeen &&
+        completedCodexToolPair(turn, evidence.calls[0], evidence.results[0]) &&
           turn.toolCallMirrorSeen &&
           turn.toolResultMirrorSeen,
-        `${options.sessionKey} denied Codex native turn must include prompt, tool call, tool result, and terminal assistant mirror identities: ${JSON.stringify(
+        `${options.sessionKey} denied Codex run must include a native prompt and tool call/result plus an owned terminal reply: ${JSON.stringify(
           {
             runtime: evidence.runtime,
             sessionId: evidence.sessionId,
             turnPrefix: prefix,
             turn,
             markerUserMessages: evidence.markerUserMessages,
+            markerAssistantMessages: evidence.markerAssistantMessages,
           },
         )}`,
       );
     }
-    assert.equal(evidence.results[0].isError, true, "denial must prevent a successful native read");
+    assert.equal(evidence.results[0].isError, true, "denial must prevent a successful tool result");
+    return evidence;
+  }
+
+  async function assertSessionToolDeniedEvidence(agent, options) {
+    const evidence = await assertSessionToolFailureEvidence(agent, options);
     assert.equal(
       evidence.results[0].deniedByUser,
       true,
@@ -1430,6 +1556,47 @@ export function createNativePluginAssertions({
       false,
       "denial must not expose the provider result",
     );
+  }
+
+  async function assertSessionToolPolicyDeniedEvidence(agent, options) {
+    const patterns = [options.resultPattern].flat();
+    assert.ok(
+      patterns.length > 0 &&
+        patterns.every((pattern) => typeof pattern === "string" && pattern.length),
+      "policy proof requires the expected native refusal",
+    );
+    assert.ok(
+      options.expectedArguments || options.codeModeCall,
+      "policy proof requires the intended invocation target",
+    );
+    const evidence = await assertSessionToolFailureEvidence(agent, options);
+    assert.equal(
+      evidence.calls[0].matchesArguments,
+      true,
+      "the model must attempt the exact requested action and target",
+    );
+    assert.equal(
+      evidence.results[0].matchesResult,
+      true,
+      `the attempted tool must return the policy refusal: ${JSON.stringify({ resultDetails: evidence.results[0].resultDetails, errorLines: evidence.results[0].errorLines })}`,
+    );
+    return {
+      sessionId: evidence.sessionId,
+      toolCallId: evidence.calls[0].id,
+      toolName: evidence.calls[0].name,
+      ...(options.codeModeCall
+        ? { codeModeProgramVerified: evidence.results[0].codeModeProgramVerified }
+        : {}),
+      ...(Array.isArray(options.resultPattern)
+        ? { matchedRefusal: evidence.results[0].matchedResultPattern }
+        : {}),
+      ...(evidence.calls[0].targetId
+        ? {
+            targetId: evidence.calls[0].targetId,
+            targetName: evidence.calls[0].targetName,
+          }
+        : {}),
+    };
   }
 
   async function assertNoSessionToolCallEvidence(agent, options) {
@@ -1458,26 +1625,27 @@ export function createNativePluginAssertions({
       assert.equal(
         evidence.promptToolNames.includes(options.toolName),
         false,
-        `${options.sessionKey} prompt tools still advertised ${options.toolName}: ${JSON.stringify({
-          runtime: evidence.runtime,
-          sessionId: evidence.sessionId,
-          promptReportSource: evidence.promptReportSource,
-          promptToolNames: evidence.promptToolNames,
-        })}`,
-      );
-    } else {
-      // The gateway prompt report does not include native Codex tools. Require
-      // the completed native turn as well as zero calls, not just an empty mirror.
-      assert.ok(
-        evidence.codexTurns.some((turn) => turn.promptSeen && turn.terminalAssistantSeen),
-        `${options.sessionKey} must include a completed marker-bearing native Codex turn: ${JSON.stringify(
+        `${options.sessionKey} direct prompt schemas still advertised ${options.toolName}: ${JSON.stringify(
           {
             runtime: evidence.runtime,
             sessionId: evidence.sessionId,
-            codexTurns: evidence.codexTurns,
-            markerUserMessages: evidence.markerUserMessages,
+            promptReportSource: evidence.promptReportSource,
+            promptToolNames: evidence.promptToolNames,
           },
         )}`,
+      );
+    } else {
+      // The Gateway prompt report omits native Codex tools. An empty trace alone cannot
+      // distinguish a filtered tool from a turn that never ran or finished.
+      assert.ok(
+        evidence.codexTurns.some(completedCodexRun),
+        `${options.sessionKey} must include a completed marker-bearing Codex run: ${JSON.stringify({
+          runtime: evidence.runtime,
+          sessionId: evidence.sessionId,
+          codexTurns: evidence.codexTurns,
+          markerUserMessages: evidence.markerUserMessages,
+          markerAssistantMessages: evidence.markerAssistantMessages,
+        })}`,
       );
     }
     assert.equal(
@@ -1505,7 +1673,6 @@ export function createNativePluginAssertions({
     assert.ok(Array.isArray(parsed.entries), "native Codex catalog discovery must return entries.");
     return parsed.entries.map((entry) => ({
       id: String(entry.id),
-      name: String(entry.name),
       remotePluginId: String(entry.remotePluginId),
       detailAvailable: entry.detailAvailable === true,
       appCount: Number.isSafeInteger(entry.appCount) ? entry.appCount : undefined,
@@ -1608,8 +1775,13 @@ export function createNativePluginAssertions({
 
   return {
     normalGatewayTurn,
+    withRuntimeFailureLogs,
+    readCodexSessionBinding,
+    readConversationReply,
+    readCodexThreadMetadata,
     assertSessionToolCallEvidence,
     assertSessionToolDeniedEvidence,
+    assertSessionToolPolicyDeniedEvidence,
     assertNoSessionToolCallEvidence,
     readOpenClawPluginPolicy,
     listCodexNativeCatalog,
@@ -1653,6 +1825,8 @@ export async function createPluginDriverRealFixture(
     validatePrerequisites,
     provisionAgentTransportSecret,
     startPortForward,
+    startPortForwardTarget,
+    applyManifest,
   } = createRealKubernetesFixture({
     kubeconfigPath,
     kubernetesContext,
@@ -1759,6 +1933,30 @@ export async function createPluginDriverRealFixture(
   });
 
   await kubectl("create", "namespace", platformNamespace);
+  // Dedicated Agents use the production routed endpoint. The fixture owns the
+  // real Envoy resources; Compute creates each Agent's route during deployment.
+  let workspaceGateway;
+  if (pluginDriverId === "codex-plugin") {
+    const helpers = {
+      kubectl,
+      resource,
+      resources,
+      waitFor,
+      startPortForwardTarget,
+      applyManifest,
+    };
+    await ensureEnvoyGatewayControllers(helpers);
+    workspaceGateway = await createEnvoyWorkspaceGatewayPlan(
+      context,
+      { platformNamespace },
+      helpers,
+    );
+    workspaceGateway.routing.endpointPort = await startWorkspaceGatewayHostRelay(
+      context,
+      workspaceGateway,
+      { ...helpers, gatewayImage },
+    );
+  }
   await kubectl(
     "create",
     "clusterrole",
@@ -1771,7 +1969,7 @@ export async function createPluginDriverRealFixture(
     "clusterrole",
     `${proofPrefix}-tenant-${suffix}`,
     "--verb=create,get,list,patch,update,delete",
-    "--resource=deployments.apps,services,serviceaccounts,configmaps,endpointslices.discovery.k8s.io,networkpolicies.networking.k8s.io,resourcequotas,limitranges,persistentvolumeclaims",
+    "--resource=deployments.apps,services,serviceaccounts,configmaps,endpointslices.discovery.k8s.io,networkpolicies.networking.k8s.io,resourcequotas,limitranges,persistentvolumeclaims,jobs.batch,httproutes.gateway.networking.k8s.io,securitypolicies.gateway.envoyproxy.io",
   );
   await kubectl(
     "create",
@@ -1830,6 +2028,7 @@ export async function createPluginDriverRealFixture(
           pluginDriverId,
           pluginDriverConfiguration,
           codexServiceAccountImport,
+          workspaceGateway,
         }),
       ),
       { mode: 0o600 },
@@ -1845,11 +2044,20 @@ export async function createPluginDriverRealFixture(
           pluginDriverId,
           pluginDriverConfiguration,
           codexServiceAccountImport,
+          workspaceGateway,
         }),
       ),
       { mode: 0o600 },
     ),
   ]);
+
+  const driverEnvironment = {};
+  if (workspaceGateway !== undefined) {
+    const keyPath = join(directory, "gateway-api-key");
+    await writeFile(keyPath, workspaceGateway.apiKey, { mode: 0o600 });
+    driverEnvironment.OCC_GATEWAY_API_KEY_PATH = keyPath;
+    driverEnvironment.OCC_GATEWAY_CA_PATH = process.env.OCC_TEST_GATEWAY_CA_CERT_PATH;
+  }
 
   const [
     { PostgresPlatformState },
@@ -1870,15 +2078,15 @@ export async function createPluginDriverRealFixture(
   const [apiDrivers, workerDrivers] = await Promise.all([
     loadInstallationConfiguration({
       mode: "production",
-      environment: { OCC_CONFIG_PATH: apiConfigurationPath },
+      environment: { ...driverEnvironment, OCC_CONFIG_PATH: apiConfigurationPath },
     }),
     loadInstallationConfiguration({
       mode: "production",
-      environment: { OCC_CONFIG_PATH: workerConfigurationPath },
+      environment: { ...driverEnvironment, OCC_CONFIG_PATH: workerConfigurationPath },
     }),
   ]);
-  assert.equal(apiDrivers.pluginDriver?.id, pluginDriverId);
-  assert.equal(workerDrivers.pluginDriver?.id, pluginDriverId);
+  assert.equal(apiDrivers.pluginDrivers[0]?.id, pluginDriverId);
+  assert.equal(workerDrivers.pluginDrivers[0]?.id, pluginDriverId);
 
   const serviceAccountDriverFactory =
     codexServiceAccountImport === undefined
@@ -1903,6 +2111,7 @@ export async function createPluginDriverRealFixture(
       installationId: existing.id,
       secret: authSecret,
       baseURL: authBaseURL,
+      agentDomain: "agents.oce.localhost",
       pool,
     });
     const servicePrincipal = installationAdministratorServicePrincipal(
@@ -1934,6 +2143,7 @@ export async function createPluginDriverRealFixture(
     databaseUrl: selectedDatabaseUrl,
     authSecret,
     authBaseURL,
+    nativeAdmin: { enabled: false, domain: "agents.oce.localhost" },
     drivers: apiDrivers,
     ...(serviceAccountDriverFactory === undefined ? {} : { serviceAccountDriverFactory }),
   });
@@ -2021,7 +2231,11 @@ export async function createPluginDriverRealFixture(
     return observed.data.status === "ready" ? observed.data : undefined;
   });
 
-  const agentApi = createAgentPluginApi({ request, namespaceId: createdNamespace.data.id });
+  const agentApi = createAgentPluginApi({
+    request,
+    namespaceId: createdNamespace.data.id,
+    gatewayAuth: workspaceGateway?.nativeOptions.gatewayAuth,
+  });
 
   async function createCodexServiceAccountFromToken({ accessToken, name }) {
     assert.ok(
@@ -2162,6 +2376,40 @@ export async function createPluginDriverRealFixture(
         };
       }),
       workerEvents: sanitizedPluginProofWorkerEvents(workerEvents, revisionId),
+      runtime: await safeDiagnostic(async () => {
+        const pods = (await resources("pods", gatewayPlacement)).filter(
+          (pod) => pod.metadata.labels?.["openclaw.dev/agent"] === agent.id,
+        );
+        const privateDiagnostics = await mkdtemp(join(tmpdir(), "occ-plugin-proof-failure-"));
+        // Keep raw native logs private and outside the fixture directory that cleanup removes.
+        for (const pod of pods) {
+          try {
+            const logs = await kubectl(
+              "logs",
+              pod.metadata.name,
+              "--namespace",
+              gatewayPlacement,
+              "--all-containers=true",
+              "--tail=200",
+            );
+            await writeFile(join(privateDiagnostics, `${pod.metadata.name}.log`), logs, {
+              mode: 0o600,
+            });
+          } catch {
+            // Preserve the deployment failure when a removed Pod has no logs.
+          }
+        }
+        return {
+          privateDiagnostics,
+          pods: pods.map((pod) => ({
+            name: pod.metadata.name,
+            revisionId: pod.metadata.labels?.["openclaw.dev/revision"],
+            role: pod.metadata.labels?.["openclaw.dev/workload-role"],
+            phase: pod.status?.phase,
+            ready: isPodReady(pod),
+          })),
+        };
+      }),
     };
   }
 
