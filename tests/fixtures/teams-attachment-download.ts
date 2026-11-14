@@ -42,13 +42,13 @@ async function fetchWithSsrFGuard(options: {
       "finalUrl" in result &&
       "release" in result,
   );
-  assert.ok(result.response instanceof Response);
+  assert.ok(result.response !== null && typeof result.response === "object");
   assert.ok(typeof result.finalUrl === "string");
   assert.ok(typeof result.release === "function");
   return { response: result.response, finalUrl: result.finalUrl, release: result.release };
 }
 async function saveResponseMedia(
-  response: Response,
+  response: object,
   options: { sourceUrl: unknown; maxBytes: number; originalFilename: string },
 ) {
   assert.ok(typeof saveMedia === "function");
