@@ -3,11 +3,22 @@ import test from "node:test";
 import vm from "node:vm";
 import { WORKSPACE_FILE_NAMES } from "../../packages/contracts/src/index.ts";
 import { requireWorkspaceNodePlugins } from "../../apps/controller/src/drivers/compute/kubernetes/configuration-rules.ts";
+import { KubernetesComputeDriver } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
+import { GATEWAY_TOOL_POLICY_SOURCE_COMMIT } from "../../apps/controller/src/drivers/compute/gateway-tool-policy.ts";
+import { apiKeyAuth, options, routedOptions } from "../helpers/kubernetes-routed-scenarios.mjs";
 import {
   WORKSPACE_NODE_BINDING_PATH,
   runOpenClawRuntimeHelper,
   workspaceNodeBinding,
 } from "../helpers/plugin-runtime.mjs";
+import {
+  GATEWAY_DID_NOT_START,
+  gatewayConfigurationHoldLine,
+  invalidGatewayConfiguration,
+  invalidGatewayConfigurationLine,
+  invalidGatewayConfigurationSecret,
+  openClawConfigValidationRefusal,
+} from "../helpers/openclaw-config-validation.mjs";
 
 const OCC_DIFFS_DIGEST =
   "sha512-5VTDNEo7D3iOgRoL5C31JPTbA/EXQEFRuxOvLy67IMFmOajwroGsUMWeuKkmqzFbPNQxvn7GACDSr/5Vmpx3/g==";
@@ -46,6 +57,13 @@ function installedPluginResponses() {
       stderr: "",
     },
   ];
+}
+
+function nativeGatewaySpawns(calls) {
+  return calls.filter(
+    ({ command, args }) =>
+      command === "node" && args?.[0] === "/app/openclaw.mjs" && args[1] === "gateway",
+  );
 }
 
 test("OpenClaw runtime helper installs exact admitted package pins and verifies the install record", async () => {
@@ -740,6 +758,10 @@ test("a running Gateway hot-applies its workspace node under plugins.* and acks 
   });
   const configPath = "/home/node/.openclaw/openclaw.json";
   const atStart = JSON.parse(files.get(configPath));
+  assert.equal(
+    atStart.plugins.entries.codex.config.appServer.remoteWorkspaceRoot,
+    "/sandbox/enterprise",
+  );
   assert.deepEqual(atStart.plugins.entries.codex.config.appServer.nativeHookRelay, {
     ...baseConfig.plugins.entries.codex.config.appServer.nativeHookRelay,
     credentialDirectory: hookDirectory,
@@ -755,7 +777,7 @@ test("a running Gateway hot-applies its workspace node under plugins.* and acks 
   assert.deepEqual(atStart.cron, { triggers: { enabled: false } });
   // The memory flush run gets Gateway-local read and write despite the excludes.
   assert.deepEqual(atStart.agents, {
-    defaults: { compaction: { memoryFlush: { enabled: false } } },
+    defaults: { compaction: { memoryFlush: { enabled: false } }, modelSelectionScope: "session" },
   });
   // Defaults the owner never set are not reported as overridden.
   assert.ok(
@@ -806,10 +828,7 @@ test("a running Gateway hot-applies its workspace node under plugins.* and acks 
     nodeId: "enrolled-node",
     remoteRoot: "/sandbox/enterprise",
   });
-  assert.equal(
-    applied.plugins.entries.codex.config.appServer.remoteWorkspaceRoot,
-    "/sandbox/enterprise",
-  );
+  assert.deepEqual(applied.plugins.entries.codex, atStart.plugins.entries.codex);
   // The write was a whole-file replacement, not an in-place rewrite.
   assert.equal(
     [...files.keys()].some((path) => path.includes(".workspace-node-")),
@@ -1112,7 +1131,7 @@ test("a Gateway given its node in the environment configures it at start and arm
     "environment-node",
   );
   assert.equal(sandbox.process.env.OPENCLAW_WORKSPACE_NODE_PATH, undefined);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter(({ args }) => args?.[1] === "gateway").length, 1);
   assert.deepEqual(intervals, [], "no binding poll without a binding path");
   assert.deepEqual(workspaceNodeState(sandbox), { nodeId: undefined, failure: undefined });
   assert.deepEqual(kills, []);
@@ -1155,8 +1174,18 @@ test("a workspace-node Gateway keeps owner Codex tool excludes, pins the codex p
             baseUrl: "https://other.example.test/v1",
             headers: { "x-model": "b" },
             params: { temperature: 0 },
-            compat: { supportsTools: false },
+            reasoning: true,
+            thinkingLevelMap: { off: "low", minimal: "low" },
+            compat: {
+              supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+              supportsTools: false,
+              thinkingLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
+              headers: { "x-route": "forbidden" },
+              baseUrl: "https://forbidden.example.test/v1",
+            },
           },
+          // An unannotated sibling must not inherit the preceding model's efforts.
+          { id: "plain" },
         ],
       },
       // Codex's other provider: an authored transport here would also make Codex
@@ -1226,6 +1255,7 @@ test("a workspace-node Gateway keeps owner Codex tool excludes, pins the codex p
     defaults: {
       model: "codex/gpt-test",
       compaction: { memoryFlush: { enabled: false, softThresholdTokens: 1000 } },
+      modelSelectionScope: "session",
     },
   });
   // The codex row keeps its models but not a transport a built-in run could reach,
@@ -1235,7 +1265,19 @@ test("a workspace-node Gateway keeps owner Codex tool excludes, pins the codex p
     providers: {
       Codex: {
         maxTokens: 4096,
-        models: [{ id: "gpt-test", name: "gpt-test", contextWindow: 200000 }],
+        models: [
+          {
+            id: "gpt-test",
+            name: "gpt-test",
+            contextWindow: 200000,
+            reasoning: true,
+            thinkingLevelMap: { off: "low", minimal: "low" },
+            compat: {
+              supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+            },
+          },
+          { id: "plain" },
+        ],
         baseUrl: "http://127.0.0.1:9",
         api: "openai-responses",
       },
@@ -1247,6 +1289,30 @@ test("a workspace-node Gateway keeps owner Codex tool excludes, pins the codex p
       anthropic: ownerConfig.models.providers.anthropic,
     },
   });
+  // An invalid/empty native effort list must not introduce a compat override,
+  // and another row must not acquire the first row's capability metadata.
+  for (const efforts of [[], ["off"], ["high", "unknown"], [1], "high"]) {
+    const config = codexGatewayConfig();
+    config.models = {
+      providers: {
+        codex: {
+          models: [
+            { id: "invalid", compat: { supportedReasoningEfforts: efforts } },
+            { id: "plain" },
+          ],
+        },
+      },
+    };
+    const result = await runOpenClawRuntimeHelper(undefined, [], {
+      baseConfig: config,
+      env: { APP_SERVER_URL: "ws://harness.example.test:18790" },
+      workspaceNodeId: "enrolled-node",
+      console: { error() {} },
+    });
+    const saved = JSON.parse(result.files.get("/home/node/.openclaw/openclaw.json"));
+    assert.deepEqual(saved.models.providers.codex.models, [{ id: "invalid" }, { id: "plain" }]);
+    assert.equal(saved.models.providers.codex.baseUrl, "http://127.0.0.1:9");
+  }
   // An openai row that names no transport keeps OpenClaw's default (no credential
   // in the Gateway) so Codex keeps owning its account's models; overrides still go.
   // APP_SERVER_URL marks a Codex Gateway, so the pin holds without the plugin entry.
@@ -1344,7 +1410,8 @@ test("a workspace-node Gateway keeps owner Codex tool excludes, pins the codex p
       message,
     );
   }
-  // Without a workspace node the Gateway's workspace is its own, so nothing is withheld.
+  // A remote Codex Harness still needs the model policy and Gateway-local
+  // exclusions while the workspace node is unavailable.
   const localBase = codexGatewayConfig();
   localBase.models = {
     providers: { codex: { baseUrl: "https://model.example.test/v1", models: [] } },
@@ -1357,10 +1424,14 @@ test("a workspace-node Gateway keeps owner Codex tool excludes, pins the codex p
     local.files.get("/home/node/.openclaw/openclaw.json") ??
       local.files.get("/etc/openclaw/openclaw.json"),
   );
-  assert.equal(localConfig.plugins.entries.codex.config.codexDynamicToolsExclude, undefined);
-  assert.equal(localConfig.cron, undefined);
-  assert.equal(localConfig.agents, undefined);
+  assert.deepEqual(
+    localConfig.plugins.entries.codex.config.codexDynamicToolsExclude,
+    GATEWAY_LOCAL_CODEX_TOOLS,
+  );
+  assert.deepEqual(localConfig.cron, { triggers: { enabled: false } });
+  assert.deepEqual(localConfig.agents, { defaults: { modelSelectionScope: "session" } });
   assert.deepEqual(localConfig.models, localBase.models);
+  assert.equal(localConfig.plugins.entries.codex.config.appServer.remoteWorkspaceRoot, undefined);
 });
 
 test("Gateway launch binds the enrolled node without expanding owner writes or changing its snapshot", async () => {
@@ -1371,7 +1442,13 @@ test("Gateway launch binds the enrolled node without expanding owner writes or c
       entries: {
         codex: {
           enabled: true,
-          config: { appServer: { transport: "websocket", url: "wss://harness.example.test" } },
+          config: {
+            appServer: {
+              transport: "websocket",
+              url: "wss://harness.example.test",
+              remoteWorkspaceRoot: "/owner/harness-workspace",
+            },
+          },
         },
       },
     },
@@ -1420,10 +1497,7 @@ test("Gateway launch binds the enrolled node without expanding owner writes or c
   assert.deepEqual(effective.plugins.entries.codex, {
     enabled: true,
     config: {
-      appServer: {
-        ...baseConfig.plugins.entries.codex.config.appServer,
-        remoteWorkspaceRoot: "/home/node/workspace",
-      },
+      appServer: baseConfig.plugins.entries.codex.config.appServer,
       codexDynamicToolsExclude: GATEWAY_LOCAL_CODEX_TOOLS,
     },
   });
@@ -1493,6 +1567,7 @@ test("Gateway launch binds the enrolled node without expanding owner writes or c
   for (const plugins of [
     { deny: ["file-transfer"] },
     { entries: { "file-transfer": { enabled: false } } },
+    { enabled: false },
   ]) {
     await assert.rejects(
       () =>
@@ -1521,12 +1596,16 @@ test("deployment admission and the Gateway entrypoint agree on the workspace nod
     }
   };
   const entrypointStarts = async (config) => {
+    const calls = [];
+    const kills = [];
     try {
       await runOpenClawRuntimeHelper(undefined, [], {
         baseConfig: config,
         workspaceNodeId: "enrolled-node",
+        calls,
+        kills,
       });
-      return true;
+      return nativeGatewaySpawns(calls).length === 1 && kills.length === 0;
     } catch (error) {
       assert.match(String(error?.message), /requires the file-transfer plugin|is not a function/);
       return false;
@@ -1540,6 +1619,8 @@ test("deployment admission and the Gateway entrypoint agree on the workspace nod
     [{ plugins: { deny: null } }, true],
     [{ plugins: { deny: ["other", "file-transfers"] } }, true],
     [{ plugins: { deny: ["other", "file-transfer"] } }, false],
+    // OpenClaw matches deny entries trimmed and lowercased (finding 3077).
+    [{ plugins: { deny: [1, " File-Transfer"] } }, false],
     // A deny that is not a list stops the entrypoint (OpenClaw requires a list as well).
     [{ plugins: { deny: { "file-transfer": true } } }, false],
     [{ plugins: { deny: 1 } }, false],
@@ -1553,10 +1634,141 @@ test("deployment admission and the Gateway entrypoint agree on the workspace nod
     [{ plugins: { entries: { "file-transfer": {} } } }, true],
     [{ plugins: { entries: { other: { enabled: false } } } }, true],
     [{ plugins: { entries: [] } }, true],
+    // OpenClaw turns off every plugin, file-transfer included (finding 3083).
+    [{ plugins: { enabled: false } }, false],
+    [{ plugins: { enabled: false, entries: { "file-transfer": { enabled: true } } } }, false],
+    [{ plugins: { enabled: true } }, true],
+    // The entrypoint adds file-transfer to a non-empty allowlist.
+    [{ plugins: { allow: ["other"] } }, true],
   ]) {
     const label = JSON.stringify(config);
     assert.equal(await entrypointStarts(structuredClone(config)), starts, label);
     assert.equal(admits(config), starts, label);
+  }
+});
+
+test("Kubernetes admission and the Dedicated Codex Gateway entrypoint agree on the codex plugin policy", async () => {
+  // Finding 3096. Every Dedicated Codex Gateway gets a codex plugin runtime, even with no plugin
+  // selected, whose overlay enables plugins.entries.codex; the entrypoint exits at every start on
+  // a Configuration that turns it off, and admission accepted each such Configuration. Each row
+  // runs the real entrypoint and the real Kubernetes Compute admission: Configuration save (the
+  // model policy selects Codex), Agent save (null bindings) and deployment, with and without a
+  // workspace node. Each admission and native spawn must match the intended policy; agreement
+  // alone could hide matching permissive regressions. This observes the generated launcher;
+  // native image tests separately verify the built runtime's enforcement behavior.
+  const manifest = { kind: "codex", selections: {} };
+  const codexSelected = {
+    agents: {
+      defaults: {
+        model: "codex/gpt-5",
+        models: { "codex/gpt-5": { agentRuntime: { id: "codex" } } },
+      },
+    },
+  };
+  const harness = { id: "codex", version: "1.0.0", mode: "dedicated" };
+  const runtime = { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" };
+  const topologies = [
+    ["without workspace node", new KubernetesComputeDriver(options()), undefined],
+    [
+      "with workspace node",
+      new KubernetesComputeDriver(routedOptions({ runtime }), { nodeEnrollment: {} }),
+      "enrolled-node",
+    ],
+  ];
+  const entrypointStarts = async (plugins, workspaceNodeId, observations = {}) => {
+    const { calls = [], kills = [], configValidationResponse } = observations;
+    try {
+      await runOpenClawRuntimeHelper({ manifest }, [], {
+        env: {
+          APP_SERVER_URL: "ws://harness.example.test:18790",
+          OPENCLAW_PLUGIN_RUNTIME_JSON: JSON.stringify({ manifest }),
+        },
+        baseConfig: { gateway: { port: 8080 }, plugins: structuredClone(plugins) },
+        workspaceNodeId,
+        calls,
+        kills,
+        configValidationResponse,
+      });
+      return nativeGatewaySpawns(calls).length === 1 && kills.length === 0;
+    } catch (error) {
+      assert.match(
+        String(error?.message),
+        /conflicts with managed plugin selection codex|is not a function|reading 'trim'|requires the file-transfer plugin/,
+      );
+      return false;
+    }
+  };
+  const admits = (admit) => {
+    try {
+      admit();
+      return true;
+    } catch (error) {
+      assert.equal(error.name, "ConfigurationHarnessError", String(error?.message));
+      return false;
+    }
+  };
+  for (const [topology, , workspaceNodeId] of topologies) {
+    const calls = [];
+    const kills = [];
+    const validStarts = await entrypointStarts({ allow: ["codex"] }, workspaceNodeId, {
+      calls,
+      kills,
+    });
+    assert.equal(nativeGatewaySpawns(calls).length, 1, `${topology}: valid native spawn`);
+    assert.deepEqual(kills, [], `${topology}: valid launcher must not exit`);
+    assert.equal(validStarts, true, `${topology}: valid Gateway starts`);
+
+    calls.length = 0;
+    const refusedStarts = await entrypointStarts({ allow: ["codex"] }, workspaceNodeId, {
+      calls,
+      kills,
+      configValidationResponse: {
+        status: 1,
+        stdout: JSON.stringify({ valid: false }),
+        stderr: "unsupported gatewayPolicy",
+      },
+    });
+    assert.equal(nativeGatewaySpawns(calls).length, 0, `${topology}: native schema refusal`);
+    assert.deepEqual(kills, [], `${topology}: schema refusal holds the wrapper`);
+    assert.equal(refusedStarts, false, `${topology}: no native Gateway spawn during schema hold`);
+  }
+  const rows = [
+    [{}, true],
+    [{ allow: ["codex"] }, true],
+    [{ allow: [" CODEX ", "slack"], deny: ["slack", "codex-extra"], enabled: true }, true],
+    // Blank items are ignored, so this allowlist is empty.
+    [{ allow: [" ", ""] }, true],
+    // The overlay turns the codex entry back on.
+    [{ allow: ["codex"], entries: { codex: { enabled: false } } }, true],
+    // The entrypoint does not read an allowlist that is not an array.
+    [{ allow: "slack" }, true],
+    [{ enabled: false }, false],
+    [{ enabled: false, entries: { codex: { enabled: true } } }, false],
+    [{ deny: [" Codex "] }, false],
+    [{ allow: ["slack"] }, false],
+    [{ allow: ["codex", 1] }, false],
+    [{ deny: [null] }, false],
+    // Only a workspace node needs file-transfer.
+    [{ deny: ["file-transfer"] }, true, false],
+  ];
+  for (const [plugins, withoutWorkspaceNode, withWorkspaceNode = withoutWorkspaceNode] of rows) {
+    const configuration = { ...codexSelected, plugins };
+    for (const [topology, driver, workspaceNodeId] of topologies) {
+      const starts = await entrypointStarts(plugins, workspaceNodeId);
+      const expected = workspaceNodeId === undefined ? withoutWorkspaceNode : withWorkspaceNode;
+      const label = `${topology} ${JSON.stringify(plugins)}`;
+      assert.equal(starts, expected, `${label}: native Gateway start`);
+      const admissions = {
+        "Agent save": () => driver.validateHarnessAuth(harness, apiKeyAuth, configuration, null),
+        deployment: () => driver.validateHarnessAuth(harness, apiKeyAuth, configuration, {}),
+      };
+      for (const [stage, admit] of Object.entries(admissions)) {
+        assert.equal(admits(admit), expected, `${label}: ${stage}`);
+      }
+      // Configuration save does not know the workspace node.
+      const saved = admits(() => driver.validateConfiguration(configuration));
+      assert.equal(saved, withoutWorkspaceNode, `${label}: Configuration save`);
+    }
   }
 });
 
@@ -1599,4 +1811,454 @@ test("a timed-out workspace binding probe releases the poll and can recover", as
   openClaw = pluginList("active", 2);
   await poll.callback();
   assert.deepEqual(workspaceNodeState(sandbox), { nodeId: "enrolled-node", failure: undefined });
+});
+
+// `openclaw config validate --json` output for a configuration read OpenClaw refused,
+// as the pinned OpenClaw prints it (exit status 1).
+function configReadRefusal(error) {
+  return openClawConfigValidationRefusal(
+    [{ path: "<root>", message: `read failed at /home/node/.openclaw/openclaw.json: ${error}` }],
+    "Resolve the read error shown above, then retry.",
+  );
+}
+const configReadPermissionDenied =
+  "EACCES: permission denied, open '/home/node/.openclaw/openclaw.json'";
+// Captured from a dedicated Gateway container started again after its native Gateway was
+// killed (SIGKILL): the new PID namespace cannot verify the recorded holder (finding 2864).
+const gatewayLockNamespaceRefusal =
+  "GatewayLockNamespaceError: cannot verify Gateway ownership from this process; heartbeat age" +
+  " does not prove that the holder stopped. holder 608 at 54b9b0fe1247/pid-ns 4026536051, last" +
+  " renewed 14 s ago. Run this command inside the Gateway container or with a shared PID" +
+  " namespace; if the holder has stopped, run `openclaw gateway recover-lock` to inspect and" +
+  " explicitly recover the unchanged owner.";
+const heldStatusEnvironment = {
+  OPENCLAW_RUNTIME_STATUS_PORT: "18791",
+  OPENCLAW_RUNTIME_STATUS_CONTAINER: "gateway",
+};
+const invalidRuntimeProvenanceLine =
+  "The dedicated Gateway cannot verify its runtime provenance: it is missing, unreadable, or malformed. It remains unready; use the OCE runtime image matching the controller.";
+const mismatchedRuntimeProvenanceLine =
+  "The dedicated Gateway runtime provenance does not match the controller's pinned OpenClaw source/revision. It remains unready; use the OCE runtime image matching the controller.";
+const gatewayToolPolicyRefusalLine =
+  "The dedicated Gateway cannot apply its required tool policy. It remains unready; use the supporting OCE runtime image and a valid Gateway tool allowlist.";
+
+const dedicatedGatewayLaunchers = [
+  {
+    name: "Kubernetes dedicated OpenClaw",
+    env: {
+      OPENCLAW_NATIVE_WORKER_PROFILE: "oce-native",
+      OPENCLAW_WORKSPACE_NODE_ID: "a".repeat(64),
+    },
+  },
+  {
+    name: "Kubernetes dedicated Codex",
+    env: { APP_SERVER_URL: "ws://harness.example.test:18790" },
+  },
+  {
+    name: "Docker dedicated Codex",
+    launcher: "docker",
+    env: { APP_SERVER_URL: "ws://harness.example.test:18790" },
+  },
+];
+
+for (const launcher of dedicatedGatewayLaunchers) {
+  test(`${launcher.name} applies the reviewed tool ceiling before native startup`, async () => {
+    const baseConfig = codexGatewayConfig();
+    baseConfig.tools = {
+      profile: "coding",
+      allow: ["read", "sessions"],
+      alsoAllow: ["gateway", "diffs"],
+      deny: ["sessions_send"],
+      // Deployment admission restricts apply_patch to the workspace by default.
+      exec: { applyPatch: { workspaceOnly: true } },
+    };
+    // A strict Configuration's explicit steering value reaches the Gateway unchanged.
+    baseConfig.messages = { queue: { allowCollaborativeSteering: false } };
+    baseConfig.agents = { defaults: { modelSelectionScope: "agent" } };
+    baseConfig.cron = { enabled: true, triggers: { enabled: true } };
+    baseConfig.plugins.entries.codex.config.codexDynamicToolsExclude = ["web_search"];
+    const { calls, files } = await runOpenClawRuntimeHelper(undefined, [], {
+      ...launcher,
+      baseConfig,
+    });
+    const native = calls.findIndex(({ args }) => args?.[1] === "gateway");
+    const validate = calls.findIndex(
+      ({ args }) => args?.[1] === "config" && args[2] === "validate",
+    );
+    assert.ok(
+      validate >= 0 && validate < native,
+      "validate the final config before starting the native Gateway",
+    );
+    const effective = JSON.parse(files.get(calls[validate].options.env.OPENCLAW_CONFIG_PATH));
+    const { gatewayPolicy, ...ordinaryTools } = effective.tools;
+    assert.deepEqual(
+      ordinaryTools,
+      baseConfig.tools,
+      "ordinary restrictions and plugin grants are retained",
+    );
+    assert.deepEqual(gatewayPolicy.allow, [
+      "sessions",
+      "sessions_list",
+      "sessions_history",
+      "sessions_search",
+      "sessions_send",
+      "sessions_spawn",
+      "sessions_yield",
+      "subagents",
+      "session_status",
+      "agents_list",
+      "automations",
+      "message",
+      "ask_user",
+      "progress_card",
+      "get_goal",
+      "create_goal",
+      "update_goal",
+      "ls",
+      "read",
+      "write",
+      "edit",
+      "apply_patch",
+      "exec",
+      "process",
+    ]);
+    assert.equal(gatewayPolicy.allow.includes("gateway"), false);
+    assert.equal(
+      gatewayPolicy.allow.includes("diffs"),
+      false,
+      "a plugin tool grant is not policy approval",
+    );
+    assert.deepEqual(Object.keys(gatewayPolicy.actions).sort(), [
+      "automations",
+      "message",
+      "process",
+      "sessions",
+      "subagents",
+    ]);
+    assert.equal(gatewayPolicy.actions.message.includes("send"), true);
+    assert.equal(gatewayPolicy.actions.message.includes("set-profile"), false);
+    assert.deepEqual(gatewayPolicy.automations, { scope: "caller", allowCommandJobs: false });
+    assert.deepEqual(effective.messages, baseConfig.messages);
+    assert.equal(effective.agents.defaults.modelSelectionScope, "session");
+    assert.deepEqual(effective.cron, { enabled: true, triggers: { enabled: false } });
+    if (launcher.env.APP_SERVER_URL !== undefined) {
+      assert.deepEqual(effective.plugins.entries.codex.config.codexDynamicToolsExclude, [
+        "web_search",
+        ...GATEWAY_LOCAL_CODEX_TOOLS,
+      ]);
+    }
+    assert.deepEqual(
+      effective.gateway.auth,
+      baseConfig.gateway.auth,
+      "human Gateway authorization remains unchanged",
+    );
+    assert.deepEqual(
+      JSON.parse(files.get("/etc/openclaw/openclaw.json")),
+      baseConfig,
+      "the admitted revision is untouched",
+    );
+  });
+
+  // A beam entry that fails its schema (finding 3045). Beside an issue on a setting the tool
+  // policy step composes, the tool policy hold wins.
+  const beamIssue = {
+    path: "plugins.entries.beam.config.mirror.endpoint",
+    message: "invalid config: must have required property 'endpoint'",
+  };
+  for (const [failure, options, held = "gateway-tool-policy", line] of [
+    [
+      "an older runtime with the known upstream source and a different commit",
+      {
+        files: [
+          [
+            "/opt/oce/runtime/provenance.json",
+            JSON.stringify({
+              source: "https://github.com/openclaw/openclaw",
+              commit: "a".repeat(40),
+            }),
+          ],
+        ],
+      },
+      "gateway-tool-policy",
+      mismatchedRuntimeProvenanceLine,
+    ],
+    [
+      "a different runtime source with the pinned commit",
+      {
+        files: [
+          [
+            "/opt/oce/runtime/provenance.json",
+            JSON.stringify({
+              source: "https://runtime.example.test/untrusted-source",
+              commit: GATEWAY_TOOL_POLICY_SOURCE_COMMIT,
+            }),
+          ],
+        ],
+      },
+      "gateway-tool-policy",
+      mismatchedRuntimeProvenanceLine,
+    ],
+    ...["ENOENT", "EACCES"].map((code) => [
+      `${code === "ENOENT" ? "missing" : "unreadable"} runtime provenance`,
+      { provenanceReadError: code },
+      "gateway-tool-policy",
+      invalidRuntimeProvenanceLine,
+    ]),
+    ...[
+      ["invalid JSON", "invalid-provenance-bytes"],
+      ["null", "null"],
+      ["an array", "[]"],
+      ["missing fields", "{}"],
+      [
+        "an invalid commit",
+        JSON.stringify({ source: "https://github.com/openclaw/openclaw", commit: "invalid-sha" }),
+      ],
+    ].map(([shape, contents]) => [
+      `malformed runtime provenance (${shape})`,
+      { files: [["/opt/oce/runtime/provenance.json", contents]] },
+      "gateway-tool-policy",
+      invalidRuntimeProvenanceLine,
+    ]),
+    [
+      "valid runtime provenance with an invalid tool allowlist",
+      { baseConfig: { ...codexGatewayConfig(), tools: { gatewayPolicy: { allow: ["gateway"] } } } },
+      "gateway-tool-policy",
+      gatewayToolPolicyRefusalLine,
+    ],
+    [
+      "schema validation refusal",
+      {
+        configValidationResponse: {
+          status: 1,
+          stdout: JSON.stringify({ valid: false }),
+          stderr: "unsupported gatewayPolicy",
+        },
+      },
+    ],
+    // Another refused read of the configuration is not a lock: it keeps the tool policy hold.
+    [
+      "unreadable configuration",
+      { configValidationResponse: configReadRefusal(`Error: ${configReadPermissionDenied}`) },
+    ],
+    [
+      "Gateway state lock refusal",
+      { configValidationResponse: configReadRefusal(gatewayLockNamespaceRefusal) },
+      "gateway-state-lock",
+    ],
+    // Settings outside the tool policy are the Agent's configuration, not the policy. The hold
+    // writes the line an embedded Gateway's gateway-config hold writes: the settings and the
+    // remedy, never a configured value.
+    [
+      "invalid settings outside the tool policy",
+      { configValidationResponse: invalidGatewayConfiguration },
+      "gateway-config",
+      invalidGatewayConfigurationLine(GATEWAY_DID_NOT_START),
+    ],
+    [
+      "a refused key beside the settings the tool policy composes",
+      {
+        configValidationResponse: openClawConfigValidationRefusal([
+          { path: "agents.defaults", message: 'Unrecognized key: "thinkingBudget"' },
+        ]),
+      },
+      "gateway-config",
+      gatewayConfigurationHoldLine(GATEWAY_DID_NOT_START, ["agents.defaults"]),
+    ],
+    // An issue on a setting the step composes keeps the tool policy hold, beside any other.
+    [
+      "an invalid composed tool policy",
+      {
+        configValidationResponse: openClawConfigValidationRefusal([
+          beamIssue,
+          { path: "tools.gatewayPolicy.actions.sessions", message: "Invalid input" },
+        ]),
+      },
+    ],
+    [
+      "an invalid composed Codex tool exclusion",
+      {
+        configValidationResponse: openClawConfigValidationRefusal([
+          {
+            path: "plugins.entries.codex.config.codexDynamicToolsExclude.0",
+            message: "invalid config: must be string",
+          },
+        ]),
+      },
+    ],
+    // A runtime whose OpenClaw does not know a composed setting refuses its key one level up.
+    [
+      "a runtime that refuses the composed cron trigger switch",
+      {
+        configValidationResponse: openClawConfigValidationRefusal([
+          { path: "cron.triggers", message: 'Unrecognized key: "enabled"' },
+          beamIssue,
+        ]),
+      },
+    ],
+    [
+      "a runtime that refuses the composed model selection scope",
+      {
+        configValidationResponse: openClawConfigValidationRefusal([
+          { path: "agents.defaults", message: 'Unrecognized key: "modelSelectionScope"' },
+        ]),
+      },
+    ],
+    // A refusal that names no setting cannot be told apart from a policy refusal.
+    [
+      "an invalid report without issues",
+      { configValidationResponse: openClawConfigValidationRefusal([]) },
+    ],
+  ]) {
+    test(`${launcher.name} holds ${failure} unready without starting model work`, async (t) => {
+      const messages = [];
+      const intervals = [];
+      if (options.provenanceReadError !== undefined) {
+        // The existing filesystem fixture reads this Map. Inject an I/O failure there;
+        // the generated launcher must classify it without exposing the exception's path.
+        const get = Map.prototype.get;
+        t.mock.method(Map.prototype, "get", function (path) {
+          if (path === "/opt/oce/runtime/provenance.json") {
+            throw Object.assign(new Error("Cannot read /private/dummy-provenance-path"), {
+              code: options.provenanceReadError,
+            });
+          }
+          return get.call(this, path);
+        });
+      }
+      const { calls, sandbox } = await runOpenClawRuntimeHelper(undefined, [], {
+        ...launcher,
+        baseConfig: codexGatewayConfig(),
+        ...options,
+        // The Docker launcher serves no status itself, so its published hold can be read here;
+        // runtime-image-gateway-peer reads the Kubernetes Gateway's over its status port.
+        env: { ...launcher.env, ...(launcher.launcher === "docker" ? heldStatusEnvironment : {}) },
+        intervals,
+        console: { error: (message) => messages.push(message) },
+      });
+      assert.equal(
+        calls.some(({ args }) => args?.[1] === "gateway"),
+        false,
+      );
+      assert.equal(
+        messages.some((message) => message.includes("required tool policy")),
+        held === "gateway-tool-policy" &&
+          line !== invalidRuntimeProvenanceLine &&
+          line !== mismatchedRuntimeProvenanceLine,
+        messages.join("\n"),
+      );
+      if (held === "gateway-state-lock") {
+        // The operator reads the cause and OpenClaw's holder description, not a policy hint.
+        assert.ok(
+          messages.some(
+            (message) =>
+              message.includes("still holds the Gateway state lock") &&
+              message.includes("unverifiable state owner") &&
+              message.includes("holder 608 at 54b9b0fe1247/pid-ns 4026536051"),
+          ),
+          messages.join("\n"),
+        );
+      }
+      if (line !== undefined) {
+        assert.deepEqual(messages, [line]);
+      }
+      if (line === invalidRuntimeProvenanceLine || line === mismatchedRuntimeProvenanceLine) {
+        assert.equal(
+          calls.some(({ args }) => args?.[1] === "config" && args[2] === "validate"),
+          false,
+          "refuse incompatible provenance before native configuration validation",
+        );
+        assert.doesNotMatch(
+          messages.join("\n"),
+          /untrusted-source|invalid-provenance-bytes|invalid-sha|dummy-provenance-path|provenance\.json|a{40}|tool allowlist/,
+        );
+      } else {
+        assert.doesNotMatch(messages.join("\n"), /runtime provenance|pinned OpenClaw/);
+        if (held === "gateway-tool-policy") {
+          assert.deepEqual(messages, [gatewayToolPolicyRefusalLine]);
+        }
+      }
+      assert.equal(messages.join("\n").includes(invalidGatewayConfigurationSecret), false);
+      if (launcher.launcher === "docker") {
+        const published = vm.runInContext("runtimeStartupFailure", sandbox);
+        assert.deepEqual(
+          { check: published?.check, code: published?.code },
+          {
+            check: held,
+            code: held === "gateway-tool-policy" ? "INCOMPATIBLE_RESPONSE" : "UNAVAILABLE",
+          },
+        );
+      }
+      assert.ok(
+        intervals.some(({ ms }) => ms === 3_600_000),
+        "keep the failed workload available for diagnosis",
+      );
+    });
+  }
+}
+
+test("a dedicated Gateway permits concrete OCE tool additions and preserves empty or narrower policy", async () => {
+  for (const gatewayPolicy of [
+    { allow: [] },
+    { allow: ["sessions", "diffs"], actions: { sessions: ["patch"] } },
+  ]) {
+    const baseConfig = codexGatewayConfig();
+    baseConfig.tools = { alsoAllow: ["plugins"], gatewayPolicy };
+    const { files } = await runOpenClawRuntimeHelper(undefined, [], {
+      env: { APP_SERVER_URL: "ws://harness.example.test:18790" },
+      baseConfig,
+    });
+    const effective = JSON.parse(files.get("/home/node/.openclaw/openclaw.json")).tools
+      .gatewayPolicy;
+    assert.deepEqual(effective.allow, gatewayPolicy.allow);
+    assert.deepEqual(effective.actions, gatewayPolicy.actions ?? {});
+    assert.deepEqual(effective.automations, { scope: "caller", allowCommandJobs: false });
+  }
+});
+
+test("a dedicated Gateway takes approved tools from the immutable revision rather than native admin config", async () => {
+  const admitted = codexGatewayConfig();
+  admitted.tools = {
+    gatewayPolicy: { allow: ["sessions", "read"], actions: { sessions: ["patch", "reset"] } },
+  };
+  const mutable = structuredClone(admitted);
+  mutable.tools.gatewayPolicy = {
+    allow: ["sessions", "plugins"],
+    actions: { sessions: ["patch"] },
+  };
+  const { files } = await runOpenClawRuntimeHelper(undefined, [], {
+    env: {
+      APP_SERVER_URL: "ws://harness.example.test:18790",
+      OPENCLAW_CONFIG_PATH: "/home/node/.openclaw/openclaw.json",
+    },
+    files: [
+      ["/home/node/.openclaw/openclaw.json", JSON.stringify(mutable)],
+      ["/etc/openclaw-managed/openclaw.json", JSON.stringify(admitted)],
+    ],
+  });
+  assert.deepEqual(
+    JSON.parse(files.get("/home/node/.openclaw/openclaw.json")).tools.gatewayPolicy,
+    {
+      allow: ["sessions"],
+      actions: { sessions: ["patch"] },
+      automations: { scope: "caller", allowCommandJobs: false },
+    },
+  );
+});
+
+test("the embedded Docker launcher retains ordinary Gateway configuration", async () => {
+  const baseConfig = {
+    gateway: { mode: "local" },
+    tools: { allow: ["gateway"] },
+    cron: { triggers: { enabled: true } },
+  };
+  const { calls, files } = await runOpenClawRuntimeHelper(undefined, [], {
+    launcher: "docker",
+    baseConfig,
+  });
+  assert.equal(calls.filter(({ args }) => args?.[1] === "gateway").length, 1);
+  assert.equal(
+    calls.some(({ args }) => args?.[1] === "config"),
+    false,
+  );
+  assert.deepEqual(JSON.parse(files.get("/etc/openclaw/openclaw.json")), baseConfig);
 });

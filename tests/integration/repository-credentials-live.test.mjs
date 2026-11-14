@@ -1,24 +1,90 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, chmod, writeFile } from "node:fs/promises";
+import { createServer } from "node:https";
+import { readFile, chmod, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { credentialDriverModule } from "../fixtures/repository-credentials/runtime.mjs";
 import { runPinnedClients } from "../fixtures/repository-credentials/clients.mjs";
-import { removeRemoteBranches } from "../fixtures/repository-credentials/workflows.mjs";
+import { removeRemoteBranches } from "../fixtures/repository-credentials/workflows.ts";
 import {
   closeAndDispose,
   registerResourceCleanup,
-} from "../fixtures/repository-credentials/cleanup.mjs";
-import { temporaryDirectory } from "../fixtures/repository-credentials/process.mjs";
+} from "../fixtures/repository-credentials/cleanup.ts";
+import { selfSigned } from "../helpers/certificates.mjs";
+import {
+  cleanEnvironment,
+  listen,
+  run,
+  temporaryDirectory,
+} from "../fixtures/repository-credentials/process.mjs";
+
+test("a BOM-prefixed public CA published for a client session verifies Git HTTPS", async (t) => {
+  const parent = await realpath(await temporaryDirectory(t, "repository-credentials-live-ca-"));
+  await chmod(parent, 0o700);
+  const { key, cert, certPath } = await selfSigned(parent, {
+    commonName: "localhost",
+    subjectAltName: "IP:127.0.0.1",
+  });
+  const pem = await readFile(certPath);
+  const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), pem]);
+  const requests = [];
+  const server = createServer({ key, cert }, (_request, response) => {
+    requests.push(1);
+    response.writeHead(200);
+    response.end();
+  });
+  const origin = await listen(t, server);
+  const { writeClientConfiguration, readClientConfiguration } =
+    await credentialDriverModule("client/config");
+  const { singleSessionGitConfiguration } = await credentialDriverModule("client/native-git");
+  const session = join(parent, "session");
+  await writeClientConfiguration(
+    {
+      session: { sessionId: "session-live-ca", deadlineWallMs: Date.now() + 86_400_000 },
+      bearer: "controlled_gateway_bearer_0000000000000000000000",
+      client: {
+        gatewayOrigin: origin,
+        gitRemote: `${origin}/example/project.git`,
+        gitUsername: "gateway-session",
+        canonicalApiHost: "github.com",
+        apiHost: new URL(origin).hostname,
+        repository: "example/project",
+      },
+    },
+    session,
+    withBom,
+  );
+  const published = await readFile(join(session, "ca.pem"));
+  assert.equal(published.subarray(0, 3).toString("hex"), "2d2d2d");
+  const configuration = await readClientConfiguration(session);
+  assert.equal(configuration.hasPublicCa, true);
+  const settings = singleSessionGitConfiguration(configuration, session);
+  assert.ok(
+    settings.some((entry) => entry.startsWith("http.") && entry.endsWith(".sslVerify=true")),
+  );
+  const result = await run(
+    "/usr/bin/git",
+    [
+      ...settings.flatMap((entry) => ["-c", entry]),
+      "-c",
+      "http.sslVerify=true",
+      "ls-remote",
+      `${origin}/example/project.git`,
+    ],
+    { env: cleanEnvironment({ HOME: parent }), allowFailure: true },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(requests.length > 0, result.stderr);
+});
 
 test(
-  "authorized live provider smoke runs through the deployed gateway with bounded cleanup",
+  "authorized live development-token smoke runs through the native sender with bounded cleanup",
   { timeout: 180000 },
   async (t) => {
     if (process.env.REPOSITORY_CREDENTIALS_LIVE !== "1") {
       t.skip(
-        "live provider evidence unavailable: set REPOSITORY_CREDENTIALS_LIVE=1 with an authorized disposable repository and deployed gateway",
+        "live provider evidence unavailable: set REPOSITORY_CREDENTIALS_LIVE=1 with an authorized disposable repository and explicit development-token sender",
       );
       return;
     }
@@ -56,14 +122,14 @@ test(
       return response.stdout ? JSON.parse(response.stdout) : undefined;
     };
     try {
+      assert.deepEqual(opened.client.pushRefAllowlist, ["refs/heads/credential-smoke/*"]);
       const parent = await temporaryDirectory(t, "repository-credentials-live-");
       await chmod(parent, 0o700);
       clientDirectory = join(parent, "session");
       await writeClientConfiguration(opened, clientDirectory, await readFile(caFile));
       const client = await runPinnedClients(t, { clientDirectory }, { signal: workSignal });
       const checkout = join(client.directory, "checkout");
-      const branch = `credential-smoke-${randomBytes(16).toString("hex")}`;
-      const nativeBranch = `${branch}-native`;
+      const branch = `credential-smoke/${randomBytes(16).toString("hex")}`;
       const prefix = `repos/${opened.client.repository}`;
       const marker = (kind) => `<!-- ${branch}:${kind} -->`;
       const register = (kind, uniqueMarker, extra = {}) =>
@@ -89,11 +155,8 @@ test(
       });
       // A failed response can follow an accepted push. Register cleanup first,
       // then reconcile the remote refs instead of assuming either outcome.
-      cleanup.push(() => removeRemoteBranches(cleanupClient, checkout, [branch, nativeBranch]));
-      await client.git(
-        ["push", "origin", `HEAD:refs/heads/${branch}`, `HEAD:refs/heads/${nativeBranch}`],
-        { cwd: checkout },
-      );
+      cleanup.push(() => removeRemoteBranches(cleanupClient, checkout, [branch]));
+      await client.git(["push", "origin", `HEAD:refs/heads/${branch}`], { cwd: checkout });
       const pullInput = await client.json("pull.json", {
         title: "Credential gateway smoke",
         body: marker("pull"),
@@ -145,25 +208,6 @@ test(
       );
       assert.ok(comment.id > 0);
       await client.gh(["api", "--paginate", `${prefix}/issues/${issue.number}/comments`]);
-      const bodyFile = join(client.directory, "body.md");
-      await writeFile(bodyFile, marker("native"));
-      register("pulls", marker("native"), { head: nativeBranch });
-      const native = await client.gh([
-        "pr",
-        "create",
-        "-R",
-        `github.com/${opened.client.repository}`,
-        "--base",
-        base,
-        "--head",
-        nativeBranch,
-        "--title",
-        "Credential native smoke",
-        "--body-file",
-        bodyFile,
-      ]);
-      const nativeNumber = /\/pull\/(\d+)/.exec(native.stdout)?.[1];
-      assert.ok(nativeNumber, "native PR creation returned no PR identity");
     } finally {
       const failures = [];
       // Work cancellation kills its command tree. Cleanup gets a separate finite

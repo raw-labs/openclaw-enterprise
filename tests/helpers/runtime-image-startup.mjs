@@ -1,28 +1,130 @@
 // Shared by the runtime image startup smoke tests, which CI runs in three lanes
 // (runtime-image-startup.test.mjs, runtime-image-startup-probe.test.mjs,
-// runtime-image-startup-termination.test.mjs,
-// runtime-image-gateway-peer.test.mjs, runtime-image-native-worker.test.mjs,
+// runtime-image-startup-termination.test.ts,
+// runtime-image-gateway-unclean-restart.test.ts,
+// runtime-image-gateway-retained-state.test.ts,
+// runtime-image-gateway-peer.test.ts, runtime-image-native-worker.test.mjs,
 // runtime-image-state-migration.test.mjs,
-// runtime-image-managed-files.test.mjs and
-// runtime-image-native-listener.test.mjs).
-import { defaultAgentModel } from "../../apps/controller/src/console/agents/starter-model.mjs";
+// runtime-image-managed-files.test.ts,
+// runtime-image-native-listener.test.mjs and
+// runtime-image-gateway-workspace.test.ts).
+import { defaultAgentModel } from "../../apps/controller/src/console/agents/starter-model.mts";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { promisify } from "node:util";
-import { imageSmokeTimeoutMultiplier } from "./image-smoke-timeout.mjs";
+import { temporaryDirectory } from "./temporary-directory.mjs";
 import { GATEWAY_RUNTIME_ENTRYPOINT as DOCKER_GATEWAY_RUNTIME_ENTRYPOINT } from "../../apps/controller/src/drivers/compute/docker/index.ts";
 import { nodeProgramArguments } from "../../apps/controller/src/drivers/compute/node-program.ts";
 import { admitLoggingConfiguration } from "../../packages/contracts/src/index.ts";
 import { createHarnessConfiguration } from "./harness-configuration.mjs";
+import { productionGatewayMemoryLimitGi } from "./kubernetes-real.mjs";
+import { commandOutput, failureTail, runDocker } from "./runtime-image-docker.ts";
+import {
+  listGatewayPlugins,
+  waitForGatewayReady,
+  waitForGatewaySpawn,
+} from "./runtime-image-gateway-observations.ts";
 
-export const execute = promisify(execFile);
-export const docker = process.env.OCC_DOCKER_BIN ?? "docker";
+export {
+  commandOutput,
+  docker,
+  execute,
+  failureTail,
+  runDocker,
+  runDockerCommand,
+  waitForDockerLog,
+} from "./runtime-image-docker.ts";
+export {
+  containerLogTail,
+  gatewayReadinessReport,
+  jsonLogEntries,
+  listGatewayPlugins,
+  openClawGatewaySpawnedRequest,
+  openClawProcessRunningRequest,
+  waitForContainerReady,
+  waitForGatewayReady,
+  waitForGatewaySpawn,
+} from "./runtime-image-gateway-observations.ts";
+
 export const image = process.env.OCC_TEST_RUNTIME_IMAGE;
 export const runtimeImageModel = defaultAgentModel;
+// The production Gateway memory limit (productionGatewayMemoryLimitGi), with
+// swap capped at the same value. Docker's `--memory` alone allows as much again
+// in swap, so a Gateway that outgrew its limit passed on CI runners, which swap,
+// and was OOM-killed on a host without swap, as on a typical Kubernetes node
+// (finding 2700).
+const gatewayMemoryLimitBytes = productionGatewayMemoryLimitGi * 1024 ** 3;
+export const gatewayMemoryArguments = [
+  "--memory",
+  String(gatewayMemoryLimitBytes),
+  "--memory-swap",
+  String(gatewayMemoryLimitBytes),
+];
+// The most an embedded Gateway's cgroup may have held (memory.peak) through its
+// first chat turn: the limit above less about 20% headroom. At the OpenClaw pin
+// of #2982 the stand-in provider's first turn peaked at 2.53 to 2.78 GiB
+// (finding 2700). A failure means the Gateway grew toward its production limit:
+// re-measure the first turn and update the documented Gateway sizing (the
+// production example, the profile renderer, installation-profiles.md and this
+// limit) before raising the budget.
+export const gatewayFirstTurnMemoryBudgetBytes = Math.round(3.2 * 1024 ** 3);
+
+const gibibytes = (bytes) => `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
+
+// Reads a running Gateway container's cgroup v2 memory.peak (Linux 5.19 and
+// later): the most the container held since it started, including the page
+// cache and tmpfs it is charged for. Returns `{ unavailable }` with the reason
+// when the host cannot report it.
+export async function gatewayMemoryPeak(containerName) {
+  let stdout;
+  try {
+    ({ stdout } = await runDocker([
+      "exec",
+      containerName,
+      "cat",
+      "/sys/fs/cgroup/memory.max",
+      "/sys/fs/cgroup/memory.peak",
+    ]));
+  } catch (error) {
+    return {
+      unavailable: `the container's cgroup v2 memory.max and memory.peak are unreadable: ${error.message.slice(0, 300)}`,
+    };
+  }
+  const [max, peak] = stdout.trim().split("\n");
+  // In the host's cgroup namespace /sys/fs/cgroup is another cgroup; only the
+  // container's own cgroup carries the limit this file sets.
+  if (Number(max) !== gatewayMemoryLimitBytes) {
+    return {
+      unavailable: `/sys/fs/cgroup is not the Gateway container's cgroup: memory.max is ${max}, not ${gatewayMemoryLimitBytes}`,
+    };
+  }
+  return { peakBytes: Number(peak) };
+}
+
+// Checks a peak from gatewayMemoryPeak against the first-turn budget in its own
+// subtest, which reports a host without memory.peak as skipped, not passed.
+export async function assertGatewayFirstTurnMemory(t, measurement) {
+  await t.test("the Gateway's first turn stays within its memory budget", (subtest) => {
+    if (measurement.unavailable !== undefined) {
+      subtest.skip(
+        `memory.peak is unavailable, so the budget is unchecked: ${measurement.unavailable}`,
+      );
+      return;
+    }
+    const { peakBytes } = measurement;
+    assert.ok(
+      peakBytes <= gatewayFirstTurnMemoryBudgetBytes,
+      `the Gateway's memory.peak through its first turn is ${gibibytes(peakBytes)}, above its ` +
+        `${gibibytes(gatewayFirstTurnMemoryBudgetBytes)} budget under a ${gibibytes(gatewayMemoryLimitBytes)} limit. ` +
+        "If the OpenClaw pin moved, re-measure the first turn without swap (finding 2700) and update the " +
+        "documented Gateway sizing (deploy/examples/production/installation.yaml, " +
+        "scripts/render-installation-profile.ts, docs/guides/deploy/installation-profiles.md) and this " +
+        "test's limit before raising gatewayFirstTurnMemoryBudgetBytes.",
+    );
+    subtest.diagnostic(`Gateway memory.peak through the first turn: ${gibibytes(peakBytes)}`);
+  });
+}
 export const imageTestOptions =
   image === undefined
     ? {
@@ -30,78 +132,15 @@ export const imageTestOptions =
       }
     : {};
 
-export async function runDocker(args, options = {}, input) {
-  const command = execute(docker, args, {
-    timeout: 60_000 * imageSmokeTimeoutMultiplier,
-    maxBuffer: 1_000_000,
-    ...options,
-  });
-  if (input === undefined) {
-    return command;
-  }
-  const inputComplete = new Promise((resolve, reject) => {
-    command.child.stdin.once("error", reject);
-    command.child.stdin.end(input, resolve);
-  });
-  const [result] = await Promise.all([command, inputComplete]);
-  return result;
-}
-
-// Like Promise.all over a case's scenarios, but waits for every one so no
-// container outlives the test's cleanup, then rethrows the first failure.
-export async function eachSettled(items, each) {
-  const results = await Promise.allSettled(items.map(each));
-  const failed = results.find(({ status }) => status === "rejected");
-  if (failed) {
-    throw failed.reason;
-  }
-}
-
-export async function waitForDockerLog(containerName, pattern) {
-  const deadline = Date.now() + 20_000 * imageSmokeTimeoutMultiplier;
-  let output = "";
-  while (Date.now() < deadline) {
-    const logs = await runDocker(["logs", containerName]).catch((error) => error);
-    output = commandOutput(logs);
-    if (pattern.test(output)) {
-      return output;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${pattern} in ${containerName} logs.
-${failureTail(output)}`);
-}
-
-export function commandOutput(error) {
-  return `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
-}
-
-// CI keeps only the first 16 KiB of a failure message (scripts/ci/reporter.mjs),
-// so a whole container log in an error loses its end: the wrapper's stderr and
-// the actual failure (finding 976 misread a cut log as a Doctor stall). Errors
-// carry at most the last `limit` characters of process output instead, from a
-// line start when one is near, so the cut does not split a value the reporter
-// would redact.
-export const failureOutputLimit = 12 * 1024;
-
-export function failureTail(output, limit = failureOutputLimit) {
-  if (output.length <= limit) {
-    return output;
-  }
-  let tail = output.slice(-limit);
-  const lineEnd = tail.indexOf("\n");
-  if (lineEnd !== -1 && lineEnd < 1024) {
-    tail = tail.slice(lineEnd + 1);
-  }
-  return `[... ${output.length - tail.length} earlier chars omitted ...]\n${tail}`;
-}
-
-export async function temporaryGatewayConfiguration(t, harnessId) {
-  const directory = await mkdtemp(join(tmpdir(), "oce-runtime-image-config-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+export async function temporaryGatewayConfiguration(
+  t,
+  harnessId,
+  configuration = createAdmittedRuntimeImageConfiguration(harnessId),
+) {
+  const directory = await temporaryDirectory(t, "oce-runtime-image-config-");
 
   const path = join(directory, "openclaw.json");
-  await writeFile(path, JSON.stringify(createAdmittedRuntimeImageConfiguration(harnessId)));
+  await writeFile(path, JSON.stringify(configuration));
   return path;
 }
 
@@ -142,76 +181,49 @@ export function createAdmittedRuntimeImageConfiguration(harnessId, options = {})
   );
 }
 
-export async function waitForGatewayReady(containerName, readinessAttempts = 60) {
-  let lastReadinessOutput = "";
-  for (let attempt = 0; attempt < readinessAttempts * imageSmokeTimeoutMultiplier; attempt += 1) {
-    const inspect = await runDocker([
-      "inspect",
-      containerName,
-      "--format",
-      "{{.State.Running}} {{.State.ExitCode}}",
-    ]);
-    const [running, exitCode] = inspect.stdout.trim().split(/\s+/);
-    if (running !== "true") {
-      throw new Error(`Gateway container exited before readiness with code ${exitCode}.`);
-    }
-
-    const ready = await runDocker([
-      "exec",
-      containerName,
-      "node",
-      "-e",
-      'fetch("http://127.0.0.1:8080/readyz").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1));',
-    ]).catch((error) => {
-      lastReadinessOutput = failureTail(commandOutput(error), 2048);
-      return undefined;
-    });
-    if (ready !== undefined) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Gateway readiness timed out.\n${lastReadinessOutput}`);
-}
-
-export async function listGatewayPlugins(containerName) {
-  const { stdout } = await runDocker([
-    "exec",
-    containerName,
-    "node",
-    "/app/openclaw.mjs",
-    "plugins",
-    "list",
-    "--json",
-  ]);
-
-  try {
-    return JSON.parse(stdout);
-  } catch (error) {
-    throw new Error(
-      `OpenClaw plugin list output was not valid JSON.\n${failureTail(stdout, 2048)}`,
-      { cause: error },
+// A new volume owned by the Gateway user, for mounting at `mountPath` (the
+// Gateway home or its ~/.openclaw) as its PersistentVolume is. `seed`, a shell
+// command run first as root with `seedVolumes` also mounted, can fill it.
+export async function gatewayStateVolume(t, mountPath, { seed, seedVolumes = [] } = {}) {
+  const volume = `oce-runtime-image-state-${randomBytes(6).toString("hex")}`;
+  await runDocker(["volume", "create", volume]);
+  // node:test runs `after` hooks in registration order, so this one runs before
+  // the hooks that remove the containers started on the volume later, and Docker
+  // refuses to remove a volume in use. Remove those containers first.
+  t.after(async () => {
+    const users = await runDocker(["ps", "-aq", "--filter", `volume=${volume}`]).catch(
+      () => undefined,
     );
-  }
-}
-
-export function jsonLogEntries(output) {
-  return output
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return undefined;
-      }
-    })
-    .filter((entry) => entry !== undefined);
+    const ids = users?.stdout.split(/\s+/).filter(Boolean) ?? [];
+    if (ids.length > 0) {
+      await runDocker(["rm", "-f", ...ids]).catch(() => {});
+    }
+    await runDocker(["volume", "rm", "-f", volume]).catch(() => {});
+  });
+  // As root, like the Docker Driver's workspace setup: a new volume mounted
+  // below the image's home can be root-owned.
+  await runDocker([
+    "run",
+    "--rm",
+    "--user",
+    "0:0",
+    "--network",
+    "none",
+    "--volume",
+    `${volume}:${mountPath}`,
+    ...seedVolumes.flatMap((value) => ["--volume", value]),
+    "--entrypoint",
+    "sh",
+    image,
+    "-c",
+    `${seed === undefined ? "" : `${seed} && `}chown -R 1000:1000 ${mountPath}`,
+  ]);
+  return volume;
 }
 
 export async function runGatewaySmoke(t, harnessId, options = {}) {
   const {
-    collectPlugins = harnessId === "codex",
+    collectPlugins = false,
     configuration = createAdmittedRuntimeImageConfiguration(harnessId, {
       enableSlack: harnessId === "openclaw",
     }),
@@ -222,6 +234,8 @@ export async function runGatewaySmoke(t, harnessId, options = {}) {
     tmpfs = ["/home/node:size=1024m,uid=1000,gid=1000,mode=700"],
     volumes = [],
     network = "none",
+    // "ready" waits for /readyz; "spawned" only until OpenClaw starts (waitForGatewaySpawn).
+    until = "ready",
     waitUntilReady = true,
     withAppServer = true,
   } = options;
@@ -277,7 +291,11 @@ export async function runGatewaySmoke(t, harnessId, options = {}) {
   }
 
   try {
-    await waitForGatewayReady(containerName, readinessAttempts);
+    if (until === "spawned") {
+      await waitForGatewaySpawn(containerName);
+    } else {
+      await waitForGatewayReady(containerName, readinessAttempts);
+    }
     const pluginList = collectPlugins ? await listGatewayPlugins(containerName) : undefined;
     const logs = await runDocker(["logs", containerName]);
     return {
@@ -287,8 +305,8 @@ export async function runGatewaySmoke(t, harnessId, options = {}) {
     };
   } catch (error) {
     const logs = await runDocker(["logs", containerName]).catch((logsError) => logsError);
-    // A failed docker command's message carries its whole stderr after the
-    // line that names the command.
+    // A failed docker command's message names the command and its exit on the first
+    // line; the ends of its stdout and stderr follow, stderr last.
     const [headline, ...detail] = error.message.split("\n");
     const failure = [
       headline.slice(0, 512),
@@ -302,7 +320,8 @@ export async function runGatewaySmoke(t, harnessId, options = {}) {
 
 const manualReviewedCodexSeccompProfileSha256 =
   "71a2871a066a696a171049a15db3f065122c153cd11ef451cee3341ddbd9697f";
-const reviewedCodexSeccompProfileFilePattern = /^codex-0\.163\.0-alpha\.2-([a-f0-9]{64})\.json$/;
+const reviewedCodexSeccompProfileFilePattern =
+  /^codex-(0\.164\.0|0\.163\.0-alpha\.2)-([a-f0-9]{64})\.json$/;
 
 async function ciPreparedCodexSeccompProfile(ciStatePath) {
   if (ciStatePath === undefined || ciStatePath.length === 0) {
@@ -345,11 +364,16 @@ export async function reviewedCodexSeccompSecurityOptions({
   profile = process.env.OCC_TEST_CODEX_SECCOMP_PROFILE,
   ciStatePath = process.env.OPENCLAW_ENTERPRISE_CI_STATE,
   ci = process.env.CI,
+  codexVersion = "0.164.0",
 } = {}) {
   const securityOptions = ["--security-opt", "no-new-privileges"];
   if (profile === undefined || profile.length === 0) {
     const inCi = ci !== undefined && ci !== "" && ci !== "false" && ci !== "0";
-    if (inCi || (ciStatePath !== undefined && ciStatePath.length > 0)) {
+    if (
+      inCi ||
+      codexVersion !== "0.164.0" ||
+      (ciStatePath !== undefined && ciStatePath.length > 0)
+    ) {
       throw new Error(
         "OCC_TEST_CODEX_SECCOMP_PROFILE is required in CI: this case runs the Codex sandbox, so its lane must prepare the reviewed profile (prepare.codexSeccomp and requiredEnv in scripts/ci/test-suites).",
       );
@@ -362,11 +386,12 @@ export async function reviewedCodexSeccompSecurityOptions({
     false,
     "OCC_TEST_CODEX_SECCOMP_PROFILE must not select an unconfined seccomp profile.",
   );
-  const expected = basename(profile).match(reviewedCodexSeccompProfileFilePattern)?.[1];
+  const match = basename(profile).match(reviewedCodexSeccompProfileFilePattern);
   assert.ok(
-    expected,
-    "OCC_TEST_CODEX_SECCOMP_PROFILE must point to codex-0.163.0-alpha.2-<profile-sha256>.json.",
+    match?.[1] === codexVersion,
+    `OCC_TEST_CODEX_SECCOMP_PROFILE must point to codex-${codexVersion}-<profile-sha256>.json.`,
   );
+  const expected = match[2];
 
   let contents;
   try {
@@ -382,11 +407,16 @@ export async function reviewedCodexSeccompSecurityOptions({
   assert.equal(
     actual,
     expected,
-    `OCC_TEST_CODEX_SECCOMP_PROFILE digest ${actual} did not match the Codex 0.163.0-alpha.2 profile filename digest ${expected}.`,
+    `OCC_TEST_CODEX_SECCOMP_PROFILE digest ${actual} did not match the Codex ${codexVersion} profile filename digest ${expected}.`,
   );
 
   const prepared = await ciPreparedCodexSeccompProfile(ciStatePath);
   if (prepared === undefined) {
+    assert.equal(
+      codexVersion,
+      "0.164.0",
+      "A historical Codex seccomp profile must be prepared by image CI state.",
+    );
     assert.equal(
       expected,
       manualReviewedCodexSeccompProfileSha256,
@@ -405,4 +435,19 @@ export async function reviewedCodexSeccompSecurityOptions({
     );
   }
   return [...securityOptions, "--security-opt", `seccomp=${profile}`];
+}
+
+function gatewayLogDiagnostic(entries) {
+  return entries
+    .filter((entry) => entry.subsystem === "gateway")
+    .map(({ level, message }) => `${level}: ${message}`)
+    .slice(-8)
+    .join("\n");
+}
+
+export function assertGatewayLogEntry(entries, predicate, description) {
+  assert.ok(
+    entries.some(predicate),
+    `${description}\nRecent gateway logs:\n${gatewayLogDiagnostic(entries)}`,
+  );
 }

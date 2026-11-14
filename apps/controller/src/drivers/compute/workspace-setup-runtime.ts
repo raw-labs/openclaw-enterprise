@@ -43,6 +43,25 @@ export const HARNESS_WORKSPACE = "/home/node/workspace";
 type SettingError = (setting: string, requirement: string) => Error;
 
 /**
+ * The roster rule for initial workspace files: only the native main Agent reads them, so the
+ * roster must be main alone (or omitted). Docker, Kubernetes and SSH Compute apply it at Agent
+ * save, so each refusal names the same setting with the same text. Returns that entry.
+ */
+export function requireWorkspaceSetupMainEntry(
+  configuration: Readonly<OpenClawConfigurationDocument>,
+  createError: SettingError,
+): { readonly setting: string; readonly agent: Readonly<Record<string, unknown>> } {
+  const entry = workspaceSetupMainEntry(configuration);
+  if (entry?.agent === undefined) {
+    throw createError(
+      "agents.entries",
+      "must hold only main, or be omitted, for initial workspace files: only the main Agent reads them",
+    );
+  }
+  return { setting: entry.setting, agent: entry.agent };
+}
+
+/**
  * Initial workspace files reach only the native main Agent's managed durable workspace, so the
  * roster must be main alone (or omitted) and its workspace one of `workspaces`: the paths the
  * Compute Driver mounts on that storage for this Agent, managed path first. Docker and
@@ -54,14 +73,8 @@ export function requireWorkspaceSetupConfiguration(
   workspaces: readonly string[],
   createError: SettingError,
 ): string {
-  const entry = workspaceSetupMainEntry(configuration);
-  const main = entry?.agent;
-  if (entry === undefined || main === undefined) {
-    throw createError(
-      "agents.entries",
-      "must hold only main, or be omitted, for initial workspace files: only the main Agent reads them",
-    );
-  }
+  const entry = requireWorkspaceSetupMainEntry(configuration, createError);
+  const main = entry.agent;
   const defaults = asRecord(asRecord(configuration.agents)?.defaults);
   const setting =
     main.workspace !== undefined ? `${entry.setting}.workspace` : "agents.defaults.workspace";
@@ -76,10 +89,12 @@ export function requireWorkspaceSetupConfiguration(
 }
 
 /**
- * The setup runner's exit status for a refusal no retry can change; any other failure exits 1.
+ * A refusal no retry can change. Other statuses remain retryable diagnostics.
  * Kubernetes Compute reports it as WORKSPACE_SETUP_REFUSED (finding 1677).
  */
 export const WORKSPACE_SETUP_REFUSED_EXIT_STATUS = 2;
+export const WORKSPACE_SETUP_NATIVE_FAILED_EXIT_STATUS = 3;
+export const WORKSPACE_SETUP_NATIVE_TIMEOUT_EXIT_STATUS = 4;
 
 /** Shared, non-executing setup entrypoint. Drivers own private delivery and exclusive startup. */
 export const WORKSPACE_SETUP_RUNTIME = String.raw`
@@ -94,6 +109,7 @@ const markerName = ".oce-workspace-setup.json";
 // A refusal: the delivery, the image's defaults or the workspace's own state disagree, so no
 // retry can change the outcome. Any other error (native setup, I/O) may pass on a retry.
 class Refusal extends Error {}
+let failureExitStatus = 1;
 function fail() { throw new Refusal("WORKSPACE_SETUP_FAILED"); }
 function inspect(file) {
   try { return fs.lstatSync(file); }
@@ -196,6 +212,7 @@ function main() {
     }
     fs.mkdirSync(workspace, { recursive: true, mode: 0o700 });
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "oce-workspace-setup-"));
+    let completed = false;
     try {
       const configPath = path.join(temporary, "openclaw.json");
       fs.writeFileSync(configPath, JSON.stringify({
@@ -207,7 +224,12 @@ function main() {
           env: { ...process.env, OPENCLAW_CONFIG_PATH: configPath },
           stdio: ["ignore", "pipe", "pipe"], timeout: 120000, maxBuffer: 1048576,
         });
-        if (result.error || result.status !== 0) throw new Error("WORKSPACE_SETUP_FAILED");
+        if (result.error || result.status !== 0) {
+          failureExitStatus = result.error?.code === "ETIMEDOUT"
+            ? ${WORKSPACE_SETUP_NATIVE_TIMEOUT_EXIT_STATUS}
+            : ${WORKSPACE_SETUP_NATIVE_FAILED_EXIT_STATUS};
+          throw result.error ?? new Error("WORKSPACE_SETUP_FAILED");
+        }
       };
       nativeSetup();
       for (const [name, value] of Object.entries(files)) {
@@ -223,7 +245,12 @@ function main() {
         if (readRegular(path.join(workspace, name)) !== value) fail();
       }
       atomicWrite(markerPath, JSON.stringify(identity));
-    } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+      completed = true;
+    } finally {
+      try { fs.rmSync(temporary, { recursive: true, force: true }); }
+      // Cleanup must not replace the original setup failure.
+      catch (error) { if (completed) throw error; }
+    }
   }
   // A completed metadata file may be the permanent restart guard; retain it.
   if (delivery !== undefined && !setup.completed) {
@@ -234,8 +261,12 @@ function main() {
 }
 try { main(); }
 catch (error) {
-  process.stderr.write("WORKSPACE_SETUP_FAILED\n");
-  process.exitCode = error instanceof Refusal ? ${WORKSPACE_SETUP_REFUSED_EXIT_STATUS} : 1;
+  // Native messages, paths and output can contain private setup data. Keep only known codes.
+  const code = ["EACCES", "EPERM", "EROFS", "ENOENT", "ENOTDIR", "ENOSPC", "EDQUOT",
+    "EMFILE", "ENFILE", "EIO", "ERR_ACCESS_DENIED", "ETIMEDOUT"].includes(error?.code)
+    ? " (" + error.code + ")" : "";
+  process.stderr.write("WORKSPACE_SETUP_FAILED" + code + "\n");
+  process.exitCode = error instanceof Refusal ? ${WORKSPACE_SETUP_REFUSED_EXIT_STATUS} : failureExitStatus;
 }
 `;
 
