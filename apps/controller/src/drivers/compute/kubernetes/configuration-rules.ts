@@ -22,9 +22,12 @@ import {
   trustedProxyIdentitiesProblem,
   unreadablePluginSecretInput,
   waitsOnVariable,
+  wholeEnvironmentReferenceName,
+  workspaceNodeGatewayPasswordProblem,
 } from "@openclaw-enterprise/occ";
 import { asRecord, splitModelRef } from "@openclaw-enterprise/utils";
 import type { HarnessAuthMethodRule } from "../harness-auth-method.ts";
+import { openClawConfigEnvironmentNames } from "./openclaw-config-environment.ts";
 import { openClawManagedPluginIds } from "../../plugin/runtime-translator.ts";
 
 /**
@@ -112,20 +115,10 @@ export function requireWorkspaceNodeGatewayPassword(
   configuration: Readonly<OpenClawConfigurationDocument>,
   createError: SettingError,
 ): void {
-  const gateway = configuration.gateway;
-  const auth = asRecord(gateway)?.auth;
-  if (
-    (gateway !== undefined && asRecord(gateway) === undefined) ||
-    (auth !== undefined && asRecord(auth) === undefined) ||
-    asRecord(auth)?.password !== undefined
-  ) {
-    return;
+  const problem = workspaceNodeGatewayPasswordProblem(configuration);
+  if (problem !== undefined) {
+    throw createError(problem.setting, problem.requirement);
   }
-  const generated = generatedGatewayPasswordReference(configuration.secrets);
-  throw createError(
-    "gateway.auth.password",
-    `must be the environment reference {source: "env", provider: "${generated.provider}", id: "${OPENCLAW_GATEWAY_PASSWORD}"} on a Dedicated Codex Agent: its Gateway uses it to apply the workspace node`,
-  );
 }
 
 const FILE_TRANSFER_PLUGIN = "file-transfer";
@@ -281,7 +274,9 @@ function readablePluginSecretInput(
  * Refuses the first reference OpenClaw cannot read (`secretInputReference`), then the first
  * required one to a variable the Gateway would lack: an APP_SERVER_ variable, which only a
  * Dedicated Codex Gateway receives, and, when `bound` is given, a name a Secret binding could set
- * but `bound` says nothing sets. At an input with an owner, it refuses such an unset name only
+ * but `bound` says nothing sets. A whole `${NAME}` whose NAME the Configuration's own `env` sets
+ * is set: OpenClaw applies that environment before it substitutes (finding 3059). At an input
+ * with an owner, it refuses such an unset name only
  * when OpenClaw cannot read the `${NAME}` it then keeps. `bound` answers for the Configuration's
  * bindings and what the Installation adds at launch; Agent save, which knows neither, passes none.
  * Other reserved names pass: Compute or the image may set them. Configuration save applies the
@@ -294,6 +289,11 @@ export function requirePluginSecretInputs(
   createError: SettingError,
 ): void {
   const secrets = asRecord(configuration.secrets);
+  let configured: ReadonlySet<string> | undefined;
+  const setByConfiguration = (value: unknown, name: string): boolean =>
+    typeof value === "string" &&
+    wholeEnvironmentReferenceName(value.trim()) === name &&
+    (configured ??= openClawConfigEnvironmentNames(configuration)).has(name);
   for (const { setting, value, required, disable } of activePluginSecretInputs(configuration)) {
     const reference = readablePluginSecretInput(setting, value, disable, secrets, createError);
     if (reference === undefined) {
@@ -305,7 +305,8 @@ export function requirePluginSecretInputs(
       bound !== undefined &&
       isAllowedSecretBindingDestination(name) &&
       !RUNTIME_VARIABLE.test(name) &&
-      !bound(name);
+      !bound(name) &&
+      !setByConfiguration(value, name);
     // An APP_SERVER_ variable is never set outside a Dedicated Codex Gateway, whatever binds.
     const appServerUnset = topology !== "Dedicated Codex" && CODEX_APP_SERVER_VARIABLE.test(name);
     const agent = topology === "embedded OpenClaw" ? "an embedded" : "a Dedicated OpenClaw";
@@ -394,6 +395,28 @@ const PROVIDER_ENVIRONMENT =
   "the Agent's Harness authentication binding owns model provider environment";
 const MODEL_CREDENTIAL_ENVIRONMENT =
   /^(?:OPENAI_|ANTHROPIC_|OCE_MODEL_API_KEY$|CODEX_(?:ACCESS_TOKEN|CHATGPT_WORKSPACE_ID|LOGIN_MODE)$)/i;
+const CHANNEL_PROXY_ENVIRONMENT =
+  /^(?:https?_proxy|all_proxy|no_proxy|node_use_env_proxy|openclaw_proxy_(?:active|ca_file))$/i;
+
+/** Only trusted Compute configuration can select the proxy and delegate guarded-fetch checks. */
+export function requireChannelProxyEnvironment(
+  configuration: Readonly<OpenClawConfigurationDocument>,
+  createError: SettingError,
+): void {
+  const env = asRecord(configuration.env);
+  for (const [parent, values] of [
+    ["env", env],
+    ["env.vars", asRecord(env?.vars)],
+  ] as const) {
+    const name = Object.keys(values ?? {}).find((key) => CHANNEL_PROXY_ENVIRONMENT.test(key));
+    if (name !== undefined) {
+      throw createError(
+        keyedSettingPath(parent, name),
+        "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
+      );
+    }
+  }
+}
 // The refusal names the header, so it explains itself whatever word the rule matched; never its
 // value. A header name is not a secret. A long one is cut so the message fits its cap.
 const credentialHeaderRequirement = (name: string): string =>

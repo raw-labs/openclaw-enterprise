@@ -9,15 +9,18 @@ kind: reference/driver
 `ChannelDriver` validates configured credentials and looks up provider identities for an authorized Namespace edit.
 OpenClaw Control Plane (OCC) owns caller authorization, Secret access, and the
 saved Agent or Configuration. The Driver owns the provider request and returns
-display candidates with stable provider IDs. It does not send messages
-or grant channel access. The current controller selects the bundled Slack
+bounded display candidates with stable provider IDs. It does not send messages
+or grant channel access. The current controller selects the bundled Slack and Teams
 implementation for directory lookup; see [Driver selection](selection.md).
 
 ## Interface
 
 The [shared interface](../../../packages/contracts/src/drivers/channel/index.ts) requires a
-Driver identity and `lookupDirectory({ token, kind, query?, cursor?, ids? })`. `kind`
-selects users or channels. `ids` resolves saved IDs directly and cannot be
+Driver identity and `lookupDirectory({ token, provider, context?, kind, query?, cursor?, ids? })`. `kind`
+selects users or channels. `provider` selects a provider-owned adapter; optional
+`context` contains at most eight nonsecret strings of at most 200 characters.
+Adapters validate their own context, authentication and pagination; OCC remains
+provider-neutral. `ids` resolves saved IDs directly and cannot be
 combined with a search query or cursor. The method returns workspace identity, candidates,
 an optional next cursor, and `complete`. A returned name is a display hint;
 callers save IDs. A missing selected Driver makes lookup unavailable.
@@ -26,15 +29,17 @@ The optional `validateCredentials(values, withSecret)` method checks configured
 channel credentials before API provisioning or deployment. `withSecret(binding,
 path, validate)` authorizes the exact same-Namespace Secret and supplies its value
 only inside the SecretDriver callback. Provider calls run before the write
-transaction. Validation does not pin Secret versions or revalidate queued work.
+transaction. Deployment admission retains the Configuration and selected Driver
+identities that were checked and rejects changes before recording a revision.
+Validation does not pin Secret versions or revalidate queued work.
 
 ## IAM
 
 OCC admits the caller, checks Agent creation or the exact Agent or Configuration
 edit, and requires `operate` on the caller-specified same-Namespace Secret. The
 Console supplies its selected bot Secret. OCC reads the value through the
-SecretDriver, then rechecks authority and Secret identity
-before giving that value to the ChannelDriver in-process. The Driver authenticates
+SecretDriver, then rechecks the required target authority, exact Secret/backend
+identity, and selected storage Driver before giving that value to the ChannelDriver in-process. The Driver authenticates
 to its provider with the token. No Secret value appears in an HTTP response,
 audit event, or Console script. Provider access does not grant OCC permissions.
 
@@ -63,6 +68,8 @@ A successful lookup does not prove the bot can post to a channel.
 
 ## Implementations
 
+- [Bundled Teams Channel Driver](teams-channel.md) reads a selected Team's
+  standard channels and member roster with resource-specific consent.
 - [Bundled Slack Channel Driver](slack-channel.md) uses a Slack bot token for
   user and channel directory reads.
 

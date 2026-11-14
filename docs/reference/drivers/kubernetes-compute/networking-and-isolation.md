@@ -1,7 +1,7 @@
 # Kubernetes networking and isolation
 
-Configure tenant network boundaries, private Agent routes, and existing
-namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
+Configure networking and private routes for the
+[Kubernetes Compute Driver](../kubernetes-compute.md).
 
 ## Networking
 
@@ -33,8 +33,11 @@ the endpoint capability retain ordinary Service or private routing.
 For startup, plugin and deployment diagnostics, set
 `network.pluginStatusProxySourceCidrs` to the API server's Pod-proxy source
 addresses as `/32` or `/128`: wider ranges warn; all-address ranges fail.
-On overlays, the source can be the control-plane node's overlay address. Verify
-each node's actual source address with enforced policies. This allows only private TCP/18791, including Agents without plugins.
+On overlays, the source can be the control-plane node's overlay address. A
+managed control plane can use different sources for OCC and direct operator
+requests. [Verify deployment diagnostics through OCC](../../../guides/operate/network-isolation.md#check-the-status-port)
+with the policies enforced. This setting admits private TCP/18791 for the listed
+sources, including for Agents without plugins.
 API and worker ServiceAccounts need namespace-local `get` on `pods/proxy`.
 Omission adds no ingress rule, potentially blocking diagnostics, and restarts the
 Gateway once per dedicated Codex first deploy. It grants neither native Gateway
@@ -112,6 +115,8 @@ Channels require an approved HTTP(S) proxy in `runtime.channels`: a literal IP
 endpoint, or the exact
 Helm-managed proxy Service URL paired with `runtime.channels.managedProxy`.
 Direct public channel-provider access is denied.
+
+Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
 
 ## Explicit network profiles
 
@@ -311,3 +316,8 @@ receive controller credentials.
 
 - [Driver configuration and troubleshooting](../kubernetes-compute.md)
 - [Kubernetes security controls](../../security.md)
+
+## Teams callbacks
+
+See [Teams setup](../../../guides/integrations/teams.md) for public callbacks,
+credentials, routing, cleanup, and verification.

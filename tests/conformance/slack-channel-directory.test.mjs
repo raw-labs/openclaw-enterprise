@@ -6,8 +6,8 @@ import test from "node:test";
 import { SlackChannelDriver } from "../../apps/controller/src/drivers/channel/slack.ts";
 import { ChannelDirectoryError } from "../../packages/occ/src/index.ts";
 import { syntheticCredentialUrl } from "../fixtures/synthetic-credential-url.mjs";
-import { refusingPort } from "../helpers/available-port.mjs";
-import { listen } from "../helpers/listen.mjs";
+import { refusingPort } from "../helpers/available-port.ts";
+import { listen } from "../helpers/listen.ts";
 import { SLACK_ROUTE_NOT_CONFIGURED } from "../helpers/refusal-text.mjs";
 import {
   connectThroughProxy,
@@ -73,7 +73,7 @@ test("Slack directory accepts only literal IP or managed Service proxy endpoints
   for (const proxyUrl of ["http://0.0.0.0:3128", "https://0.0.0.0:8443"]) {
     assert.throws(
       () => new SlackChannelDriver(globalThis.fetch, proxyUrl),
-      /^Error: Slack directory proxy must not use host 0\.0\.0\.0, which names no proxy address\.$/,
+      /^Error: Channel directory proxy must not use host 0\.0\.0\.0, which names no proxy address\.$/,
     );
   }
 });

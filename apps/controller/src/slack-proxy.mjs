@@ -1,15 +1,91 @@
 import { createServer } from "node:http";
+import dns from "node:dns";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_PORT = 3128;
 const CONNECT_TIMEOUT_MS = 10_000;
 const SHUTDOWN_DRAIN_MS = 2_000;
-// How long a client may take to read what is still queued for it, and close its side, after
-// the proxy has finished writing to it.
+// How long client output may remain blocked, or a client may take to drain and close its
+// side after the proxy has finished writing to it.
 const CLIENT_DRAIN_TIMEOUT_MS = 10_000;
 const ALLOWED_SUFFIXES = [".slack.com", ".slack-edge.com", ".slack-msgs.com"];
 const ALLOWED_HOSTS = new Set(["slack.com", "slack-edge.com", "slack-msgs.com"]);
+// Public-cloud text messaging only: no broad Microsoft or SharePoint wildcard.
+const TEAMS_HOSTS = new Set([
+  "login.microsoftonline.com",
+  "login.botframework.com",
+  "api.botframework.com",
+  "smba.trafficmanager.net",
+  "graph.microsoft.com",
+]);
+const teamsEnabled = process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED === "true";
+if (
+  process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED !== undefined &&
+  !["true", "false"].includes(process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED)
+) {
+  throw new Error("OCC_CHANNEL_PROXY_TEAMS_ENABLED must be true or false.");
+}
+const TEAMS_FILE_HOST_SUFFIXES = [
+  ".sharepoint.com",
+  ".sharepoint-df.com",
+  ".1drv.com",
+  ".onedrive.com",
+  ".blob.core.windows.net",
+];
+const teamsFileHosts = readTeamsFileHosts(process.env.OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS);
+// Match the Helm proxy's public IPv4 egress boundary. Validate every DNS answer before
+// opening a socket, then connect to that numeric address so DNS cannot change underneath it.
+const blockedAddresses = new net.BlockList();
+for (const [address, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+]) {
+  blockedAddresses.addSubnet(address, prefix, "ipv4");
+}
+
+function readTeamsFileHosts(value) {
+  if (value === undefined) {
+    return new Set();
+  }
+  let hosts;
+  try {
+    hosts = JSON.parse(value);
+  } catch {
+    throw new Error(
+      "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS must be a JSON list of exact Microsoft storage hostnames.",
+    );
+  }
+  if (
+    !Array.isArray(hosts) ||
+    hosts.length > 32 ||
+    (!teamsEnabled && hosts.length > 0) ||
+    hosts.some(
+      (host) =>
+        typeof host !== "string" ||
+        host.length > 253 ||
+        !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host) ||
+        !TEAMS_FILE_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix)),
+    )
+  ) {
+    throw new Error(
+      "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS requires Teams and at most 32 exact lowercase Microsoft storage hostnames.",
+    );
+  }
+  return new Set(hosts);
+}
 
 function parsePort(value) {
   if (value === undefined || value === "") {
@@ -44,6 +120,7 @@ function isAllowedSlackConnectTarget(target) {
   }
   return (
     ALLOWED_HOSTS.has(parsed.host) ||
+    (teamsEnabled && (TEAMS_HOSTS.has(parsed.host) || teamsFileHosts.has(parsed.host))) ||
     ALLOWED_SUFFIXES.some((suffix) => parsed.host.endsWith(suffix))
   );
 }
@@ -76,9 +153,9 @@ function cutClient(socket) {
 }
 
 // Called once the proxy is done writing to the client: the upstream closed, or a CONNECT was
-// refused. When the client's write side was already ended (pipe() ends it on the upstream's
-// clean EOF; reject() ends it with the status line), bytes can still be queued for a slow
-// client, and destroy() would drop them. Even after they are flushed, a close with unread
+// refused. When the client's write side was already ended (forwardToClient ends it on the
+// upstream's clean EOF; reject() ends it with the status line), bytes can still be queued for
+// a slow client, and destroy() would drop them. Even after they are flushed, a close with unread
 // client bytes (a TLS close_notify, say) makes the kernel reset the connection and drop the
 // tail. So linger: discard what the client sends, keep the socket until the client has read
 // everything and closed its side, and cut it at `drainTimeoutMs`. Anything else (an upstream
@@ -98,6 +175,66 @@ function closeClientWhenDrained(clientSocket, drainTimeoutMs) {
   clientSocket.once("close", () => clearTimeout(timer));
 }
 
+// Bound pending client writes even below the high-water mark, where no drain event fires.
+// Keep normal pause/resume backpressure without timing out idle Socket Mode tunnels.
+// EOF hands ownership back to closeClientWhenDrained, which preserves complete replies.
+function forwardToClient(upstream, clientSocket, drainTimeoutMs) {
+  let timer;
+  let pendingWrites = 0;
+  let stopped = false;
+  const clear = () => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  const write = (chunk) => {
+    if (stopped) {
+      return;
+    }
+    pendingWrites += 1;
+    if (timer === undefined) {
+      timer = setTimeout(() => {
+        clear();
+        if (pendingWrites > 0 && clientSocket.writableLength > 0) {
+          stop();
+          cutClient(clientSocket);
+          upstream.destroy();
+        }
+      }, drainTimeoutMs);
+      timer.unref();
+    }
+    if (
+      !clientSocket.write(chunk, () => {
+        pendingWrites -= 1;
+        if (pendingWrites === 0) {
+          clear();
+        }
+      })
+    ) {
+      upstream.pause();
+    }
+  };
+  const resume = () => upstream.resume();
+  const end = () => {
+    stop();
+    clientSocket.end();
+  };
+  const stop = () => {
+    stopped = true;
+    clear();
+    upstream.off("data", write);
+    upstream.off("end", end);
+    upstream.off("close", stop);
+    clientSocket.off("drain", resume);
+    clientSocket.off("close", stop);
+  };
+  upstream.on("data", write);
+  upstream.once("end", end);
+  upstream.once("close", stop);
+  clientSocket.on("drain", resume);
+  clientSocket.once("close", stop);
+  return write;
+}
+
 export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS } = {}) {
   const server = createServer((request, response) => {
     response.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
@@ -115,35 +252,81 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
       return;
     }
     const target = parseConnectTarget(request.url);
-    const upstream = net.connect({ host: target.host, port: target.port });
+    let upstream;
     let connected = false;
-    upstream.setTimeout(CONNECT_TIMEOUT_MS);
-    upstream.once("connect", () => {
-      connected = true;
-      upstream.setTimeout(0);
-      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      if (head.length > 0) {
-        upstream.write(head);
-      }
-      upstream.pipe(clientSocket);
-      clientSocket.pipe(upstream);
-    });
-    upstream.once("timeout", () => upstream.destroy(new Error("upstream connection timeout")));
-    upstream.once("error", () => {
-      if (connected) {
-        // Before the upstream's EOF, the reply is cut: reset, so the client cannot take it as
-        // whole. After it (a client byte piped into the ended upstream, say), the reply is
-        // complete and the close handler lets the client drain it.
-        if (!clientSocket.destroyed && !clientSocket.writableEnded) {
-          clientSocket.resetAndDestroy();
-        }
+    let finished = false;
+    // One deadline covers resolution and connection; a late resolver callback cannot
+    // create an upstream after timeout, client disconnect, or process shutdown.
+    const timer = setTimeout(() => fail(502, "Bad Gateway"), CONNECT_TIMEOUT_MS);
+    const finish = () => {
+      finished = true;
+      clearTimeout(timer);
+    };
+    const fail = (status, message) => {
+      if (finished) {
         return;
       }
-      reject(clientSocket, 502, "Bad Gateway");
+      finish();
+      upstream?.destroy();
+      if (!clientSocket.destroyed) {
+        reject(clientSocket, status, message);
+        closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
+      }
+    };
+    clientSocket.once("close", () => {
+      finish();
+      upstream?.destroy();
     });
-    upstream.once("close", () => closeClientWhenDrained(clientSocket, clientDrainTimeoutMs));
-    clientSocket.once("close", () => upstream.destroy());
-    clientSocket.once("error", () => upstream.destroy());
+    clientSocket.once("error", () => {
+      finish();
+      upstream?.destroy();
+    });
+    dns.lookup(target.host, { family: 4, all: true, verbatim: true }, (error, addresses) => {
+      if (finished) {
+        return;
+      }
+      if (error || addresses.length === 0) {
+        fail(502, "Bad Gateway");
+        return;
+      }
+      if (
+        addresses.some(
+          ({ address, family }) =>
+            family !== 4 || net.isIP(address) !== 4 || blockedAddresses.check(address, "ipv4"),
+        )
+      ) {
+        fail(403, "Forbidden");
+        return;
+      }
+      upstream = net.connect({ host: addresses[0].address, family: 4, port: target.port });
+      upstream.once("connect", () => {
+        connected = true;
+        finish();
+        const writeToClient = forwardToClient(upstream, clientSocket, clientDrainTimeoutMs);
+        writeToClient("HTTP/1.1 200 Connection Established\r\n\r\n");
+        if (head.length > 0) {
+          upstream.write(head);
+        }
+        clientSocket.pipe(upstream);
+      });
+      upstream.once("error", () => {
+        if (connected) {
+          // Before the upstream's EOF, the reply is cut: reset, so the client cannot take it as
+          // whole. After it (a client byte piped into the ended upstream, say), the reply is
+          // complete and the close handler lets the client drain it.
+          if (!clientSocket.destroyed && !clientSocket.writableEnded) {
+            clientSocket.resetAndDestroy();
+          }
+          return;
+        }
+        fail(502, "Bad Gateway");
+      });
+      upstream.once("close", () => {
+        if (connected) {
+          closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
+        }
+      });
+    });
   });
 
   return server;

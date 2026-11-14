@@ -12,11 +12,11 @@ images; individual Agents cannot choose their own implementations.
 1. Use bundled Kubernetes Compute and Kubernetes Secret for a new Installation
    or for [local Agent deployment](../../guides/quickstart.md). The
    [production Installation example](../../guides/deploy/production-installation.md#configure-the-installation)
-   shows a complete YAML document with the required OCC and Driver settings.
+   shows the required OCC and Driver settings.
    If you need embedded OpenClaw on existing Linux hosts with credentials
    supplied on those hosts, start with [SSH Compute](ssh-compute.md) instead.
 2. Select the required Configuration, IAM, Compute, and Secret implementations.
-   The table below lists each capability and its allowed choices. Omit optional
+   The table lists supported choices. Omit optional
    Sandbox, Credential Gateway, ServiceAccount, Plugin, and Repo selections
    unless you need them.
 3. Set `OCC_CONFIG_PATH` to the absolute path of that trusted YAML and select
@@ -50,7 +50,7 @@ Sandbox packages in trusted YAML in either mode.
 | Capability           | Shared contract                                                             | Selection boundary                                                                                                                                       |
 | -------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `configuration`      | [ConfigurationDriver](configuration.md)                                     | Required in Installation YAML; bundled Kubernetes or installed package.                                                                                  |
-| `channel`            | [ChannelDriver](channel.md)                                                 | Controller-selected bundled Slack directory Driver; no Installation YAML selector.                                                                       |
+| `channel`            | [ChannelDriver](channel.md)                                                 | Controller-selected bundled Slack and Teams directory Driver; no Installation YAML selector.                                                             |
 | `iam`                | [IAMDriver](iam.md)                                                         | Required in Installation YAML; bundled native IAM or installed package.                                                                                  |
 | `compute`            | [ComputeDriver](compute.md)                                                 | Required in Installation YAML; bundled Kubernetes, bundled SSH, or installed package.                                                                    |
 | `secret`             | [SecretDriver](secret.md)                                                   | Required in trusted Installation YAML, including SSH; bundled Kubernetes only.                                                                           |
@@ -290,11 +290,11 @@ function returning the current reconciliation operation's `AbortSignal`, or
 work when an operation loses its lease or is cancelled. Tenants and operator
 YAML cannot supply or replace the function.
 
-Production startup rejects bundled or installed Compute Drivers missing either
-`activateRevision` or `deactivateRevision`; development permits four-method
-Drivers. See the [ComputeDriver contract](compute.md) for
-core operations, staged activation, and preflight. Startup checks structure,
-not whether installed code actually preserves workload isolation.
+Every Compute Driver must implement `ensureNamespace`, `deleteNamespace`,
+`prepareRevision`, `stopRevision`, and `retireRevision`. Production also requires
+`activateRevision` and `deactivateRevision`; development permits their absence.
+See the [ComputeDriver contract](compute.md) for staged activation and preflight.
+Startup checks structure, not workload isolation.
 
 Provide any defaults explicitly in Installation YAML or document them in the
 Driver package. OCC does not merge package-provided defaults.
@@ -388,3 +388,5 @@ The [Driver package loader](../../../apps/controller/src/composition/driver-pack
 resolves installed packages and checks their factories;
 [Installation composition](../../../apps/controller/src/composition/installation-config.ts)
 validates selections and constructs the runtime bundle.
+
+Namespace setup follows the [registration lifecycle](namespace-lifecycle.md).
