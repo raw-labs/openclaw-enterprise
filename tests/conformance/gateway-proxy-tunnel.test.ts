@@ -1,0 +1,531 @@
+import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import net from "node:net";
+import { Duplex } from "node:stream";
+import test, { type TestContext } from "node:test";
+import { setImmediate as nextTurn } from "node:timers/promises";
+import { createGatewayProxyServer } from "../../apps/controller/src/gateway-proxy.ts";
+import { refusingPort } from "../helpers/available-port.mjs";
+import { listen as listenServer } from "../helpers/listen.mjs";
+import { connectThroughProxy, startGatewayProxy } from "../helpers/gateway-proxy.ts";
+import { within } from "../helpers/wait-for.mjs";
+
+// The bundled Slack proxy (apps/controller/src/gateway-proxy.ts) relays CONNECT tunnels only.
+// These tests drive the real proxy process against loopback upstreams: startGatewayProxy
+// redirects its slack.com:443 connections to a local port, so nothing leaves the host.
+// Every wait is bounded (within's 10 s default), so a proxy that stops relaying fails the
+// test instead of hanging it.
+const testOptions = { timeout: 60_000 };
+
+async function listen(
+  t: TestContext,
+  onConnection: (socket: net.Socket) => void,
+  options: net.ServerOpts = {},
+) {
+  const server = net.createServer(options, onConnection);
+  const port = await listenServer(t, server);
+  return Object.assign(server, { port });
+}
+
+// Collects everything a socket reads, and when its peer's EOF ('end') and its own close came.
+function record(socket: net.Socket) {
+  const chunks: Buffer[] = [];
+  let sawEnd = false;
+  socket.on("data", (chunk) => chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
+  const ended = new Promise<void>((resolve) => {
+    socket.once("end", () => {
+      sawEnd = true;
+      resolve();
+    });
+  });
+  const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+  return { bytes: () => Buffer.concat(chunks), ended, closed, sawEnd: () => sawEnd };
+}
+
+// Sends `CONNECT target` to the proxy, with `early` bytes in the same write (the proxy gets
+// them as the CONNECT request's head), and resolves once the response head has arrived.
+// `body()` is what the client has received after the response head so far.
+async function openTunnel(
+  t: TestContext,
+  proxyPort: number,
+  target: string,
+  early = Buffer.alloc(0),
+) {
+  const socket = net.connect({ host: "127.0.0.1", port: proxyPort });
+  socket.on("error", () => {});
+  t.after(() => socket.destroy());
+  const received = record(socket);
+  await within(
+    new Promise<void>((resolve) => socket.once("connect", () => resolve())),
+    "proxy connect",
+  );
+  socket.write(
+    Buffer.concat([Buffer.from(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`), early]),
+  );
+  const headEnd = await within(
+    new Promise<number>((resolve, reject) => {
+      const check = () => {
+        const index = received.bytes().indexOf("\r\n\r\n");
+        if (index !== -1) {
+          socket.off("data", check);
+          resolve(index + 4);
+        }
+      };
+      socket.on("data", check);
+      socket.once("close", () => reject(new Error(`proxy closed: ${received.bytes()}`)));
+    }),
+    `CONNECT ${target} response`,
+  );
+  const head = received.bytes().subarray(0, headEnd).toString("latin1");
+  return {
+    socket,
+    head,
+    body: () => received.bytes().subarray(headEnd),
+    ended: received.ended,
+    closed: received.closed,
+    sawEnd: received.sawEnd,
+  };
+}
+
+const established = /^HTTP\/1\.1 200 Connection Established\r\n/;
+
+test("a CONNECT tunnel relays bytes both ways and both ends see EOF", testOptions, async (t) => {
+  // An echo upstream that keeps its write side open after the client's EOF, so the reply can
+  // only finish if the proxy relays that EOF upstream. The proxy closes the client once the
+  // upstream finishes, both by ending the pipe and on the upstream's close; the client sees
+  // the same EOF either way, so this test does not tell those two paths apart.
+  const upstreamSeen: ReturnType<typeof record>[] = [];
+  const upstream = await listen(
+    t,
+    (socket) => {
+      socket.on("error", () => {});
+      const seen = record(socket);
+      upstreamSeen.push(seen);
+      socket.pipe(socket);
+    },
+    { allowHalfOpen: true },
+  );
+  const { port: proxyPort } = await startGatewayProxy(t, { upstreamPort: upstream.port });
+
+  // Bytes sent with the CONNECT request itself, then a payload far larger than one TCP read.
+  const early = randomBytes(1_024);
+  const payload = randomBytes(4 * 1024 * 1024);
+  const sent = Buffer.concat([early, payload]);
+  const tunnel = await openTunnel(t, proxyPort, "slack.com:443", early);
+  assert.match(tunnel.head, established);
+  tunnel.socket.end(payload);
+
+  await within(tunnel.ended, "client EOF");
+  assert.equal(upstreamSeen.length, 1);
+  await within(upstreamSeen[0]!.ended, "upstream EOF");
+  assert.ok(upstreamSeen[0]!.bytes().equals(sent), "the upstream received every byte in order");
+  assert.ok(tunnel.body().equals(sent), "the client received every echoed byte in order");
+  await within(tunnel.closed, "client close");
+  await within(upstreamSeen[0]!.closed, "upstream close");
+});
+
+test(
+  "a CONNECT tunnel delivers a large upstream reply in full to a slow client",
+  testOptions,
+  async (t) => {
+    const reply = randomBytes(8 * 1024 * 1024);
+    const upstream = await listen(t, (socket) => {
+      socket.on("error", () => {});
+      socket.end(reply);
+    });
+    const { port: proxyPort } = await startGatewayProxy(t, {
+      upstreamPort: upstream.port,
+    });
+
+    const tunnel = await openTunnel(t, proxyPort, "slack.com:443");
+    assert.match(tunnel.head, established);
+    // Read nothing for a moment while the upstream writes its reply and closes. The proxy must
+    // respect the slow client's backpressure and still deliver the whole reply before EOF.
+    tunnel.socket.pause();
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    tunnel.socket.resume();
+    await within(tunnel.closed, "client close");
+    assert.equal(tunnel.body().length, reply.length, "the client received the whole reply");
+    assert.ok(tunnel.body().equals(reply), "the client received the reply in order");
+    assert.ok(tunnel.sawEnd(), "the client saw a clean EOF");
+  },
+);
+
+// Drives createGatewayProxyServer in this process with a client socket whose writes complete only
+// when the test says so, as writes do behind a full TCP send buffer. A real slow client only
+// reaches that state when the kernel buffers happen to be full, so the loopback test above
+// rarely catches a proxy that drops queued bytes; this one does every time. `upstreamSocket()`
+// is the proxy's own socket to the upstream, redirected to `upstreamPort`.
+function heldClientTunnel(
+  t: TestContext,
+  upstreamPort: number,
+  serverOptions?: Parameters<typeof createGatewayProxyServer>[0],
+) {
+  const connect = net.connect;
+  let upstreamSocket!: net.Socket;
+  t.mock.method(net, "connect", (options: net.NetConnectOpts) => {
+    upstreamSocket = connect({ ...options, host: "127.0.0.1", port: upstreamPort });
+    return upstreamSocket;
+  });
+  const chunks: Buffer[] = [];
+  const held: ((error?: Error | null) => void)[] = [];
+  let finished = false;
+  let reset = false;
+  const client = Object.assign(
+    new Duplex({
+      read() {},
+      write(chunk, _encoding, callback) {
+        chunks.push(chunk);
+        held.push(callback);
+      },
+      final(callback) {
+        finished = true;
+        callback();
+      },
+    }),
+    {
+      resetAndDestroy(this: Duplex) {
+        reset = true;
+        return this.destroy();
+      },
+    },
+  );
+  // A net.Socket closes with a TCP reset here; record it.
+  client.on("error", () => {});
+  t.after(() => client.destroy());
+  const closed = new Promise<void>((resolve) => client.once("close", () => resolve()));
+  const server = createGatewayProxyServer(serverOptions);
+  server.emit("connect", { url: "slack.com:443" }, client, Buffer.alloc(0));
+  return {
+    client,
+    closed,
+    upstreamSocket: () => upstreamSocket,
+    held,
+    bytes: () => Buffer.concat(chunks),
+    finished: () => finished,
+    reset: () => reset,
+  };
+}
+
+test(
+  "a CONNECT tunnel flushes bytes still queued for the client after the upstream closes",
+  testOptions,
+  async (t) => {
+    // Smaller than the client's high-water mark, so the pipe never pauses the upstream: its EOF
+    // and close reach the proxy while the reply still waits behind the first held write.
+    const reply = randomBytes(1_024);
+    const upstream = await listen(t, (socket) => {
+      socket.on("error", () => {});
+      socket.end(reply);
+    });
+    const tunnel = heldClientTunnel(t, upstream.port);
+
+    await within(
+      new Promise<void>((resolve) => tunnel.upstreamSocket().once("close", resolve)),
+      "upstream close",
+    );
+    // Let the proxy's own close listener on the same socket run.
+    await nextTurn();
+    assert.ok(tunnel.client.writableEnded, "the proxy ended the client after the upstream EOF");
+    assert.ok(tunnel.client.writableLength > 0, "the reply is still queued for the client");
+    assert.equal(tunnel.client.destroyed, false, "the proxy keeps a client that is still reading");
+
+    // The client reads everything, then closes its side.
+    while (tunnel.held.length > 0) {
+      tunnel.held.shift()!();
+      await nextTurn();
+    }
+    assert.ok(tunnel.finished(), "the client saw a clean EOF");
+    const body = tunnel.bytes().subarray(tunnel.bytes().indexOf("\r\n\r\n") + 4);
+    assert.match(tunnel.bytes().toString("latin1"), established);
+    assert.ok(body.equals(reply), "the client received the whole reply");
+    tunnel.client.push(null);
+    await within(tunnel.closed, "client close");
+    assert.equal(tunnel.reset(), false, "a drained client gets a clean close");
+  },
+);
+
+test(
+  "a client byte after the upstream's EOF does not cut the complete reply",
+  testOptions,
+  async (t) => {
+    const reply = randomBytes(1_024);
+    const upstream = await listen(t, (socket) => {
+      socket.on("error", () => {});
+      socket.end(reply);
+    });
+    const tunnel = heldClientTunnel(t, upstream.port);
+    // The client sends a byte just as the upstream's EOF has ended the proxy's upstream socket,
+    // so piping it upstream fails (EPIPE) after the whole reply has arrived.
+    const upstreamErrors: unknown[] = [];
+    tunnel
+      .upstreamSocket()
+      .once("error", (error) => upstreamErrors.push("code" in error ? error.code : undefined));
+    tunnel.upstreamSocket().once("finish", () => tunnel.client.push("late-client-byte"));
+
+    await within(
+      new Promise<void>((resolve) => tunnel.upstreamSocket().once("close", resolve)),
+      "upstream close",
+    );
+    await nextTurn();
+    assert.deepEqual(upstreamErrors, ["EPIPE"], "the late byte failed upstream");
+    assert.equal(tunnel.client.destroyed, false, "the proxy keeps a client that is still reading");
+
+    while (tunnel.held.length > 0) {
+      tunnel.held.shift()!();
+      await nextTurn();
+    }
+    assert.ok(tunnel.finished(), "the client saw a clean EOF");
+    const body = tunnel.bytes().subarray(tunnel.bytes().indexOf("\r\n\r\n") + 4);
+    assert.ok(body.equals(reply), "the client received the whole reply");
+    tunnel.client.push(null);
+    await within(tunnel.closed, "client close");
+    assert.equal(tunnel.reset(), false, "a complete reply gets a clean close");
+  },
+);
+
+test(
+  "a client that never reads its queued bytes is reset after the drain timeout",
+  testOptions,
+  async (t) => {
+    const upstream = await listen(t, (socket) => {
+      socket.on("error", () => {});
+      socket.end("never-read");
+    });
+    const tunnel = heldClientTunnel(t, upstream.port, { clientDrainTimeoutMs: 1_000 });
+
+    await within(
+      new Promise<void>((resolve) => tunnel.upstreamSocket().once("close", resolve)),
+      "upstream close",
+    );
+    await nextTurn();
+    assert.equal(tunnel.client.destroyed, false, "the client gets time to read");
+    await within(tunnel.closed, "client close after the drain timeout");
+    assert.equal(tunnel.finished(), false, "the stuck client never got a clean EOF");
+    assert.ok(tunnel.reset(), "a cut reply ends in a reset, not a clean close");
+  },
+);
+
+test("an unreachable upstream gets 502 and the proxy keeps serving", testOptions, async (t) => {
+  // A held port refuses connections until the upstream below takes it. A released port could
+  // be taken by a test running in parallel.
+  const refusing = await refusingPort();
+  t.after(() => refusing.release());
+  const upstreamPort = refusing.port;
+  const { child, port: proxyPort, stderr } = await startGatewayProxy(t, { upstreamPort });
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await within(connectThroughProxy(proxyPort, "slack.com:443"), "502 response");
+    assert.match(response, /^HTTP\/1\.1 502 Bad Gateway\r\n/);
+  }
+  assert.match(
+    await within(connectThroughProxy(proxyPort, "example.com:443"), "403 response"),
+    /^HTTP\/1\.1 403 Forbidden\r\n/,
+  );
+
+  // The same proxy relays once the upstream is reachable.
+  const upstream = net.createServer((socket) => {
+    socket.on("error", () => {});
+    socket.end("upstream-ready");
+  });
+  const listenUpstream = () =>
+    new Promise<void>((resolve, reject) => {
+      upstream.once("error", reject);
+      upstream.listen(upstreamPort, "127.0.0.1", () => {
+        upstream.off("error", reject);
+        resolve();
+      });
+    });
+  // Bind while the port is still held, so nothing can take it in between. Linux allows that
+  // (both sockets set SO_REUSEADDR and the held one does not listen); where the platform
+  // refuses, release the port first.
+  try {
+    await listenUpstream();
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "EADDRINUSE") {
+      throw error;
+    }
+    await refusing.release();
+    await listenUpstream();
+  }
+  t.after(() => upstream.close());
+  await refusing.release();
+  const tunnel = await openTunnel(t, proxyPort, "slack.com:443");
+  assert.match(tunnel.head, established);
+  await within(tunnel.closed, "client close");
+  assert.equal(tunnel.body().toString(), "upstream-ready");
+  assert.equal(child.exitCode, null, stderr());
+});
+
+test(
+  "an upstream reset closes an open tunnel and the proxy keeps serving",
+  testOptions,
+  async (t) => {
+    let connections = 0;
+    const upstream = await listen(t, (socket) => {
+      connections += 1;
+      socket.on("error", () => {});
+      if (connections === 1) {
+        socket.once("data", () => socket.resetAndDestroy());
+      } else {
+        socket.end("second-tunnel");
+      }
+    });
+    const {
+      child,
+      port: proxyPort,
+      stderr,
+    } = await startGatewayProxy(t, {
+      upstreamPort: upstream.port,
+    });
+
+    const reset = await openTunnel(t, proxyPort, "slack.com:443");
+    assert.match(reset.head, established);
+    const errors: unknown[] = [];
+    reset.socket.on("error", (error) => errors.push("code" in error ? error.code : undefined));
+    reset.socket.write("ping");
+    await within(reset.closed, "client close after the upstream reset");
+    // Once the tunnel is open, a failure only closes it: no status line goes into the stream.
+    assert.equal(reset.body().length, 0, `unexpected bytes after the reset: ${reset.body()}`);
+    // A reset, not a clean EOF, so the client cannot take a cut reply as whole.
+    assert.equal(reset.sawEnd(), false, "the client saw no clean EOF");
+    assert.deepEqual(errors, ["ECONNRESET"]);
+
+    const next = await openTunnel(t, proxyPort, "slack.com:443");
+    assert.match(next.head, established);
+    await within(next.closed, "second tunnel close");
+    assert.equal(next.body().toString(), "second-tunnel");
+    assert.equal(child.exitCode, null, stderr());
+  },
+);
+
+test("the CONNECT allowlist matches whole Slack host names on port 443", testOptions, async (t) => {
+  const upstream = await listen(t, (socket) => {
+    socket.on("error", () => {});
+    socket.end("fixture-upstream");
+  });
+  const { port: proxyPort } = await startGatewayProxy(t, {
+    upstreamPort: upstream.port,
+    upstreamHosts: [
+      "slack.com",
+      "slack-edge.com",
+      "slack-msgs.com",
+      "wss-primary.slack.com",
+      "a.slack-edge.com",
+      "b.slack-msgs.com",
+    ],
+  });
+
+  // Allowed: the Slack apex, Slack subdomains, and any letter case (DNS names are not
+  // case-sensitive). The redirect sends each to the local upstream.
+  for (const target of [
+    "slack.com:443",
+    "slack-edge.com:443",
+    "slack-msgs.com:443",
+    "wss-primary.slack.com:443",
+    "a.slack-edge.com:443",
+    "b.slack-msgs.com:443",
+    "Slack.COM:443",
+    "WSS-Primary.Slack.com:443",
+  ]) {
+    const tunnel = await openTunnel(t, proxyPort, target);
+    assert.match(tunnel.head, established, target);
+    await within(tunnel.closed, `${target} close`);
+    assert.equal(tunnel.body().toString(), "fixture-upstream", target);
+  }
+
+  // Refused with 403: other hosts, look-alikes, other ports, and targets where a Slack name is
+  // only part of the authority.
+  for (const target of [
+    "example.com:443",
+    "evilslack.com:443",
+    "slack.com.evil.example:443",
+    "a.slack.com.evil.example:443",
+    "slack.com:80",
+    "slack.com:8443",
+    "x@slack.com:443",
+    "evil.example/slack.com:443",
+    "slack.com:443@evil.example",
+    "slack.com:443/x",
+    "slack.com:443x",
+  ]) {
+    assert.match(
+      await within(connectThroughProxy(proxyPort, target), `${target} response`),
+      /^HTTP\/1\.1 403 Forbidden\r\n/,
+      target,
+    );
+  }
+});
+
+test(
+  "operator host policy permits non-Slack tunnels and scopes wildcard matching",
+  testOptions,
+  async (t) => {
+    const upstream = await listen(t, (socket) => {
+      socket.on("error", () => {});
+      socket.end("permitted-service");
+    });
+    const { port: proxyPort } = await startGatewayProxy(t, {
+      upstreamPort: upstream.port,
+      upstreamHosts: ["api.example.test", "one.services.example.test"],
+      allowedHosts: ["api.example.test", "*.services.example.test"],
+    });
+    // DNS/socket redirection is only the local upstream fixture; the production
+    // proxy process evaluates the actual configured policy and relays real bytes.
+    for (const target of ["api.example.test:443", "one.services.example.test:443"]) {
+      const tunnel = await openTunnel(t, proxyPort, target);
+      assert.match(tunnel.head, established);
+      await within(tunnel.closed, "permitted-service close");
+      assert.equal(tunnel.body().toString(), "permitted-service");
+    }
+    for (const target of [
+      "slack.com:443",
+      "services.example.test:443",
+      "evilservices.example.test:443",
+      "api.example.test.evil:443",
+      "api.example.test:80",
+    ]) {
+      assert.match((await openTunnel(t, proxyPort, target)).head, /^HTTP\/1\.1 403 Forbidden/);
+    }
+    // Startup rejects malformed policy rather than widening a mistyped route.
+    for (const allowedHosts of [
+      ["*example.test"],
+      ["https://api.example.test"],
+      "api.example.test",
+    ]) {
+      assert.throws(() => createGatewayProxyServer({ allowedHosts }), /allowedHosts/);
+    }
+  },
+);
+
+test(
+  "an explicit * policy permits unrelated hosts but retains CONNECT port and syntax checks",
+  testOptions,
+  async (t) => {
+    const upstream = await listen(t, (socket) => {
+      socket.on("error", () => {});
+      socket.end("public-service");
+    });
+    const { port: proxyPort } = await startGatewayProxy(t, {
+      upstreamPort: upstream.port,
+      upstreamHosts: ["api.example.test", "registry.other.test"],
+      allowedHosts: ["*"],
+    });
+    // Only the upstream sockets are redirected. The real process reads the operator
+    // environment policy, authorizes CONNECT, and relays bytes to both destinations.
+    for (const target of ["api.example.test:443", "registry.other.test:443"]) {
+      const tunnel = await openTunnel(t, proxyPort, target);
+      assert.match(tunnel.head, established);
+      await within(tunnel.closed, "public-service close");
+      assert.equal(tunnel.body().toString(), "public-service");
+    }
+    for (const target of [
+      "api.example.test:80",
+      "api.example.test:8443",
+      "api.example.test:443/path",
+      "user@api.example.test:443",
+    ]) {
+      assert.match((await openTunnel(t, proxyPort, target)).head, /^HTTP\/1\.1 403 Forbidden/);
+    }
+  },
+);
