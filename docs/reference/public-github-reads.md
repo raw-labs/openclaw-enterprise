@@ -49,7 +49,9 @@ removed or changed, Compute first removes that version's grant to narrow new
 connections, then stops its Harness and waits for its Pods to terminate before
 reporting a configuration failure. Removing a NetworkPolicy does not guarantee
 that an existing connection closes. A GET admitted before withdrawal completes
-may drain; the stopped Harness cannot start a new one afterward. Deploy a new version to select a replacement peer. Apply the
+may drain; the stopped Harness cannot start a new one afterward. Deploy a new version
+to select a replacement peer. Selecting a Credential Proxy alone does not withdraw
+an unprotected revision's reader access. Apply the
 database migration before starting a controller that writes the new admission
 fact, and complete the rollout before admitting versions with that controller.
 

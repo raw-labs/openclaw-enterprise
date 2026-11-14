@@ -26,6 +26,16 @@ export function cleanEnvironment(extra = {}) {
   };
 }
 
+export class FixtureCommandTimeoutError extends Error {}
+
+/**
+ * @param {string} command
+ * @param {readonly string[]} [args]
+ * @param {{cwd?: string | URL | undefined, env?: NodeJS.ProcessEnv | undefined,
+ *   input?: string | NodeJS.ArrayBufferView | undefined, timeout?: number | undefined,
+ *   allowFailure?: boolean | undefined, signal?: AbortSignal | undefined}} [options]
+ * @returns {Promise<{code: number | null, stdout: string, stderr: string}>}
+ */
 export async function run(
   command,
   args,
@@ -90,6 +100,7 @@ export async function run(
   child.stdout.on("data", (chunk) => collect("stdout", chunk));
   child.stderr.on("data", (chunk) => collect("stderr", chunk));
   child.stdin.on("error", () => {});
+  /** @type {Promise<number | null>} */
   const closed = new Promise((resolve) => {
     finish = resolve;
     child.once("error", () => stop("spawn failed"));
@@ -106,6 +117,9 @@ export async function run(
     const code = await closed;
     // Do not serialize command arguments, output, or cancellation reasons:
     // any of them can contain credentials supplied by the client.
+    if (failure === "timeout") {
+      throw new FixtureCommandTimeoutError("command failed (timeout)");
+    }
     if (failure || (code !== 0 && !allowFailure)) {
       throw new Error(`command failed (${failure ?? `exit ${code}`})`);
     }
@@ -124,35 +138,66 @@ export async function temporaryDirectory(t, prefix = "repository-credentials-") 
   return directory;
 }
 
+// One self-signed certificate per process on the shared fixture key (shared-keys.mjs), minted by
+// the first call in a directory of its own. Every certificate minted from that key and subject
+// would verify the others anyway, so later calls lose nothing by reusing it; each still gets its
+// own key and cert files.
+/** @type {ReturnType<typeof mintFixtureCertificate> | undefined} */
+let fixtureCertificate;
+
+async function mintFixtureCertificate() {
+  const directory = await mkdtemp(join(tmpdir(), "repository-credentials-tls-mint-"));
+  try {
+    const keyFile = join(directory, "key.pem");
+    const certFile = join(directory, "cert.pem");
+    await writeFile(keyFile, sharedRsaPrivateKeyPem("repository-credentials-tls"), {
+      mode: 0o600,
+    });
+    await run("openssl", [
+      "req",
+      "-x509",
+      "-key",
+      keyFile,
+      "-out",
+      certFile,
+      "-days",
+      "2",
+      "-subj",
+      "/CN=credentials.example.test",
+      "-addext",
+      "subjectAltName=DNS:credentials.example.test,DNS:localhost,IP:127.0.0.1",
+    ]);
+    return await readFile(certFile);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 export async function createTlsMaterial(t) {
+  if (fixtureCertificate === undefined) {
+    fixtureCertificate = mintFixtureCertificate();
+    fixtureCertificate.catch(() => {
+      fixtureCertificate = undefined;
+    });
+  }
+  const cert = await fixtureCertificate;
   const directory = await temporaryDirectory(t, "repository-credentials-tls-");
   const keyFile = join(directory, "key.pem");
   const certFile = join(directory, "cert.pem");
-  // A fresh self-signed certificate on the process's shared fixture key (shared-keys.mjs).
   await writeFile(keyFile, sharedRsaPrivateKeyPem("repository-credentials-tls"), { mode: 0o600 });
-  await run("openssl", [
-    "req",
-    "-x509",
-    "-key",
-    keyFile,
-    "-out",
-    certFile,
-    "-days",
-    "2",
-    "-subj",
-    "/CN=credentials.example.test",
-    "-addext",
-    "subjectAltName=DNS:credentials.example.test,DNS:localhost,IP:127.0.0.1",
-  ]);
+  await writeFile(certFile, cert, { mode: 0o644 });
   return {
     key: await readFile(keyFile),
-    cert: await readFile(certFile),
-    ca: await readFile(certFile),
+    cert: Buffer.from(cert),
+    ca: Buffer.from(cert),
     keyFile,
     certFile,
   };
 }
 
+// Like tests/helpers/listen.ts (note: positional `port` before `host`, and it returns an
+// https URL), but self-contained: the isolation fixture mounts this directory alone into
+// its containers, where tests/helpers is absent.
 export async function listen(t, server, port = 0, host = "127.0.0.1") {
   const sockets = new Set();
   server.on("connection", (socket) => {

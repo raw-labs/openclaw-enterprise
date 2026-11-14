@@ -103,7 +103,8 @@ selected runtime before relying on it.
    that creating it needs Installation access.
 2. Choose your Preset in **Preset template**, fill its variables,
    and select **Use Preset**. The chooser closes and the Agent form opens with
-   the rendered copy. To load the installed `default-codex` copy, select **Start with default Preset**.
+   the rendered copy. **Start with default Preset** chooses the
+   [readable default](../../reference/presets.md#plain-console-default) for you.
    To create an Agent without a saved setup, select **Start without Preset** instead.
 3. Review the model, execution mode, native Configuration JSON, authentication,
    plugin selections, and workspace files under Advanced settings. Configure Slack
@@ -128,6 +129,13 @@ You can navigate away and return to your [unsaved Console draft](../../reference
 Before saving, to choose another Preset or supply different variables, select **Start over**
 and confirm that the unsaved draft can be discarded. A supplied
 `configuration.values` replaces the entire native JSON editor.
+
+If Create Agent refuses a Configuration setting that a variable filled, the
+refusal names that variable and offers **Change** with its name. That action
+returns to the Preset with your entries, except passwords. The variable shows
+the refusal and has focus. The action is available only while **Start over** is.
+A variable used in a key is named only for a refusal of that key, not of a setting inside it.
+If you changed that setting in the Configuration JSON, the refusal names no variable.
 
 Saving a Preset does not validate every launch setting. Review the draft before
 creating it; an invalid execution mode can fail when opening the form, while

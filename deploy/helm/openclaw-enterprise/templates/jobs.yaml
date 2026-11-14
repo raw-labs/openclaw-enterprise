@@ -1,3 +1,11 @@
+{{- if not (has .Values.database.upgradeMigration (list "hook" "separate")) }}
+{{- fail "database.upgradeMigration must be hook or separate" }}
+{{- end }}
+{{- if and .Values.preprovisionedNamespace (eq .Values.database.upgradeMigration "separate") }}
+{{- fail "database.upgradeMigration separate requires the initialization Job" }}
+{{- end }}
+{{- if not .Values.preprovisionedNamespace }}
+{{- $repositoryGit := include "openclaw.repositoryCredentials.gitEnabled" . -}}
 {{- $jobName := printf "%s-initialization" .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- /* On install, preserve evidence from an earlier attempt before Helm runs any hooks.
       This is a point-in-time lookup, not a lock or proof the installation is new. */ -}}
@@ -13,6 +21,12 @@ metadata:
   labels:
     {{- include "openclaw.labels" (dict "root" . "component" "initialization") | nindent 4 }}
   annotations:
+    {{- if and .Release.IsInstall .Values.installation.attemptId }}
+    openclaw.dev/installation-attempt: {{ .Values.installation.attemptId | quote }}
+    {{- end }}
+    {{- if and .Release.IsUpgrade .Values.installation.upgradeAttemptId }}
+    openclaw.dev/upgrade-attempt: {{ .Values.installation.upgradeAttemptId | quote }}
+    {{- end }}
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation
@@ -20,6 +34,10 @@ spec:
   backoffLimit: 0
   template:
     metadata:
+      {{- if and .Release.IsUpgrade .Values.installation.upgradeAttemptId }}
+      annotations:
+        openclaw.dev/upgrade-attempt: {{ .Values.installation.upgradeAttemptId | quote }}
+      {{- end }}
       labels:
         {{- include "openclaw.labels" (dict "root" . "component" "initialization") | nindent 8 }}
     spec:
@@ -34,7 +52,6 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumes:
-        {{- if .Release.IsUpgrade }}
         # The installation-check container reads what API startup reads from these.
         - name: installation-startup
           secret:
@@ -42,13 +59,20 @@ spec:
             items:
               - key: {{ .Values.installation.key | quote }}
                 path: installation.yaml
-        {{- if .Values.repositoryCredentials.enabled }}
+        {{- if .Values.api.consoleTheme.configMapName }}
+        - name: console-theme
+          configMap:
+            name: {{ .Values.api.consoleTheme.configMapName | quote }}
+        {{- end }}
+        {{- if $repositoryGit }}
         - name: repository-registry
           configMap:
             name: {{ .Values.repositoryCredentials.registryConfigMapName | quote }}
             items:
               - key: {{ .Values.repositoryCredentials.registryKey | quote }}
                 path: registry.json
+        {{- end }}
+        {{- if .Values.repositoryCredentials.enabled }}
         - name: repository-public-ca
           secret:
             secretName: {{ .Values.repositoryCredentials.publicCaSecretName | quote }}
@@ -56,6 +80,13 @@ spec:
               - key: {{ .Values.repositoryCredentials.publicCaKey | quote }}
                 path: ca.crt
         {{- end }}
+        {{- if and .Values.preparedGitHub.custodySecretName .Values.preparedGitHub.issuerCaConfigMapName }}
+        # Loading the Installation reads preparedGitHub.issuerCaPath. Public CA only, never custody.
+        - name: prepared-github-issuer-ca
+          configMap:
+            name: {{ .Values.preparedGitHub.issuerCaConfigMapName | quote }}
+            items:
+              - {key: ca.crt, path: ca.crt}
         {{- end }}
         - name: bootstrap-password-output
           persistentVolumeClaim:
@@ -69,9 +100,7 @@ spec:
                 path: {{ .Values.database.caKey | quote }}
         {{- end }}
       initContainers:
-        {{- if .Release.IsUpgrade }}
-        # Refuses an Installation the API would refuse at startup, before migration and
-        # before Helm replaces the API Pod, so a bad change leaves the old Pods serving.
+        # Validate the mounted Installation before the migration or bootstrap can write.
         - name: installation-check
           image: {{ .Values.images.controller | quote }}
           command: ["node"]
@@ -88,25 +117,43 @@ spec:
               value: production
             - name: OCC_CONFIG_PATH
               value: /etc/openclaw/installation/installation.yaml
+            {{- include "openclaw.listenerEnv" . | trim | nindent 12 }}
+            {{- if .Values.api.consoleTheme.configMapName }}
+            - name: OCC_CONSOLE_THEME_DIR
+              value: /etc/openclaw/console-theme
+            {{- end }}
           volumeMounts:
             - name: installation-startup
               mountPath: /etc/openclaw/installation
               readOnly: true
-            {{- if .Values.repositoryCredentials.enabled }}
+            {{- if .Values.api.consoleTheme.configMapName }}
+            - name: console-theme
+              mountPath: /etc/openclaw/console-theme
+              readOnly: true
+            {{- end }}
+            {{- if $repositoryGit }}
             - name: repository-registry
               mountPath: /etc/openclaw/repository-registry
               readOnly: true
+            {{- end }}
+            {{- if .Values.repositoryCredentials.enabled }}
             - name: repository-public-ca
               mountPath: /etc/openclaw/repository-ca
               readOnly: true
             {{- end }}
-        {{- end }}
+            {{- if and .Values.preparedGitHub.custodySecretName .Values.preparedGitHub.issuerCaConfigMapName }}
+            - name: prepared-github-issuer-ca
+              mountPath: /etc/openclaw/prepared-github-issuer
+              readOnly: true
+            {{- end }}
         - name: migration
           image: {{ .Values.images.controller | quote }}
           args:
             - scripts/migrate-production.mjs
             {{- if .Release.IsInstall }}
             - --expect-empty
+            {{- else if eq .Values.database.upgradeMigration "separate" }}
+            - --require-current
             {{- end }}
           securityContext:
             {{- include "openclaw.containerSecurity" . | nindent 12 }}
@@ -137,6 +184,8 @@ spec:
             {{- include "openclaw.secretEnv" (dict "name" "OCC_AUTH_SECRET" "secretName" .Values.auth.secretName "key" .Values.auth.secretKey) | nindent 12 }}
             - name: OCC_AUTH_BASE_URL
               value: {{ .Values.auth.baseUrl | quote }}
+            - name: OCC_AGENT_NATIVE_ADMIN_DOMAIN
+              value: {{ .Values.agentNativeAdmin.domain | quote }}
             - name: OCC_BOOTSTRAP_ADMIN_EMAIL
               value: {{ .Values.bootstrap.adminEmail | quote }}
             - name: OCC_BOOTSTRAP_PASSWORD_FILE
@@ -153,3 +202,4 @@ spec:
               mountPath: {{ .Values.database.caMountPath | quote }}
               readOnly: true
             {{- end }}
+{{- end }}
