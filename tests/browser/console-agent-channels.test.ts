@@ -19,7 +19,7 @@ import {
   teamsDirectoryContext,
   teamsLink,
   teamsMemberId,
-} from "../helpers/teams-directory.mjs";
+} from "../helpers/teams-directory.ts";
 
 import { apiErrorResponse, proxyErrorResponse } from "../helpers/api-error.mjs";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";

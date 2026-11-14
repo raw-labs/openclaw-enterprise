@@ -24,7 +24,7 @@ verifies removal from native Configuration. This proves configuration handling,
 not Microsoft upload permissions or file delivery. Its directory case uses the real API, OCC, IAM, Secret Driver,
 and bundled Channel Driver with a local HTTP Microsoft protocol fixture. It
 selects names, saves native IDs, and preserves manual entry after consent denial.
-`tests/integration/teams-directory.test.mjs` additionally checks Team-scoped
+`tests/integration/teams-directory.test.ts` additionally checks Team-scoped
 requests, pagination, foreign continuation rejection and response sanitization.
 These fixtures do not prove live Graph authentication or RSC consent. Before
 qualifying lookup, install the revised app in a disposable Team and verify
@@ -47,7 +47,7 @@ sockets and cannot establish Microsoft connectivity.
 
 The runtime case `runtime image downloads native guarded Teams media through the
 channel proxy` invokes the public native `fetchWithSsrFGuard` and
-`saveResponseMedia` SDK functions against `tests/fixtures/teams-attachment-download.mjs` over real TLS through the
+`saveResponseMedia` SDK functions against `tests/fixtures/teams-attachment-download.ts` over real TLS through the
 actual proxy process. Run it with the built image above:
 
 ```sh

@@ -550,7 +550,7 @@ test(
       image,
       "--test",
       "--test-reporter=tap",
-      "/checkout/tests/fixtures/teams-attachment-download.mjs",
+      "/checkout/tests/fixtures/teams-attachment-download.ts",
     ]);
     assert.match(result.stdout, /# pass 1/);
     assert.match(result.stdout, /# fail 0/);

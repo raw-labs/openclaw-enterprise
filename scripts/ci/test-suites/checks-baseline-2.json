@@ -56,7 +56,7 @@
     "tests/integration/password-sign-in-admission.test.ts",
     "tests/integration/google-login-transport.test.ts",
     "tests/conformance/slack-channel-directory.test.mjs",
-    "tests/integration/teams-directory.test.mjs",
+    "tests/integration/teams-directory.test.ts",
     "tests/conformance/bounded-response-reads.test.ts",
     "tests/conformance/repository-credentials-github.test.mjs",
     "tests/integration/repository-credentials-driver.test.mjs",
@@ -157,7 +157,7 @@
   },
   "files": [
     {
-      "path": "tests/integration/teams-directory.test.mjs"
+      "path": "tests/integration/teams-directory.test.ts"
     },
     {
       "path": "tests/integration/prepared-refresh-enrollment.test.ts",

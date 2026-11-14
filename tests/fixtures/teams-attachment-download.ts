@@ -9,16 +9,59 @@ import { startSlackProxy } from "../helpers/slack-proxy.mjs";
 // Run inside the selected native image. Only upstream DNS/connection routing is
 // simulated; the SDK guard, TLS, redirects, media storage and proxy are real.
 const runtimeRequire = createRequire("/app/package.json");
-const { fetchWithSsrFGuard } = await import(
-  pathToFileURL(runtimeRequire.resolve("openclaw/plugin-sdk/ssrf-runtime"))
+const ssrfModule: unknown = await import(
+  pathToFileURL(runtimeRequire.resolve("openclaw/plugin-sdk/ssrf-runtime")).href
 );
-const { saveResponseMedia } = await import(
-  pathToFileURL(runtimeRequire.resolve("openclaw/plugin-sdk/media-runtime"))
+const mediaModule: unknown = await import(
+  pathToFileURL(runtimeRequire.resolve("openclaw/plugin-sdk/media-runtime")).href
 );
+
+// The SDK is loaded from the selected image, not the controller dependency graph.
+// Check its boundary before using values returned by the runtime module.
+assert.ok(ssrfModule && typeof ssrfModule === "object" && "fetchWithSsrFGuard" in ssrfModule);
+assert.ok(mediaModule && typeof mediaModule === "object" && "saveResponseMedia" in mediaModule);
+const fetchGuard = ssrfModule.fetchWithSsrFGuard;
+const saveMedia = mediaModule.saveResponseMedia;
+assert.equal(typeof fetchGuard, "function");
+assert.equal(typeof saveMedia, "function");
+async function fetchWithSsrFGuard(options: {
+  url: string;
+  init: { headers: Record<string, string> };
+  requireHttps: boolean;
+  policy: { hostnameAllowlist: string[] };
+  retainAuthorizationRedirectHostnameAllowlist: string[];
+  timeoutMs: number;
+  lookupFn(): Promise<{ address: string; family: number }[]>;
+}) {
+  assert.ok(typeof fetchGuard === "function");
+  const result: unknown = await Reflect.apply(fetchGuard, undefined, [options]);
+  assert.ok(
+    result &&
+      typeof result === "object" &&
+      "response" in result &&
+      "finalUrl" in result &&
+      "release" in result,
+  );
+  assert.ok(result.response instanceof Response);
+  assert.ok(typeof result.finalUrl === "string");
+  assert.ok(typeof result.release === "function");
+  return { response: result.response, finalUrl: result.finalUrl, release: result.release };
+}
+async function saveResponseMedia(
+  response: Response,
+  options: { sourceUrl: unknown; maxBytes: number; originalFilename: string },
+) {
+  assert.ok(typeof saveMedia === "function");
+  const result: unknown = await Reflect.apply(saveMedia, undefined, [response, options]);
+  assert.ok(
+    result && typeof result === "object" && "path" in result && typeof result.path === "string",
+  );
+  return { path: result.path };
+}
 
 test("native guarded attachment downloads use the reviewed channel proxy", async (t) => {
   const content = Buffer.from("name,value\nattachment,42\n");
-  const requests = [];
+  const requests: { host: string | undefined; authorization: string | undefined }[] = [];
   const server = https.createServer(
     {
       key: await readFile("/certificates/key.pem"),
@@ -41,9 +84,11 @@ test("native guarded attachment downloads use the reviewed channel proxy", async
     server.closeAllConnections();
     return new Promise((resolve) => server.close(resolve));
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
   const proxy = await startSlackProxy(t, {
-    upstreamPort: server.address().port,
+    upstreamPort: address.port,
     upstreamHosts: ["graph.microsoft.com", "tenant.sharepoint.com", "neighbor.sharepoint.com"],
     teamsEnabled: true,
     teamsFileHosts: JSON.stringify(["tenant.sharepoint.com"]),

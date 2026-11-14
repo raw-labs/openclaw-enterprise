@@ -1,4 +1,14 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingHttpHeaders } from "node:http";
+import type { TestContext } from "node:test";
+import type { ChannelRequest } from "../../apps/controller/src/drivers/channel/transport.ts";
+
+type Route = {
+  body: Record<string, unknown>;
+  status?: number;
+  wait?: Promise<void>;
+  started?: () => void;
+  completed?: () => void;
+};
 
 export const teamsDirectoryContext = {
   appId: "11111111-1111-4111-8111-111111111111",
@@ -10,11 +20,15 @@ export const teamsMemberId = "44444444-4444-4444-8444-444444444444";
 export const teamsLink = `https://teams.microsoft.com/l/team/${encodeURIComponent(teamsNativeId)}/conversations?groupId=${teamsDirectoryContext.teamId}`;
 
 /** HTTP protocol fixture at the Microsoft boundary; not live Graph/RSC consent proof. */
-export async function teamsDirectoryProvider(t) {
-  const calls = [];
+export async function teamsDirectoryProvider(t: TestContext) {
+  const calls: {
+    url: URL;
+    headers: IncomingHttpHeaders;
+    method: string | undefined;
+    body: string;
+  }[] = [];
   const path = `/v1.0/teams/${teamsDirectoryContext.teamId}`;
-  /** @type {Map<string, { body: Record<string, unknown>, status?: number, wait?: Promise<void>, started?: () => void, completed?: () => void }>} */
-  const routes = new Map([
+  const routes = new Map<string, Route>([
     [
       `/${teamsDirectoryContext.tenantId}/oauth2/v2.0/token`,
       { body: { access_token: "synthetic-graph-access-token", token_type: "Bearer" } },
@@ -57,7 +71,7 @@ export async function teamsDirectoryProvider(t) {
     for await (const chunk of request) {
       body += chunk;
     }
-    const url = new URL(request.url, "http://127.0.0.1");
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
     calls.push({ url, headers: request.headers, method: request.method, body });
     const route = routes.get(
       url.pathname +
@@ -72,20 +86,24 @@ export async function teamsDirectoryProvider(t) {
       route?.completed?.(),
     );
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(
     () =>
-      new Promise((resolve) => {
-        server.close(resolve);
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
         server.closeAllConnections();
       }),
   );
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected TCP address");
+  }
+  const origin = `http://127.0.0.1:${address.port}`;
   return {
     calls,
     routes,
     path,
-    request(url, options) {
+    request(url: Parameters<ChannelRequest>[0], options: Parameters<ChannelRequest>[1]) {
       const target = new URL(url);
       if (
         !["https://login.microsoftonline.com", "https://graph.microsoft.com"].includes(

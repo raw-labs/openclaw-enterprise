@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { Type } from "typebox";
+import { Check } from "typebox/value";
+import { ChannelDirectoryLookupResponse } from "../../packages/contracts/src/api/resources.ts";
 import { BundledChannelDriver } from "../../apps/controller/src/drivers/channel/index.ts";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
 import {
@@ -7,7 +10,7 @@ import {
   teamsDirectoryContext,
   teamsNativeId,
   teamsMemberId,
-} from "../helpers/teams-directory.mjs";
+} from "../helpers/teams-directory.ts";
 
 test("Agent-scoped Teams lookup uses the authorized password and Team roster, then saves native access IDs", async (t) => {
   const fixture = await createConsoleAppFixture(t);
@@ -31,19 +34,32 @@ test("Agent-scoped Teams lookup uses the authorized password and Team roster, th
     context: teamsDirectoryContext,
   };
   const channels = await fixture.request("POST", path, { body: { ...body, kind: "channels" } });
+  const channelsData = fixture.fixtureResponse(
+    channels,
+    200,
+    ChannelDirectoryLookupResponse,
+    "Teams directory lookup",
+  ).data;
   assert.equal(channels.status, 200, JSON.stringify(channels.body));
-  assert.equal(channels.data.workspaceId, teamsNativeId);
+  assert.equal(channelsData.workspaceId, teamsNativeId);
   assert.deepEqual(
-    channels.data.candidates.map((candidate) => candidate.name),
+    channelsData.candidates.map((candidate) => candidate.name),
     ["General", "Engineering"],
   );
   // The membership entry ID cannot be used as a bot sender allowlist ID.
   const members = await fixture.request("POST", path, {
     body: { ...body, kind: "users", query: "alex" },
   });
+  const membersData = fixture.fixtureResponse(
+    members,
+    200,
+    ChannelDirectoryLookupResponse,
+    "Teams directory lookup",
+  ).data;
   assert.equal(members.status, 200, JSON.stringify(members.body));
-  assert.deepEqual(members.data.candidates, [{ id: teamsMemberId, name: "Alex Chen" }]);
+  assert.deepEqual(membersData.candidates, [{ id: teamsMemberId, name: "Alex Chen" }]);
   const oauth = provider.calls.find((call) => call.method === "POST");
+  assert.ok(oauth);
   const form = new URLSearchParams(oauth.body);
   assert.equal(form.get("client_secret"), "synthetic-teams-app-password");
   assert.equal(form.get("scope"), "https://graph.microsoft.com/.default");
@@ -60,6 +76,8 @@ test("Agent-scoped Teams lookup uses the authorized password and Team roster, th
     JSON.stringify([channels.body, members.body]),
     /synthetic-teams-app-password|synthetic-graph-access-token|opaque-membership-id/,
   );
+  const engineering = channelsData.candidates[1];
+  assert.ok(engineering);
   const configuration = await fixture.updateConfiguration(namespace.id, agent.configurationId, {
     channels: {
       msteams: {
@@ -68,18 +86,28 @@ test("Agent-scoped Teams lookup uses the authorized password and Team roster, th
         tenantId: teamsDirectoryContext.tenantId,
         appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
         teams: {
-          [channels.data.workspaceId]: {
-            channels: { [channels.data.candidates[1].id]: { requireMention: true } },
+          [channelsData.workspaceId]: {
+            channels: { [engineering.id]: { requireMention: true } },
           },
         },
         groupPolicy: "allowlist",
-        groupAllowFrom: members.data.candidates.map((candidate) => candidate.id),
+        groupAllowFrom: membersData.candidates.map((candidate) => candidate.id),
         dmPolicy: "disabled",
       },
     },
   });
-  assert.deepEqual(configuration.values.channels.msteams.groupAllowFrom, [teamsMemberId]);
-  assert.ok(configuration.values.channels.msteams.teams[teamsNativeId]);
+  const values = configuration.values;
+  const savedTeams = Type.Object({
+    channels: Type.Object({
+      msteams: Type.Object({
+        groupAllowFrom: Type.Array(Type.String()),
+        teams: Type.Record(Type.String(), Type.Unknown()),
+      }),
+    }),
+  });
+  assert.ok(Check(savedTeams, values));
+  assert.deepEqual(values.channels.msteams.groupAllowFrom, [teamsMemberId]);
+  assert.ok(values.channels.msteams.teams[teamsNativeId]);
   // A foreign Secret must be rejected before any provider credential or directory I/O.
   const other = await fixture.createNamespace("Other Team", { ready: true });
   const foreign = await fixture.createSecret(
@@ -118,7 +146,8 @@ test("Teams lookup bounds pagination, rejects foreign continuations, and reports
     kind: "users",
     query: "alex",
   };
-  const next = (skip) => `https://graph.microsoft.com${provider.path}/members?$skiptoken=${skip}`;
+  const next = (skip: string) =>
+    `https://graph.microsoft.com${provider.path}/members?$skiptoken=${skip}`;
   // Three empty provider pages cannot establish absence. Continue with the same scope.
   provider.routes.set(`${provider.path}/members`, {
     body: { value: [], "@odata.nextLink": next("one") },
@@ -133,12 +162,24 @@ test("Teams lookup bounds pagination, rejects foreign continuations, and reports
     body: { value: [{ id: "membership", userId: teamsMemberId, displayName: "Alex Chen" }] },
   });
   const first = await fixture.request("POST", path, { body });
+  const firstData = fixture.fixtureResponse(
+    first,
+    200,
+    ChannelDirectoryLookupResponse,
+    "Teams directory lookup",
+  ).data;
   assert.equal(first.status, 200, JSON.stringify(first.body));
-  assert.equal(first.data.complete, false);
+  assert.equal(firstData.complete, false);
   const continued = await fixture.request("POST", path, {
-    body: { ...body, cursor: first.data.nextCursor },
+    body: { ...body, cursor: firstData.nextCursor },
   });
-  assert.deepEqual(continued.data.candidates, [{ id: teamsMemberId, name: "Alex Chen" }]);
+  const continuedData = fixture.fixtureResponse(
+    continued,
+    200,
+    ChannelDirectoryLookupResponse,
+    "Teams directory lookup",
+  ).data;
+  assert.deepEqual(continuedData.candidates, [{ id: teamsMemberId, name: "Alex Chen" }]);
   // Graph can return more channels than one API result page; continuation must lose none.
   const roster = Array.from({ length: 120 }, (_, index) => ({
     id: `19:channel-${index}@thread.tacv2`,
@@ -148,15 +189,27 @@ test("Teams lookup bounds pagination, rejects foreign continuations, and reports
   provider.routes.set(`${provider.path}/channels`, { body: { value: roster } });
   const channelBody = { ...body, kind: "channels", query: "" };
   const channelPage = await fixture.request("POST", path, { body: channelBody });
+  const channelPageData = fixture.fixtureResponse(
+    channelPage,
+    200,
+    ChannelDirectoryLookupResponse,
+    "Teams directory lookup",
+  ).data;
   assert.equal(channelPage.status, 200, JSON.stringify(channelPage.body));
-  assert.equal(channelPage.data.candidates.length, 100);
+  assert.equal(channelPageData.candidates.length, 100);
   const channelRemainder = await fixture.request("POST", path, {
-    body: { ...channelBody, cursor: channelPage.data.nextCursor },
+    body: { ...channelBody, cursor: channelPageData.nextCursor },
   });
+  const channelRemainderData = fixture.fixtureResponse(
+    channelRemainder,
+    200,
+    ChannelDirectoryLookupResponse,
+    "Teams directory lookup",
+  ).data;
   assert.equal(channelRemainder.status, 200, JSON.stringify(channelRemainder.body));
-  assert.equal(channelRemainder.data.complete, true);
+  assert.equal(channelRemainderData.complete, true);
   assert.deepEqual(
-    [...channelPage.data.candidates, ...channelRemainder.data.candidates].map(
+    [...channelPageData.candidates, ...channelRemainderData.candidates].map(
       (candidate) => candidate.id,
     ),
     roster.map((channel) => channel.id),
@@ -166,7 +219,7 @@ test("Teams lookup bounds pagination, rejects foreign continuations, and reports
     body: {
       ...body,
       context: { ...teamsDirectoryContext, teamId: "55555555-5555-4555-8555-555555555555" },
-      cursor: first.data.nextCursor,
+      cursor: firstData.nextCursor,
     },
   });
   assert.equal(changed.status, 503);

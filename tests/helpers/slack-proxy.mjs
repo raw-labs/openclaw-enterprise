@@ -19,6 +19,9 @@ import { temporaryDirectory } from "./temporary-directory.mjs";
  * A test can never reach the network. Returns the child, the listening port and `stderr()`,
  * what the proxy has written so far.
  */
+/** @param {import("node:test").TestContext} t
+ * @param {{fixedPort?: boolean, upstreamPort?: number, upstreamHosts?: string[], dnsAnswers?: Record<string, unknown>, teamsEnabled?: boolean, teamsFileHosts?: string, expectStartupFailure?: boolean}} [options]
+ */
 export async function startSlackProxy(
   t,
   {
