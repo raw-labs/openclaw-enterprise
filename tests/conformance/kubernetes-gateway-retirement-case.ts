@@ -43,7 +43,7 @@ type Deletion =
       [Kind in keyof NamespacedDelete]: [kind: Kind, request: NamespacedDelete[Kind]];
     }[keyof NamespacedDelete]
   | [
-      kind: "HTTPRoute" | "SecurityPolicy" | "NetworkPolicy",
+      kind: "HTTPRoute" | "Service" | "SecurityPolicy" | "NetworkPolicy",
       request: { spec: ObjectDelete[0]; body: ObjectDelete[6] },
     ];
 

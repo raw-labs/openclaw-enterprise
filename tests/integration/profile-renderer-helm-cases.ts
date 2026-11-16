@@ -198,7 +198,6 @@ export function registerHelmCases(): void {
           "configuration",
           "runtime",
           "proxy",
-          "proxyUrl",
         ),
         undefined,
       );
