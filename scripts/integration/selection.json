@@ -4,25 +4,25 @@
   "integrationBranch": "codex/raw-integration",
   "upstream": {
     "repository": "openclaw/openclaw-enterprise",
-    "commit": "7e1ac6d88e3893c3d4e6444fb3b9b9776519a3fb"
+    "commit": "13fc0108d6f8e484dbf7a568356136d904b608fd"
   },
   "batch": {
-    "startingIntegration": "f7e56dcfa544ffec45710235b77a0ccbcac9e505",
+    "startingIntegration": "745863bd53429428cdad933de20330af405d8b70",
     "steps": [
       {
         "operation": "Anchor the published integration history",
-        "commit": "f7e56dcfa544ffec45710235b77a0ccbcac9e505",
-        "input": "f7e56dcfa544ffec45710235b77a0ccbcac9e505"
+        "commit": "745863bd53429428cdad933de20330af405d8b70",
+        "input": "745863bd53429428cdad933de20330af405d8b70"
       },
       {
-        "operation": "Join refreshed candidate without restoring retired custom roles",
-        "commit": "0840d0c277690f59af955ad782660c9a89a229a7",
-        "input": "7e1ac6d88e3893c3d4e6444fb3b9b9776519a3fb"
+        "operation": "Join refreshed upstream and exact selected source heads",
+        "commit": "377e5b33b1bbbea0a3151619677a940fed7ba6ea",
+        "input": "13fc0108d6f8e484dbf7a568356136d904b608fd"
       }
     ],
     "preservedMigrationPrefix": {
-      "commit": "f7e56dcfa544ffec45710235b77a0ccbcac9e505",
-      "entryCount": 77
+      "commit": "745863bd53429428cdad933de20330af405d8b70",
+      "entryCount": 81
     }
   },
   "features": [
@@ -31,9 +31,9 @@
       "title": "Microsoft Teams channels",
       "author": "miguelbranco80",
       "headRef": "codex/teams-support",
-      "commit": "e42ff4ebac3770d80f3ade9adfcb6e5fa88c56a1",
+      "commit": "de9d923855b13d479092882f002b00cb5573e788",
       "status": "included",
-      "comparisonBase": "6a61029ae8bf35a3b14811cff1546d5cefdb69b3",
+      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "main",
       "draft": false,
@@ -44,9 +44,9 @@
       "title": "Installation profiles and Preset starters",
       "author": "miguelbranco80",
       "headRef": "codex/installation-customization",
-      "commit": "ac764f775cd5c793cb1bee402a4f1d3b822b3e03",
+      "commit": "64c975f4ab7c23d2598e1ce96411db8e71cd6531",
       "status": "included",
-      "comparisonBase": "6a61029ae8bf35a3b14811cff1546d5cefdb69b3",
+      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "codex/installation-customization-base",
       "draft": false,
@@ -71,9 +71,9 @@
       "title": "Native plugin permission preservation",
       "author": "miguelbranco80",
       "headRef": "codex/console-native-plugin-allowlist",
-      "commit": "e308bcacac0f5b38e8c56c90aa2fc61732a8a64d",
+      "commit": "11f66c1269c751e89719112612eb6cfc95a22ca8",
       "status": "included",
-      "comparisonBase": "6a61029ae8bf35a3b14811cff1546d5cefdb69b3",
+      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "codex/native-plugin-upstream-base",
       "draft": false,
@@ -84,9 +84,9 @@
       "title": "Temporary embedded channel evaluation",
       "author": "miguelbranco80",
       "headRef": "codex/eval-embedded-channels",
-      "commit": "c7c0bd24ccdf74db596171f35695d964b7b86d5d",
+      "commit": "ca2bdf12d02a3cdfc562df6346ec4c68d6d9b618",
       "status": "included",
-      "comparisonBase": "6a61029ae8bf35a3b14811cff1546d5cefdb69b3",
+      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "codex/eval-upstream-a7aa9219f",
       "draft": true,
@@ -97,9 +97,9 @@
       "title": "One bundled or external Gateway outbound proxy",
       "author": "miguelbranco80",
       "headRef": "openclaw/delta-claw",
-      "commit": "ee565aa18f3cb0e382881329e7b7ede92634cce9",
+      "commit": "3ae05a6f38656952cd5f8b61eae74c876fa46f2c",
       "status": "included",
-      "comparisonBase": "6a61029ae8bf35a3b14811cff1546d5cefdb69b3",
+      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "main",
       "draft": true,
@@ -266,116 +266,67 @@
   ],
   "compatibility": [
     {
-      "id": "current-upstream-chat-and-native-preparation",
+      "id": "typed-native-preparation-and-chat",
       "pullRequests": [1, 12],
-      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
+      "commits": ["dcc352296fea748cea088acf2f3de7df978595c9"],
       "paths": [
-        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "packages/contracts/src/drivers/compute/index.ts",
         "packages/occ/src/index.ts",
-        "docs/flows/agent-native-admin.md",
-        "tests/integration/postgres-agent-provisioning.test.mjs",
-        "migrations/0081_retire_custom_runtime_roles.sql"
-      ],
-      "notes": "Use upstream operator/admin endpoint split and trusted scope ceiling. Retain deployment-copy origin preparation and test genuine migration non-escalation."
-    },
-    {
-      "id": "generic-proxy-teams-embedded-profiles",
-      "pullRequests": [2, 11, 15, 17, 36],
-      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
-      "paths": [
-        "apps/controller/src/gateway-proxy.mjs",
         "apps/controller/src/drivers/compute/kubernetes/index.ts",
-        "deploy/helm/openclaw-enterprise/templates/deployments.yaml",
-        "tests/conformance/gateway-proxy-tunnel.test.mjs",
-        "tests/integration/profile-renderer.test.mjs"
+        "apps/controller/src/composition/production.ts",
+        "apps/controller/src/composition/development-postgres.ts",
+        "docs/flows/agent-native-admin.md",
+        "tests/integration/postgres-agent-provisioning-harness-cases.ts",
+        "tests/integration/postgres-agent-provisioning-fixture.ts"
       ],
-      "notes": "Keep generic runtime.proxy, profile channels opt-in, Teams guarded transport/DNS pinning, callback reconciliation and current Preset/native plugin behavior. Current APIs and fixture shapes only."
+      "notes": "Retain the deployment-copy native origin transform after upstream Gateway security defaults; preserve saved Configuration immutability and upstream operator/admin endpoint scope split. Real PostgreSQL guided provisioning covers the regular queue/worker path."
     },
     {
-      "id": "published-persistence-and-native-ci",
+      "id": "shared-proxy-and-channel-composition",
+      "pullRequests": [2, 11, 15, 17, 36],
+      "commits": ["dcc352296fea748cea088acf2f3de7df978595c9"],
+      "paths": [
+        "apps/controller/src/gateway-proxy.ts",
+        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "scripts/render-installation-profile.ts",
+        "deploy/helm/openclaw-enterprise/templates/deployments.yaml",
+        "tests/conformance/gateway-proxy-tunnel.test.ts",
+        "tests/conformance/kubernetes-gateway-retirement-case.ts",
+        "tests/integration/profile-renderer-helm-cases.ts"
+      ],
+      "notes": "Use runtime.proxy for the shared proxy and embedded opt-in. Preserve Teams public-IPv4 pinning/deadlines, callback resource ownership/deletion, generic explicit host policy, trusted chat scopes, current profile outputs, Preset behavior and native plugin policies."
+    },
+    {
+      "id": "immutable-ledger-and-fork-qualification",
       "pullRequests": [1, 18, 36],
-      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
+      "commits": ["dcc352296fea748cea088acf2f3de7df978595c9"],
       "paths": [
         "scripts/migration-history.mjs",
         "tests/integration/postgres-migration-compatibility.test.mjs",
         ".github/workflows/ci.yml",
         ".github/workflows/container-check.yml",
-        ".github/workflows/codeql.yml"
+        ".github/workflows/codeql.yml",
+        "scripts/ci/container-release/native-smoke.ts",
+        "tests/integration/container-release.test.ts"
       ],
-      "notes": "Preserve all 77 published migration identities and SQL; append three exact upstream evolutions and explicit role retirement. Preserve configured fork runners and real sandbox qualification without publication."
+      "notes": "Preserve all 81 published SQL/journal/canonical entries. Append two byte-identical upstream migrations. Retain fork runners, integration triggers and sealed OCI archive import with Docker CLI, without publishing images or weakening runtime/sandbox proof."
     },
     {
-      "id": "gateway-defaults-deployment-hook-ordering",
-      "pullRequests": [12, 17, 36],
-      "commits": ["ff398b552f412e879f9b6a8ef64f553db9f7edf1"],
+      "id": "current-runtime-and-browser-fixtures",
+      "pullRequests": [2, 11, 15, 17, 36],
+      "commits": ["dcc352296fea748cea088acf2f3de7df978595c9"],
       "paths": [
-        "packages/occ/src/index.ts",
-        "tests/integration/postgres-agent-provisioning.test.mjs",
-        "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
-        "tests/integration/sign-in-chart-parity.test.mjs",
-        "tests/integration/ci-prepare.test.mjs"
-      ],
-      "notes": "Sandbox transform, Gateway security defaults, then Compute native administration preparation. Real cluster equality protects upstream defaults; native proxy state is read from the real Pod rather than retired NODE_USE_ENV_PROXY."
-    },
-    {
-      "id": "channel-browser-and-compose-worker-reconciliation",
-      "pullRequests": [2, 12],
-      "commits": ["0bd09e4f18a6b40969d27b87123e1ae6c8e844c6"],
-      "paths": [
+        "tests/fixtures/teams-attachment-download.ts",
+        "tests/fixtures/runtime-gateway-proxy.ts",
+        "tests/integration/runtime-image-startup.test.ts",
+        "tests/helpers/console-fixture-transport.ts",
+        "tests/helpers/console-app.mjs",
+        "tests/helpers/teams-directory.ts",
         ".github/actions/run-ci-lane/action.yml",
         "compose.kubernetes.yaml",
-        "compose.native-admin.yaml",
-        "tests/browser/console-agent-detail.test.ts",
-        "tests/browser/console-agent-saves.test.ts",
-        "tests/browser/console-agents.test.ts",
-        "tests/browser/console-disabled-reasons.test.ts",
-        "tests/browser/console-runtime-credentials.test.ts",
-        "tests/integration/configuration-controller.test.mjs"
+        "compose.native-admin.yaml"
       ],
-      "notes": "Keep Kubernetes worker native admission settings in the Kubernetes overlay, not the shared Docker browser overlay. Install real WebKit for the Teams directory browser lane. Scope Slack-only assertions and use current channel credential gating/messages; retain proxy-owned environment rejection."
-    },
-    {
-      "id": "ci-webkit-summary-and-precreation-cancellation",
-      "pullRequests": [2],
-      "commits": ["1a63d1989739dcc83e51a9e1ba315f3830a79b55"],
-      "paths": [
-        ".github/actions/run-ci-lane/action.yml",
-        "tests/helpers/ci-prepare-fixture-command.mjs"
-      ],
-      "notes": "Include the WebKit installer in ordered first-failure reporting. A cancelled preparation with no created cluster gets the real k3d empty inventory from its fixture; production cleanup continues rejecting malformed inventories."
-    },
-    {
-      "id": "retirement-preserves-current-policy-authority",
-      "pullRequests": [1],
-      "commits": ["9776468292b730fb3d0a3d6910d56606d0b2c34f"],
-      "paths": [
-        "migrations/0081_retire_custom_runtime_roles.sql",
-        "migrations/meta/_canonical-history.json",
-        "tests/integration/postgres-migration-compatibility.test.mjs"
-      ],
-      "notes": "The newly introduced retirement migration must remove only use, not the supported manage_policy action. Upgrade regression seeds an existing policy denial before retirement and proves it survives. Remeasure PostgreSQL18.6 native/logical-restored catalogs; no changes to the starting 77 SQL files or journal/canonical entry metadata."
-    },
-    {
-      "id": "runtime-proxy-fixtures-use-current-transport",
-      "pullRequests": [2, 36],
-      "commits": ["e9b025ca1ff711ea8d0aa617c43fbd1cf2e1f003"],
-      "paths": [
-        "tests/fixtures/runtime-gateway-proxy.mjs",
-        "tests/fixtures/teams-attachment-download.mjs",
-        "tests/integration/runtime-image-startup.test.mjs"
-      ],
-      "notes": "Use the generic Gateway proxy helper with exact Teams media hosts; share only synthetic certificates with the non-root image. Simulate public DNS and numeric routing only inside the disposable TLS fixture; preserve production private-address rejection, host policy and exact Codex transport lifecycle assertions."
-    },
-    {
-      "id": "native-smoke-import-current-docker-cli",
-      "pullRequests": [],
-      "commits": ["5a1c1c8356947529c6286a592dcde06858b3b40f"],
-      "paths": [
-        "scripts/ci/container-release.mjs",
-        "tests/integration/container-release.test.mjs",
-        "docs/flows/container-publication.md"
-      ],
-      "notes": "Use Skopeo Docker-archive conversion and the installed Docker CLI instead of the old direct-daemon client. Preserve converted/loaded config identity, ordered layer verification, native architecture, sandbox/startup/version probes and platform receipt gates. No runtime recipe, source pin, security boundary or publication authorization changed."
+      "notes": "Port qualified proxy/Teams image fixtures to typed owners; keep certificate readability and scoped synthetic-public test transport. Explicit loopback fixture agents avoid host proxy interception. Install WebKit in its owning CI browser lane and retain failure-summary step identity. Keep worker native settings Kubernetes-only."
     }
   ],
   "publishedMigrationPrefix": {
@@ -667,6 +618,24 @@
       "sha256": "5ba98d253eb755b61548a60471475a45d704622059db76fe5b769461ab628aec",
       "commit": "534ac074ab6fc255a120354060ab6baf8e60fcbd",
       "reason": "Append exact upstream SQL after the immutable published integration prefix."
+    },
+    {
+      "source": "migrations/0077_control_plane_audit.sql",
+      "integrated": "migrations/0082_control_plane_audit.sql",
+      "sourceCommit": "13fc0108d6f8e484dbf7a568356136d904b608fd",
+      "sourceSha256": "bc4935537596f312db39e299b0b2d10f8a920225b37dd9ad4f6734387a58178d",
+      "sha256": "bc4935537596f312db39e299b0b2d10f8a920225b37dd9ad4f6734387a58178d",
+      "commit": "dcc352296fea748cea088acf2f3de7df978595c9",
+      "reason": "Append exact upstream SQL after the immutable 81-entry published integration prefix."
+    },
+    {
+      "source": "migrations/0078_preserve_pending_sandbox_policy_application.sql",
+      "integrated": "migrations/0083_preserve_pending_sandbox_policy_application.sql",
+      "sourceCommit": "13fc0108d6f8e484dbf7a568356136d904b608fd",
+      "sourceSha256": "ecea7db627931734acba60f4a8d7fa23dd6c6209f07ed1901507ffe47347a789",
+      "sha256": "ecea7db627931734acba60f4a8d7fa23dd6c6209f07ed1901507ffe47347a789",
+      "commit": "dcc352296fea748cea088acf2f3de7df978595c9",
+      "reason": "Append exact upstream SQL after the immutable 81-entry published integration prefix."
     }
   ],
   "migrationReconciliations": [
@@ -838,76 +807,30 @@
   },
   "qualification": {
     "policy": "Normal push only codex/raw-integration; source PRs and fork main read-only. No release, image publication or deployment.",
-    "previousTestedCommit": "f7e56dcfa544ffec45710235b77a0ccbcac9e505",
+    "previousTestedCommit": "745863bd53429428cdad933de20330af405d8b70",
     "requiredChecks": [
       "CI Required on published SHA",
       "CodeQL on published SHA with separate finding accounting",
       "Native controller and runtime AMD64 and ARM64, nonpublishing"
     ],
     "localChecks": {
-      "results": "PostgreSQL migration/restore/role retirement: 206 passed, zero skipped. PostgreSQL provisioning: 64 passed, zero skipped. Combined Kubernetes Compute, generic proxy, native access, Helm and profiles: 677 passed, zero skipped (676 initial passes plus stock-chart replay after committing). Agent creation, Presets and detail browser checks: 163 passed, zero skipped. CI policy: 115 initial passes, three local ambient-redaction failures reproduced and passed with only the unrelated inherited service marker removed; no assertion changes.",
+      "results": "PostgreSQL full migration lane: 305 passed, zero skipped (86 preparation, 218 migration/restore, one version). Guided provisioning: 74 passed, zero skipped. Kubernetes compute conformance: 388 passed, zero skipped. CI/native workflow policy: 128 passed, zero skipped. Focused proxy/native harness: 40 passed, zero skipped. Final profile and packaging receipts are recorded externally. Final profile renderer: 108 passed, zero skipped. Formatting, lint, typecheck, documentation and both CI suite audits passed.",
+      "browser": "Channels/Presets combined: 114 passed with four failures; multiline Preset case passed in isolation and in serialized file replay (75 passed). Remaining local limits: WebKit host libraries missing; two TLS cases require Go on PATH. These are not counted as passing and require final-head CI.",
       "ui": {
         "stories": [
           "Components/Native Admin/Operator chat",
-          "Components/Native Admin/Available",
-          "Pages/Create Agent/Custom Preset quick-start"
+          "Components/Native Admin/Native admin",
+          "Pages/Create Agent/Custom Preset quick-start",
+          "Pages/Create Agent/Preset with saved model credential"
         ],
-        "proof": "Rebuilt Storybook, inspected desktop screenshots and replayed the 16.88-second Preset-to-draft video. Delivered screenshots/video as native conversation attachments. Simulated UI, not runtime proof."
+        "proof": "Rebuilt Storybook and inspected screenshots. Replayed the 16.84-second Preset-to-draft recording at normal speed and inspected decoded opening/transition/final frames. Delivered screenshots/video as conversation attachments. Simulated UI, not runtime proof."
       },
-      "pageLengthReview": "Compute/native access references and flow each describe one coherent contract/lifecycle. Trimmed repetition under 2500 words without exemptions or historical Manual Notes edits.",
-      "commands": [
-        "pnpm typecheck",
-        "pnpm lint",
-        "pnpm format:check",
-        "pnpm docs:check",
-        "pnpm openapi:check",
-        "pnpm check:workspace",
-        "node scripts/ci/run-tests.mjs audit",
-        "node scripts/integration/check-selection.mjs"
-      ],
-      "environment": "Task-local Go, NSS tools and Chromium shared libraries. TLS browser wrapper preserves sandboxing and only supplies shared-library lookup. CI runner diagnostics use env -u OPENCLAW_SERVICE_MARKER because its inherited value aliases ordinary public service names. No product assertion or security probe weakened.",
-      "repair": "After ordering repair: four real PostgreSQL/Kubernetes ownership/lifecycle cases, three real provisioning cases including embedded channels through redeploy/stop, and retained-job case passed without skips (eight total). All 64 PostgreSQL provisioning cases passed with explicit Gateway defaults assertions. Host-only chart parity and QA runner selection each passed. Lint/typecheck, docs, formatting and existing selection checks passed.",
-      "channelComposeRepair": "Compose/development packaging: 76 passed. Configuration API: 286 passed. Credential/save/disabled-reason browser files: 103 passed; seven targeted browser regressions passed. CI preparation: 107 passed. No skips. Teams directory Chromium passed; local WebKit host prerequisite missing, with real WebKit installation added to its CI lane. Lint, typecheck, formatting, docs, workspace isolation and suite audit passed.",
-      "ciFixtureRepair": "K3d preparation/cancellation: 59 passed, zero skipped. CI impact/policy: 77 passed, zero skipped with the task-local real millisecond clock adapter (host date emits nanoseconds for %s%3N). Lint/format passed. Prior remote head passed the Teams directory browser file with actual WebKit installed, plus both conformance/browser functional regressions; remaining failures were these two CI-wiring/fixture issues.",
-      "restrictionRepair": "Real PostgreSQL migration/restore suite: 206 passed, zero skipped. Real sandbox-policy HTTP/database file: 33 passed, zero skipped. Existing manage_policy restriction survives upgrade while use and runtime assignments retire without escalation. Original 77 migration SQL files/journal/canonical entries verified identical. Native/full and historical logical restores remeasured. Lint, typecheck, formatting, suite audit passed.",
-      "runtimeProxyFixtureRepair": "Reproduced both image-lane failures using the SHA/config/digest-verified CI runtime artifact from 5b41445f5. Same genuine image after fixture repair: Teams guarded download and scoped Codex transport cases both passed, zero skips. Proxy conformance: 15 passed, zero skips. Lint, typecheck, formatting and suite audit passed. No product code, security boundary, runtime source pin or new flow changed.",
-      "nativeImportRepair": "Existing adversarial loaded-image substitution regression and release harness: 23 passed, zero skipped. Same Skopeo1.4.1 fails direct-daemon transport and passes archive/CLI. Genuine native AMD64 runtime artifact from beae39758/run43055016659: sealed blob/receipt/config/layer identity verified and Node24.22.1 started after repaired import. Lint, typecheck, formatting, docs/link/length checks, workspace isolation and suite audit passed. This local import proof is not full native runtime smoke qualification."
+      "documentation": "Current flow links follow typed owners and remapped SQL files; retained RFCs renumbered to avoid upstream collisions. Docs length/link/spec checks passed without new exceptions."
     },
     "limits": [
       "Exact-head remote qualification follows push; local tests do not establish native image or real cluster results.",
-      "No live Slack/Teams delivery or external model execution claimed."
-    ],
-    "failedCandidates": [
-      {
-        "commit": "cddddaf556416a6f8ef237670d26520a0371267f",
-        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43039926689",
-        "notes": "Real k3d equality caught Compute preparation receiving pre-security-default values. Preserve the defaults as hook input; keep cluster assertions unchanged and add explicit provisioning assertions. Update retired Node proxy and chart-worker/QA runner expectations to current contracts."
-      },
-      {
-        "commit": "42f997b0e8072c8c96f0c347046b78a37fbb5a24",
-        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43041586088",
-        "notes": "Browser lanes found stale Slack-only selectors/messages after Teams support, an obsolete operator-only Teams gate assertion, and missing WebKit. Conformance exposed Kubernetes worker added without build to Docker-only Compose and a proxy-owned environment variable masking an unrelated binding assertion. Fixed without weakening product validation, authorization or browser security probes."
-      },
-      {
-        "commit": "d92661adb93c7e5a3f3ba075a91919dd92783a6b",
-        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43044519688",
-        "notes": "Functional browser tests, including real WebKit Teams directory selection, passed. CI summary needs every consequential step ID and conclusion in order. Cancellation raced before fixture cluster creation, exposing an invalid mock inventory [{}] instead of real empty inventory []; preserve production rejection and fix the fixture."
-      },
-      {
-        "commit": "4c2cc560ddf628f39bc818cbf5f1bc8886a2610e",
-        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43046967671",
-        "notes": "Superseded before qualification. PostgreSQL platform on predecessor d92661adb (run43044519688, job130604976737) exposed the same new retirement SQL omitting manage_policy from the restriction action set. Correct this batch migration and catalog evidence, extend the real upgrade case; preserve all 77 starting entries. Failed unqualified candidate receipts are not an accepted release history."
-      },
-      {
-        "commit": "5b41445f5515d102ffd18e8cdcbb4143e60db3e0",
-        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43049117127",
-        "notes": "All non-image lanes and other image checks passed. Teams media fixture imported removed Slack-specific helper; its synthetic certificates needed non-root readability. Native proxy fixture resolved its disposable origin to a private Docker address correctly denied by the hardened proxy. Repair only fixture routing/material; retain real native SDK, TLS, redirects, host denial, no-fallback and exact internal transport assertions."
-      },
-      {
-        "commit": "beae397585ca918f6b51c613b1c313025ca2c0a6",
-        "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43055016659",
-        "notes": "Ordinary CI passed all 25 primary jobs and CodeQL analyzers passed. Native AMD64 import failed before runtime tests. Skopeo1.4.1 direct-daemon failure reproduced locally: client API1.22 below daemon API1.40. The same old Skopeo succeeds via Docker archive/CLI. Actual sealed native AMD64 OCI from this run was hash/receipt-verified, imported with the repaired path, loaded config/layers verified and Node24.22.1 started. Requalify the repaired final head on both native architectures."
-      }
+      "No live Slack/Teams delivery or external model-provider checks.",
+      "Previous head had 94 open CodeQL findings; successful analysis is not security clearance."
     ]
   },
   "previousBatches": [
@@ -989,6 +912,66 @@
           "commit": "c14c33ab437582ffc7641d9dc9c4184247d50a16",
           "entryCount": 72
         }
+      }
+    },
+    {
+      "integration": "745863bd53429428cdad933de20330af405d8b70",
+      "batch": {
+        "startingIntegration": "f7e56dcfa544ffec45710235b77a0ccbcac9e505",
+        "steps": [
+          {
+            "operation": "Anchor the published integration history",
+            "commit": "f7e56dcfa544ffec45710235b77a0ccbcac9e505",
+            "input": "f7e56dcfa544ffec45710235b77a0ccbcac9e505"
+          },
+          {
+            "operation": "Join refreshed candidate without restoring retired custom roles",
+            "commit": "0840d0c277690f59af955ad782660c9a89a229a7",
+            "input": "7e1ac6d88e3893c3d4e6444fb3b9b9776519a3fb"
+          }
+        ],
+        "preservedMigrationPrefix": {
+          "commit": "f7e56dcfa544ffec45710235b77a0ccbcac9e505",
+          "entryCount": 77
+        }
+      },
+      "reconstruction": {
+        "startingCommit": "7e1ac6d88e3893c3d4e6444fb3b9b9776519a3fb",
+        "steps": [
+          {
+            "pullRequest": 11,
+            "commit": "592b283ee2f721187ac8d702e2ea31d760f0aa5f",
+            "input": "ac764f775cd5c793cb1bee402a4f1d3b822b3e03"
+          },
+          {
+            "pullRequest": 15,
+            "commit": "4794fc17f59e8911baf2c0879c5acd7104c97368",
+            "input": "e308bcacac0f5b38e8c56c90aa2fc61732a8a64d"
+          },
+          {
+            "pullRequest": 2,
+            "commit": "21722cb925672486294f4af238ecd498fb6273b7",
+            "input": "e42ff4ebac3770d80f3ade9adfcb6e5fa88c56a1"
+          },
+          {
+            "pullRequest": 17,
+            "commit": "c194071e3c64ef65fa268d9c3923e29e701d119c",
+            "input": "c7c0bd24ccdf74db596171f35695d964b7b86d5d"
+          },
+          {
+            "pullRequest": 36,
+            "commit": "32a1daf56895fb21007e602f6a66c0287fefbd17",
+            "input": "ee565aa18f3cb0e382881329e7b7ede92634cce9"
+          },
+          {
+            "pullRequest": 12,
+            "commit": "5af6ad4cf6118f37c7e2fc776485c0ee91a4b761",
+            "input": "37fac70dfb784351544189ad07909588b327ef47"
+          }
+        ],
+        "reconciliationCommit": "534ac074ab6fc255a120354060ab6baf8e60fcbd",
+        "historyJoin": "0840d0c277690f59af955ad782660c9a89a229a7",
+        "reason": "Current selected source heads share a recent baseline; retirement of #1 requires reconstructing the current tree rather than preserving obsolete code through an ordinary merge. Join preserves published ancestry and the complete 77-entry persistence prefix."
       }
     }
   ],
@@ -1084,6 +1067,83 @@
           ],
           "limits": "Successful analyzer jobs are not a zero-findings result. Final-head analyzers and any security gates remain required."
         }
+      }
+    },
+    {
+      "integration": "745863bd53429428cdad933de20330af405d8b70",
+      "qualification": {
+        "policy": "Normal push only codex/raw-integration; source PRs and fork main read-only. No release, image publication or deployment.",
+        "previousTestedCommit": "f7e56dcfa544ffec45710235b77a0ccbcac9e505",
+        "requiredChecks": [
+          "CI Required on published SHA",
+          "CodeQL on published SHA with separate finding accounting",
+          "Native controller and runtime AMD64 and ARM64, nonpublishing"
+        ],
+        "localChecks": {
+          "results": "PostgreSQL migration/restore/role retirement: 206 passed, zero skipped. PostgreSQL provisioning: 64 passed, zero skipped. Combined Kubernetes Compute, generic proxy, native access, Helm and profiles: 677 passed, zero skipped (676 initial passes plus stock-chart replay after committing). Agent creation, Presets and detail browser checks: 163 passed, zero skipped. CI policy: 115 initial passes, three local ambient-redaction failures reproduced and passed with only the unrelated inherited service marker removed; no assertion changes.",
+          "ui": {
+            "stories": [
+              "Components/Native Admin/Operator chat",
+              "Components/Native Admin/Available",
+              "Pages/Create Agent/Custom Preset quick-start"
+            ],
+            "proof": "Rebuilt Storybook, inspected desktop screenshots and replayed the 16.88-second Preset-to-draft video. Delivered screenshots/video as native conversation attachments. Simulated UI, not runtime proof."
+          },
+          "pageLengthReview": "Compute/native access references and flow each describe one coherent contract/lifecycle. Trimmed repetition under 2500 words without exemptions or historical Manual Notes edits.",
+          "commands": [
+            "pnpm typecheck",
+            "pnpm lint",
+            "pnpm format:check",
+            "pnpm docs:check",
+            "pnpm openapi:check",
+            "pnpm check:workspace",
+            "node scripts/ci/run-tests.mjs audit",
+            "node scripts/integration/check-selection.mjs"
+          ],
+          "environment": "Task-local Go, NSS tools and Chromium shared libraries. TLS browser wrapper preserves sandboxing and only supplies shared-library lookup. CI runner diagnostics use env -u OPENCLAW_SERVICE_MARKER because its inherited value aliases ordinary public service names. No product assertion or security probe weakened.",
+          "repair": "After ordering repair: four real PostgreSQL/Kubernetes ownership/lifecycle cases, three real provisioning cases including embedded channels through redeploy/stop, and retained-job case passed without skips (eight total). All 64 PostgreSQL provisioning cases passed with explicit Gateway defaults assertions. Host-only chart parity and QA runner selection each passed. Lint/typecheck, docs, formatting and existing selection checks passed.",
+          "channelComposeRepair": "Compose/development packaging: 76 passed. Configuration API: 286 passed. Credential/save/disabled-reason browser files: 103 passed; seven targeted browser regressions passed. CI preparation: 107 passed. No skips. Teams directory Chromium passed; local WebKit host prerequisite missing, with real WebKit installation added to its CI lane. Lint, typecheck, formatting, docs, workspace isolation and suite audit passed.",
+          "ciFixtureRepair": "K3d preparation/cancellation: 59 passed, zero skipped. CI impact/policy: 77 passed, zero skipped with the task-local real millisecond clock adapter (host date emits nanoseconds for %s%3N). Lint/format passed. Prior remote head passed the Teams directory browser file with actual WebKit installed, plus both conformance/browser functional regressions; remaining failures were these two CI-wiring/fixture issues.",
+          "restrictionRepair": "Real PostgreSQL migration/restore suite: 206 passed, zero skipped. Real sandbox-policy HTTP/database file: 33 passed, zero skipped. Existing manage_policy restriction survives upgrade while use and runtime assignments retire without escalation. Original 77 migration SQL files/journal/canonical entries verified identical. Native/full and historical logical restores remeasured. Lint, typecheck, formatting, suite audit passed.",
+          "runtimeProxyFixtureRepair": "Reproduced both image-lane failures using the SHA/config/digest-verified CI runtime artifact from 5b41445f5. Same genuine image after fixture repair: Teams guarded download and scoped Codex transport cases both passed, zero skips. Proxy conformance: 15 passed, zero skips. Lint, typecheck, formatting and suite audit passed. No product code, security boundary, runtime source pin or new flow changed.",
+          "nativeImportRepair": "Existing adversarial loaded-image substitution regression and release harness: 23 passed, zero skipped. Same Skopeo1.4.1 fails direct-daemon transport and passes archive/CLI. Genuine native AMD64 runtime artifact from beae39758/run43055016659: sealed blob/receipt/config/layer identity verified and Node24.22.1 started after repaired import. Lint, typecheck, formatting, docs/link/length checks, workspace isolation and suite audit passed. This local import proof is not full native runtime smoke qualification."
+        },
+        "limits": [
+          "Exact-head remote qualification follows push; local tests do not establish native image or real cluster results.",
+          "No live Slack/Teams delivery or external model execution claimed."
+        ],
+        "failedCandidates": [
+          {
+            "commit": "cddddaf556416a6f8ef237670d26520a0371267f",
+            "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43039926689",
+            "notes": "Real k3d equality caught Compute preparation receiving pre-security-default values. Preserve the defaults as hook input; keep cluster assertions unchanged and add explicit provisioning assertions. Update retired Node proxy and chart-worker/QA runner expectations to current contracts."
+          },
+          {
+            "commit": "42f997b0e8072c8c96f0c347046b78a37fbb5a24",
+            "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43041586088",
+            "notes": "Browser lanes found stale Slack-only selectors/messages after Teams support, an obsolete operator-only Teams gate assertion, and missing WebKit. Conformance exposed Kubernetes worker added without build to Docker-only Compose and a proxy-owned environment variable masking an unrelated binding assertion. Fixed without weakening product validation, authorization or browser security probes."
+          },
+          {
+            "commit": "d92661adb93c7e5a3f3ba075a91919dd92783a6b",
+            "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43044519688",
+            "notes": "Functional browser tests, including real WebKit Teams directory selection, passed. CI summary needs every consequential step ID and conclusion in order. Cancellation raced before fixture cluster creation, exposing an invalid mock inventory [{}] instead of real empty inventory []; preserve production rejection and fix the fixture."
+          },
+          {
+            "commit": "4c2cc560ddf628f39bc818cbf5f1bc8886a2610e",
+            "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43046967671",
+            "notes": "Superseded before qualification. PostgreSQL platform on predecessor d92661adb (run43044519688, job130604976737) exposed the same new retirement SQL omitting manage_policy from the restriction action set. Correct this batch migration and catalog evidence, extend the real upgrade case; preserve all 77 starting entries. Failed unqualified candidate receipts are not an accepted release history."
+          },
+          {
+            "commit": "5b41445f5515d102ffd18e8cdcbb4143e60db3e0",
+            "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43049117127",
+            "notes": "All non-image lanes and other image checks passed. Teams media fixture imported removed Slack-specific helper; its synthetic certificates needed non-root readability. Native proxy fixture resolved its disposable origin to a private Docker address correctly denied by the hardened proxy. Repair only fixture routing/material; retain real native SDK, TLS, redirects, host denial, no-fallback and exact internal transport assertions."
+          },
+          {
+            "commit": "beae397585ca918f6b51c613b1c313025ca2c0a6",
+            "ci": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43055016659",
+            "notes": "Ordinary CI passed all 25 primary jobs and CodeQL analyzers passed. Native AMD64 import failed before runtime tests. Skopeo1.4.1 direct-daemon failure reproduced locally: client API1.22 below daemon API1.40. The same old Skopeo succeeds via Docker archive/CLI. Actual sealed native AMD64 OCI from this run was hash/receipt-verified, imported with the repaired path, loaded config/layers verified and Node24.22.1 started. Requalify the repaired final head on both native architectures."
+          }
+        ]
       }
     }
   ],
@@ -1205,44 +1265,156 @@
         "docs/flows/platform-console/agent-creation.md"
       ],
       "notes": "Use upstream staged-channel create grants and deployment-time bound-credential grants instead of retired PR13 expansion. Preserve Installation-wide Default users Groups, per-person runtime roles, native plugin policy round trips, Teams and shared proxy selection. Kubernetes revocation coverage now removes the actual deploy-created grant and requires ordinary redeployment to restore it; final-head cluster CI is required."
+    },
+    {
+      "id": "current-upstream-chat-and-native-preparation",
+      "pullRequests": [1, 12],
+      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
+      "paths": [
+        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "packages/occ/src/index.ts",
+        "docs/flows/agent-native-admin.md",
+        "tests/integration/postgres-agent-provisioning.test.mjs",
+        "migrations/0081_retire_custom_runtime_roles.sql"
+      ],
+      "notes": "Use upstream operator/admin endpoint split and trusted scope ceiling. Retain deployment-copy origin preparation and test genuine migration non-escalation."
+    },
+    {
+      "id": "generic-proxy-teams-embedded-profiles",
+      "pullRequests": [2, 11, 15, 17, 36],
+      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
+      "paths": [
+        "apps/controller/src/gateway-proxy.mjs",
+        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "deploy/helm/openclaw-enterprise/templates/deployments.yaml",
+        "tests/conformance/gateway-proxy-tunnel.test.mjs",
+        "tests/integration/profile-renderer.test.mjs"
+      ],
+      "notes": "Keep generic runtime.proxy, profile channels opt-in, Teams guarded transport/DNS pinning, callback reconciliation and current Preset/native plugin behavior. Current APIs and fixture shapes only."
+    },
+    {
+      "id": "published-persistence-and-native-ci",
+      "pullRequests": [1, 18, 36],
+      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
+      "paths": [
+        "scripts/migration-history.mjs",
+        "tests/integration/postgres-migration-compatibility.test.mjs",
+        ".github/workflows/ci.yml",
+        ".github/workflows/container-check.yml",
+        ".github/workflows/codeql.yml"
+      ],
+      "notes": "Preserve all 77 published migration identities and SQL; append three exact upstream evolutions and explicit role retirement. Preserve configured fork runners and real sandbox qualification without publication."
+    },
+    {
+      "id": "gateway-defaults-deployment-hook-ordering",
+      "pullRequests": [12, 17, 36],
+      "commits": ["ff398b552f412e879f9b6a8ef64f553db9f7edf1"],
+      "paths": [
+        "packages/occ/src/index.ts",
+        "tests/integration/postgres-agent-provisioning.test.mjs",
+        "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
+        "tests/integration/sign-in-chart-parity.test.mjs",
+        "tests/integration/ci-prepare.test.mjs"
+      ],
+      "notes": "Sandbox transform, Gateway security defaults, then Compute native administration preparation. Real cluster equality protects upstream defaults; native proxy state is read from the real Pod rather than retired NODE_USE_ENV_PROXY."
+    },
+    {
+      "id": "channel-browser-and-compose-worker-reconciliation",
+      "pullRequests": [2, 12],
+      "commits": ["0bd09e4f18a6b40969d27b87123e1ae6c8e844c6"],
+      "paths": [
+        ".github/actions/run-ci-lane/action.yml",
+        "compose.kubernetes.yaml",
+        "compose.native-admin.yaml",
+        "tests/browser/console-agent-detail.test.ts",
+        "tests/browser/console-agent-saves.test.ts",
+        "tests/browser/console-agents.test.ts",
+        "tests/browser/console-disabled-reasons.test.ts",
+        "tests/browser/console-runtime-credentials.test.ts",
+        "tests/integration/configuration-controller.test.mjs"
+      ],
+      "notes": "Keep Kubernetes worker native admission settings in the Kubernetes overlay, not the shared Docker browser overlay. Install real WebKit for the Teams directory browser lane. Scope Slack-only assertions and use current channel credential gating/messages; retain proxy-owned environment rejection."
+    },
+    {
+      "id": "ci-webkit-summary-and-precreation-cancellation",
+      "pullRequests": [2],
+      "commits": ["1a63d1989739dcc83e51a9e1ba315f3830a79b55"],
+      "paths": [
+        ".github/actions/run-ci-lane/action.yml",
+        "tests/helpers/ci-prepare-fixture-command.mjs"
+      ],
+      "notes": "Include the WebKit installer in ordered first-failure reporting. A cancelled preparation with no created cluster gets the real k3d empty inventory from its fixture; production cleanup continues rejecting malformed inventories."
+    },
+    {
+      "id": "retirement-preserves-current-policy-authority",
+      "pullRequests": [1],
+      "commits": ["9776468292b730fb3d0a3d6910d56606d0b2c34f"],
+      "paths": [
+        "migrations/0081_retire_custom_runtime_roles.sql",
+        "migrations/meta/_canonical-history.json",
+        "tests/integration/postgres-migration-compatibility.test.mjs"
+      ],
+      "notes": "The newly introduced retirement migration must remove only use, not the supported manage_policy action. Upgrade regression seeds an existing policy denial before retirement and proves it survives. Remeasure PostgreSQL18.6 native/logical-restored catalogs; no changes to the starting 77 SQL files or journal/canonical entry metadata."
+    },
+    {
+      "id": "runtime-proxy-fixtures-use-current-transport",
+      "pullRequests": [2, 36],
+      "commits": ["e9b025ca1ff711ea8d0aa617c43fbd1cf2e1f003"],
+      "paths": [
+        "tests/fixtures/runtime-gateway-proxy.mjs",
+        "tests/fixtures/teams-attachment-download.mjs",
+        "tests/integration/runtime-image-startup.test.mjs"
+      ],
+      "notes": "Use the generic Gateway proxy helper with exact Teams media hosts; share only synthetic certificates with the non-root image. Simulate public DNS and numeric routing only inside the disposable TLS fixture; preserve production private-address rejection, host policy and exact Codex transport lifecycle assertions."
+    },
+    {
+      "id": "native-smoke-import-current-docker-cli",
+      "pullRequests": [],
+      "commits": ["5a1c1c8356947529c6286a592dcde06858b3b40f"],
+      "paths": [
+        "scripts/ci/container-release.mjs",
+        "tests/integration/container-release.test.mjs",
+        "docs/flows/container-publication.md"
+      ],
+      "notes": "Use Skopeo Docker-archive conversion and the installed Docker CLI instead of the old direct-daemon client. Preserve converted/loaded config identity, ordered layer verification, native architecture, sandbox/startup/version probes and platform receipt gates. No runtime recipe, source pin, security boundary or publication authorization changed."
     }
   ],
   "reconstruction": {
-    "startingCommit": "7e1ac6d88e3893c3d4e6444fb3b9b9776519a3fb",
+    "startingCommit": "13fc0108d6f8e484dbf7a568356136d904b608fd",
     "steps": [
       {
         "pullRequest": 11,
-        "commit": "592b283ee2f721187ac8d702e2ea31d760f0aa5f",
-        "input": "ac764f775cd5c793cb1bee402a4f1d3b822b3e03"
+        "commit": "01f30eacf058deced0e8da6318ea2ad428b615f6",
+        "input": "64c975f4ab7c23d2598e1ce96411db8e71cd6531"
       },
       {
         "pullRequest": 15,
-        "commit": "4794fc17f59e8911baf2c0879c5acd7104c97368",
-        "input": "e308bcacac0f5b38e8c56c90aa2fc61732a8a64d"
+        "commit": "b76660e380c4375f65414935ae01290200944bfe",
+        "input": "11f66c1269c751e89719112612eb6cfc95a22ca8"
       },
       {
         "pullRequest": 2,
-        "commit": "21722cb925672486294f4af238ecd498fb6273b7",
-        "input": "e42ff4ebac3770d80f3ade9adfcb6e5fa88c56a1"
+        "commit": "f7775610a5a79dc5be2d12834d0213441782b168",
+        "input": "de9d923855b13d479092882f002b00cb5573e788"
       },
       {
         "pullRequest": 17,
-        "commit": "c194071e3c64ef65fa268d9c3923e29e701d119c",
-        "input": "c7c0bd24ccdf74db596171f35695d964b7b86d5d"
+        "commit": "037cc3d8e8c0ff98eae11ec96ec5c97cf5e1e428",
+        "input": "ca2bdf12d02a3cdfc562df6346ec4c68d6d9b618"
       },
       {
         "pullRequest": 36,
-        "commit": "32a1daf56895fb21007e602f6a66c0287fefbd17",
-        "input": "ee565aa18f3cb0e382881329e7b7ede92634cce9"
+        "commit": "a61a0b5c120ce2cf2851cc2b39313d29820aae5e",
+        "input": "3ae05a6f38656952cd5f8b61eae74c876fa46f2c"
       },
       {
         "pullRequest": 12,
-        "commit": "5af6ad4cf6118f37c7e2fc776485c0ee91a4b761",
+        "commit": "ae69d3f36d95b85f08d5795b7b97f754fc21a6c0",
         "input": "37fac70dfb784351544189ad07909588b327ef47"
       }
     ],
-    "reconciliationCommit": "534ac074ab6fc255a120354060ab6baf8e60fcbd",
-    "historyJoin": "0840d0c277690f59af955ad782660c9a89a229a7",
-    "reason": "Current selected source heads share a recent baseline; retirement of #1 requires reconstructing the current tree rather than preserving obsolete code through an ordinary merge. Join preserves published ancestry and the complete 77-entry persistence prefix."
+    "reconciliationCommit": "dcc352296fea748cea088acf2f3de7df978595c9",
+    "historyJoin": "377e5b33b1bbbea0a3151619677a940fed7ba6ea",
+    "reason": "Five refreshed feature heads share a recent upstream baseline; retain the selected closed native-preparation input through current typed contracts. Reconstruct the current tree and join published ancestry without restoring retired custom roles or create-time Secret grants. Preserve all 81 published persistence entries."
   }
 }
