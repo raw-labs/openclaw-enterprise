@@ -2049,9 +2049,11 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
   for (const { lane } of array(images.strategy.matrix.include).map(record)) {
     assert.equal(runnerFor(images, text(lane)), ciRunners.get(text(lane)), text(lane));
   }
-  const ciExpression = present(
-    present(loadYaml(".github/workflows/ci.yml").jobs["pr-safe"])["runs-on"],
-  ).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
+  const ciJobs = loadYaml(".github/workflows/ci.yml").jobs;
+  const ciExpressionFor = (lane: string) =>
+    present(
+      present(ciJobs[lane.startsWith("images-") ? "image-lanes" : "pr-safe"])["runs-on"],
+    ).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
   // Selecting an installed runner must also carry into same-source qualification;
   // otherwise the PR passes on one kernel while qualification queues on another.
   for (const lane of pinned) {
@@ -2059,18 +2061,33 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
     const expected = "configured-large-runner";
     assert.equal(runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars), expected);
     assert.equal(
-      runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
+      runInNewContext(ciExpressionFor(lane), {
+        vars,
+        matrix: { lane, runner: ciRunners.get(lane) },
+      }),
       runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars),
     );
   }
-  const vars = { CI_LARGE_RUNNER: "configured-large-runner", CI_SANDBOX_RUNNER: "sandbox-runner" };
   const lane = "images-runtime-startup";
+  const compatible = {
+    CI_LARGE_RUNNER: "configured-large-runner",
+    CI_COMPAT_RUNNER: "compat-runner",
+  };
+  assert.equal(runnerFor(images, lane, compatible), "compat-runner");
+  assert.equal(
+    runInNewContext(ciExpressionFor(lane), {
+      vars: compatible,
+      matrix: { lane, runner: ciRunners.get(lane) },
+    }),
+    "compat-runner",
+  );
+  const vars = { ...compatible, CI_SANDBOX_RUNNER: "sandbox-runner" };
   assert.equal(
     runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars),
     "sandbox-runner",
   );
   assert.equal(
-    runInNewContext(ciExpression, { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
+    runInNewContext(ciExpressionFor(lane), { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
     "sandbox-runner",
   );
 });
