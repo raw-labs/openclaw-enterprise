@@ -622,7 +622,7 @@ test(
       gatewayStorageClassName: "local-path",
       // Current Compute admission owns the endpoint; keep synthetic keys offline.
       modelProvider: { protocol: "openai-responses", baseUrl: "https://127.0.0.1:9/v1" },
-      channels: { proxyUrl: "http://10.42.0.15:3128" },
+      proxy: { proxyUrl: "http://10.42.0.15:3128" },
     };
     const network = {
       dns: { namespace: "kube-system", podLabels: { "k8s-app": "kube-dns" } },
@@ -745,7 +745,7 @@ test(
       network,
       runtime: {
         ...runtime,
-        channels: { ...runtime.channels, experimentalEmbeddedChannels: true },
+        proxy: { ...runtime.proxy, experimentalEmbeddedChannels: true },
       },
     });
     const optedIn = await createProvisioningApiFixture(
@@ -882,7 +882,7 @@ test(
       network,
       runtime: {
         ...runtime,
-        channels: { ...runtime.channels, experimentalEmbeddedChannels: true },
+        proxy: { ...runtime.proxy, experimentalEmbeddedChannels: true },
       },
     });
     const withoutCallback = await createProvisioningApiFixture(

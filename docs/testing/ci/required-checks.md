@@ -58,6 +58,9 @@ shown in GitHub Actions and links to their test manifests. Runtime image metadat
 tests use real Docker containers with lightweight fixture images; they do not
 run a complete Agent or call a model provider.
 
+PostgreSQL Authentication uses the runner's `/usr/bin/google-chrome` with Chromium's
+sandbox enabled. Browser setup verifies that binary before the tests run.
+
 CI Impact selects coverage. Suite Audit and Static Checks is one job that runs
 in every mode: it lints workflows, audits suite ownership, and runs workspace,
 lint, format, OpenAPI, documentation checks, and the documentation build.
