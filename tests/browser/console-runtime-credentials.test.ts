@@ -1592,7 +1592,7 @@ test("a channel Secret save refused for a missing binding says where to bind it"
   await expectNoText(page, /Fix that setting in the Configuration JSON/);
 });
 
-test("Teams-enabled drafts keep console deploy blocked", async (t) => {
+test("Teams-enabled drafts require a bound app password before deploy", async (t) => {
   const fixture = await createConsoleAppFixture(t, {
     gatewayRouting: {
       hostname: "gateway.example.test",
@@ -1627,14 +1627,16 @@ test("Teams-enabled drafts keep console deploy blocked", async (t) => {
   const { page } = await newPage(t, fixture);
   await login(page, fixture, detailUrl(fixture, namespace.id, agent.id, "draft", "credentials"));
   await page.getByRole("button", { name: "Save authentication source" }).waitFor();
+  const password = page.getByLabel("Teams app password", { exact: true });
+  await password.waitFor();
+  assert.equal(await password.isDisabled(), false);
+  assert.equal(await password.inputValue(), "");
   await page
-    .getByText(
-      "Microsoft Teams credentials and readiness are operator-managed and cannot be confirmed by this Credentials tab. Use the operator deployment workflow for Teams, or disable Teams through the Configuration API to deploy here.",
-    )
+    .getByText("Choose a Secret for each channel credential to save.", { exact: true })
     .waitFor();
   assert.equal(await page.getByRole("button", { name: "Deploy new version" }).isDisabled(), true);
   await expectNoText(page, /Slack app token|Slack bot token/);
-  assert.equal(await page.getByRole("button", { name: "Save channel Secrets" }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Save channel Secrets" }).isDisabled(), true);
 });
 
 test("bound Slack credential fields show Secret references without reading values", async (t) => {

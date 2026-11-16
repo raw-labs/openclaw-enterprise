@@ -420,7 +420,7 @@ jobs:
         include: ${{ fromJSON(needs.impact.outputs.matrix) }}
     env:
       # The host Chrome package provides the sandbox support these TLS tests require.
-      OCC_TEST_BROWSER_EXECUTABLE: ${{ matrix.lane == 'postgres-auth' && '/usr/bin/google-chrome' || '' }}
+      OCC_TEST_BROWSER_EXECUTABLE: ${{ (matrix.lane == 'postgres-auth' || startsWith(matrix.lane, 'checks-browser')) && '/usr/bin/google-chrome' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
