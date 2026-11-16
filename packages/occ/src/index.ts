@@ -898,6 +898,11 @@ export interface ControllerOptions {
    */
   readonly refreshBundledDefaultPresets?: boolean;
   readonly loggingLevel?: LoggingLevel;
+  /** Installation-owned origin resolution; never taken from a request Host or Agent input. */
+  readonly nativeAdminOrigin?: (
+    installationId: string,
+    agent: Pick<Agent, "namespaceId" | "id">,
+  ) => string | undefined;
   readonly configuredServiceAccountDriverId?: string;
   /** Installation startup `runtime.nativeWorkerSupport`; never set from the API. */
   readonly nativeWorkerSupport?: NativeWorkerSupport;
@@ -2336,6 +2341,7 @@ export class OpenClawController {
   private readonly bundledPresetVersions: readonly BundledPresetVersion[];
   private readonly refreshBundledDefaultPresets: boolean;
   private readonly loggingLevel: LoggingLevel;
+  private readonly nativeAdminOrigin: ControllerOptions["nativeAdminOrigin"];
   private readonly backendMap: ReadonlyMap<string, BackendDefinition>;
   private readonly configuredServiceAccountDriverId: string | undefined;
 
@@ -2393,6 +2399,7 @@ export class OpenClawController {
     this.bundledPresetVersions = immutableCopy(options.bundledPresetVersions ?? []);
     this.refreshBundledDefaultPresets = options.refreshBundledDefaultPresets === true;
     this.loggingLevel = normalizeLoggingLevel(options.loggingLevel);
+    this.nativeAdminOrigin = options.nativeAdminOrigin;
     if (
       options.nativeWorkerSupport !== undefined &&
       options.nativeWorkerSupport !== "custom-image"
@@ -13609,6 +13616,7 @@ export class OpenClawController {
         revisionHarness,
         compute,
         sandbox,
+        lockedAgent,
       );
       // The model provider settings, then the Compute rules, as on Configuration save, so a
       // stored Configuration that predates a rule gets the message its next save would. A
@@ -18327,6 +18335,7 @@ export class OpenClawController {
     harness: RevisionHarnessDescriptor,
     compute: ComputeDriver,
     sandbox: SandboxDriver | undefined,
+    agent?: Pick<Agent, "namespaceId" | "id">,
   ): OpenClawConfigurationDocument {
     if (harness.id === "openclaw") {
       requireSandboxOpenClawMode(sandbox, harness.mode);
@@ -18337,10 +18346,18 @@ export class OpenClawController {
         : values;
     // Every Compute Driver renders the Gateway's document from this snapshot.
     const securedConfiguration = admitGatewaySecurityDefaults(sandboxConfiguration);
+    const nativeAdminOrigin =
+      agent === undefined ? undefined : this.nativeAdminOrigin?.(this.installation.id, agent);
+    const computeConfiguration =
+      agent === undefined || compute.configureAgent === undefined
+        ? securedConfiguration
+        : compute.configureAgent(frozenValues(securedConfiguration), {
+            ...(nativeAdminOrigin === undefined ? {} : { nativeAdminOrigin }),
+          });
     return frozenValues(
       compute.runtimeLogging === "driver"
-        ? securedConfiguration
-        : admitLoggingConfiguration(securedConfiguration, this.loggingLevel),
+        ? computeConfiguration
+        : admitLoggingConfiguration(computeConfiguration, this.loggingLevel),
     );
   }
 

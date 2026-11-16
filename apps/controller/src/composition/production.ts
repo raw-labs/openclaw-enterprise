@@ -7,6 +7,7 @@ import {
 } from "./control-plane-audit.ts";
 import { OAuthAccountTokens } from "../backends/token-service/oauth-connection.ts";
 import { closeResources } from "./close-resources.ts";
+import { nativeAdminOriginResolver } from "../gateway/native-admin-origin.ts";
 import { installEgressAuthority } from "./egress-authority.ts";
 import { installationControllerOptions } from "./installation-config.ts";
 import { validatePersistedNativeIAMState } from "@openclaw-enterprise/iam";
@@ -232,6 +233,9 @@ export async function composeProduction(
           ? {}
           : { pluginSourceReader: config.drivers.pluginSourceReader }),
         recordOperations: true,
+        ...(config.nativeAdmin?.enabled === true
+          ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! }
+          : {}),
         backends: installation.backend,
         defaultPresets: config.drivers.defaultPresets ?? [],
         bundledPresetVersions: config.drivers.bundledPresetVersions ?? [],

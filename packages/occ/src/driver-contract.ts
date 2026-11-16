@@ -193,6 +193,7 @@ export function driverHasCapabilityContract(driver: Driver): boolean {
     typeof candidate.retireRevision === "function" &&
     (candidate.getGatewayChatEndpoint === undefined ||
       typeof candidate.getGatewayChatEndpoint === "function") &&
+    (candidate.configureAgent === undefined || typeof candidate.configureAgent === "function") &&
     (candidate.getRuntimeImages === undefined ||
       typeof candidate.getRuntimeImages === "function") &&
     (candidate.resolveSandboxNamespace === undefined ||

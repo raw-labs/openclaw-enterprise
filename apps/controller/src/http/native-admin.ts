@@ -915,7 +915,6 @@ export function createNativeAdminAccess(options: NativeAdminOptions) {
       publicOrigin,
       installationId,
       agent,
-      revision,
       domain: nativeAdminDomain,
     });
     if (agent.desiredRuntimeState !== "running") {

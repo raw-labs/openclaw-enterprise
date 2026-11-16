@@ -1,6 +1,7 @@
 import { createPostgresReadinessCheck } from "./postgres-readiness.ts";
 import { OAuthAccountTokens } from "../backends/token-service/oauth-connection.ts";
 import { closeResources } from "./close-resources.ts";
+import { nativeAdminOriginResolver } from "../gateway/native-admin-origin.ts";
 import { installEgressAuthority } from "./egress-authority.ts";
 import { installationControllerOptions } from "./installation-config.ts";
 import {
@@ -192,6 +193,9 @@ export async function composePostgresDevelopment(
           ? {}
           : { pluginSourceReader: drivers.pluginSourceReader }),
         recordOperations: true,
+        ...(config.nativeAdmin?.enabled === true
+          ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! }
+          : {}),
         defaultPresets: drivers?.defaultPresets ?? [],
         bundledPresetVersions: drivers?.bundledPresetVersions ?? [],
         refreshBundledDefaultPresets: drivers?.installation.presets?.includeDefaults === true,
