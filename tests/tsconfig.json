@@ -28,6 +28,7 @@
     "resolveJsonModule": true
   },
   "include": [
+    "helpers/preset-upgrade-process.ts",
     "integration/docker-compute-compose-cases.ts",
     "integration/static-egress-request-capacity-cases.ts",
     "integration/sandbox-driver-namespace-provider-cases.ts",

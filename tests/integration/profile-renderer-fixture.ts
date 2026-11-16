@@ -168,6 +168,7 @@ export function renderCli(
   directory = fileTemporaryDirectory(`oce-profile-${profile}-`),
   root = repository,
   dnsServer?: string,
+  profileFile?: string,
 ) {
   const inputPath = join(directory, "input.json");
   writeFileSync(inputPath, `${JSON.stringify(input, null, 2)}\n`);
@@ -187,6 +188,7 @@ export function renderCli(
         "scripts/render-installation-profile.ts",
         "--profile",
         profile,
+        ...(profileFile === undefined ? [] : ["--profile-file", profileFile]),
         "--input",
         inputPath,
         "--out-dir",
@@ -209,12 +211,18 @@ export async function render(
   profile: string,
   input: unknown,
   directory = fileTemporaryDirectory(`oce-profile-${profile}-`),
+  profileFile?: string,
 ) {
   const inputPath = join(directory, "input.json");
   writeFileSync(inputPath, `${JSON.stringify(input, null, 2)}\n`);
   let summary: RendererSummary;
   try {
-    summary = await renderInstallationProfile({ profile, input: inputPath, outDir: directory });
+    summary = await renderInstallationProfile({
+      profile,
+      input: inputPath,
+      outDir: directory,
+      ...(profileFile === undefined ? {} : { profileFile }),
+    });
   } catch (error) {
     if (!(error instanceof RenderRefusal)) {
       throw error;
