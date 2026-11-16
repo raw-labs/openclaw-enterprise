@@ -850,7 +850,7 @@ test(
         environment.find(({ name }) => name === "HTTPS_PROXY").value,
         runtime.proxy.proxyUrl,
       );
-      assert.equal(environment.find(({ name }) => name === "NODE_USE_ENV_PROXY").value, "1");
+      assert.equal(environment.find(({ name }) => name === "OPENCLAW_PROXY_ACTIVE").value, "1");
       assert.ok(environment.find(({ name }) => name === "OPENAI_API_KEY").valueFrom.secretKeyRef);
       assert.equal(
         (await resources("deployments", placement)).filter(
