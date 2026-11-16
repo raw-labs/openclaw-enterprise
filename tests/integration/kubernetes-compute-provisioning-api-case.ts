@@ -490,6 +490,41 @@ export async function runProvisioningApiCase(
     assert.equal(error.code, "RESOURCE_CONFLICT");
     assert.ok(error.message.includes(setting));
   }
+  // An Installation without callback routing must refuse Teams at API admission,
+  // before provisioning creates an Agent or hands deployment to a worker.
+  const teams = {
+    ...body,
+    configuration: {
+      ...body.configuration,
+      values: {
+        ...body.configuration.values,
+        channels: {
+          msteams: {
+            enabled: true,
+            appId: "00000000-0000-4000-8000-000000000001",
+            tenantId: "00000000-0000-4000-8000-000000000002",
+            appPassword: { source: "env", id: "MSTEAMS_APP_PASSWORD" },
+          },
+        },
+      },
+      secretBindings: {
+        MSTEAMS_APP_PASSWORD: { source: slackBotSecret.data.ref, delivery: { type: "env" } },
+      },
+    },
+  };
+  const missingCallback = await fixture.requestChecked(
+    ErrorResponse,
+    409,
+    "POST",
+    `${namespacePath}/agents/provision`,
+    teams,
+  );
+  assert.equal(missingCallback.error.code, "RESOURCE_CONFLICT");
+  assert.equal(
+    missingCallback.error.message,
+    "The configured model, authentication, or channel bindings cannot be provisioned.",
+  );
+
   const admitted = await fixture.requestChecked(
     AgentProvisioningResponse,
     202,

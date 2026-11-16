@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import net from "node:net";
+import dns from "node:dns";
 import { Duplex } from "node:stream";
 import test, { type TestContext } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
@@ -70,10 +71,22 @@ async function tunnel(t: TestContext) {
     resolvePeer(socket);
   });
   const upstreamPort = await listen(t, upstreamServer);
+  // Keep the real tunnel lifecycle while pinning the public DNS admission fixture.
+  t.mock.method(
+    dns,
+    "lookup",
+    (
+      _host: string,
+      _options: dns.LookupAllOptions,
+      callback: (error: null, addresses: dns.LookupAddress[]) => void,
+    ) => {
+      callback(null, [{ address: "8.8.8.8", family: 4 }]);
+    },
+  );
   const connect = net.connect;
   let upstream!: net.Socket;
   t.mock.method(net, "connect", (options: net.NetConnectOpts) => {
-    assert.deepEqual(options, { host: "slack.com", port: 443 });
+    assert.deepEqual(options, { host: "8.8.8.8", family: 4, port: 443 });
     upstream = connect({ host: "127.0.0.1", port: upstreamPort });
     return upstream;
   });

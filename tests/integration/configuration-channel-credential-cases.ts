@@ -262,6 +262,19 @@ export function registerConfigurationChannelCredentialCases(
       `must not set the credential header "${name}" (its name marks a credential)`;
 
     for (const [values, message] of [
+      ...(
+        [
+          ["env", "OPENCLAW_PROXY_ACTIVE", "1"],
+          ["env.vars", "https_proxy", "http://proxy.example.invalid:3128"],
+          ["env.vars", "NO_PROXY", "*"],
+        ] satisfies [string, string, string][]
+      ).map(([parent, name, value]): [OpenClawConfigurationDocument, string] => [
+        { ...valid, env: parent === "env" ? { [name]: value } : { vars: { [name]: value } } },
+        setting(
+          `${parent}.${name}`,
+          "must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust",
+        ),
+      ]),
       [
         { ...valid, channels: { discord: { enabled: true } } },
         unsupportedChannelRefusal("channels.discord"),
@@ -420,10 +433,10 @@ export function registerConfigurationChannelCredentialCases(
     assert.ok(Check(schemaContext, AgentRevisionListResponse, revisions.body));
     assert.deepEqual(revisions.body.data, []);
 
-    // A disabled unsupported channel and a non-credential env name still save.
+    // A disabled unsupported channel and an ordinary application env name still save.
     for (const values of [
       { ...valid, channels: { discord: { enabled: false } } },
-      { ...valid, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
+      { ...valid, env: { vars: { APPLICATION_REGION: "test" } } },
     ] satisfies readonly OpenClawConfigurationDocument[]) {
       await updateSaved(context.request, item, values, JSON.stringify(values));
     }
@@ -559,7 +572,7 @@ export function registerConfigurationChannelCredentialCases(
     assert.deepEqual(stored.body.data.values, slack);
     assertRefused(
       await context.request("PATCH", item, {
-        values: { ...slack, env: { vars: { HTTP_PROXY: "http://proxy:3128" } } },
+        values: { ...slack, env: { vars: { APPLICATION_REGION: "test" } } },
       }),
       appRefusal,
       { label: "unrelated update of a stored row" },
