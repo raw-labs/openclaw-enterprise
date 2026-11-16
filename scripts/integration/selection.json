@@ -4,25 +4,20 @@
   "integrationBranch": "codex/raw-integration",
   "upstream": {
     "repository": "openclaw/openclaw-enterprise",
-    "commit": "13fc0108d6f8e484dbf7a568356136d904b608fd"
+    "commit": "0aee6393e5f0edd80a59b830262112706c4045b4"
   },
   "batch": {
-    "startingIntegration": "745863bd53429428cdad933de20330af405d8b70",
+    "startingIntegration": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
     "steps": [
       {
-        "operation": "Anchor the published integration history",
-        "commit": "745863bd53429428cdad933de20330af405d8b70",
-        "input": "745863bd53429428cdad933de20330af405d8b70"
-      },
-      {
-        "operation": "Join refreshed upstream and exact selected source heads",
-        "commit": "377e5b33b1bbbea0a3151619677a940fed7ba6ea",
-        "input": "13fc0108d6f8e484dbf7a568356136d904b608fd"
+        "operation": "Merge current upstream preserving selected feature heads and qualified integration adapters",
+        "commit": "34168622a077116b1c0070007b67b126c58b4df8",
+        "input": "0aee6393e5f0edd80a59b830262112706c4045b4"
       }
     ],
     "preservedMigrationPrefix": {
-      "commit": "745863bd53429428cdad933de20330af405d8b70",
-      "entryCount": 81
+      "commit": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+      "entryCount": 83
     }
   },
   "features": [
@@ -807,31 +802,22 @@
   },
   "qualification": {
     "policy": "Normal push only codex/raw-integration; source PRs and fork main read-only. No release, image publication or deployment.",
-    "previousTestedCommit": "745863bd53429428cdad933de20330af405d8b70",
-    "requiredChecks": [
-      "CI Required on published SHA",
-      "CodeQL on published SHA with separate finding accounting",
-      "Native controller and runtime AMD64 and ARM64, nonpublishing"
-    ],
-    "localChecks": {
-      "results": "PostgreSQL full migration lane: 305 passed, zero skipped (86 preparation, 218 migration/restore, one version). Guided provisioning: 74 passed, zero skipped. Kubernetes compute conformance: 388 passed, zero skipped. CI/native workflow policy: 128 passed, zero skipped. Focused proxy/native harness: 40 passed, zero skipped. Final profile and packaging receipts are recorded externally. Final profile renderer: 108 passed, zero skipped. Formatting, lint, typecheck, documentation and both CI suite audits passed.",
-      "browser": "Channels/Presets combined: 114 passed with four failures; multiline Preset case passed in isolation and in serialized file replay (75 passed). Remaining local limits: WebKit host libraries missing; two TLS cases require Go on PATH. These are not counted as passing and require final-head CI.",
-      "ui": {
-        "stories": [
-          "Components/Native Admin/Operator chat",
-          "Components/Native Admin/Native admin",
-          "Pages/Create Agent/Custom Preset quick-start",
-          "Pages/Create Agent/Preset with saved model credential"
-        ],
-        "proof": "Rebuilt Storybook and inspected screenshots. Replayed the 16.84-second Preset-to-draft recording at normal speed and inspected decoded opening/transition/final frames. Delivered screenshots/video as conversation attachments. Simulated UI, not runtime proof."
-      },
-      "documentation": "Current flow links follow typed owners and remapped SQL files; retained RFCs renumbered to avoid upstream collisions. Docs length/link/spec checks passed without new exceptions."
+    "previousTestedCommit": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+    "previousRuns": {
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875339763",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875339769",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875341231"
     },
-    "limits": [
-      "Exact-head remote qualification follows push; local tests do not establish native image or real cluster results.",
-      "No live Slack/Teams delivery or external model-provider checks.",
-      "Previous head had 94 open CodeQL findings; successful analysis is not security clearance."
-    ]
+    "previousFindings": {
+      "unresolved": 81,
+      "status": "Not waived or dismissed; compare final-head API and SARIF identities, not counts alone."
+    },
+    "requiredChecks": [
+      "CI Required and all selected lane reports at published SHA without required skips",
+      "CodeQL both analyzers and separate exact-head finding accounting",
+      "Native controller and runtime AMD64 and ARM64 actual startup and sandbox smokes; no publication"
+    ],
+    "status": "pending-final-head-qualification"
   },
   "previousBatches": [
     {
@@ -972,6 +958,28 @@
         "reconciliationCommit": "534ac074ab6fc255a120354060ab6baf8e60fcbd",
         "historyJoin": "0840d0c277690f59af955ad782660c9a89a229a7",
         "reason": "Current selected source heads share a recent baseline; retirement of #1 requires reconstructing the current tree rather than preserving obsolete code through an ordinary merge. Join preserves published ancestry and the complete 77-entry persistence prefix."
+      }
+    },
+    {
+      "integration": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+      "batch": {
+        "startingIntegration": "745863bd53429428cdad933de20330af405d8b70",
+        "steps": [
+          {
+            "operation": "Anchor the published integration history",
+            "commit": "745863bd53429428cdad933de20330af405d8b70",
+            "input": "745863bd53429428cdad933de20330af405d8b70"
+          },
+          {
+            "operation": "Join refreshed upstream and exact selected source heads",
+            "commit": "377e5b33b1bbbea0a3151619677a940fed7ba6ea",
+            "input": "13fc0108d6f8e484dbf7a568356136d904b608fd"
+          }
+        ],
+        "preservedMigrationPrefix": {
+          "commit": "745863bd53429428cdad933de20330af405d8b70",
+          "entryCount": 81
+        }
       }
     }
   ],
@@ -1145,6 +1153,34 @@
           }
         ]
       }
+    },
+    {
+      "policy": "Normal push only codex/raw-integration; source PRs and fork main read-only. No release, image publication or deployment.",
+      "previousTestedCommit": "745863bd53429428cdad933de20330af405d8b70",
+      "requiredChecks": [
+        "CI Required on published SHA",
+        "CodeQL on published SHA with separate finding accounting",
+        "Native controller and runtime AMD64 and ARM64, nonpublishing"
+      ],
+      "localChecks": {
+        "results": "PostgreSQL full migration lane: 305 passed, zero skipped (86 preparation, 218 migration/restore, one version). Guided provisioning: 74 passed, zero skipped. Kubernetes compute conformance: 388 passed, zero skipped. CI/native workflow policy: 128 passed, zero skipped. Focused proxy/native harness: 40 passed, zero skipped. Final profile and packaging receipts are recorded externally. Final profile renderer: 108 passed, zero skipped. Formatting, lint, typecheck, documentation and both CI suite audits passed.",
+        "browser": "Channels/Presets combined: 114 passed with four failures; multiline Preset case passed in isolation and in serialized file replay (75 passed). Remaining local limits: WebKit host libraries missing; two TLS cases require Go on PATH. These are not counted as passing and require final-head CI.",
+        "ui": {
+          "stories": [
+            "Components/Native Admin/Operator chat",
+            "Components/Native Admin/Native admin",
+            "Pages/Create Agent/Custom Preset quick-start",
+            "Pages/Create Agent/Preset with saved model credential"
+          ],
+          "proof": "Rebuilt Storybook and inspected screenshots. Replayed the 16.84-second Preset-to-draft recording at normal speed and inspected decoded opening/transition/final frames. Delivered screenshots/video as conversation attachments. Simulated UI, not runtime proof."
+        },
+        "documentation": "Current flow links follow typed owners and remapped SQL files; retained RFCs renumbered to avoid upstream collisions. Docs length/link/spec checks passed without new exceptions."
+      },
+      "limits": [
+        "Exact-head remote qualification follows push; local tests do not establish native image or real cluster results.",
+        "No live Slack/Teams delivery or external model-provider checks.",
+        "Previous head had 94 open CodeQL findings; successful analysis is not security clearance."
+      ]
     }
   ],
   "historicalCompatibility": [
@@ -1379,42 +1415,44 @@
       "notes": "Use Skopeo Docker-archive conversion and the installed Docker CLI instead of the old direct-daemon client. Preserve converted/loaded config identity, ordered layer verification, native architecture, sandbox/startup/version probes and platform receipt gates. No runtime recipe, source pin, security boundary or publication authorization changed."
     }
   ],
-  "reconstruction": {
-    "startingCommit": "13fc0108d6f8e484dbf7a568356136d904b608fd",
-    "steps": [
-      {
-        "pullRequest": 11,
-        "commit": "01f30eacf058deced0e8da6318ea2ad428b615f6",
-        "input": "64c975f4ab7c23d2598e1ce96411db8e71cd6531"
-      },
-      {
-        "pullRequest": 15,
-        "commit": "b76660e380c4375f65414935ae01290200944bfe",
-        "input": "11f66c1269c751e89719112612eb6cfc95a22ca8"
-      },
-      {
-        "pullRequest": 2,
-        "commit": "f7775610a5a79dc5be2d12834d0213441782b168",
-        "input": "de9d923855b13d479092882f002b00cb5573e788"
-      },
-      {
-        "pullRequest": 17,
-        "commit": "037cc3d8e8c0ff98eae11ec96ec5c97cf5e1e428",
-        "input": "ca2bdf12d02a3cdfc562df6346ec4c68d6d9b618"
-      },
-      {
-        "pullRequest": 36,
-        "commit": "a61a0b5c120ce2cf2851cc2b39313d29820aae5e",
-        "input": "3ae05a6f38656952cd5f8b61eae74c876fa46f2c"
-      },
-      {
-        "pullRequest": 12,
-        "commit": "ae69d3f36d95b85f08d5795b7b97f754fc21a6c0",
-        "input": "37fac70dfb784351544189ad07909588b327ef47"
-      }
-    ],
-    "reconciliationCommit": "dcc352296fea748cea088acf2f3de7df978595c9",
-    "historyJoin": "377e5b33b1bbbea0a3151619677a940fed7ba6ea",
-    "reason": "Five refreshed feature heads share a recent upstream baseline; retain the selected closed native-preparation input through current typed contracts. Reconstruct the current tree and join published ancestry without restoring retired custom roles or create-time Secret grants. Preserve all 81 published persistence entries."
-  }
+  "previousReconstructions": [
+    {
+      "startingCommit": "13fc0108d6f8e484dbf7a568356136d904b608fd",
+      "steps": [
+        {
+          "pullRequest": 11,
+          "commit": "01f30eacf058deced0e8da6318ea2ad428b615f6",
+          "input": "64c975f4ab7c23d2598e1ce96411db8e71cd6531"
+        },
+        {
+          "pullRequest": 15,
+          "commit": "b76660e380c4375f65414935ae01290200944bfe",
+          "input": "11f66c1269c751e89719112612eb6cfc95a22ca8"
+        },
+        {
+          "pullRequest": 2,
+          "commit": "f7775610a5a79dc5be2d12834d0213441782b168",
+          "input": "de9d923855b13d479092882f002b00cb5573e788"
+        },
+        {
+          "pullRequest": 17,
+          "commit": "037cc3d8e8c0ff98eae11ec96ec5c97cf5e1e428",
+          "input": "ca2bdf12d02a3cdfc562df6346ec4c68d6d9b618"
+        },
+        {
+          "pullRequest": 36,
+          "commit": "a61a0b5c120ce2cf2851cc2b39313d29820aae5e",
+          "input": "3ae05a6f38656952cd5f8b61eae74c876fa46f2c"
+        },
+        {
+          "pullRequest": 12,
+          "commit": "ae69d3f36d95b85f08d5795b7b97f754fc21a6c0",
+          "input": "37fac70dfb784351544189ad07909588b327ef47"
+        }
+      ],
+      "reconciliationCommit": "dcc352296fea748cea088acf2f3de7df978595c9",
+      "historyJoin": "377e5b33b1bbbea0a3151619677a940fed7ba6ea",
+      "reason": "Five refreshed feature heads share a recent upstream baseline; retain the selected closed native-preparation input through current typed contracts. Reconstruct the current tree and join published ancestry without restoring retired custom roles or create-time Secret grants. Preserve all 81 published persistence entries."
+    }
+  ]
 }
