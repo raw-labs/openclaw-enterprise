@@ -171,7 +171,7 @@ intact until rename succeeds, and other writers' temporary files remain untouche
 and cleanup failures propagate to the caller; this does not add automatic retries
 or alter OCC's metadata transaction and compensation boundary.
 
-[Configuration persistence and version snapshots](configuration-driver/persistence-and-revisions.md) traces metadata locking, Driver effects, Agent reference resolution, and snapshot validation after request authorization.
+[Configuration persistence and version snapshots](configuration-driver/persistence-and-revisions.md) traces locking, Driver effects, reference resolution and admission. See [channel admission](agent-channel-runtime.md).
 
 Ordinary deployment retains validated Configuration and Driver identities.
 Admission rejects changed Agent bindings, Configuration content or generation,
@@ -260,6 +260,8 @@ its optional integration is skipped.
 - 2026-10-25: Writes refuse a Slack token SecretRef the Slack Channel Driver cannot read. (finding 2514)
 - 2026-10-25 13:00: Writes, provisioning and the Create Agent preflight refuse an enabled channel's unbound credential reference. (fix-2319, finding 2319)
 - 2026-10-23 13:40: Writes and Preset saves refuse an `agents` model without its provider, with deployment's text. (fix-1828, finding 1828)
+- 2026-10-14 11:41: Document the Installation-controlled embedded channel admission exception in the revision companion. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
+
 - 2026-10-14 10:30: Writes refuse literals in the other slots OpenClaw marks sensitive ([rules](configuration-driver/persistence-and-revisions.md)). (fix-1309, finding 1309)
 - 2026-10-14 09:30: Writes and deployment require references in the other key and header slots the Gateway sends ([list](../reference/configuration/secrets.md#secret-boundaries)); those header slots and MCP headers refuse invalid header names. Stored documents still read. (fix-1307, finding 1307)
 - 2026-10-14 09:00: The Kubernetes model provider rule also checks `agents.*.modelPolicy.allow` entries, which the Dedicated Codex projection qualifies like `models` keys; Dedicated Codex refuses `mediaModels.*` and `voiceModel`. Preset saves run the `agents` shape and roster rules Configuration save runs, checking a templated Agent ID or ownership as far as its written text goes. (fix-1306-1308, findings 1306, 1308)
@@ -275,8 +277,5 @@ its optional integration is skipped.
 - 2026-10-11 13:00: Configuration save refuses a Codex approval policy the Gateway refuses and a literal `gateway.auth.password`; Kubernetes deployment admission and provisioning refuse the gateway password, channel topology and workspace-node plugin settings that preparation or the Gateway refused only after predecessors stopped. (fix-1112-1115, findings 1112-1115)
 - 2026-10-11 12:00: Configuration POST/PATCH admit every Configuration the Kubernetes Driver stores (6 x (1 MiB + 32 KiB) body) and check the create or update grant before reading the body. (fix-1118, finding 1118)
 - 2026-10-10 08:00: Kubernetes renders `gateway.bind: lan` for an omitted or `auto` bind; Kubernetes and Docker Compute refuse other unreachable listeners (other binds, non-`0.0.0.0` custom hosts, Tailscale exposure) before version creation. (fix-996-999, findings 996-998)
-- 2026-10-10 11:29: Refuse Kubernetes native listeners that pass local readiness but cannot serve Pod-IP routes before version creation. (authoring-run/f29e292f-76cb-44a1-88b5-e0244f9164fc - f8a837e33b5c03bc0c92065e979485ee06960150)
-- 2026-10-09 19:00: Configuration create and update refuse an `agents` roster every deployment refuses, with deployment's text, through the shared `requireDeployableRoster`; an existing row still reads and deploys as before. (q35-roster-save, finding 874)
-- 2026-10-09 15:00: OCC rechecks metadata after the failed Configuration delete or update transaction releases its row locks. OCC skips compensation if the recheck detects a changed or deleted row. Compensation proceeds if the recheck fails. (fix-944-945)
 
 [Configuration Driver flow documentation history](configuration-driver/history.md) preserves the older dated entries.

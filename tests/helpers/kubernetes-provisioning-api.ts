@@ -340,6 +340,9 @@ export async function createProvisioningApiFixture(
 
   return {
     bootstrapNamespaceIds,
+    readRevision(namespaceId: string, agentId: string, revisionId: string) {
+      return state.read((view) => view.revisions.findRevision(namespaceId, agentId, revisionId));
+    },
     async readWork(idempotencyKey: string) {
       const result = await pool.query<{ state: ControllerWorkState; reason_code: string | null }>(
         "SELECT state, reason_code FROM occ.controller_work WHERE idempotency_key = $1",

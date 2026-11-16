@@ -71,6 +71,7 @@ graph TD
 `CI Impact` selects coverage. `Suite Audit and Static Checks` verifies checkout identity.
 [Ordinary CI](../testing/ci/required-checks.md#scenarios) uses the event checkout without external service credentials.
 Kubernetes runners require kernel NetworkPolicy enforcement.
+[Configuration](../testing/ci/configuration.md#local-runner-overrides) owns scoped runner and CI-only AppArmor overrides, including reusable Full Integration matrices.
 
 Pull requests compare the verified merge to its first parent using that parent’s policy.
 The second parent must match the event head. Main pushes use `before` policy for the
@@ -398,17 +399,5 @@ awaits an approved resource ledger.
 - 2026-11-08 16:02: Select documentation-only main pushes from verified before-tree policy. (authoring-run/bafcfe3a-329e-4d07-8f36-f178b64e37d0 - ca3ad3c4f3ec8ec5660ec2909bd4673adf78ff90)
 
 - 2026-11-04 12:10: Isolate the Codex Git proof queue without Slack. (authoring-run/14bcb9d6-2d4c-449d-8bbc-b64e3ef7e632 - aa60a72115e342ec020d1083fb5e30c139202c84)
-
-- 2026-11-06 09:03: Validate lane identity before attributing outcomes from matrix results. (authoring-run/acefb857-8e57-4f00-b7f5-ed9224944d88 - 048b2cd25cc59087bcb2551fce03a39eef023340)
-
-- 2026-11-04 10:07: Consolidate Full Integration policy and bound the cutover proof routes. (authoring-run/79147f32-199a-48ad-9b7e-fbdf94bf9d60 - 2628dba73edd44e4980711129e48fb7842828019)
-
-- 2026-11-03 01:07: Bind staging tests to release source. (authoring-run/c1bf6b1d-bea1-4de7-b3af-4a2ea197ba06 - d2fc28e1d6d70292e462956cedef0dae9281c48c)
-
-- 2026-11-02 23:56: Trace staging authentication. (authoring-run/5817dfd2-487d-44bc-a2f7-2d57659ea0fc - db2cc11c4fd767c47394d680ef46bf26e1202fbc)
-
-- 2026-10-29 02:11: Add focused Compose OpenShell selection and sanitized native worker observations. (authoring-run/01a17fae-f253-7d71-af12-d3f259c4faf0 - aa2cfe543b3bba361679e7e1a3028c3327d2c388)
-
-- 2026-10-23 07:40: Preserve upstream CI selection alongside locale-independent timestamp ordering after conflict resolution. (authoring-run/01a10a81-070c-7aa3-97d0-fbce8f285d4d - a6a49a5192fa1c9cc5035801eed7d64b03336491)
 
 [GitHub Actions testing documentation history](github-actions-testing/history.md) preserves the older dated entries.

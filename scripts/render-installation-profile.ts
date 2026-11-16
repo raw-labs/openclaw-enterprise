@@ -1465,7 +1465,7 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
   closed(
     channels,
     "channels",
-    ["runtimeProxyUrl", "directoryProxyUrl", "managedSlackProxy"],
+    ["runtimeProxyUrl", "directoryProxyUrl", "managedSlackProxy", "experimentalEmbeddedChannels"],
     diagnostics,
   );
   closed(codex, "codex", ["managedServiceAccounts", "modelDiscoveryCidrs"], diagnostics);
@@ -1849,6 +1849,23 @@ function buildRendered(
     ["channels", "managedSlackProxy"],
     diagnostics,
   );
+  const experimentalEmbeddedChannels = asBoolean(
+    channels,
+    ["channels", "experimentalEmbeddedChannels"],
+    diagnostics,
+  );
+  const embeddedChannelOptions =
+    channels.experimentalEmbeddedChannels === undefined ? {} : { experimentalEmbeddedChannels };
+  if (experimentalEmbeddedChannels) {
+    if (!managedSlackProxyEnabled && channels.runtimeProxyUrl === undefined) {
+      diagnostics.errors.push(
+        "channels.experimentalEmbeddedChannels requires channels.runtimeProxyUrl or channels.managedSlackProxy.",
+      );
+    }
+    diagnostics.warnings.push(
+      "Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.",
+    );
+  }
   const managedSlackProxyHost = `openclaw-enterprise-slack-proxy.${namespace}.svc`;
   if (profile.name === "openclaw" && Object.keys(codex).length > 0) {
     diagnostics.errors.push("codex inputs are only consumed by the codex profile.");
@@ -2238,6 +2255,7 @@ function buildRendered(
               ? {
                   channels: {
                     proxyUrl: `http://${managedSlackProxyHost}:3128`,
+                    ...embeddedChannelOptions,
                     managedProxy: {
                       hostname: managedSlackProxyHost,
                       namespace,
@@ -2258,6 +2276,7 @@ function buildRendered(
                         validate: channelProxyUrl,
                         description: "an HTTP(S) literal IPv4 endpoint with an explicit port",
                       }),
+                      ...embeddedChannelOptions,
                     },
                   }),
           },

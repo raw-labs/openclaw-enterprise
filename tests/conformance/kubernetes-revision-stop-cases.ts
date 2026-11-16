@@ -488,7 +488,10 @@ export async function checkStopPreservesReplacement(
         async listNamespacedPod() {
           return { items: [] };
         },
-        async readNamespacedService() {
+        async readNamespacedService({ name: requestedName }: { name: string }) {
+          if (requestedName !== name) {
+            throw missing();
+          }
           return read("Service");
         },
         async readNamespacedServiceAccount() {
