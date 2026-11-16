@@ -231,7 +231,7 @@ Account routes enforce the
 [session and recovery controls](../reference/authentication/external-sign-in.md#session-and-recovery-controls):
 State locks actor and target and checks `expectedVersion`. After method/recovery locks,
 `human-authentication.ts:guardAuthority` holds all six IAM tables through commit
-using `0073_account_administration_policy.sql`, awaits the selected IAM Driver through
+using `0077_account_administration_policy.sql`, awaits the selected IAM Driver through
 the route's actor callback, then rechecks the session. `READ COMMITTED` sees grants changed
 during lock waits; `NOWAIT` contention returns retryable `503`. Denials roll back
 before HTTP audit.

@@ -234,7 +234,9 @@ export async function composeProduction(
           : { pluginSourceReader: config.drivers.pluginSourceReader }),
         recordOperations: true,
         ...(config.nativeAdmin?.enabled === true
-          ? { nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)! }
+          ? {
+              nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)!,
+            }
           : {}),
         backends: installation.backend,
         defaultPresets: config.drivers.defaultPresets ?? [],

@@ -1,3 +1,4 @@
+import { nativeAdminOriginResolver } from "../../apps/controller/src/gateway/native-admin-origin.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -502,6 +503,9 @@ export async function createProvisioningFixture<
     const started = createControllerWorker({
       pool: workerPool,
       drivers,
+      ...(options.nativeAdmin
+        ? { nativeAdminOrigin: nativeAdminOriginResolver(nativeAdminSettings.nativeAdmin, origin)! }
+        : {}),
       pollIntervalMs: 15,
       leaseDurationMs: options.leaseDurationMs ?? 30_000,
       maxAttempts: 3,

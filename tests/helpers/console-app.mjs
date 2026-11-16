@@ -239,6 +239,7 @@ export async function startHttpsIngress({
       {
         hostname: "127.0.0.1",
         port: upstreamPort,
+        agent: false,
         method: incoming.method,
         path: incoming.url,
         headers: incoming.headers,

@@ -1,6 +1,6 @@
 # Agent native admin UI
 
-Native browser access is disabled by default. It exposes an Agent Gateway’s chat or administration surface according to the caller’s Agent permission, subject to [Gateway managed mode](#gateway-managed-mode). OCC resolves the Agent host and proxies native HTTP and WebSocket traffic using the human’s OCE session.
+Native browser access is disabled by default. OCC proxies Agent HTTP/WebSockets using the human’s OCE session, Agent permissions and [Gateway managed mode](#gateway-managed-mode).
 
 ## Host-only session exchange
 
@@ -15,11 +15,9 @@ SameSite=Strict host-only cookie, expiring with its parent session (at most eigh
 hours). HTTP, WebSocket admission and renewal recheck the session, Principal,
 Agent, Namespace, revision and authorization. Neither cookie reaches the Gateway.
 
-Repeating **Open Agent UI** reuses a valid handle with the same authority and
-expiry, preserving WebSockets. Otherwise, redemption issues a new handle.
-A version-change refusal on an [eligible HTML navigation](#authorization-and-availability)
-shows HTTP 403 **Agent version changed** with a Console return link. It never
-redirects or transfers access.
+Repeated launches reuse handles only with unchanged authority and expiry,
+preserving WebSockets. Version-change refusals show eligible HTML navigations
+HTTP 403 **Agent version changed** with a Console link; no access transfers.
 
 ## Who can open it
 
@@ -67,44 +65,38 @@ Browser preparation does not change the creator's Agent permissions.
 - Private gateway routing (enabled by default). [Prepare its prerequisites](../guides/deploy/workspace-routing.md#requirements) and [Envoy routing](gateway-routing.md) before installation. Helm rejects native admin when routing is disabled; the API needs each Agent's private route.
 - `OCC_AUTH_BASE_URL` set to the public OCC origin that serves the console, for example `https://console.oce.example.com`.
 - The Agent must be running with a selected version owned by the selected Compute Driver: both Driver ID and implementation must match the version. The [mode-specific endpoint](#agent-host-identity) must map from private `wss:` to private `https:`.
-- The native Agent configuration must keep the trusted-proxy `occ-workspace-files` identity with `operator.admin`, enable native `controlUi`, allow the derived Agent origin, and enable trusted-proxy device auto-approval. The machine identity grant supplies admin authority; device auto-approval can stay limited to read/write. The support check rejects token auth, disabled device auth, and host-header origin fallback.
-- Chat additionally requires `gateway.auth.trustedProxy.requiredHeaders` to include `x-openclaw-scopes` in the saved Configuration and a runtime that enforces the [chat authority ceiling](#native-authority-and-drift). Preserve other required headers when adding it.
+- Native policy must retain trusted-proxy `occ-workspace-files` with `operator.admin`, enabled `controlUi`, the Agent origin and device auto-approval. Token auth, disabled device auth and host-header fallback are unsupported; device scopes may remain read/write.
+- Chat additionally requires `x-openclaw-scopes` in `gateway.auth.trustedProxy.requiredHeaders` and runtime enforcement of the [chat authority ceiling](#native-authority-and-drift). Preserve other required headers.
 
-Local development uses the existing loopback HTTPS proxy for Console sessions in
-Compose and Kubernetes-only profiles. Compose with Kubernetes Compute and
-OpenShell also enables native Agent routing. The first-Agent helper’s
-`--control-ui` option supplies the Agent’s native configuration.
+Local profiles use the loopback HTTPS proxy. Compose/Kubernetes Compute and
+OpenShell also route native Agent hosts; `first-agent --control-ui` supplies
+compatible policy.
 
 ## First-deployment configuration
 
 With Installation access and private Kubernetes routing enabled, OCC prepares
-native administration when `gateway.controlUi.enabled` is `true`. Both Standard
-Presets enable it. At deployment, Kubernetes Compute adds its trusted-proxy
-identity, administrator device approval, exact Agent `allowedOrigins` entry and
-`gateway.publicOrigin`. OCC derives origins from Installation, Namespace and
-Agent IDs, preserving public scheme and port. Guided provisioning uses the
-same admission path after Agent allocation.
+native administration when `gateway.controlUi.enabled` is true; both Standard
+Presets enable it. After Agent allocation, Compute adds trusted-proxy identity,
+administrator device approval, exact `allowedOrigins` and `gateway.publicOrigin`,
+preserving the public scheme and port.
 
-The immutable Agent revision receives this policy. Reusable Configuration
-values/generations and historical revisions stay unchanged. Agents sharing a
-Configuration receive separate origins; redeployment does not accumulate sibling
-origins. Existing Agents adopt it on their next explicit deployment, without an
-automatic rollout.
+Only the immutable revision changes. Reusable Configurations, generations and
+history remain unchanged. Shared Configurations receive separate Agent origins;
+redeployment never accumulates sibling origins. Existing Agents adopt this on
+their next explicit deployment, without automatic rollout.
 
-Disabled or omitted UI, disabled device approval or disabled Installation access
-leaves policy unprepared. Unsafe device-auth or host-header fallback settings do
-not enable managed access. Conflicting authentication, approval scopes,
-`publicOrigin`, wildcard origins or another origin inside the Agent domain
-refuses deployment with a setting-specific message. This includes the Console
-origin when its hostname is under the Agent suffix: the browser opens the native
-UI at the Agent origin. Omit managed origins from reusable Configurations.
+Disabled UI, device approval or Installation access leaves policy unprepared.
+Unsafe device-auth and host-header fallback cannot enable access. Conflicting
+authentication, approval scopes, publicOrigin, wildcard origins or any other
+origin inside the Agent domain refuses deployment. This includes a Console host
+under the Agent suffix: omit managed origins from reusable Configurations.
 Compatible SecretRefs, loopback policy, other exact origins, model, Harness,
-plugin settings and Secret bindings are preserved. Drivers without the hook
-retain existing availability requirements.
+plugin settings and Secret bindings survive. Drivers without this hook retain
+existing availability requirements.
 
-This prepares full native administrator authority, including its supported
-terminal. It adds no OCE grants, changes no native tool restrictions and does not
-support external-sign-in profiles.
+Preparation grants native administrator authority, including its terminal,
+without adding OCE grants or changing native tool restrictions. External-sign-in
+profiles remain unsupported.
 
 ## Authorization and availability
 
@@ -114,7 +106,7 @@ this boundary before returning any feature status, including `disabled`.
 Successful access selects `mode: "chat"` or `mode: "admin"`; unsupported narrow
 runtime authority fails closed instead of granting administration.
 
-The response reports:
+Response statuses:
 
 | Status        | Meaning                                                                                                                                                                                                                                                             |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -124,23 +116,18 @@ The response reports:
 | `unavailable` | No version is serving yet: the Agent has no selected version, or a newer version is replacing it.                                                                                                                                                                   |
 | `available`   | The caller may open the returned `url` for the selected version.                                                                                                                                                                                                    |
 
-A stopped Agent without a selected version returns only `status: "stopped"`, including before first deployment and after completed stop reconciliation. Otherwise, stopped results include target fields. A desired-running Agent without a selected version returns `unavailable` in the success envelope. Dependency outages, including IAM, return `503 DEPENDENCY_UNAVAILABLE`. Malformed requests, IAM denials and missing sessions use the protected-route error envelope.
+Stopped Agents without selected versions return only `status: "stopped"`; other stopped results include target fields. Desired-running Agents awaiting selection return `unavailable`. Dependency outages return `503 DEPENDENCY_UNAVAILABLE`; malformed requests, denials and missing sessions use protected-route errors.
 
-Changing the selected Compute Driver does not migrate existing versions. After
-lifecycle and native-configuration checks, OCC compares the selected Driver's ID
-and implementation with the selected version's recorded owner. A mismatch returns
-`503 DEPENDENCY_UNAVAILABLE` from the availability API before endpoint resolution,
-private gateway-key lookup or transport. Agent-host HTTP retains its existing
-`403` refusal. WebSocket admission destroys the client socket without an HTTP
-response, before gateway-key lookup or connection; a mismatch during a WebSocket
-lease closes the connection through the existing failed-lease path.
-Earlier stopped, replacing and unsupported-configuration outcomes
-keep their precedence.
+Changing Compute selection does not migrate versions. After lifecycle and
+configuration checks, both Driver ID and implementation must match the version.
+A mismatch returns API `503 DEPENDENCY_UNAVAILABLE`, HTTP `403`, or closes
+an upgrading WebSocket before gateway-key lookup or transport. Lease mismatch
+closes existing connections. Earlier stopped, replacing and unsupported results
+keep precedence.
 
-The mismatch is not transient, so refreshing does not clear it. Each API process
-logs one `native_admin.compute_owner_mismatch` warning per version and selected
-Driver, naming both Driver IDs and implementations. To restore access, select the
-version's Compute Driver again, with the same ID and implementation.
+Refreshing cannot repair ownership. Each API process logs one
+`native_admin.compute_owner_mismatch` warning per version and selected Driver.
+Restore the recorded Driver ID and implementation.
 
 Without a valid session, `/` or `/chat/main[/<session>]` navigations can return to the Console. Session segments accept letters, digits, hyphens and underscores; trailing slashes are allowed. Only the opaque host key survives; paths and queries are dropped. Responses use `Cache-Control: no-store` and `Referrer-Policy: no-referrer`, without checking Agent existence.
 

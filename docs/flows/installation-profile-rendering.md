@@ -8,12 +8,10 @@ last_updated_session: authoring-run/75fd678f-12c9-4f7c-adde-d32a16f8c0cf
 
 ## Overview
 
-An operator passes a profile, JSON inputs, and output directory to
-`scripts/render-installation-profile.ts`. The renderer validates inputs, resolves omitted
-hosted Codex destinations, and writes paired Helm values, Installation YAML, and
-preflight. This flow ends at those files. Operators still prepare the cluster
-and Secrets, apply Helm, and configure hosted/runtime tokens, optional ChatGPT
-service accounts, the repository registry, and Slack consumers.
+`scripts/render-installation-profile.ts` validates a profile and JSON inputs,
+resolves omitted hosted Codex destinations, and writes paired Helm values,
+Installation YAML and preflight. Operators separately prepare the cluster,
+Secrets, tokens, repository registry and channel consumers, then apply Helm.
 
 ## Entry Points
 
@@ -23,7 +21,7 @@ service accounts, the repository registry, and Slack consumers.
   `scripts/render-installation-profile.ts:resolveHostedDiscoveryCidrs`.
 - Assumptions: The caller runs from the repository root with a trusted bundled
   or explicitly selected profile and site inputs without plaintext credentials.
-  Native admin needs installed dependencies for the public suffix check.
+  Native admin needs dependencies for public-suffix validation.
 
 ## Flow
 
@@ -58,12 +56,10 @@ graph TD
 
 `scripts/render-installation-profile.ts:parseArgs`
 
-Direct Node execution runs the CLI. Importing the module exposes the renderer
-and its refusal type without running the command.
+Node executes the CLI; imports expose the renderer and refusal type.
 
 `parseArgs` accepts `--profile`, `--input`, `--out-dir`, and optional `--profile-file`; other flags fail
-before output. Profiles are `openclaw` or `codex`, with no `default`. JSON supplies
-the release name and namespace for Helm and Installation settings.
+before output. Profiles are `openclaw` or `codex`, with no `default`. JSON supplies the Helm release and namespace.
 
 Before cleanup, the renderer compares the input and selected profile file identities with each of its
 three output files. It refuses a shared file, including directory aliases,

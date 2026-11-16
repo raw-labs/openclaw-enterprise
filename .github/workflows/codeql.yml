@@ -1,6 +1,9 @@
 name: CodeQL
 
 on:
+  push:
+    branches:
+      - codex/raw-integration
   public:
   pull_request:
   schedule:

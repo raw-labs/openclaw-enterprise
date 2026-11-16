@@ -115,10 +115,11 @@ admin independently of device scopes. Existing helper-owned names keep this sele
 
 API and worker derive trusted Installation origins through `nativeAdminTarget`.
 Helm supplies matching inputs. For the Compose/OpenShell profile,
-`compose.native-admin.yaml:services` supplies the same enablement, Agent domain
+`compose.kubernetes.yaml:services.worker-kubernetes` supplies the same enablement, Agent domain
 and public HTTPS origin to the controller and Kubernetes worker. Cookie settings
 remain API-only. Deployment and provisioning pass the allocated
-Agent and frozen Sandbox copy to Compute through `agentRuntimeConfiguration`.
+Agent and frozen Sandbox copy through `agentRuntimeConfiguration`. OCC adds
+canonical Gateway security defaults before Compute prepares the deployment copy.
 Agent save remains unchanged. Kubernetes prepares gateway identity, device
 approval and exact origins; conflicts refuse admission and opt-outs stay disabled.
 OCC then applies logging and validation, freezing the result in an Agent revision.
@@ -141,9 +142,7 @@ Browsing a historical version does not change the selected destination.
 Stopped/unsupported states offer **Open draft**. Unavailable states offer
 **View deployment** for readable versions, otherwise **Refresh access**.
 
-OCE owns durable configuration. Runtime notices come from
-`apps/controller/src/drivers/compute/runtime-startup.ts:gatewayManagedModeEnvironment`;
-see [Gateway managed mode](../reference/agents/gateway-managed-mode.md).
+See [Gateway managed mode](../reference/agents/gateway-managed-mode.md) for runtime notices and durable configuration.
 
 ### 2. OCC protects the availability route
 
@@ -176,7 +175,7 @@ Compute `id` and `implementation` must match `revision.compute`; changing select
 `apps/controller/src/gateway/native-admin.ts:nativeAdminTarget`
 `apps/controller/src/gateway/native-admin-host.ts:deriveNativeAdminHost`
 
-Overlong suffixes refuse native targets after authorization; opt-in fails before persistence.
+Overlong suffixes fail after authorization, or before opt-in persistence.
 
 `deriveNativeAdminHost` hashes scoped Agent identity under the configured domain. `nativeAdminTarget` returns `/`.
 
@@ -186,11 +185,10 @@ Overlong suffixes refuse native targets after authorization; opt-in fails before
 
 `apps/controller/src/auth/index.ts:createControllerAuth`
 
-`deriveSharedCookieDomain` computes the longest common DNS-label suffix of the
-HTTPS Console origin and Agent domain. It rejects IP addresses, missing hosts,
-and public suffixes. In shared-cookie mode this applies even when native
-access is disabled and uses `__Secure-openclaw_occ_shared.session_token`.
-Sign-out revokes the current session and expires its shared cookie. There is no obsolete-cookie cleanup. See the [session contract](../reference/authentication.md#native-admin-shared-sessions).
+`deriveSharedCookieDomain` validates the common HTTPS DNS suffix, excluding IPs
+and public suffixes. Shared-cookie mode uses `__Secure-openclaw_occ_shared.session_token`
+even when native access is disabled. Sign-out revokes the session and expires
+its cookie; see [session details](../reference/authentication.md#native-admin-shared-sessions).
 
 ### 5a. Host-only exchange binds access to the parent session
 
@@ -199,21 +197,13 @@ Sign-out revokes the current session and expires its shared cookie. There is no 
 `apps/controller/src/http/native-browser-bridge.ts:landingPage`
 `packages/occ/src/state/native-browser-access.ts:PostgresNativeBrowserAccess`
 
-`createControllerAuth` and `createNativeAdminAccess` restrict host-only exchange to guarded OIDC without Google.
-
-Host-only launch requires the Console session, `x-occ-session-key`, Console
-Origin, and exact-Agent `operate` or `administer`. An intent binds that session, Principal,
-Agent, Namespace, revision and origin. The landing page sets its challenge
-cookie; the opener confirms it. Redemption checks challenge and exchange, consumes
-and audits the intent, and sets the access cookie. It reuses an unexpired handle
-only when Installation, parent session, Principal, Agent, Namespace, revision,
-origin and parent expiry match; otherwise it replaces it. Reuse preserves existing
-WebSockets without allocating another handle. Stored secrets are hashed; expired,
-replayed or mismatched exchanges fail closed.
-
-Human authentication owns parent-session currentness. Admission and renewal
-recheck that session, exact-Agent access and revision. The exchange creates no
-account or grant. See [session limits](../reference/agent-native-admin.md#host-only-session-exchange).
+Host-only exchange requires guarded OIDC and the Console session, session key,
+Origin and exact-Agent permission. Launch, challenge confirmation and one-use
+redemption bind the parent session, Principal, Agent, Namespace, revision and
+origin. Secrets are hashed; mismatches and replay fail closed. Reuse preserves
+WebSockets only with unchanged authority and expiry. Admission and renewal
+recheck parent-session currentness and authorization. No account or grant is
+created; see the [session contract](../reference/agent-native-admin.md#host-only-session-exchange).
 
 ### 6. OCC intercepts native-host HTTP requests
 
@@ -345,7 +335,7 @@ admin Configuration remains Pod-local.
 
 ## Related docs
 
-- [Proposed Compute preparation contract](../../specs/rfcs/0024-native-admin-deployment-preparation.md)
+- [Proposed Compute preparation contract](../../specs/rfcs/0042-native-admin-deployment-preparation.md)
 - [Agent native admin UI](../reference/agent-native-admin.md)
 - [Platform console](../reference/console.md#open-the-native-admin-ui)
 - [Gateway routing with Envoy](../reference/gateway-routing.md#native-admin-ui-routing)
@@ -381,10 +371,4 @@ admin Configuration remains Pod-local.
 - 2026-11-09 14:07: Consolidate browser authorization and document current-cookie logout. (authoring-run/f217fd51-af6b-4d6a-a888-b2be4880aa91 - e39be9803)
 
 - 2026-11-09 12:12: Added OIDC sessions and scoped chat. (codex/oidc-agent-chat - f1ebda062)
-- 2026-11-06 07:57: Integrate host-only exchange, repeat launches and current session ownership in accompanying changes. (authoring-run/43cf1307-6d25-4d9d-951e-55fe09a514b8 - a4c2191e73337d73ee27e7fe2c9a51cef40d99f5)
-
-- 2026-11-03 12:55: Sign-in link for unactivated page loads. (fix/native-admin-signed-out-html-fallback)
-
-- 2026-11-02 09:55: Shorten provisioning prose and link shared status definitions after rebasing. (authoring-run/275c0d0a-d040-47d3-9e52-47ff86b87ab9 - 393b1585e4b10a3232abf10c60b766d8e55d85ce)
-
-[Agent native admin documentation history](agent-native-admin/history.md) preserves the older dated entries.
+  [Agent native admin documentation history](agent-native-admin/history.md) preserves the older dated entries.

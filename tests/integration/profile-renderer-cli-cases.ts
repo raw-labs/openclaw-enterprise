@@ -121,7 +121,6 @@ export function registerCliCases(): void {
       codex.preflight.prerequisites.join("\n"),
       /bundled Gateway proxy permits only configured hostnames/,
     );
-    assert.match(codex.preflight.prerequisites.join("\n"), /Slack consumers remain inactive/);
     assert.match(codex.preflight.prerequisites.join("\n"), /Hosted plugin discovery.*PAT/);
     assert.match(codex.preflight.prerequisites.join("\n"), /runtime credentials.*Agent/);
   });

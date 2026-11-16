@@ -1,13 +1,13 @@
 ---
-rfc: ../rfcs/0040-temporary-embedded-channel-trial.md
+rfc: ../rfcs/0041-temporary-embedded-channel-trial.md
 ---
 
 # Implementation plan: Trial native channels in embedded OpenClaw
 
-- **ID:** RFC-0040
+- **ID:** RFC-0041
 - **Delivery status:** In progress
 - **Owner:** miguelbranco80
-- **Authority:** [Temporary embedded channel proposal](../rfcs/0040-temporary-embedded-channel-trial.md)
+- **Authority:** [Temporary embedded channel proposal](../rfcs/0041-temporary-embedded-channel-trial.md)
 - **Source baseline:** `d7595b9ce392c0558cf84c268bc31f093aba36bf`
 
 ## Outcome and scope

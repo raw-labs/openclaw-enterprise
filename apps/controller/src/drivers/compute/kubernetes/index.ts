@@ -661,6 +661,7 @@ interface GatewayConfigurationSnapshot {
   readonly revision: number;
   readonly revisionId: string;
   readonly gatewayManagedMode: boolean;
+  readonly teamsWebhook: boolean;
   readonly usesGatewayPasswordEnv: boolean;
   readonly usesWritableNativeAdminConfig: boolean;
   readonly annotations: Readonly<Record<string, string>>;
@@ -6712,7 +6713,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
         await this.admittedCredentialSourceType(revision),
       ),
     );
-    const channels = this.enabledChannels(admittedRevision);
+    this.enabledChannels(admittedRevision);
     await this.prepareRevisionStage("gateway_routing", () =>
       this.verifyGatewayRoutingConfiguration(admittedRevision),
     );
@@ -7200,7 +7201,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
               embedded,
               embedded ? revision.servicePrincipalId : undefined,
               embedded ? deliveredHarnessAuth : undefined,
-              channels,
               gatewaySecretEnvironment,
               pluginRuntime,
               [],
@@ -7365,7 +7365,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
         false,
         undefined,
         deliveredHarnessAuth,
-        [],
         [],
         pluginRuntime,
         [],
@@ -7994,7 +7993,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
       revision.secretBindings,
       await this.admittedCredentialSourceType(revision),
     );
-    const channels = this.enabledChannels(admittedRevision);
+    this.enabledChannels(admittedRevision);
     const { name: namespace } = await this.resolveNamespace(revision.namespaceId);
     await this.verifyScratchVolume(revision, namespace);
     await this.revokeUnavailablePublicGithubRead(revision, namespace);
@@ -8094,7 +8093,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
               true,
               revision.servicePrincipalId,
               deliveredHarnessAuth,
-              channels,
               gatewaySecretEnvironment,
               pluginRuntime,
               [],
@@ -8208,7 +8206,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
         false,
         undefined,
         activatedHarnessAuth,
-        [],
         [],
         pluginRuntime,
         [],
@@ -8362,7 +8359,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
         false,
         undefined,
         undefined,
-        channels,
         gatewaySecretEnvironment,
         pluginRuntime,
         [],
@@ -13581,6 +13577,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       revisionId: revision.id,
       gatewayManagedMode: revision.gatewayManagedMode,
       ...(harnessNamespace === undefined ? {} : { harnessNamespace }),
+      teamsWebhook: this.enabledChannels(revision).some(({ webhook }) => webhook),
       usesGatewayPasswordEnv,
       usesWritableNativeAdminConfig: this.usesWritableNativeAdminConfig(nativeConfiguration),
       annotations: {
@@ -16934,7 +16931,6 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     embedded = false,
     workloadServicePrincipalId?: string,
     harnessAuth?: PreparedHarnessAuth,
-    enabledChannels: readonly ChannelRequirements[] = [],
     secretEnvironment: readonly SecretEnvironmentProjection[] = [],
     pluginRuntime?: PluginRuntimeSnapshot,
     pluginWarnings: readonly PluginDeploymentWarning[] = [],
@@ -16970,7 +16966,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             ...configuration.annotations,
             [AGENT_REVISION_ANNOTATION]: String(configuration.revision),
             [AGENT_REVISION_ID_ANNOTATION]: configuration.revisionId,
-            "openclaw.dev/msteams-webhook": String(enabledChannels.some(({ webhook }) => webhook)),
+            "openclaw.dev/msteams-webhook": String(configuration.teamsWebhook),
           }
         : {};
     const revisionLabels =

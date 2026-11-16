@@ -1661,6 +1661,7 @@ esac`,
     `
 case "$2" in
   inspect) cat "$SMOKE_FIXTURE/inspect.json" ;;
+  load) ;;
   save) cat "$SMOKE_FIXTURE/export.tar" ;;
   rm) ;;
   *) exit 92 ;;

@@ -589,8 +589,13 @@
                     "page": "guides/integrations/slack",
                     "label": "Slack"
                   },
-                  { "page": "guides/integrations/teams", "label": "Microsoft Teams" },
-                  { "page": "guides/integrations/embedded-channel-trial", "label": "Embedded Trial"
+                  {
+                    "page": "guides/integrations/teams",
+                    "label": "Microsoft Teams"
+                  },
+                  {
+                    "page": "guides/integrations/embedded-channel-trial",
+                    "label": "Embedded Trial"
                   }
                 ]
               }
@@ -1132,6 +1137,10 @@
                   {
                     "page": "contributing/runtime-flows",
                     "label": "Runtime Flows"
+                  },
+                  {
+                    "page": "contributing/downstream-integration",
+                    "label": "Downstream Integration"
                   }
                 ]
               },

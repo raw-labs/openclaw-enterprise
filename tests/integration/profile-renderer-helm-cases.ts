@@ -102,15 +102,12 @@ export function registerHelmCases(): void {
     { skip: helmSkip },
     async (t) => {
       for (const profile of ["openclaw", "codex"]) {
-        for (const proxy of [
-          { managedSlackProxy: true },
-          { runtimeProxyUrl: "http://192.0.2.10:3128" },
-        ]) {
+        for (const proxy of [{ bundled: true }, { url: "http://192.0.2.10:3128" }]) {
           const checksums: string[] = [];
           for (const enabled of [undefined, false, true]) {
             const input = profile === "codex" ? codexInput() : baseInput();
+            input.proxy = proxy;
             input.channels = {
-              ...proxy,
               ...(enabled === undefined ? {} : { experimentalEmbeddedChannels: enabled }),
             };
             const output = await render(profile, input);
@@ -122,7 +119,7 @@ export function registerHelmCases(): void {
               "configuration",
             );
             assert.equal(
-              propertyAt(compute, "runtime", "channels", "experimentalEmbeddedChannels"),
+              propertyAt(compute, "runtime", "proxy", "experimentalEmbeddedChannels"),
               enabled,
             );
             assert.equal(
@@ -133,9 +130,9 @@ export function registerHelmCases(): void {
             );
             requireConfiguration(KubernetesComputeDriver, compute);
             assert.equal(
-              propertyAt(compute, "runtime", "channels", "proxyUrl"),
-              ("runtimeProxyUrl" in proxy ? proxy.runtimeProxyUrl : undefined) ??
-                "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
+              propertyAt(compute, "runtime", "proxy", "proxyUrl"),
+              ("url" in proxy ? proxy.url : undefined) ??
+                "http://openclaw-enterprise-gateway-proxy.openclaw-system.svc:3128",
             );
 
             // The option changes trusted startup configuration, so both consumers
@@ -173,20 +170,24 @@ export function registerHelmCases(): void {
         { ...input, channels: { ...input.channels, experimentalEmbeddedChannel: true } },
         /channels\.experimentalEmbeddedChannel is not supported/,
       );
-      for (const proxy of [
-        {},
-        { managedSlackProxy: false },
-        { directoryProxyUrl: "http://192.0.2.10:3128" },
-      ]) {
+      for (const proxy of [{}, { bundled: false }]) {
         await assertPreflightFailure(
           profile,
-          { ...input, channels: { ...proxy, experimentalEmbeddedChannels: true } },
-          /channels\.experimentalEmbeddedChannels requires channels\.runtimeProxyUrl or channels\.managedSlackProxy/,
+          {
+            ...input,
+            proxy,
+            channels: {
+              directoryProxyUrl: "http://192.0.2.10:3128",
+              experimentalEmbeddedChannels: true,
+            },
+          },
+          /channels\.experimentalEmbeddedChannels requires proxy\.url or proxy\.bundled/,
         );
       }
       // Explicit opt-out needs no runtime proxy and must not create channel runtime wiring.
       const disabled = await render(profile, {
         ...input,
+        proxy: {},
         channels: { experimentalEmbeddedChannels: false },
       });
       assert.equal(
@@ -196,7 +197,8 @@ export function registerHelmCases(): void {
           "compute",
           "configuration",
           "runtime",
-          "channels",
+          "proxy",
+          "proxyUrl",
         ),
         undefined,
       );

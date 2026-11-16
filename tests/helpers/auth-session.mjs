@@ -201,7 +201,6 @@ export async function signInToControllerApp(app, credentials, { origin } = {}) {
           },
     email: credentials.email,
     password: credentials.password,
-    origin,
   });
 }
 

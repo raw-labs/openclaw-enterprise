@@ -1,3 +1,4 @@
+import { fetchLoopback } from "./console-fixture-transport.ts";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { TestContext } from "node:test";
 import type { ChannelRequest } from "../../apps/controller/src/drivers/channel/transport.ts";
@@ -112,7 +113,15 @@ export async function teamsDirectoryProvider(t: TestContext) {
       ) {
         throw new Error("Unexpected external host");
       }
-      return fetch(new URL(target.pathname + target.search, origin), options);
+      return fetchLoopback(new URL(target.pathname + target.search, origin).href, {
+        ...options,
+        ...(options.body === undefined
+          ? {}
+          : {
+              body: options.body.toString(),
+              headers: { ...options.headers, "content-type": "application/x-www-form-urlencoded" },
+            }),
+      });
     },
   };
 }

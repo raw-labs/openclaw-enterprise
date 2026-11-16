@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import https from "node:https";
+import dns from "node:dns";
+import net from "node:net";
+import test from "node:test";
+import { promisify } from "node:util";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
@@ -45,6 +49,31 @@ if (role === "origin") {
     )
     .listen(443, "0.0.0.0", () => console.log("origin ready"));
 } else if (role === "proxy") {
+  // Simulate public DNS while routing the pinned address to the disposable TLS origin.
+  const origin = await promisify(dns.lookup)("allowed.proxy.test", { family: 4 });
+  const publicAddress = "93.184.216.34";
+  const originalLookup = dns.lookup;
+  test.mock.method(
+    dns,
+    "lookup",
+    (
+      hostname: string,
+      options: dns.LookupAllOptions,
+      callback: (error: Error | null, addresses: dns.LookupAddress[]) => void,
+    ) => {
+      if (net.isIP(hostname)) {
+        return originalLookup(hostname, options, callback);
+      }
+      assert.ok(["allowed.proxy.test", "denied.proxy.test"].includes(hostname));
+      assert.deepEqual(options, { family: 4, all: true, verbatim: true });
+      queueMicrotask(() => callback(null, [{ address: publicAddress, family: 4 }]));
+    },
+  );
+  const originalConnect = net.connect;
+  test.mock.method(net, "connect", (options: net.NetConnectOpts & { host: string }) => {
+    assert.deepEqual(options, { host: publicAddress, family: 4, port: 443 });
+    return originalConnect({ ...options, host: origin.address });
+  });
   const proxyModulePath = "/proof/gateway-proxy.mjs";
   const { createGatewayProxyServer }: typeof import("../../apps/controller/src/gateway-proxy.ts") =
     await import(proxyModulePath);

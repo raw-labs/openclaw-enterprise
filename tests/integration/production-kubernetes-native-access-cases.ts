@@ -312,7 +312,14 @@ export function registerNativeAdminAndRuntimeLogCases(
         apiEnvironment.filter(({ name }) => name === "OCC_AUTH_COOKIE_DOMAIN"),
         [],
       );
-      assert.ok(!workerEnvironment.some(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")));
+      assert.deepEqual(
+        workerEnvironment.filter(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")),
+        apiEnvironment.filter(({ name }) => name.startsWith("OCC_AGENT_NATIVE_ADMIN_")),
+      );
+      assert.deepEqual(
+        workerEnvironment.filter(({ name }) => name === "OCC_AUTH_BASE_URL"),
+        apiEnvironment.filter(({ name }) => name === "OCC_AUTH_BASE_URL"),
+      );
       assert.ok(!workerEnvironment.some(({ name }) => name === "OCC_AUTH_COOKIE_DOMAIN"));
       assert.deepEqual(
         apiEnvironment.filter(({ name }) => name === "OCC_GATEWAY_API_KEY_PATH"),

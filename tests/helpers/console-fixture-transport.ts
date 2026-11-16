@@ -16,6 +16,8 @@ export async function fetchLoopback(url: string, init: RequestInit): Promise<Res
       url,
       {
         method: init.method,
+        // This fixture must dial its loopback listener, never the host HTTP proxy.
+        agent: false,
         headers: Object.fromEntries(headers),
         signal: init.signal ?? undefined,
       },

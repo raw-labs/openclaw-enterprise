@@ -45,7 +45,6 @@ for (const [address, prefix] of [
   blockedAddresses.addSubnet(address, prefix, "ipv4");
 }
 
-
 function validateAllowedHosts(hosts: unknown): asserts hosts is string[] {
   if (
     !Array.isArray(hosts) ||

@@ -67,12 +67,12 @@ branch policy. No-push preparation lacks package write permission and
 protected-environment credentials.
 
 `.github/workflows/container-publish.yml:jobs.prepare` calls the reusable
-`.github/workflows/container-check.yml:jobs.prepare` image/architecture matrix. Controller and runtime each build on native AMD64 and ARM64 Linux runners.
+`.github/workflows/container-check.yml:jobs.prepare` image/architecture matrix. Both images build on native AMD64 and ARM64 Linux.
 See [shared CI settings](../release/configuration.md#build-settings) for native runner defaults and overrides.
 
 ### Runtime source verification
 
-To verify runtime changes locally, first
+For local verification,
 [resolve the build arguments](../../deploy/runtime/README.md#resolve-openclaw-build-arguments), then run:
 
 ```bash
@@ -80,9 +80,8 @@ docker build -f deploy/runtime/Dockerfile \
   "${openclaw_build_args[@]}" --target openclaw-bridge-tests .
 ```
 
-Before assembly, `openclaw-bridge-tests` runs bridge suites, CUA tests, and
-typechecks with the same checkout, arguments, base, and platform. Failure blocks
-smoke and upload. Local assembly can run independently.
+`openclaw-bridge-tests` runs bridge suites, CUA tests, and
+typechecks with the same checkout, arguments, base, and platform. Failure blocks smoke and upload; local assembly is independent.
 
 The `resources` step checks architecture, CPU, memory, and cgroup-v2 ancestor
 limits. Both stages use its Node compiler budget. ARM runtime can select eight
@@ -190,7 +189,9 @@ and referenced OCI blobs, rejecting preexisting `platform.json`.
 `built-runtime-*` cannot qualify for publication. Controllers retain one-job build/smoke.
 
 `scripts/ci/container-release/native-smoke.ts:smoke` requires the selected native architecture.
-It binds the OCI export to the build digest, loads it with Skopeo, checks the
+It binds the OCI export to the build digest. Skopeo converts it to a temporary
+Docker archive; the Docker CLI loads it after config-digest verification. The
+archive is removed immediately. Smoke checks the
 loaded config and architecture, and runs startup tests by immutable image ID
 with native deadlines. For containerd, `scripts/upgrade-image-identity.py` exports
 and hash-verifies the manifest/config against the original OCI config, binding

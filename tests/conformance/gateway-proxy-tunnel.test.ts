@@ -165,16 +165,28 @@ function heldClientTunnel(
   const connect = net.connect;
   // DNS supplies a public destination. Only its socket transport is redirected locally;
   // production still has to validate the answer and connect to that numeric address.
-  t.mock.method(dns, "lookup", (_host: string, _options: dns.LookupAllOptions, callback: (error: Error | null, addresses: dns.LookupAddress[]) => void) => {
-    callback(null, [{ address: "93.184.216.34", family: 4 }]);
-  });
+  t.mock.method(
+    dns,
+    "lookup",
+    (
+      _host: string,
+      _options: dns.LookupAllOptions,
+      callback: (error: Error | null, addresses: dns.LookupAddress[]) => void,
+    ) => {
+      callback(null, [{ address: "93.184.216.34", family: 4 }]);
+    },
+  );
   let upstreamSocket!: net.Socket;
-  t.mock.method(net, "connect", (options: net.NetConnectOpts & {host: string; family: number}) => {
-    assert.equal(options.host, "93.184.216.34");
-    assert.equal(options.family, 4);
-    upstreamSocket = connect({ ...options, host: "127.0.0.1", port: upstreamPort });
-    return upstreamSocket;
-  });
+  t.mock.method(
+    net,
+    "connect",
+    (options: net.NetConnectOpts & { host: string; family: number }) => {
+      assert.equal(options.host, "93.184.216.34");
+      assert.equal(options.family, 4);
+      upstreamSocket = connect({ ...options, host: "127.0.0.1", port: upstreamPort });
+      return upstreamSocket;
+    },
+  );
   const chunks: Buffer[] = [];
   const held: ((error?: Error | null) => void)[] = [];
   let finished = false;
@@ -589,9 +601,13 @@ test("a stalled DNS lookup is bounded by the connection deadline", testOptions, 
 
 test("a disconnected client cannot open an upstream when DNS completes", async (t) => {
   let resolved!: (error: Error | null, addresses: dns.LookupAddress[]) => void;
-  t.mock.method(dns, "lookup", (_host: string, _options: dns.LookupAllOptions, callback: typeof resolved) => {
-    resolved = callback;
-  });
+  t.mock.method(
+    dns,
+    "lookup",
+    (_host: string, _options: dns.LookupAllOptions, callback: typeof resolved) => {
+      resolved = callback;
+    },
+  );
   t.mock.method(net, "connect", () => assert.fail("late DNS opened an upstream"));
   const client = new net.Socket();
   const closed = new Promise((resolve) => client.once("close", resolve));
