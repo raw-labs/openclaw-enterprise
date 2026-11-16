@@ -6,6 +6,7 @@ interface SiteOverrides extends InputRecord {
   controlPlane?: InputRecord;
   runtime?: InputRecord;
   channels?: InputRecord;
+  proxy?: InputRecord;
   codex?: InputRecord;
   repository?: InputRecord;
 }
@@ -53,9 +54,8 @@ export function baseInput(overrides: SiteOverrides = {}): SiteInput {
       gatewayNodeSelector: { "oce-role": "control" },
       transportSecretPrefix: "openclaw-agent-transport",
     },
-    channels: {
-      managedSlackProxy: true,
-    },
+    channels: {},
+    proxy: { bundled: true },
     ...overrides,
   };
 }

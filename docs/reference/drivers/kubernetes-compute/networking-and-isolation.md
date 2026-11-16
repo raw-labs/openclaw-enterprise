@@ -51,6 +51,9 @@ the proxy's source range; NetworkPolicy distinguishes the authenticated proxy
 from other Pods in that range. Remove direct API or tenant-workload access to
 the native gateway port in this mode.
 
+Gateway HTTPS routing uses [one bundled or external proxy](gateway-proxy.md),
+independently of channel enablement.
+
 ### Gateway authentication
 
 Compute retains OCC's machine administration and preserves explicit native human
@@ -111,13 +114,13 @@ endpoint, Pod and Service CIDRs, and metadata endpoint fall inside them. A
 dedicated Agent has one authentication-only egress policy, pinned to its latest
 prepared Agent revision ID. Stop leaves it and the Agent's runtime and plugin-status
 policies, selecting no Pod, until the next preparation or Agent deletion.
-Channels require reviewed literal-IP HTTP(S) `runtime.channels.proxyUrl` or Helm
-`runtime.channels.managedProxy`. Dedicated Gateways deny direct provider access.
-[Teams trial](../../../guides/integrations/teams.md) requires
-`gatewayRouting.channels.hostname` and public HTTPS; Compute owns callbacks. Default-off `runtime.channels.experimentalEmbeddedChannels` permits
-the [unsupported embedded trial](../../../guides/integrations/embedded-channel-trial.md).
-
-Guarded downloads require [reviewed-proxy trust](../../../guides/integrations/teams.md#prepare-attachment-downloads); the declaration is Gateway-wide.
+Channels require an approved HTTP(S) proxy in `runtime.proxy`: a literal IP
+endpoint, or the exact
+Helm-managed proxy Service URL paired with `runtime.proxy.managedProxy`.
+Direct public channel-provider access is denied.
+Default-off `runtime.proxy.experimentalEmbeddedChannels` permits the
+[embedded trial](../../../guides/integrations/embedded-channel-trial.md).
+Guarded downloads require reviewed-proxy trust in `runtime.proxy.guardedFetchProxy`.
 
 ## Explicit network profiles
 

@@ -175,7 +175,6 @@ interface KubernetesFixtureMethods {
     embedded?: boolean,
     workloadServicePrincipalId?: string,
     harnessAuth?: PreparedAuth,
-    enabledChannels?: readonly { egress: "https-proxy" }[],
     secretEnvironment?: readonly SecretEnvironmentProjection[],
     pluginRuntime?: { name: string; runtime: PluginRuntimeSpec },
     pluginWarnings?: readonly PluginDeploymentWarning[],

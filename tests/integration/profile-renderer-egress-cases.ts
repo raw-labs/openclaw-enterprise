@@ -24,6 +24,76 @@ import {
 } from "./profile-renderer-fixture.ts";
 
 export function registerEgressCases(): void {
+  test("profile proxy selection shares one endpoint and limits bundled policy inputs", async (t) => {
+    for (const allowedHosts of [["api.example.com", "*.slack.com"], ["*"], []]) {
+      const configured = await render(
+        "openclaw",
+        baseInput({ proxy: { bundled: true, allowedHosts } }),
+      );
+      t.after(() => rmSync(configured.directory, { recursive: true, force: true }));
+      assert.deepEqual(
+        propertyAt(loadYaml(configured.values), "gatewayProxy", "allowedHosts"),
+        allowedHosts,
+      );
+    }
+    await assertPreflightFailure(
+      "openclaw",
+      baseInput({ proxy: { bundled: true, url: "http://192.0.2.10:3128" } }),
+      /mutually exclusive/,
+    );
+    await assertPreflightFailure(
+      "openclaw",
+      baseInput({ proxy: { allowedHosts: ["api.example.com"] } }),
+      /requires proxy.bundled/,
+    );
+  });
+
+  test("directory proxy overrides leave Gateway selection unchanged in both profiles", async (t) => {
+    for (const profile of ["openclaw", "codex"]) {
+      for (const proxy of [{}, { url: "http://192.0.2.10:3128" }, { bundled: true }]) {
+        const input = profile === "codex" ? codexInput({ proxy }) : baseInput({ proxy });
+        const baseline = await render(profile, input);
+        t.after(() => rmSync(baseline.directory, { recursive: true, force: true }));
+        const directoryUrl = "https://192.0.2.20:8443";
+        const overridden = await render(profile, {
+          ...input,
+          channels: { directoryProxyUrl: directoryUrl },
+        });
+        t.after(() => rmSync(overridden.directory, { recursive: true, force: true }));
+        assert.equal(
+          propertyAt(loadYaml(overridden.values), "api", "channelDirectoryProxyUrl"),
+          directoryUrl,
+        );
+        assert.deepEqual(
+          propertyAt(loadYaml(overridden.values), "gatewayProxy"),
+          propertyAt(loadYaml(baseline.values), "gatewayProxy"),
+        );
+        // Directory-only configuration must not create or change Gateway permissions.
+        assert.deepEqual(
+          computeConfiguration(overridden.installation),
+          computeConfiguration(baseline.installation),
+        );
+        assert.equal(
+          propertyAt(loadYaml(baseline.values), "api", "channelDirectoryProxyUrl"),
+          undefined,
+        );
+      }
+    }
+  });
+
+  test("retired channel proxy profile keys identify their replacement", async () => {
+    for (const [key, value, replacement] of [
+      ["runtimeProxyUrl", "http://192.0.2.10:3128", "proxy.url"],
+      ["managedSlackProxy", true, "proxy.bundled"],
+    ] as const) {
+      await assertPreflightFailure(
+        "openclaw",
+        baseInput({ channels: { [key]: value } }),
+        new RegExp(`channels\\.${key} was removed; use ${replacement.replace(".", "\\.")}`),
+      );
+    }
+  });
+
   test("preflight rejects CIDR prefixes with a leading zero", async () => {
     const controlPlane = baseInput().controlPlane;
     await assertPreflightFailure(
@@ -93,34 +163,27 @@ export function registerEgressCases(): void {
     const message = /must be an HTTP\(S\) literal IPv4 endpoint with an explicit port/;
     await assertPreflightFailure(
       "openclaw",
-      baseInput({ channels: { directoryProxyUrl: "http://192.0.2.999:8080" } }),
+      baseInput({ proxy: { url: "http://192.0.2.999:8080" } }),
       message,
     );
     await assertPreflightFailure(
       "openclaw",
-      baseInput({ channels: { runtimeProxyUrl: "http://192.0.2.10:99999" } }),
+      baseInput({ proxy: { url: "http://192.0.2.10:99999" } }),
       message,
     );
     // Compute and the API's Slack directory refuse an unspecified proxy host, which names no proxy.
-    for (const field of ["runtimeProxyUrl", "directoryProxyUrl"]) {
-      await assertPreflightFailure(
-        "openclaw",
-        baseInput({ channels: { [field]: "http://0.0.0.0:3128" } }),
-        new RegExp(
-          `channels\\.${field} must not use host 0\\.0\\.0\\.0, which names no proxy address\\.`,
-        ),
-      );
-    }
+    await assertPreflightFailure(
+      "openclaw",
+      baseInput({ proxy: { url: "http://0.0.0.0:3128" } }),
+      /proxy\.url must not use host 0\.0\.0\.0, which names no proxy address\./,
+    );
     const accepted = await render(
       "openclaw",
       baseInput({
-        channels: {
-          directoryProxyUrl: "http://192.0.2.10:8080",
-          runtimeProxyUrl: "http://192.0.2.10:8080",
-        },
+        proxy: { url: "http://192.0.2.10:8080" },
       }),
     );
-    assert.match(accepted.values, /channelDirectoryProxyUrl: http:\/\/192\.0\.2\.10:8080/);
+    assert.match(accepted.values, /url: http:\/\/192\.0\.2\.10:8080/);
     assert.match(accepted.installation, /proxyUrl: http:\/\/192\.0\.2\.10:8080/);
     requireConfiguration(KubernetesComputeDriver, computeConfiguration(accepted.installation));
   });
@@ -129,16 +192,13 @@ export function registerEgressCases(): void {
     for (const proxyUrl of ["http://192.0.2.10:80", "https://192.0.2.10:443"]) {
       test(`${profile} preserves explicit default channel proxy port in ${proxyUrl}`, async (t) => {
         const input = profile === "codex" ? codexInput() : baseInput();
-        input.channels = { directoryProxyUrl: proxyUrl, runtimeProxyUrl: proxyUrl };
+        input.proxy = { url: proxyUrl };
         const output = await render(profile, input);
         t.after(() => rmSync(output.directory, { recursive: true, force: true }));
         assert.equal(output.preflight.ok, true);
-        assert.equal(
-          propertyAt(loadYaml(output.values), "api", "channelDirectoryProxyUrl"),
-          proxyUrl,
-        );
+        assert.equal(propertyAt(loadYaml(output.values), "gatewayProxy", "url"), proxyUrl);
         const compute = computeConfiguration(output.installation);
-        assert.equal(propertyAt(compute, "runtime", "channels", "proxyUrl"), proxyUrl);
+        assert.equal(propertyAt(compute, "runtime", "proxy", "proxyUrl"), proxyUrl);
         // Installation validation runs even before an Agent enables a channel.
         assert.doesNotThrow(() => requireConfiguration(KubernetesComputeDriver, compute));
       });
@@ -150,7 +210,7 @@ export function registerEgressCases(): void {
     t.after(() => rmSync(output.directory, { recursive: true, force: true }));
     const compute = computeConfiguration(output.installation);
     const runtime = objectAt(compute, "runtime");
-    const managed = structuredClone(objectAt(runtime, "channels"));
+    const managed = structuredClone(objectAt(runtime, "proxy"));
     const managedProxy = objectAt(managed, "managedProxy");
     const hostname = textAt(managedProxy, "hostname");
     assert.equal(managedProxy.port, 3128);
@@ -164,14 +224,14 @@ export function registerEgressCases(): void {
       "http://192.0.2.10:443",
       "https://192.0.2.10:80/",
     ]) {
-      runtime.channels = { proxyUrl };
+      runtime.proxy = { proxyUrl };
       assert.doesNotThrow(() => requireConfiguration(KubernetesComputeDriver, compute), proxyUrl);
     }
     for (const [scheme, port] of [
       ["http", 80],
       ["https", 443],
     ]) {
-      runtime.channels = {
+      runtime.proxy = {
         ...managed,
         proxyUrl: `${scheme}://${hostname}:${port}/`,
         managedProxy: { ...managedProxy, port },
@@ -197,7 +257,7 @@ export function registerEgressCases(): void {
       "ftp://192.0.2.10:80",
       "http://proxy.example.invalid:80",
     ]) {
-      runtime.channels = { proxyUrl };
+      runtime.proxy = { proxyUrl };
       assert.throws(
         () => requireConfiguration(KubernetesComputeDriver, compute),
         SharedConfigurationValidationError,
@@ -216,7 +276,7 @@ export function registerEgressCases(): void {
         port: 80,
       }),
     ]) {
-      runtime.channels = {
+      runtime.proxy = {
         ...managed,
         proxyUrl,
         managedProxy: { ...managedProxy, port: 80 },
@@ -233,7 +293,7 @@ export function registerEgressCases(): void {
     t.after(() => rmSync(output.directory, { recursive: true, force: true }));
     const compute = computeConfiguration(output.installation);
     const runtime = objectAt(compute, "runtime");
-    const managed = structuredClone(objectAt(runtime, "channels"));
+    const managed = structuredClone(objectAt(runtime, "proxy"));
     const hostname = textAt(managed, "managedProxy", "hostname");
 
     for (const proxyUrl of [
@@ -242,7 +302,7 @@ export function registerEgressCases(): void {
       "http://proxy.example.invalid:8080",
       "http://192.0.2.10:8080/path",
     ]) {
-      runtime.channels = { proxyUrl };
+      runtime.proxy = { proxyUrl };
       assert.throws(
         () => requireConfiguration(KubernetesComputeDriver, compute),
         SharedConfigurationValidationError,
@@ -253,7 +313,7 @@ export function registerEgressCases(): void {
       `http://${hostname}:8080`,
       "http://other.openclaw-system.svc:3128",
     ]) {
-      runtime.channels = { ...managed, proxyUrl };
+      runtime.proxy = { ...managed, proxyUrl };
       assert.throws(
         () => requireConfiguration(KubernetesComputeDriver, compute),
         SharedConfigurationValidationError,

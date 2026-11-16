@@ -94,16 +94,16 @@ export function registerCliCases(): void {
     ]);
     assert.match(openclaw.values, /agentNativeAdmin:\n {2}enabled: true/);
     assert.match(openclaw.values, /repositoryCredentials:\n {2}enabled: false/);
-    assert.match(openclaw.values, /slackProxy:\n {2}enabled: true/);
+    assert.match(openclaw.values, /gatewayProxy:\n {2}enabled: true/);
     assert.match(
       openclaw.installation,
-      /channels:\n\s+proxyUrl: http:\/\/openclaw-enterprise-slack-proxy\.openclaw-system\.svc:3128/,
+      /proxy:\n\s+proxyUrl: http:\/\/openclaw-enterprise-gateway-proxy\.openclaw-system\.svc:3128/,
     );
     assert.match(
       openclaw.installation,
-      /managedProxy:\n\s+hostname: openclaw-enterprise-slack-proxy\.openclaw-system\.svc/,
+      /managedProxy:\n\s+hostname: openclaw-enterprise-gateway-proxy\.openclaw-system\.svc/,
     );
-    assert.match(openclaw.installation, /app\.kubernetes\.io\/component: slack-proxy/);
+    assert.match(openclaw.installation, /app\.kubernetes\.io\/component: gateway-proxy/);
 
     const codex = renderCli("codex", codexInput());
     assert.equal(codex.summary.ok, true);
@@ -112,10 +112,14 @@ export function registerCliCases(): void {
       { id: "codex-plugin", configuration: { catalogSource: "hosted" } },
     ]);
     assert.doesNotMatch(codex.installation, /service_account: chatgpt-service-accounts/);
-    assert.match(codex.values, /slackProxy:\n {2}enabled: true/);
+    assert.match(codex.values, /gatewayProxy:\n {2}enabled: true/);
     assert.match(
       codex.installation,
-      /channels:\n\s+proxyUrl: http:\/\/openclaw-enterprise-slack-proxy\.openclaw-system\.svc:3128/,
+      /proxy:\n\s+proxyUrl: http:\/\/openclaw-enterprise-gateway-proxy\.openclaw-system\.svc:3128/,
+    );
+    assert.match(
+      codex.preflight.prerequisites.join("\n"),
+      /bundled Gateway proxy permits only configured hostnames/,
     );
     assert.match(codex.preflight.prerequisites.join("\n"), /Slack consumers remain inactive/);
     assert.match(codex.preflight.prerequisites.join("\n"), /Hosted plugin discovery.*PAT/);

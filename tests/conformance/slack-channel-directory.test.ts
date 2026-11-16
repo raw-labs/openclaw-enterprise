@@ -16,8 +16,8 @@ import { SLACK_ROUTE_NOT_CONFIGURED } from "../helpers/refusal-text.mjs";
 import {
   connectThroughProxy,
   requestThroughProxy,
-  startSlackProxy,
-} from "../helpers/slack-proxy.mjs";
+  startGatewayProxy,
+} from "../helpers/gateway-proxy.ts";
 import { within } from "../helpers/wait-for.ts";
 
 const token = "xoxb-fixture";
@@ -46,23 +46,23 @@ test("Slack directory accepts only literal IP or managed Service proxy endpoints
     () =>
       new SlackChannelDriver(
         globalThis.fetch,
-        "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
-        { managedProxyHosts: ["openclaw-enterprise-slack-proxy.openclaw-system.svc"] },
+        "http://openclaw-enterprise-gateway-proxy.openclaw-system.svc:3128",
+        { managedProxyHosts: ["openclaw-enterprise-gateway-proxy.openclaw-system.svc"] },
       ),
   );
   for (const proxyUrl of [
-    "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128",
-    "http://slack-proxy:3128",
-    "http://slack-proxy.openclaw-system.svc.cluster.local:3128",
+    "http://openclaw-enterprise-gateway-proxy.openclaw-system.svc:3128",
+    "http://gateway-proxy:3128",
+    "http://gateway-proxy.openclaw-system.svc.cluster.local:3128",
     syntheticCredentialUrl({
       protocol: "http",
       username: "user",
       password: "pass",
-      host: "openclaw-enterprise-slack-proxy.openclaw-system.svc",
+      host: "openclaw-enterprise-gateway-proxy.openclaw-system.svc",
       port: 3128,
     }),
-    "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:3128/path",
-    "http://openclaw-enterprise-slack-proxy.openclaw-system.svc:65536",
+    "http://openclaw-enterprise-gateway-proxy.openclaw-system.svc:3128/path",
+    "http://openclaw-enterprise-gateway-proxy.openclaw-system.svc:65536",
   ]) {
     assert.throws(() => new SlackChannelDriver(globalThis.fetch, proxyUrl), /managed Kubernetes/);
   }
@@ -81,9 +81,9 @@ test("bundled Slack proxy process restricts methods and CONNECT targets", async 
     socket.write("fixture-upstream");
   });
   const upstreamPort = await listen(t, upstream);
-  // A fixed proxy port, so the test proves the proxy honours OCC_SLACK_PROXY_PORT.
+  // A fixed proxy port, so the test proves the proxy honours OCC_GATEWAY_PROXY_PORT.
   const proxyOptions = { fixedPort: true, upstreamPort };
-  const { port: proxyPort } = await startSlackProxy(t, proxyOptions);
+  const { port: proxyPort } = await startGatewayProxy(t, proxyOptions);
   assert.ok(typeof proxyPort === "number");
 
   assert.match(
@@ -113,7 +113,7 @@ test("bundled Slack proxy process exits on SIGTERM and closes open tunnels", asy
   });
   const upstreamPort = await listen(t, upstream);
   const proxyOptions = { fixedPort: false, upstreamPort };
-  const { child, port: proxyPort } = await startSlackProxy(t, proxyOptions);
+  const { child, port: proxyPort } = await startGatewayProxy(t, proxyOptions);
   assert.ok(typeof proxyPort === "number");
   t.after(() => child.kill("SIGKILL"));
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>

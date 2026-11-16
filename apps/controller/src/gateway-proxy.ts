@@ -1,7 +1,13 @@
 import { createServer } from "node:http";
 import dns from "node:dns";
 import net from "node:net";
+import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
+
+type ClientSocket = Duplex & { resetAndDestroy(): unknown };
+function isClientSocket(socket: Duplex): socket is ClientSocket {
+  return "resetAndDestroy" in socket && typeof socket.resetAndDestroy === "function";
+}
 
 const DEFAULT_PORT = 3128;
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -9,31 +15,14 @@ const SHUTDOWN_DRAIN_MS = 2_000;
 // How long client output may remain blocked, or a client may take to drain and close its
 // side after the proxy has finished writing to it.
 const CLIENT_DRAIN_TIMEOUT_MS = 10_000;
-const ALLOWED_SUFFIXES = [".slack.com", ".slack-edge.com", ".slack-msgs.com"];
-const ALLOWED_HOSTS = new Set(["slack.com", "slack-edge.com", "slack-msgs.com"]);
-// Public-cloud text messaging only: no broad Microsoft or SharePoint wildcard.
-const TEAMS_HOSTS = new Set([
-  "login.microsoftonline.com",
-  "login.botframework.com",
-  "api.botframework.com",
-  "smba.trafficmanager.net",
-  "graph.microsoft.com",
-]);
-const teamsEnabled = process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED === "true";
-if (
-  process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED !== undefined &&
-  !["true", "false"].includes(process.env.OCC_CHANNEL_PROXY_TEAMS_ENABLED)
-) {
-  throw new Error("OCC_CHANNEL_PROXY_TEAMS_ENABLED must be true or false.");
-}
-const TEAMS_FILE_HOST_SUFFIXES = [
-  ".sharepoint.com",
-  ".sharepoint-df.com",
-  ".1drv.com",
-  ".onedrive.com",
-  ".blob.core.windows.net",
+const DEFAULT_ALLOWED_HOSTS = [
+  "slack.com",
+  "*.slack.com",
+  "slack-edge.com",
+  "*.slack-edge.com",
+  "slack-msgs.com",
+  "*.slack-msgs.com",
 ];
-const teamsFileHosts = readTeamsFileHosts(process.env.OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS);
 // Match the Helm proxy's public IPv4 egress boundary. Validate every DNS answer before
 // opening a socket, then connect to that numeric address so DNS cannot change underneath it.
 const blockedAddresses = new net.BlockList();
@@ -52,56 +41,46 @@ for (const [address, prefix] of [
   ["203.0.113.0", 24],
   ["224.0.0.0", 4],
   ["240.0.0.0", 4],
-]) {
+] as const) {
   blockedAddresses.addSubnet(address, prefix, "ipv4");
 }
 
-function readTeamsFileHosts(value) {
-  if (value === undefined) {
-    return new Set();
-  }
-  let hosts;
-  try {
-    hosts = JSON.parse(value);
-  } catch {
-    throw new Error(
-      "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS must be a JSON list of exact Microsoft storage hostnames.",
-    );
-  }
+
+function validateAllowedHosts(hosts: unknown): asserts hosts is string[] {
   if (
     !Array.isArray(hosts) ||
-    hosts.length > 32 ||
-    (!teamsEnabled && hosts.length > 0) ||
+    hosts.length > 256 ||
     hosts.some(
-      (host) =>
+      (host: unknown) =>
         typeof host !== "string" ||
         host.length > 253 ||
-        !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host) ||
-        !TEAMS_FILE_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix)),
+        (host !== "*" &&
+          !/^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
+            host,
+          )),
     )
   ) {
     throw new Error(
-      "OCC_CHANNEL_PROXY_TEAMS_FILE_HOSTS requires Teams and at most 32 exact lowercase Microsoft storage hostnames.",
+      "Gateway proxy allowedHosts must be at most 256 entries: lowercase DNS names, optionally prefixed with *., or * for all hosts.",
     );
   }
-  return new Set(hosts);
 }
 
-function parsePort(value) {
+function parsePort(value: string | undefined) {
   if (value === undefined || value === "") {
     return DEFAULT_PORT;
   }
   if (!/^[0-9]+$/.test(value)) {
-    throw new Error("OCC_SLACK_PROXY_PORT must be an integer TCP port.");
+    throw new Error("OCC_GATEWAY_PROXY_PORT must be an integer TCP port.");
   }
   const port = Number(value);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new Error("OCC_SLACK_PROXY_PORT must be between 0 and 65535.");
+    throw new Error("OCC_GATEWAY_PROXY_PORT must be between 0 and 65535.");
   }
   return port;
 }
 
-function parseConnectTarget(target) {
+function parseConnectTarget(target: string | undefined) {
   const match = /^([A-Za-z0-9.-]+):([0-9]+)$/.exec(target ?? "");
   if (match === null) {
     return undefined;
@@ -110,22 +89,23 @@ function parseConnectTarget(target) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return undefined;
   }
-  return { host: match[1].toLowerCase(), port };
+  return { host: match[1]!.toLowerCase(), port };
 }
 
-function isAllowedSlackConnectTarget(target) {
+function isAllowedConnectTarget(target: string | undefined, allowedHosts: readonly string[]) {
   const parsed = parseConnectTarget(target);
-  if (parsed === undefined || parsed.port !== 443) {
-    return false;
-  }
   return (
-    ALLOWED_HOSTS.has(parsed.host) ||
-    (teamsEnabled && (TEAMS_HOSTS.has(parsed.host) || teamsFileHosts.has(parsed.host))) ||
-    ALLOWED_SUFFIXES.some((suffix) => parsed.host.endsWith(suffix))
+    parsed !== undefined &&
+    parsed.port === 443 &&
+    allowedHosts.some(
+      (host) =>
+        host === "*" ||
+        (host.startsWith("*.") ? parsed.host.endsWith(host.slice(1)) : parsed.host === host),
+    )
   );
 }
 
-function closeOnSocketError(socket) {
+function closeOnSocketError(socket: ClientSocket) {
   let closing = false;
   socket.on("error", () => {
     if (closing) {
@@ -136,7 +116,7 @@ function closeOnSocketError(socket) {
   });
 }
 
-function reject(socket, statusCode, message) {
+function reject(socket: ClientSocket, statusCode: number, message: string) {
   socket.end(`HTTP/1.1 ${statusCode} ${message}\r\nConnection: close\r\n\r\n`);
 }
 
@@ -144,7 +124,7 @@ function reject(socket, statusCode, message) {
 // of sending a FIN, so the client cannot take a cut reply as whole. With nothing queued, every
 // byte is already with the kernel (a shutdown may still be in flight, when a reset would fail
 // and leak the handle), so a plain close is right.
-function cutClient(socket) {
+function cutClient(socket: ClientSocket) {
   if (socket.writableLength > 0) {
     socket.resetAndDestroy();
     return;
@@ -161,7 +141,7 @@ function cutClient(socket) {
 // everything and closed its side, and cut it at `drainTimeoutMs`. Anything else (an upstream
 // close with no EOF) still closes the client now. The native admin WebSocket relay
 // (gateway/native-admin-proxy.ts) has its own copy: this file runs standalone, with no imports.
-function closeClientWhenDrained(clientSocket, drainTimeoutMs) {
+function closeClientWhenDrained(clientSocket: ClientSocket, drainTimeoutMs: number) {
   if (clientSocket.destroyed) {
     return;
   }
@@ -178,15 +158,15 @@ function closeClientWhenDrained(clientSocket, drainTimeoutMs) {
 // Bound pending client writes even below the high-water mark, where no drain event fires.
 // Keep normal pause/resume backpressure without timing out idle Socket Mode tunnels.
 // EOF hands ownership back to closeClientWhenDrained, which preserves complete replies.
-function forwardToClient(upstream, clientSocket, drainTimeoutMs) {
-  let timer;
+function forwardToClient(upstream: net.Socket, clientSocket: ClientSocket, drainTimeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let pendingWrites = 0;
   let stopped = false;
   const clear = () => {
     clearTimeout(timer);
     timer = undefined;
   };
-  const write = (chunk) => {
+  const write = (chunk: Uint8Array | string) => {
     if (stopped) {
       return;
     }
@@ -235,24 +215,31 @@ function forwardToClient(upstream, clientSocket, drainTimeoutMs) {
   return write;
 }
 
-export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS } = {}) {
+export function createGatewayProxyServer({
+  clientDrainTimeoutMs = CLIENT_DRAIN_TIMEOUT_MS,
+  allowedHosts = DEFAULT_ALLOWED_HOSTS,
+}: { clientDrainTimeoutMs?: number; allowedHosts?: unknown } = {}) {
+  validateAllowedHosts(allowedHosts);
   const server = createServer((request, response) => {
     response.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
     response.end("CONNECT required\n");
   });
 
   server.on("connect", (request, clientSocket, head) => {
+    if (!isClientSocket(clientSocket)) {
+      throw new TypeError("CONNECT requires a reset-capable socket");
+    }
     // Attach this before reject(). A refused CONNECT that resets emits
     // EPIPE or ECONNRESET while the 403 is written; without a listener
     // that error exits the process.
     closeOnSocketError(clientSocket);
-    if (!isAllowedSlackConnectTarget(request.url)) {
+    if (!isAllowedConnectTarget(request.url, allowedHosts)) {
       reject(clientSocket, 403, "Forbidden");
       closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
       return;
     }
-    const target = parseConnectTarget(request.url);
-    let upstream;
+    const target = parseConnectTarget(request.url)!;
+    let upstream: net.Socket | undefined;
     let connected = false;
     let finished = false;
     // One deadline covers resolution and connection; a late resolver callback cannot
@@ -262,7 +249,7 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
       finished = true;
       clearTimeout(timer);
     };
-    const fail = (status, message) => {
+    const fail = (status: number, message: string) => {
       if (finished) {
         return;
       }
@@ -298,18 +285,19 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
         fail(403, "Forbidden");
         return;
       }
-      upstream = net.connect({ host: addresses[0].address, family: 4, port: target.port });
-      upstream.once("connect", () => {
+      const socket = net.connect({ host: addresses[0]!.address, family: 4, port: target.port });
+      upstream = socket;
+      socket.once("connect", () => {
         connected = true;
         finish();
-        const writeToClient = forwardToClient(upstream, clientSocket, clientDrainTimeoutMs);
+        const writeToClient = forwardToClient(socket, clientSocket, clientDrainTimeoutMs);
         writeToClient("HTTP/1.1 200 Connection Established\r\n\r\n");
         if (head.length > 0) {
-          upstream.write(head);
+          socket.write(head);
         }
-        clientSocket.pipe(upstream);
+        clientSocket.pipe(socket);
       });
-      upstream.once("error", () => {
+      socket.once("error", () => {
         if (connected) {
           // Before the upstream's EOF, the reply is cut: reset, so the client cannot take it as
           // whole. After it (a client byte piped into the ended upstream, say), the reply is
@@ -321,7 +309,7 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
         }
         fail(502, "Bad Gateway");
       });
-      upstream.once("close", () => {
+      socket.once("close", () => {
         if (connected) {
           closeClientWhenDrained(clientSocket, clientDrainTimeoutMs);
         }
@@ -333,9 +321,13 @@ export function createSlackProxyServer({ clientDrainTimeoutMs = CLIENT_DRAIN_TIM
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const port = parsePort(process.env.OCC_SLACK_PROXY_PORT);
-  const server = createSlackProxyServer();
-  const sockets = new Set();
+  const port = parsePort(process.env.OCC_GATEWAY_PROXY_PORT);
+  const allowedHosts =
+    process.env.OCC_GATEWAY_PROXY_ALLOWED_HOSTS === undefined
+      ? DEFAULT_ALLOWED_HOSTS
+      : JSON.parse(process.env.OCC_GATEWAY_PROXY_ALLOWED_HOSTS);
+  const server = createGatewayProxyServer({ allowedHosts });
+  const sockets = new Set<net.Socket>();
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
@@ -359,6 +351,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(port, "0.0.0.0", () => {
     const address = server.address();
     const selectedPort = typeof address === "object" && address !== null ? address.port : port;
-    process.stderr.write(`Slack proxy listening on ${selectedPort}\n`);
+    process.stderr.write(`Gateway proxy listening on ${selectedPort}\n`);
   });
 }

@@ -5,7 +5,7 @@ import dns from "node:dns";
 import { Duplex } from "node:stream";
 import test, { type TestContext } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import { createSlackProxyServer } from "../../apps/controller/src/slack-proxy.mjs";
+import { createGatewayProxyServer } from "../../apps/controller/src/gateway-proxy.ts";
 import { listen } from "../helpers/listen.ts";
 
 const writeBudgetMs = 100;
@@ -93,7 +93,7 @@ async function tunnel(t: TestContext) {
   const client = new HeldClient();
   client.on("error", () => {});
   t.after(() => client.destroy());
-  const server = createSlackProxyServer({ clientDrainTimeoutMs: writeBudgetMs });
+  const server = createGatewayProxyServer({ clientDrainTimeoutMs: writeBudgetMs });
   server.emit("connect", { url: "slack.com:443" }, client, Buffer.alloc(0));
   await Promise.all([peerReady, once(upstream, "connect")]);
   assert.match(Buffer.concat(client.received).toString(), /^HTTP\/1\.1 200 Connection Established/);

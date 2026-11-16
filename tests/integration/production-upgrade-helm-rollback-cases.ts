@@ -79,6 +79,30 @@ function apiEnvironment(state: RecoveryState) {
 // These cases run the upgrade script against controlled Helm and Kubernetes
 // responses. The disposable-cluster proof checks Helm itself.
 export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtureFactory }): void {
+  test("image-only candidates can remove an explicitly disabled legacy Slack proxy", async (t) => {
+    const f = await fixture(t, { candidates: true });
+    // Previous production examples saved this disabled block. Removing it must
+    // cross preflight without granting permission to alter an active proxy.
+    for (const file of ["values.json", "live-values"]) {
+      const path = join(f.directory, file);
+      const values = requiredRecord(await yamlFile(path), "Helm values");
+      values.slackProxy = { enabled: false };
+      await writeFile(path, JSON.stringify(values));
+    }
+    await f.run("--preflight-only");
+    assert.equal(existsSync(join(f.evidence, "startup-preflight-passed")), true);
+  });
+
+  test("image-only candidates reject Gateway proxy changes before writes", async (t) => {
+    const f = await fixture(t, { candidates: true });
+    const path = join(f.directory, "candidate-values.json");
+    const candidate = requiredRecord(JSON.parse(await readFile(path, "utf8")), "candidate values");
+    candidate.gatewayProxy = { url: "http://198.51.100.25:3128" };
+    await writeFile(path, JSON.stringify(candidate));
+    await assert.rejects(f.run(), /candidate values change a protected setting/);
+    assert.deepEqual(await f.events(), []);
+  });
+
   async function interruptedUpgradeWithCompletedHook(
     t: TestContext,
     initializationResources?: FixtureOptions["initializationResources"],
@@ -105,25 +129,9 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
     assert.equal(existsSync(join(f.evidence, "helm-recovery")), false);
   }
 
-  // Clearing this proxy is an allowed candidate-values change. Stock Helm can
-  // leave its old NetworkPolicy behind when interrupted before ordinary updates.
-  async function interruptedProxyRemoval(t: TestContext, selectedProxy = "") {
+  // The new chart retires a predecessor directory-proxy resource without changing protected proxy settings.
+  async function interruptedProxyRemoval(t: TestContext) {
     const f = await fixture(t, { recoveryHooks: true });
-    const values = requiredRecord(
-      await yamlFile(join(f.directory, "values.json")),
-      "expected Helm values",
-    );
-    values.api = { ...asRecord(values.api), channelDirectoryProxyUrl: "http://198.51.100.25:3128" };
-    for (const file of ["values.json", "live-values"]) {
-      await writeFile(join(f.directory, file), JSON.stringify(values));
-    }
-    const candidate = structuredClone(values);
-    requiredRecord(
-      candidate.api,
-      "expected API values after staging the predecessor",
-    ).channelDirectoryProxyUrl = selectedProxy;
-    const candidatePath = join(f.directory, "remove-proxy.json");
-    await writeFile(candidatePath, JSON.stringify(candidate), { mode: 0o600 });
     const policy = {
       apiVersion: "networking.k8s.io/v1",
       kind: "NetworkPolicy",
@@ -145,9 +153,12 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
       },
     };
     const state = await f.state();
-    state.recoveryBaselineResources = selectedProxy ? [] : [policy];
+    state.recoveryBaselineResources = [policy];
+    state.recoveryBaselineApiEnvironment = [
+      { name: "OCC_CHANNEL_DIRECTORY_PROXY_URL", value: "http://198.51.100.25:3128" },
+    ];
     await writeFile(join(f.directory, "state.json"), JSON.stringify(state));
-    const run = (...args: string[]) => f.run("--candidate-values", candidatePath, ...args);
+    const run = (...args: string[]) => f.run(...args);
     const pending = await loseHelmResponseWithCompletedHook(f, run);
     return { f, run, pending, policy, key: `${policy.kind}/${policy.metadata.name}` };
   }
@@ -213,15 +224,46 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
   });
 
   test("same-candidate recovery verifies a changed retained environment selection after rollback", async (t) => {
-    const { f, run, pending } = await interruptedProxyRemoval(t, "http://198.51.100.26:3128");
-    // A retained scalar can legitimately differ before rollback. This protocol
-    // fault keeps its old value afterward; it must not receive acknowledgement.
-    const entries = apiEnvironment(pending);
-    const proxy = asRecord(
-      entries.find((entry) => asRecord(entry)?.name === "OCC_CHANNEL_DIRECTORY_PROXY_URL"),
+    const f = await fixture(t, { recoveryHooks: true });
+    // Recorded release manifests can move a mounted configuration file. Reconcile
+    // the selected environment from those manifests, not from mutable values.
+    const previous = {
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      metadata: { name: "configuration-worker", namespace: "system" },
+      spec: {
+        template: {
+          spec: {
+            containers: [
+              {
+                name: "worker",
+                image: controller,
+                env: [
+                  { name: "OCC_CONFIG_PATH", value: "/etc/openclaw/installation/previous.yaml" },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    };
+    const candidate = structuredClone(previous);
+    const configurationVariable = candidate.spec.template.spec.containers[0]?.env[0];
+    assert.ok(configurationVariable);
+    configurationVariable.value = "/etc/openclaw/installation/installation.yaml";
+    const initial = await f.state();
+    initial.recoveryBaselineResources = [previous];
+    initial.recoveryCandidateResources = [candidate];
+    await writeFile(join(f.directory, "state.json"), JSON.stringify(initial));
+    const pending = await loseHelmResponseWithCompletedHook(f);
+    const run = (...args: string[]) => f.run(...args);
+    const worker = resource(pending, "Deployment/configuration-worker");
+    const entries = array(
+      firstContainer(templateSpec(worker.spec), "containers").env,
+      "worker environment",
     );
-    assert.ok(proxy, "expected the candidate directory proxy variable");
-    proxy.value = "http://198.51.100.25:3128";
+    const entry = requiredRecord(entries[0], "configuration path environment");
+    entry.value = "/etc/openclaw/installation/previous.yaml";
     await writeFile(join(f.directory, "state.json"), JSON.stringify(pending));
     await assert.rejects(run(...recoverHelm), /live environment differs/);
     assert.equal((await f.state()).rollbackSubmissions, 1);

@@ -224,7 +224,15 @@ export function createRecoveryCommandHandler(tools: RecoveryTools) {
                   ? {
                       manifest:
                         renderedDocuments(
-                          await standInChart(tools, join(root, "live-values"), false),
+                          await standInChart(
+                            tools,
+                            join(root, "live-values"),
+                            false,
+                            undefined,
+                            [],
+                            false,
+                            state.recoveryBaselineApiEnvironment,
+                          ),
                         )
                           .filter(
                             (object) =>
