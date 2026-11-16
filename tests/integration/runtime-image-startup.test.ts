@@ -1,3 +1,4 @@
+import { execute, runDocker } from "../helpers/runtime-image-docker.ts";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,15 +12,13 @@ import {
   PLUGIN_RUNTIME_HELPERS,
 } from "../../apps/controller/src/drivers/compute/kubernetes/runtime-entrypoints.ts";
 import {
-  execute,
-  runDocker,
   image,
   runtimeImageModel,
   imageTestOptions,
   createAdmittedRuntimeImageConfiguration,
   runGatewaySmoke,
   reviewedCodexSeccompSecurityOptions,
-} from "../helpers/runtime-image-startup.mjs";
+} from "../helpers/runtime-image-startup.ts";
 import { jsonLogEntries } from "../helpers/runtime-image-gateway-observations.ts";
 import { verifyRuntimeSeccompRecord } from "./runtime-image-seccomp-case.ts";
 import { verifyRuntimeCodexAuthMount } from "./runtime-image-codex-auth-mount-case.ts";
