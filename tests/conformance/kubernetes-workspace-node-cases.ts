@@ -214,7 +214,6 @@ export async function checkLegacyWorkspaceNodeRetirement() {
         },
         readNamespacedService: notFound,
         readNamespacedConfigMap: notFound,
-        readNamespacedService: notFound,
         async readNamespacedSecret({ name }: ReadSecret) {
           const secret = secrets.get(name);
           if (!secret) {

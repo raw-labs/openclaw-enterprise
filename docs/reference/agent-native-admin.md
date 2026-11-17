@@ -23,10 +23,7 @@ HTTP 403 **Agent version changed** with a Console link; no access transfers.
 
 ## Who can open it
 
-The console’s Agent browser surface requires a human session and exact Agent
-`operate` or `administer` permission. `operate` grants chat access;
-`administer` retains administration access and takes precedence when both are
-granted. Agent `read` alone and service API keys grant neither mode.
+Browser access requires a human session and exact Agent `operate` (chat) or `administer` (administration) permission. Administration takes precedence. Agent `read` and service API keys grant neither mode.
 
 Password and OIDC sign-in support native browser access with shared cookies.
 OIDC also supports the [host-only session exchange](#host-only-session-exchange).
@@ -34,9 +31,7 @@ Google sign-in does not support native browser access.
 
 ## Enable during creation
 
-In **Create Agent**, select **Enable browser chat**. Unchecked by default, it
-requires Installation native access enablement and compatible gateway support.
-Ordinary Agent owners can use this option without Installation administration.
+In **Create Agent**, select **Enable browser chat** (default off). It requires Installation native access and compatible gateway support, but not Installation administrator permission.
 
 API callers set `nativeAdmin: true` on `POST /namespaces/:namespaceId/agents`
 and supply `expectedConfigurationGeneration`. In addition to ordinary Agent
@@ -49,10 +44,9 @@ Supported guided provisioning accepts `nativeAdmin: true` on
 Configuration before queueing its deployment. Its existing provisioning
 permissions still apply.
 
-Both paths save `controlUi.enabled`, the exact derived HTTPS origin (including
-its port), `gateway.publicOrigin`, and trusted-proxy admin device approval in the
-initial Configuration. It preserves existing allowed origins, Secret bindings,
-and unrelated settings. Conflicting authentication modes, unsupported auth fields,
+Both paths save `controlUi.enabled`, the derived HTTPS origin and port,
+`gateway.publicOrigin`, and trusted-proxy admin device approval in the initial
+Configuration, preserving existing origins, Secret bindings and unrelated settings. Conflicting authentication modes, unsupported auth fields,
 disabled device authentication, and host-header origin fallback are refused.
 Guided-provisioning retries retain the Agent identity and prepared Configuration.
 Browser preparation does not change the creator's Agent permissions.
@@ -121,12 +115,7 @@ predecessor. Its saved [replacement record](agents/planned-replacement.md) must
 name that predecessor and have phase `pre-stop`. OCC returns `unavailable` after
 the worker records `stopping` or if no record matches the selected predecessor.
 
-A stopped Agent without a selected version returns only `status: "stopped"`,
-including before first deployment and after stop reconciliation. While the Agent is stopping,
-a chat operator also receives only the status. An administrator with a
-selected stopped version receives target fields. Dependency outages, including
-IAM, return `503 DEPENDENCY_UNAVAILABLE`. Malformed requests, IAM denials and
-missing sessions use the protected-route error envelope.
+Without a selected version, a stopped Agent returns only `status: "stopped"`. Stopping Agents return only status to chat operators; administrators with a selected stopped version receive target fields. Dependency outages, including IAM, return `503 DEPENDENCY_UNAVAILABLE`. Malformed requests, IAM denials and missing sessions use the protected-route error envelope.
 
 After lifecycle and native configuration checks, OCC compares the selected
 Compute Driver's ID and implementation with the version's recorded owner.
@@ -135,10 +124,9 @@ from Agent-host HTTP. WebSocket admission closes the socket without an HTTP
 response. These refusals precede endpoint lookup, gateway-key lookup and
 connection. A mismatch during lease renewal closes the connection.
 
-Changing the selected Compute Driver leaves existing versions in place.
-Each API process logs one `native_admin.compute_owner_mismatch` per version
-and selected Driver, naming both IDs and implementations. Select the version's
-Compute Driver again to restore access.
+Changing Compute Driver preserves existing versions. Each API process logs
+`native_admin.compute_owner_mismatch` once per version and selected Driver,
+naming both IDs and implementations. Restore the version's Compute Driver to regain access.
 
 Without a valid session, `/` or `/chat/main[/<session>]` navigations can return to the Console. Session segments accept letters, digits, hyphens and underscores; trailing slashes are allowed. Only the opaque host key survives; paths and queries are dropped. Responses use `Cache-Control: no-store` and `Referrer-Policy: no-referrer`, without checking Agent existence.
 
@@ -189,17 +177,13 @@ For browser proxying, OCC maps the selected endpoint to the same authority and p
 
 ## Shared session boundary
 
-Shared-cookie mode uses the automatically derived domain. Every host receiving that cookie must be a trusted OCE ingress endpoint. Agent hosts route to OCC, not Envoy or tenant Services. OCC strips cookies, `Authorization`, API keys, forwarded identity/scope headers and native `Set-Cookie`; the Gateway never receives the OCE cookie.
+Shared-cookie mode derives its domain automatically. All receiving hosts must be trusted OCE ingress endpoints routing to OCC, not Envoy or tenant Services. OCC strips cookies, `Authorization`, API keys, forwarded identity/scope headers and native `Set-Cookie`; no OCE cookie reaches the Gateway.
 
 Native chat or other activity in the Agent tab does not renew the console session. Session expiry, logout, session revocation, permission removal or a change between chat and administration authority, pilot disablement, Agent unavailability, or a version change closes active WebSockets during the authorization lease. A socket remains bound to the session that opened it; replacing a browser cookie does not replace that socket’s session. Reconnecting uses the same stable Agent host and the selected version when the shared OCE session, exact Agent permission, and native configuration remain valid.
 
 ## Gateway managed mode
 
-Managed mode defaults on where the Compute Driver supports it. It prevents Gateway administrators from editing native
-configuration, opening Gateway-local terminals, and running Gateway-hosted command
-jobs. An Installation administrator can change the setting in OCE for the next
-deployment. See [Gateway managed mode](agents/gateway-managed-mode.md) for runtime
-requirements and behavior when managed mode is off.
+[Gateway managed mode](agents/gateway-managed-mode.md) defaults on for supporting Compute Drivers. It blocks native configuration edits, Gateway-local terminals and Gateway-hosted command jobs. Installation administrators can change it for the next deployment.
 
 ## Native authority and drift
 
@@ -215,9 +199,7 @@ Chat access does not grant native configuration writes, device or pairing
 administration, approval management, or elevated gateway commands. A runtime
 that cannot enforce the selected narrow scopes is unsupported for chat mode.
 
-With Gateway managed mode off, native changes stay in gateway-local state.
-Kubernetes reloads the managed snapshot on Pod recreation or redeployment. Save
-lasting settings in the OCE Configuration. See [Kubernetes managed native configuration](drivers/kubernetes-compute/storage-and-credentials.md#managed-native-configuration)
+With managed mode off, native changes remain local until Pod recreation or redeployment reloads the managed snapshot. Save lasting settings in the OCE Configuration. See [Kubernetes managed native configuration](drivers/kubernetes-compute/storage-and-credentials.md#managed-native-configuration)
 for mounts and copy behavior.
 
 Do not change `gateway.bind`, `gateway.customBindHost`, or

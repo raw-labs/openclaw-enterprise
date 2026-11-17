@@ -401,12 +401,6 @@ export function registerNativeAdminCases() {
       const native = createTestKubernetesComputeDriver(compute.id, {
         gatewayRuntime: true,
         privateStatus: true,
-        gatewayRouting: {
-          hostname: "agents.example.internal",
-          gatewayName: "oce-agent-gateways",
-          gatewayNamespace: "openclaw-system",
-          envoyNamespace: "envoy-gateway-system",
-        },
       });
       // Only readiness and credentials are simulated; preparation uses production Compute.
       compute.preflight = async () => undefined;

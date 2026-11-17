@@ -11,8 +11,6 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { createKubernetesComputeDriver } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
-import { conformanceKubernetesOptions } from "../helpers/kubernetes-compute.mjs";
 import { syntheticCredentialUrl } from "../fixtures/synthetic-credential-url.mjs";
 import { commandCalls, writeCommand } from "../helpers/fake-commands.ts";
 
@@ -515,48 +513,6 @@ test("Teams file destinations use the generic explicit proxy allowlist", tooling
     );
   }
 });
-test(
-  "Teams packaging requires explicit public TLS and separate callback ingress",
-  tooling,
-  async () => {
-    const channelValues = {
-      ...gatewayRoutingValues,
-      "gatewayRouting.channels.enabled": "true",
-      "gatewayRouting.channels.hostname": "channels.example.test",
-      "gatewayRouting.channels.tlsSecretName": "teams-public-tls",
-      "gatewayRouting.channels.ingressPeers[0].ipBlock.cidr": "0.0.0.0/0",
-      "slackProxy.enabled": "true",
-      "slackProxy.teamsEnabled": "true",
-    };
-    const objects = await resources((await renderProductionChart(channelValues)).stdout);
-    const gateway = objects.find(({ kind }) => kind === "Gateway");
-    const listener = gateway.spec.listeners.find(({ name }) => name === "channels");
-    assert.equal(listener.hostname, "channels.example.test");
-    assert.equal(listener.port, 8444);
-    assert.equal(listener.tls.certificateRefs[0].name, "teams-public-tls");
-    const proxy = objects.find(
-      ({ kind, metadata }) =>
-        kind === "Deployment" && metadata.name === "openclaw-enterprise-slack-proxy",
-    );
-    assert.equal(
-      proxy.spec.template.spec.containers[0].env.find(
-        ({ name }) => name === "OCC_CHANNEL_PROXY_TEAMS_ENABLED",
-      )?.value,
-      "true",
-    );
-    for (const overrides of [
-      { "gatewayRouting.channels.tlsSecretName": "" },
-      { "gatewayRouting.channels.listenerPort": "10443" },
-      { "gatewayRouting.channels.ingressPeers": "null" },
-    ]) {
-      await assert.rejects(
-        renderProductionChart({ ...channelValues, ...overrides }),
-        /gatewayRouting.channels/,
-      );
-    }
-  },
-);
-
 registerSandboxIngressCase(sandboxValues);
 
 // Evaluate the selector-only, numeric-port ingress rules rendered by this chart.

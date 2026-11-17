@@ -1,6 +1,6 @@
 # Runtime image recipe
 
-Build the OpenClaw Enterprise runtime for quickstart and integration tests. Entrypoints:
+Runtime entrypoints for quickstart and integration tests:
 
 - OpenClaw gateway: `node /app/openclaw.mjs`.
 - Dedicated OpenClaw node: `node /app/openclaw.mjs connect --target-file <private-file> --ephemeral --pair-or-reconnect`.
@@ -376,11 +376,6 @@ remains unknown. Rebuild the runtime image to include this metadata.
 
 ## Microsoft Teams plugin
 
-The same pinned OpenClaw source assembly bundles `msteams` alongside `codex` and
-`slack`, retaining the Teams SDK and Azure dependencies. Upstream treats plugins
-built with their host as bundled; no compatibility override or plugin download
-is used. The Teams startup case exercises actual SDK authentication in the
-assembled image; see [Teams verification](../../docs/testing/teams.md). Live
-Microsoft delivery and public Kubernetes ingress remain separate acceptance checks.
+The pinned source bundles `msteams`, `codex` and `slack`, retaining Teams SDK and Azure dependencies without compatibility overrides or plugin downloads. [Teams verification](../../docs/testing/teams.md) exercises SDK authentication in the image. Live delivery and public ingress require separate acceptance checks.
 
 [Internal proxy bridge](../../docs/flows/gateway-outbound-proxy.md).

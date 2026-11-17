@@ -4,19 +4,49 @@
   "integrationBranch": "codex/raw-integration",
   "upstream": {
     "repository": "openclaw/openclaw-enterprise",
-    "commit": "0aee6393e5f0edd80a59b830262112706c4045b4"
+    "commit": "c8c1fb2d1e00413a4a911d1bd7980d44a4e252a1"
   },
   "batch": {
-    "startingIntegration": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+    "startingIntegration": "92b6b79dde6c9159a1b3403d89aaba95a529c786",
     "steps": [
       {
-        "operation": "Merge current upstream preserving selected feature heads and qualified integration adapters",
-        "commit": "34168622a077116b1c0070007b67b126c58b4df8",
-        "input": "0aee6393e5f0edd80a59b830262112706c4045b4"
+        "operation": "Merge current upstream retaining published migration identities",
+        "commit": "cc0e5d2627490a72e0689bd21cf91b9839bf315d",
+        "input": "c8c1fb2d1e00413a4a911d1bd7980d44a4e252a1"
+      },
+      {
+        "operation": "Merge selected feature revision",
+        "commit": "799d9633e8b9b6add5c86f63b01022b6a58cc24e",
+        "input": "142afbcc439301aa7b0d0882df1b6da956dc8ddd",
+        "pullRequest": 11
+      },
+      {
+        "operation": "Merge selected feature revision",
+        "commit": "cc00496103905065a5e74fca736770c2299bc706",
+        "input": "27aa612d2bafd819c734942d59125084a6c658eb",
+        "pullRequest": 15
+      },
+      {
+        "operation": "Merge selected feature revision",
+        "commit": "59b132e74f97758c7cbed0d6254927afab7adc7f",
+        "input": "b979ce713e20b2b3d150319b6c114b086f886edf",
+        "pullRequest": 2
+      },
+      {
+        "operation": "Merge selected feature revision",
+        "commit": "33d5c7403edae57fdc179938e18af2b3c728a9d3",
+        "input": "71fdc26515c7eb5b921fae9b043ec5cfb97403f0",
+        "pullRequest": 17
+      },
+      {
+        "operation": "Merge selected feature revision",
+        "commit": "0a4dfae70baf20a93609f275a35ae7ba4c1a492c",
+        "input": "92fa7b32bc06a0784ddc4d08302bfa5f69f8b6e3",
+        "pullRequest": 36
       }
     ],
     "preservedMigrationPrefix": {
-      "commit": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+      "commit": "92b6b79dde6c9159a1b3403d89aaba95a529c786",
       "entryCount": 83
     }
   },
@@ -26,9 +56,9 @@
       "title": "Microsoft Teams channels",
       "author": "miguelbranco80",
       "headRef": "codex/teams-support",
-      "commit": "de9d923855b13d479092882f002b00cb5573e788",
+      "commit": "b979ce713e20b2b3d150319b6c114b086f886edf",
       "status": "included",
-      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
+      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "main",
       "draft": false,
@@ -39,9 +69,9 @@
       "title": "Installation profiles and Preset starters",
       "author": "miguelbranco80",
       "headRef": "codex/installation-customization",
-      "commit": "64c975f4ab7c23d2598e1ce96411db8e71cd6531",
+      "commit": "142afbcc439301aa7b0d0882df1b6da956dc8ddd",
       "status": "included",
-      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
+      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "codex/installation-customization-base",
       "draft": false,
@@ -66,9 +96,9 @@
       "title": "Native plugin permission preservation",
       "author": "miguelbranco80",
       "headRef": "codex/console-native-plugin-allowlist",
-      "commit": "11f66c1269c751e89719112612eb6cfc95a22ca8",
+      "commit": "27aa612d2bafd819c734942d59125084a6c658eb",
       "status": "included",
-      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
+      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "codex/native-plugin-upstream-base",
       "draft": false,
@@ -79,9 +109,9 @@
       "title": "Temporary embedded channel evaluation",
       "author": "miguelbranco80",
       "headRef": "codex/eval-embedded-channels",
-      "commit": "ca2bdf12d02a3cdfc562df6346ec4c68d6d9b618",
+      "commit": "71fdc26515c7eb5b921fae9b043ec5cfb97403f0",
       "status": "included",
-      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
+      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "codex/eval-upstream-a7aa9219f",
       "draft": true,
@@ -92,9 +122,9 @@
       "title": "One bundled or external Gateway outbound proxy",
       "author": "miguelbranco80",
       "headRef": "openclaw/delta-claw",
-      "commit": "3ae05a6f38656952cd5f8b61eae74c876fa46f2c",
+      "commit": "92fa7b32bc06a0784ddc4d08302bfa5f69f8b6e3",
       "status": "included",
-      "comparisonBase": "be6fb7519aee0a86164802ea961807dd0cc84fb9",
+      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "main",
       "draft": true,
@@ -631,6 +661,24 @@
       "sha256": "ecea7db627931734acba60f4a8d7fa23dd6c6209f07ed1901507ffe47347a789",
       "commit": "dcc352296fea748cea088acf2f3de7df978595c9",
       "reason": "Append exact upstream SQL after the immutable 81-entry published integration prefix."
+    },
+    {
+      "source": "migrations/0079_predecessor_replacement.sql",
+      "integrated": "migrations/0084_predecessor_replacement.sql",
+      "sourceCommit": "c8c1fb2d1e00413a4a911d1bd7980d44a4e252a1",
+      "sourceSha256": "1881fc6c24f3af183ac775c2f8c794330a35f80d7be751d63dd0a342677021c9",
+      "sha256": "1881fc6c24f3af183ac775c2f8c794330a35f80d7be751d63dd0a342677021c9",
+      "commit": "cc0e5d2627490a72e0689bd21cf91b9839bf315d",
+      "reason": "Append exact upstream SQL after the immutable 83-entry published integration prefix."
+    },
+    {
+      "source": "migrations/0080_revision_runtime_inputs.sql",
+      "integrated": "migrations/0085_revision_runtime_inputs.sql",
+      "sourceCommit": "c8c1fb2d1e00413a4a911d1bd7980d44a4e252a1",
+      "sourceSha256": "3957c54b4daa32c608905c225811c465fe5d8f926675b2bd08a202507747e3ab",
+      "sha256": "3957c54b4daa32c608905c225811c465fe5d8f926675b2bd08a202507747e3ab",
+      "commit": "cc0e5d2627490a72e0689bd21cf91b9839bf315d",
+      "reason": "Append exact upstream SQL after the immutable 83-entry published integration prefix."
     }
   ],
   "migrationReconciliations": [
@@ -802,11 +850,11 @@
   },
   "qualification": {
     "policy": "Normal push only codex/raw-integration; source PRs and fork main read-only. No release, image publication or deployment.",
-    "previousTestedCommit": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+    "previousTestedCommit": "92b6b79dde6c9159a1b3403d89aaba95a529c786",
     "previousRuns": {
-      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875339763",
-      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875339769",
-      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875341231"
+      "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43956528612",
+      "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43956528685",
+      "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43956530682"
     },
     "previousFindings": {
       "unresolved": 81,
@@ -980,6 +1028,20 @@
           "commit": "745863bd53429428cdad933de20330af405d8b70",
           "entryCount": 81
         }
+      }
+    },
+    {
+      "startingIntegration": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+      "steps": [
+        {
+          "operation": "Merge current upstream preserving selected feature heads and qualified integration adapters",
+          "commit": "34168622a077116b1c0070007b67b126c58b4df8",
+          "input": "0aee6393e5f0edd80a59b830262112706c4045b4"
+        }
+      ],
+      "preservedMigrationPrefix": {
+        "commit": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+        "entryCount": 83
       }
     }
   ],
@@ -1181,6 +1243,25 @@
         "No live Slack/Teams delivery or external model-provider checks.",
         "Previous head had 94 open CodeQL findings; successful analysis is not security clearance."
       ]
+    },
+    {
+      "policy": "Normal push only codex/raw-integration; source PRs and fork main read-only. No release, image publication or deployment.",
+      "previousTestedCommit": "0d3d1cf80472f3df5dea7d0b634e8cc09c3c785c",
+      "previousRuns": {
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875339763",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875339769",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/43875341231"
+      },
+      "previousFindings": {
+        "unresolved": 81,
+        "status": "Not waived or dismissed; compare final-head API and SARIF identities, not counts alone."
+      },
+      "requiredChecks": [
+        "CI Required and all selected lane reports at published SHA without required skips",
+        "CodeQL both analyzers and separate exact-head finding accounting",
+        "Native controller and runtime AMD64 and ARM64 actual startup and sandbox smokes; no publication"
+      ],
+      "status": "pending-final-head-qualification"
     }
   ],
   "historicalCompatibility": [

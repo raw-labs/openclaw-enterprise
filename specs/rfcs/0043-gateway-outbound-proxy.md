@@ -6,7 +6,7 @@ author: miguelbranco80
 
 # Proposal: one Gateway outbound proxy
 
-- **ID:** RFC-0040
+- **ID:** RFC-0043
 - **Status:** Proposed
 - **Author:** miguelbranco80
 - **Created:** 2026-11-05
@@ -53,15 +53,15 @@ Bundled and external selections are mutually exclusive. The selection applies to
 
 Change the configuration interfaces as follows:
 
-| Interface | Previous configuration | Proposed configuration |
-|---|---|---|
-| Profile: Gateway endpoint | `channels.runtimeProxyUrl` | `proxy.url` |
-| Profile: bundled selection | `channels.managedSlackProxy` | `proxy.bundled` |
-| Profile: directory override | `channels.directoryProxyUrl` | Retained |
-| Helm: bundled server | `slackProxy.*` | `gatewayProxy.*` |
-| Helm: directory override | `api.channelDirectoryProxyUrl` | Retained; empty inherits the Gateway proxy |
-| Kubernetes Compute | `runtime.channels.proxyUrl`, `runtime.channels.managedProxy` | `runtime.proxy.proxyUrl`, `runtime.proxy.managedProxy` |
-| Bundled destination policy | Fixed Slack host list | Profile `proxy.allowedHosts`; Helm `gatewayProxy.allowedHosts` |
+| Interface                   | Previous configuration                                       | Proposed configuration                                         |
+| --------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------- |
+| Profile: Gateway endpoint   | `channels.runtimeProxyUrl`                                   | `proxy.url`                                                    |
+| Profile: bundled selection  | `channels.managedSlackProxy`                                 | `proxy.bundled`                                                |
+| Profile: directory override | `channels.directoryProxyUrl`                                 | Retained                                                       |
+| Helm: bundled server        | `slackProxy.*`                                               | `gatewayProxy.*`                                               |
+| Helm: directory override    | `api.channelDirectoryProxyUrl`                               | Retained; empty inherits the Gateway proxy                     |
+| Kubernetes Compute          | `runtime.channels.proxyUrl`, `runtime.channels.managedProxy` | `runtime.proxy.proxyUrl`, `runtime.proxy.managedProxy`         |
+| Bundled destination policy  | Fixed Slack host list                                        | Profile `proxy.allowedHosts`; Helm `gatewayProxy.allowedHosts` |
 
 The profile renderer generates matching Helm and Compute configuration. Direct Helm users must also configure the matching Compute endpoint.
 
@@ -92,12 +92,12 @@ Reuse the existing CONNECT server and deploy it as a private Helm Service. Do no
 
 The default destination list remains Slack-only. Operators replace it with `proxy.allowedHosts`:
 
-| Entry | Meaning |
-|---|---|
-| `api.example.com` | Permit that exact hostname |
-| `*.example.com` | Permit subdomains, but not `example.com` itself |
-| `"*"` | Permit all hostnames |
-| Empty list | Deny all destinations |
+| Entry             | Meaning                                         |
+| ----------------- | ----------------------------------------------- |
+| `api.example.com` | Permit that exact hostname                      |
+| `*.example.com`   | Permit subdomains, but not `example.com` itself |
+| `"*"`             | Permit all hostnames                            |
+| Empty list        | Deny all destinations                           |
 
 For example, this profile fragment permits Slack and other public HTTPS destinations:
 
@@ -152,9 +152,9 @@ Sharing the default reduces configuration but couples the clients’ availabilit
 
 Preserve the existing difference between modes:
 
-| Mode | Behavior before and after this proposal |
-|---|---|
-| Embedded | Retain direct public HTTPS access for model and tool requests |
+| Mode      | Behavior before and after this proposal                                      |
+| --------- | ---------------------------------------------------------------------------- |
+| Embedded  | Retain direct public HTTPS access for model and tool requests                |
 | Dedicated | Retain restricted Gateway networking, without general direct Internet access |
 
 Operators do **not** need `allowedHosts: ["*"]` to preserve embedded’s existing direct access. They leave the Gateway proxy unset.

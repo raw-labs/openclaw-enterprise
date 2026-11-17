@@ -67,13 +67,12 @@ branch policy. No-push preparation lacks package write permission and
 protected-environment credentials.
 
 `.github/workflows/container-publish.yml:jobs.prepare` calls the reusable
-`.github/workflows/container-check.yml:jobs.prepare` image/architecture matrix. Both images build on native AMD64 and ARM64 Linux.
+`.github/workflows/container-check.yml:jobs.prepare` image/architecture matrix. Both build on native AMD64/ARM64 Linux.
 See [shared CI settings](../release/configuration.md#build-settings) for native runner defaults and overrides.
 
 ### Runtime source verification
 
-For local verification,
-[resolve the build arguments](../../deploy/runtime/README.md#resolve-openclaw-build-arguments), then run:
+[Resolve build arguments](../../deploy/runtime/README.md#resolve-openclaw-build-arguments) for local verification:
 
 ```bash
 docker build -f deploy/runtime/Dockerfile \
@@ -99,8 +98,7 @@ It exports OCI directories without registry credentials.
 
 `scripts/lib/openclaw-source.ts` reads the commit, archive checksum, and timestamp
 from `deploy/runtime/openclaw-source.json`. The Dockerfile verifies build arguments
-against the manifest before downloading source. Manifest changes invalidate runtime
-build caches independently of credential-service targets.
+against the manifest before downloading source. Manifest changes invalidate runtime caches independently of credential-service targets.
 
 The `openclaw-source` stage verifies and patches the archive. Then
 `scripts/build-runtime-assets.ts inputs` copies preparation manifests and lists
