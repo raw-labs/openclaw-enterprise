@@ -1,7 +1,6 @@
 # Runtime image recipe
 
-Build the OpenClaw Enterprise runtime image for local quickstart and integration
-tests. The image provides these entrypoints.
+Build the OpenClaw Enterprise runtime for quickstart and integration tests. Entrypoints:
 
 - OpenClaw gateway: `node /app/openclaw.mjs`.
 - Dedicated OpenClaw node: `node /app/openclaw.mjs connect --target-file <private-file> --ephemeral --pair-or-reconnect`.
@@ -13,9 +12,7 @@ and explicit requests still follow network policy.
 The Dockerfile uses a verified public OpenClaw archive, its pinned package
 manager, frozen lockfile, and upstream Docker assembly. A registry mirror
 requires [separate Corepack and pnpm build secrets](../../docs/guides/deploy/production-installation.md#build-through-a-package-registry-mirror).
-Both Codex entrypoints use stock Codex `0.164.0` from the frozen lockfile
-without dependency downgrades or binary patches. Verify native startup and
-sandbox behavior with the image's seccomp rules. Codex, Slack, and Teams come from the same source, whose
+Both Codex entrypoints use stock Codex `0.164.0`, without binary patches or dependency downgrades. Verify startup and sandbox behavior with the image's seccomp rules. Codex, Slack, and Teams come from the same source, whose
 restricted workspace-node commands and persistent device identity support
 split storage. That contract requires a newer source than `2026.9.5`.
 
@@ -26,37 +23,43 @@ The tool policy limits model turns in both modes. When a child spawns, OpenClaw
 waits for placement started by session creation and rechecks the parent's
 authority before dispatch. The source also preserves shared host-module links
 during plugin capture and handles bundled WebAssembly and directory assets.
-Until [OpenClaw #158724](https://github.com/openclaw/openclaw/pull/158724) or
-an equivalent implementation is available upstream, the build applies its
+Until upstream ships [OpenClaw #158724](https://github.com/openclaw/openclaw/pull/158724)
+or an equivalent, the build applies its
 `readOnlyPaths` compatibility change as
 `openclaw-codex-read-only-paths.patch`. This preserves the restricted Codex
 filesystem profile required by the repository broker and selected plugins.
-The selected source preserves MCP elicitation's `on-request`, reconnects expired
+The source preserves MCP elicitation's `on-request`, reconnects expired
 `connect --ephemeral` setup with saved credentials, and retains caller authority
-through required-worker placement after acknowledgement. The checksum-verified
-`openclaw-required-worker-authority-regression.patch` tests public-RPC placement
-before/after acknowledgement, disconnect, and committed role, scope and profile
-revocation without network access.
+through required-worker placement after acknowledgement. The build runs
+`openclaw-required-worker-authority-regression.patch` offline, covering public-RPC
+placement before/after acknowledgement, disconnect, and role, scope and profile
+revocation. [OpenClaw #196972](https://github.com/openclaw/openclaw/pull/196972)
+adds an opt-in wait for admitted work and final writes.
 The build also applies `openclaw-codex-full-access-profile.patch`, which selects
 the native full-access Codex profile, and
 `openclaw-control-ui-browser-reconnect.patch`, which offers a browser navigation
-after the Control UI's access is refused. Remove each when the pinned OpenClaw
-does the same.
+after the Control UI's access is refused. Remove each once upstream does the
+same.
 `openclaw-terminated-gateway-namespace.patch` lets a supervisor that verified a
-private Linux PID namespace stopped recover only Gateway records from that
-namespace. OC still compares its lock fingerprint before recovery. An
-unattributed owner requires operator confirmation.
+private Linux PID namespace stopped recover its Gateway records, or, inside it,
+any record whose PID is dead. OC compares its lock fingerprint first.
+Unattributed owners need operator confirmation.
 OpenClaw normalizes newly created owner-only Linux directories that inherit
 setgid and reports invalid plugin settings during startup. The build runs the
 upstream private-store regressions.
+`openclaw-native-turn-settlement.patch` carries [upstream #185180](https://github.com/openclaw/openclaw/pull/185180).
+When Codex releases a long-running turn, the Gateway gives final delivery its normal progress window.
+
 `openclaw-node-setup-renewal.patch` adds `--pair-or-reconnect` for first enrollment
 or renewal under the same binding. Fresh setup comes first; a typed bootstrap rejection
 allows one validated saved-token retry. See [node enrollment](../../docs/reference/drivers/kubernetes-compute/storage-and-credentials.md#harness-storage)
 for Gateway/TLS-pin checks, local credential retirement when switching targets,
 and pairing recovery. Remove this bridge when the selected source provides that contract.
-Provenance `patches` maps every patch the Dockerfile applies, in order, to its
-SHA-256; `scripts/build-runtime-assets.ts` holds that list, and a test checks it
-against the Dockerfile.
+`openclaw-chat-main-session-start.patch` (OpenClaw #197151) lets chat-only members start
+an Agent's unused main conversation; `openclaw-chat-absent-selected-agent.patch`
+(#200358) limits that to the selected Agent.
+Provenance `patches` maps each applied patch, in order, to its SHA-256;
+`scripts/build-runtime-assets.ts` holds the list, which a test checks against the Dockerfile.
 
 Dedicated Gateways require the supporting source recorded in this recipe and
 validate their effective native configuration before starting. The required
@@ -103,13 +106,11 @@ lists packaged files, modes, hashes, and symlinks after permission normalization
 
 The final stage copies the assembled directory directly into the pinned
 `node:24.22.1-bookworm-slim` base with runtime libraries, Git/SSH, GitHub CLI,
-Python, and process utilities. Both bases apply current Debian updates. The stock runtime excludes build
-compilers. Selecting Cargo adds the Rust compiler and a system linker. The slim-base repository credential
+Python, and process utilities. Both bases apply current Debian updates. The stock runtime excludes compilers; Cargo adds Rust and a system linker. The slim-base repository credential
 client compiles only its own sources without typechecking. The service builds
 and typechecks the workspace.
 
-Building requires registry access. A disposable stage installs plugin build
-dependencies. The production stage selects required upstream plugins plus Codex
+Registry access is required. A disposable stage installs plugin build dependencies. The production stage selects required upstream plugins plus Codex
 Slack, and Teams, installs dependencies for the target architecture with lifecycle
 scripts enabled, and runs upstream postinstall, pruning, import-closure, and
 native filesystem-addon checks. Pruning removes tests, QA source, documentation

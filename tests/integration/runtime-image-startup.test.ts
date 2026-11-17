@@ -2,8 +2,8 @@ import { execute, runDocker } from "../helpers/runtime-image-docker.ts";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { temporaryDirectory } from "../fixtures/repository-credentials/process.mjs";
-import { createModelProbeCertificates } from "../helpers/runtime-model-probe-certificates.mjs";
+import { temporaryDirectory } from "../fixtures/repository-credentials/process.ts";
+import { createModelProbeCertificates } from "../helpers/runtime-model-probe-certificates.ts";
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import {
