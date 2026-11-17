@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { verifySingleSlackDelivery } from "../helpers/slack-delivery.mjs";
-import { sessionEvidenceScript } from "../helpers/normal-agent-tools.mjs";
+import {
+  assertSlackChannelDestination,
+  verifySingleSlackDelivery,
+} from "../helpers/slack-delivery.ts";
+import { parseGatewayObservation } from "../helpers/normal-agent-observation-receipts.ts";
+import { sessionEvidenceScript } from "../helpers/normal-agent-gateway-evidence.ts";
 import {
   arrangeProductionTopology,
   assertDeniedConnection,
@@ -10,10 +14,10 @@ import {
   kubectl,
   requiresLiveSlack,
   resource,
-  slackApi,
   waitFor,
 } from "../helpers/harness-topology-k3d-real.mjs";
-import { boundedTeardown } from "../helpers/kubernetes-real.mjs";
+import { slackApi } from "../helpers/slack-web-api.ts";
+import { boundedTeardown } from "../helpers/bounded-teardown.ts";
 
 // The topology registers its platform Namespace delete before the worker and port-forward stops.
 // Run them newest-first, each bounded and all attempted (finding 1711).
@@ -81,6 +85,7 @@ test(
       const { role, userId } = members[index];
       let status = "unverified";
       if (result.status === "fulfilled") {
+        assertSlackChannelDestination(result.value, slack.channelId);
         status = result.value.channel?.is_member === true ? "member" : "not-member";
       }
       testContext.diagnostic(
@@ -184,7 +189,7 @@ test(
     // Exercise the enforcing policy rather than checking selectors alone.
     const proxyService = await resource(
       "service",
-      "openclaw-enterprise-slack-proxy",
+      "openclaw-enterprise-gateway-proxy",
       topology.platformNamespace,
     );
     await assertDeniedConnection(
@@ -195,7 +200,7 @@ test(
     );
     const proxyDeployment = await resource(
       "deployment",
-      "openclaw-enterprise-slack-proxy",
+      "openclaw-enterprise-gateway-proxy",
       topology.platformNamespace,
     );
     for (const token of [slack.appToken, slack.botToken, slack.senderBotToken]) {
@@ -244,7 +249,7 @@ test(
         const keys = JSON.parse(await execGateway("node", "-e", probe));
         const matches = [];
         for (const key of keys.filter((key) => key.includes("slack"))) {
-          const proof = JSON.parse(
+          const proof = parseGatewayObservation(
             await execGateway(
               "node",
               "-e",
