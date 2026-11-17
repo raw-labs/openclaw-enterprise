@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createKubernetesComputeDriver } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
+import { conformanceKubernetesOptions } from "../helpers/kubernetes-compute.mjs";
 import { ConfigurationValidationError } from "../../packages/contracts/src/index.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
