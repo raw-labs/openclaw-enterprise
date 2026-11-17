@@ -1,7 +1,6 @@
 # Runtime image recipe
 
-Build the OpenClaw Enterprise runtime image for local quickstart and integration
-tests. The image provides these entrypoints.
+Build the OpenClaw Enterprise runtime for quickstart and integration tests. Entrypoints:
 
 - OpenClaw gateway: `node /app/openclaw.mjs`.
 - Dedicated OpenClaw node: `node /app/openclaw.mjs connect --target-file <private-file> --ephemeral --pair-or-reconnect`.
@@ -13,9 +12,7 @@ and explicit requests still follow network policy.
 The Dockerfile uses a verified public OpenClaw archive, its pinned package
 manager, frozen lockfile, and upstream Docker assembly. A registry mirror
 requires [separate Corepack and pnpm build secrets](../../docs/guides/deploy/production-installation.md#build-through-a-package-registry-mirror).
-Both Codex entrypoints use stock Codex `0.164.0` from the frozen lockfile
-without dependency downgrades or binary patches. Verify native startup and
-sandbox behavior with the image's seccomp rules. Codex, Slack, and Teams come from the same source, whose
+Both Codex entrypoints use stock Codex `0.164.0`, without binary patches or dependency downgrades. Verify startup and sandbox behavior with the image's seccomp rules. Codex, Slack, and Teams come from the same source, whose
 restricted workspace-node commands and persistent device identity support
 split storage. That contract requires a newer source than `2026.9.5`.
 
@@ -111,13 +108,11 @@ lists packaged files, modes, hashes, and symlinks after permission normalization
 
 The final stage copies the assembled directory directly into the pinned
 `node:24.22.1-bookworm-slim` base with runtime libraries, Git/SSH, GitHub CLI,
-Python, and process utilities. Both bases apply current Debian updates. The stock runtime excludes build
-compilers. Selecting Cargo adds the Rust compiler and a system linker. The slim-base repository credential
+Python, and process utilities. Both bases apply current Debian updates. The stock runtime excludes compilers; Cargo adds Rust and a system linker. The slim-base repository credential
 client compiles only its own sources without typechecking. The service builds
 and typechecks the workspace.
 
-Building requires registry access. A disposable stage installs plugin build
-dependencies. The production stage selects required upstream plugins plus Codex
+Registry access is required. A disposable stage installs plugin build dependencies. The production stage selects required upstream plugins plus Codex
 Slack, and Teams, installs dependencies for the target architecture with lifecycle
 scripts enabled, and runs upstream postinstall, pruning, import-closure, and
 native filesystem-addon checks. Pruning removes tests, QA source, documentation
