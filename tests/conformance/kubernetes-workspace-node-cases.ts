@@ -212,6 +212,7 @@ export async function checkLegacyWorkspaceNodeRetirement() {
         async listNamespacedPod() {
           return { items: [] };
         },
+        readNamespacedService: notFound,
         readNamespacedConfigMap: notFound,
         readNamespacedService: notFound,
         async readNamespacedSecret({ name }: ReadSecret) {
@@ -504,7 +505,7 @@ export async function checkActivationWorkspaceNodeRefusals() {
     gatewayName,
     { namespaceId: tenant.id, agentId: revision.agentId },
     { name: kubernetesNamespaceName(tenant.id), plane: "control" },
-    options().images.gateway,
+    { runtime: options().images.gateway, workspaceSetup: options().images.gateway },
     gatewayName,
     "gateway",
     {},

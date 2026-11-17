@@ -181,6 +181,12 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 82 && completedCount > 82) {
     return "prePendingSandboxPolicyApplication";
   }
+  if (count === 83 && completedCount > 83) {
+    return "prePredecessorReplacement";
+  }
+  if (count === 84 && completedCount > 84) {
+    return "preRevisionRuntimeInputs";
+  }
   if (count === completedCount) {
     return "completed";
   }

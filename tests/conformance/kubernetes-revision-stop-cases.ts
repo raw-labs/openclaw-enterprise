@@ -126,7 +126,7 @@ export async function checkContainmentRetirementRetry() {
       revisionId: revision.id,
     },
     { name: namespace, plane: "execution" },
-    "agent:local",
+    { runtime: "agent:local", workspaceSetup: options().images.gateway },
     `agent-${digest(revision.agentId)}`,
     "agent",
     {},
@@ -480,8 +480,8 @@ export async function checkStopPreservesReplacement(
         async listNamespacedPod() {
           return { items: [] };
         },
-        async readNamespacedService({ name: requestedName }: { name: string }) {
-          if (requestedName !== name) {
+        async readNamespacedService({ name }: ReadDeployment) {
+          if (name !== service.metadata.name) {
             throw stopResourceNotFound();
           }
           return read("Service");
@@ -578,7 +578,7 @@ export async function checkContainmentStopOrder() {
       revisionId: revision.id,
     },
     { name: namespace, plane: "execution" },
-    "agent:local",
+    { runtime: "agent:local", workspaceSetup: options().images.gateway },
     `agent-${digest(revision.agentId)}`,
     "agent",
     {},
@@ -677,7 +677,7 @@ function stopOrderFixture(id: string) {
       revisionId: revision.id,
     },
     { name: namespace, plane: "execution" },
-    "agent:local",
+    { runtime: "agent:local", workspaceSetup: options().images.gateway },
     `agent-${digest(revision.agentId)}`,
     "agent",
     {},

@@ -1277,6 +1277,9 @@ const legacyExecutionAdmission = { version: 2, mode: "unprotected" };
 function upgradedCanonicalData(data) {
   return {
     ...data,
+    agents: data.agents.map(({ value }) => ({
+      value: { ...value, predecessor_replacement: value.predecessor_replacement ?? null },
+    })),
     agent_revisions: data.agent_revisions.map(({ value }) => ({
       value: {
         ...value,
@@ -1455,6 +1458,8 @@ test(
     for (const [prefix, history] of [
       [81, "preControlPlaneAudit"],
       [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
     ]) {
       await context.test(`populated canonical ${prefix}`, async (child) => {
         const db = await historyDatabase(child, fixture, "pending_policy", { prefix });
@@ -1756,6 +1761,8 @@ test(
       [79, "preNativeBrowserAccess"],
       [81, "preControlPlaneAudit"],
       [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
     ]) {
       void context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
@@ -2055,6 +2062,8 @@ test(
       [79, "preNativeBrowserAccess"],
       [81, "preControlPlaneAudit"],
       [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
     ]) {
       void context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -2252,6 +2261,8 @@ test(
       [79, "preNativeBrowserAccess"],
       [81, "preControlPlaneAudit"],
       [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
     ]) {
       const previous = await historyDatabase(context, fixture, "previous", { prefix });
       const restored = await restoreHistoryArchive(
@@ -2325,6 +2336,8 @@ test(
       [79, "preNativeBrowserAccess"],
       [81, "preControlPlaneAudit"],
       [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
     ]) {
       void context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });
@@ -2349,6 +2362,8 @@ test(
         // Reject native browser trigger creation after its tables and grants; all of 0076 must roll back.
         // 0078 replaces the custody guard in place; abort its CREATE FUNCTION statement.
         const rollbackTag = [
+          [84, "ALTER TABLE"],
+          [83, "GRANT"],
           [82, "CREATE FUNCTION"],
           [81, "CREATE INDEX"],
           [79, "CREATE TRIGGER"],
