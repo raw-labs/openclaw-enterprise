@@ -8,10 +8,12 @@ export function createPlatformReadView(
   lifetime: RepositoryTransactionLifetime,
 ): PlatformReadView {
   return Object.freeze({
+    sandboxPolicies: bindRepository(repositories.sandboxPolicies, lifetime, ["find"]),
     operations: bindRepository(repositories.operations, lifetime, [
       "list",
       "findWork",
       "findWorkAttempt",
+      "hasRepositoryExecutionRedeployRequired",
       "hasOutstandingCredentialWithdrawalWork",
     ]),
     installations: bindRepository(repositories.installations, lifetime, [
@@ -28,12 +30,34 @@ export function createPlatformReadView(
       "listPresets",
       "listPresetSummaries",
     ]),
+    connectionTemplates: bindRepository(repositories.connectionTemplates, lifetime, [
+      "findConnectionTemplate",
+      "listConnectionTemplates",
+      "hasOtherConnectionIssuer",
+      "countNamespaceConnectionTemplates",
+      "findOAuthConnectionTemplateVersion",
+      "listOAuthClientCleanups",
+      "listOAuthClients",
+      "countNamespaceOAuthClients",
+      "findOAuthClient",
+    ]),
+    savedConnections: bindRepository(repositories.savedConnections, lifetime, [
+      "findTokenCustody",
+      "listDueConnectionTokens",
+      "findSavedConnection",
+      "listNamespaceConnections",
+      "listRevokingConnections",
+    ]),
     secrets: bindRepository(repositories.secrets, lifetime, [
       "findSecret",
       "listSecrets",
       "listReferences",
     ]),
     credentialSources: bindRepository(repositories.credentialSources, lifetime, [
+      "findEgressInstallation",
+      "findRevisionEgressInstallation",
+      "listCredentialPolicyReductions",
+      "isEgressMaterialRejected",
       "findCredentialSource",
       "listCredentialSources",
       "findCredentialWithdrawal",
@@ -46,13 +70,16 @@ export function createPlatformReadView(
     ]),
     workspaceSetups: bindRepository(repositories.workspaceSetups, lifetime, ["find"]),
     agents: bindRepository(repositories.agents, lifetime, [
+      "findPredecessorReplacement",
       "findAgent",
       "listAgents",
+      "hasAgentNamed",
       "findAgentForBrowsing",
       "listAgentsForBrowsing",
       "listAgentReferences",
     ]),
     revisions: bindRepository(repositories.revisions, lifetime, [
+      "findFirstDeploymentReceipt",
       "findRevision",
       "listRevisions",
       "findRevisionForBrowsing",
@@ -68,8 +95,13 @@ export function createPlatformReadView(
       "listRestrictionsTargeting",
       "listServicePrincipals",
       "getServicePrincipal",
+      "listConfiguredPolicy",
     ]),
     repositorySessions: bindRepository(repositories.repositorySessions, lifetime, [
+      "findStandingExecution",
+      "listStandingApprovals",
+      "findStandingApproval",
+
       "findAttempt",
       "findBrokerReceipt",
       "findBrokerReceiptBySession",

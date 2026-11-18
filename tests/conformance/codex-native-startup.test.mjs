@@ -1,6 +1,24 @@
+import assert from "node:assert/strict";
 import test from "node:test";
-import { checkCodexStartup, login, probe, timedOut } from "../fixtures/codex-native-startup.mjs";
+import { pluginRuntimeEnvironment } from "../../apps/controller/src/drivers/compute/plugin-runtime.ts";
+import {
+  checkCodexStartup,
+  createCodexStartup,
+  login,
+  probe,
+  timedOut,
+} from "../fixtures/codex-native-startup.mjs";
+import {
+  checkBoundedOutputTail,
+  checkBoundedProbeEvents,
+  checkFailureOutputClasses,
+  checkNoRetryOutput,
+  checkProbeEventPrecedence,
+  codexProbeEvents,
+} from "./codex-failure-output-classifier-cases.ts";
+import { registerCodexPatLoginRetryCases } from "./codex-native-startup-login-retry-cases.ts";
 
+/** @type {import("../fixtures/codex-native-startup-types.ts").StartupExpectation & { code: "READY" }} */
 const ready = {
   phases: [
     ["codex-login", "ok"],
@@ -9,6 +27,10 @@ const ready = {
   ],
   code: "READY",
 };
+/**
+ * @param {import("../fixtures/codex-native-startup-types.ts").LoginFailureCode} [code]
+ * @returns {import("../fixtures/codex-native-startup-types.ts").StartupExpectation & { check: "login"; code: import("../fixtures/codex-native-startup-types.ts").LoginFailureCode }}
+ */
 function loginFailure(code = "LOGIN_FAILED") {
   return { phases: [["codex-login", "failed"]], check: "login", code };
 }
@@ -28,14 +50,39 @@ function probeFailure(cause, provider) {
 const probeTimeout = { ...probeFailure(), code: "MODEL_PROBE_TIMEOUT" };
 const probeAuthenticationFailure = { ...probeFailure(), code: "AUTHENTICATION_FAILED" };
 
-const errorEvent = (message) => ({ type: "error", message });
-const failedTurn = (message) => ({ type: "turn.failed", error: { message } });
+const { errorEvent, failedTurn } = codexProbeEvents;
+
+test("verifier-only Codex refuses enabled plugins with API-key login before app-server spawn", (t) => {
+  // Login/probe output is scripted here; the generated wrapper owns this refusal.
+  // No fake plugin response is used to establish installation behavior.
+  const runtime = createCodexStartup(t, {
+    transportToken: "verifier",
+    native: [
+      login(),
+      probe([
+        { type: "turn.started" },
+        { type: "item.completed", item: { type: "agent_message", text: "READY" } },
+        { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+      ]),
+    ],
+    environment: pluginRuntimeEnvironment({
+      kind: "codex",
+      selections: { "codex-plugin:linear@openai-curated-remote": { enabled: true } },
+    }),
+  });
+  assert.throws(() => runtime.start(), /API-key authentication cannot install them/);
+  assert.equal(runtime.appServerStarts, 0);
+  assert.equal(runtime.marker(), undefined);
+  runtime.assertNativeScriptConsumed();
+});
 
 // Component conformance: scripted native output, real generated entrypoint and status handler.
 test("Codex runtime gates startup and readiness on a successful native authentication turn", async (t) => {
   const started = { type: "turn.started" };
   const assistant = { type: "item.completed", item: { type: "agent_message", text: "READY" } };
   const completed = { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
+  const missingModelMessage =
+    "unexpected status 404 Not Found: The model `gpt-4.1` does not exist or you do not have access to it.";
   const advisory = {
     type: "item.completed",
     item: errorEvent("Model catalog metadata unavailable"),
@@ -47,12 +94,206 @@ test("Codex runtime gates startup and readiness on a successful native authentic
     "Reconnecting... 2/3 stream disconnected - retrying sampling request",
   );
   const completedTurn = (...events) => [started, ...events, assistant, completed];
+  // The pinned CLI reports the denied upgrade as retry errors and the HTTPS switch
+  // as an advisory item. The fixture replays those events through the real wrapper.
+  const threadStarted = { type: "thread.started", thread_id: "fixture-thread" };
+  const completedFallbackTurn = (...events) => [threadStarted, ...completedTurn(...events)];
+  const deniedUpgrade =
+    'unexpected status 403 Forbidden: {"error":"unsupported_l7_protocol","detail":"HTTP upgrade is not supported for REST endpoints; use a separate protocol: websocket endpoint with explicit message rules"}, url: wss://chatgpt.com/backend-api/codex/responses';
+  const detailFirstDenial =
+    'unexpected status 403 Forbidden: {"detail":"HTTP upgrade is not supported for REST endpoints; use a separate protocol: websocket endpoint with explicit message rules","error":"unsupported_l7_protocol"}, url: wss://chatgpt.com/backend-api/codex/responses';
+  const reconnectUpgrade = (cause = deniedUpgrade, attempts = "2/5") =>
+    errorEvent("Reconnecting... " + attempts + " (" + cause + ")");
+  const fallbackAdvisory = (cause) => ({
+    type: "item.completed",
+    item: {
+      id: "item_0",
+      ...errorEvent("Falling back from WebSockets to HTTPS transport. " + cause),
+    },
+  });
+  const httpsFallback = fallbackAdvisory(deniedUpgrade);
+  const denialWithExtraField = deniedUpgrade.replace('{"error"', '{"policy":"denied","error"');
+  const forbiddenUpgradeFailure = probeFailure(
+    { kind: "PROBE_STATUS", detail: "error-event" },
+    { status: 403 },
+  );
   const scenarios = [
+    {
+      name: "protected profile without enrollment refuses before any native process",
+      protectedInference: "missing",
+      native: [],
+    },
+    {
+      name: "protected probe refuses an unexpected native stream retry",
+      protectedInference: "signed",
+      events: completedTurn(recoveredStreamError),
+      expect: probeFailure({ kind: "PROBE_STATUS", detail: "error-event" }),
+    },
+    {
+      // Finding 1599: a protected profile retries nothing, so a transient failure that earns
+      // an unprotected probe its one retry is held at once, after one business request.
+      name: "protected transient probe error never starts a second business request",
+      protectedInference: "signed",
+      native: [login(), probe([started, errorEvent("connection refused")], { status: 1 })],
+      expect: probeFailure({ kind: "PROBE_STATUS", detail: "error-event" }),
+    },
+    {
+      name: "protected transient failed turn never starts a second business request",
+      protectedInference: "signed",
+      native: [
+        login(),
+        probe([started, failedTurn("unexpected status 502: upstream")], { status: 1 }),
+      ],
+      expect: probeFailure({ kind: "PROBE_STATUS", detail: "turn-failed" }, { status: 502 }),
+    },
     {
       name: "provider PAT placeholder uses native auth storage before the model probe",
       providerPat: true,
       events: completedTurn(),
       expect: ready,
+    },
+    {
+      name: "OpenShell provider PAT accepts the released error-first denial after HTTPS answers",
+      providerPat: true,
+      events: completedFallbackTurn(
+        ...["2/5", "3/5", "4/5", "5/5"].map((attempts) =>
+          reconnectUpgrade(deniedUpgrade, attempts),
+        ),
+        httpsFallback,
+      ),
+      expect: ready,
+    },
+    {
+      name: "OpenShell provider PAT also accepts the equivalent detail-first denial",
+      providerPat: true,
+      events: completedFallbackTurn(
+        reconnectUpgrade(detailFirstDenial),
+        fallbackAdvisory(detailFirstDenial),
+      ),
+      expect: ready,
+    },
+    {
+      name: "ordinary Codex authentication cannot recover an OpenShell upgrade denial",
+      events: completedFallbackTurn(reconnectUpgrade(), httpsFallback),
+      expect: forbiddenUpgradeFailure,
+    },
+    {
+      name: "protected PAT authentication cannot recover an OpenShell upgrade denial",
+      protectedInference: "signed",
+      providerPat: true,
+      events: completedFallbackTurn(reconnectUpgrade(), httpsFallback),
+      expect: forbiddenUpgradeFailure,
+    },
+    ...[
+      ["wrong host", deniedUpgrade.replace("chatgpt.com", "example.com")],
+      ["wrong path", deniedUpgrade.replace("/responses", "/models")],
+      ["query parameter", deniedUpgrade + "?fixture=1"],
+      ["URL user information", deniedUpgrade.replace("wss://", "wss://fixture@")],
+      ["wrong status", deniedUpgrade.replace("403 Forbidden", "401 Unauthorized")],
+      [
+        "method denied",
+        deniedUpgrade.replace(
+          "HTTP upgrade is not supported for REST endpoints; use a separate protocol: websocket endpoint with explicit message rules",
+          "POST is not allowed for this endpoint",
+        ),
+      ],
+      ["wrong protocol code", deniedUpgrade.replace("unsupported_l7_protocol", "policy_denied")],
+      ["an unexpected body field", denialWithExtraField],
+    ].map(([label, cause]) => ({
+      name: "OpenShell provider PAT refuses a reconnect with " + label,
+      providerPat: true,
+      events: completedFallbackTurn(reconnectUpgrade(cause), httpsFallback),
+      expect:
+        label === "wrong status"
+          ? probeFailure({ kind: "PROBE_STATUS", detail: "error-event" }, { status: 401 })
+          : forbiddenUpgradeFailure,
+    })),
+    ...[
+      [
+        "an invalid native retry limit",
+        completedFallbackTurn(reconnectUpgrade(deniedUpgrade, "2/11"), httpsFallback),
+      ],
+      [
+        "too many retry events",
+        completedFallbackTurn(
+          ...Array.from({ length: 11 }, () => reconnectUpgrade()),
+          httpsFallback,
+        ),
+      ],
+      [
+        "an unrelated reconnect",
+        completedFallbackTurn(reconnectUpgrade(), httpsFallback, recoveredStreamError),
+      ],
+      ["no fallback advisory", completedFallbackTurn(reconnectUpgrade())],
+      ["a different fallback advisory", completedFallbackTurn(reconnectUpgrade(), advisory)],
+      [
+        "an unexpected field in the fallback advisory",
+        completedFallbackTurn(reconnectUpgrade(), fallbackAdvisory(denialWithExtraField)),
+      ],
+      [
+        "a second thread",
+        completedFallbackTurn(
+          reconnectUpgrade(),
+          { ...threadStarted, thread_id: "second-thread" },
+          httpsFallback,
+        ),
+      ],
+      ["no thread marker", completedTurn(reconnectUpgrade(), httpsFallback)],
+      [
+        "a reconnect after the fallback advisory",
+        completedFallbackTurn(reconnectUpgrade(), httpsFallback, reconnectUpgrade(), httpsFallback),
+      ],
+      [
+        "a second turn",
+        [...completedFallbackTurn(reconnectUpgrade(), httpsFallback), ...completedTurn()],
+      ],
+      [
+        "a nonfinal turn completion",
+        [...completedFallbackTurn(reconnectUpgrade(), httpsFallback), advisory],
+      ],
+      [
+        "no turn completion",
+        [threadStarted, started, reconnectUpgrade(), httpsFallback, assistant],
+      ],
+      [
+        "no answer after the transport failure",
+        [threadStarted, started, assistant, reconnectUpgrade(), httpsFallback, completed],
+      ],
+    ].map(([label, events]) => ({
+      name: "OpenShell provider PAT remains unready with " + label,
+      providerPat: true,
+      events,
+      expect: forbiddenUpgradeFailure,
+    })),
+    ...[
+      ["a nonzero exit", { status: 1 }],
+      ["a signal", { status: null, signal: "SIGTERM" }],
+      ["a timeout", timedOut],
+    ].map(([label, result]) => ({
+      name: "OpenShell provider PAT remains unready after " + label,
+      providerPat: true,
+      events: completedFallbackTurn(reconnectUpgrade(), httpsFallback),
+      result,
+      expect: forbiddenUpgradeFailure,
+    })),
+    ...[
+      failedTurn("unexpected status 403 Forbidden: credential rejected"),
+      errorEvent("unexpected status 401 Unauthorized: credential rejected"),
+    ].map((refusal) => ({
+      name:
+        "OpenShell provider PAT rejects a terminal HTTPS authorization failure in " + refusal.type,
+      providerPat: true,
+      events: [threadStarted, started, reconnectUpgrade(), httpsFallback, refusal],
+      expect: probeAuthenticationFailure,
+    })),
+    {
+      name: "OpenShell provider PAT rejects a tool event after fallback",
+      providerPat: true,
+      events: completedFallbackTurn(reconnectUpgrade(), httpsFallback, {
+        type: "item.completed",
+        item: { type: "command_execution" },
+      }),
+      expect: probeFailure({ kind: "PROBE_STATUS", detail: "tool-event" }),
     },
     {
       name: "provider PAT metadata rejection keeps the revision unready",
@@ -64,6 +305,7 @@ test("Codex runtime gates startup and readiness on a successful native authentic
         }),
       ],
       expect: loginFailure("AUTHENTICATION_FAILED"),
+      loginClasses: ["http_401_403"],
     },
     {
       name: "verifier-only app server starts without exposing either token input",
@@ -144,12 +386,14 @@ test("Codex runtime gates startup and readiness on a successful native authentic
       loginMode: "codex_pat",
       native: [login({ status: null, error: { code: "ENOENT" } })],
       expect: loginFailure(),
+      loginClasses: ["empty"],
     },
     {
       name: "access-token login refusal is not retried",
       loginMode: "codex_pat",
       native: [login({ status: 1 })],
       expect: loginFailure(),
+      loginClasses: ["empty"],
     },
     {
       // Native text observed from codex-cli 0.154 with a revoked access token.
@@ -163,30 +407,36 @@ test("Codex runtime gates startup and readiness on a successful native authentic
         }),
       ],
       expect: loginFailure("AUTHENTICATION_FAILED"),
+      loginClasses: ["http_401_403"],
     },
     {
-      name: "access-token login transport error remains a login failure",
+      // Finding 2017: a transport error is a reliability failure, retried before it is held.
+      name: "access-token login transport error is retried, then held as a login failure",
       loginMode: "codex_pat",
-      native: [
+      native: Array.from({ length: 5 }, () =>
         login({
           status: 1,
           stderr:
             "Error logging in with access token: failed to request personal access token metadata: error sending request for url (https://auth.openai.com/)\n",
         }),
-      ],
+      ),
       expect: loginFailure(),
+      loginClasses: ["network", "network", "network", "network", "network"],
+      loginPauses: [1000, 2000, 4000, 8000],
     },
     {
       name: "access-token login recovers one timeout before probing",
       loginMode: "codex_pat",
       native: [login(timedOut), login(), probe(completedTurn())],
       expect: ready,
+      loginClasses: ["timeout"],
     },
     {
       name: "access-token login stops after three timeouts",
       loginMode: "codex_pat",
-      native: [login(timedOut), login(timedOut), login(timedOut)],
+      native: [login(timedOut, 30000), login(timedOut, 30000), login(timedOut, 30000)],
       expect: loginFailure(),
+      loginClasses: ["timeout", "timeout", "timeout"],
     },
     {
       name: "service account token uses native access-token login before probe and clears credentials",
@@ -379,10 +629,52 @@ test("Codex runtime gates startup and readiness on a successful native authentic
       ],
       result: { status: 1 },
       expect: probeFailure(
-        { kind: "PROBE_STATUS", detail: "turn-failed" },
+        { kind: "PROBE_STATUS", detail: "model_not_found" },
         { status: 404, code: "model_not_found" },
       ),
     },
+    // Stock Codex renders the provider's 404 message without its structured code.
+    ...[
+      ["the pinned CLI error names the requested model", missingModelMessage, 404, true],
+      [
+        "a reconnect repeats that refusal",
+        `Reconnecting... 1/5 (${missingModelMessage}, request id: example)`,
+        404,
+        true,
+      ],
+      [
+        "a missing endpoint is not a missing model",
+        "unexpected status 404 Not Found: Unknown endpoint.",
+        404,
+        false,
+      ],
+      [
+        "the provider names a different model",
+        missingModelMessage.replace("gpt-4.1", "gpt-4.10"),
+        404,
+        false,
+      ],
+      [
+        "a different status keeps its own cause",
+        missingModelMessage.replace("404 Not Found", "400 Bad Request"),
+        400,
+        false,
+      ],
+      [
+        "quoted status text is not a provider response",
+        `example: ${missingModelMessage}`,
+        404,
+        false,
+      ],
+    ].map(([name, message, status, unavailable]) => ({
+      name,
+      events: [started, errorEvent(message)],
+      result: { status: 1 },
+      expect: probeFailure(
+        { kind: "PROBE_STATUS", detail: unavailable ? "model_not_found" : "error-event" },
+        unavailable ? { status, code: "model_not_found" } : { status },
+      ),
+    })),
     {
       name: "a server error naming the credential is not retried",
       events: [started, failedTurn("unexpected status 500: invalid api key for this server")],
@@ -419,7 +711,7 @@ test("Codex runtime gates startup and readiness on a successful native authentic
   ];
   for (const scenario of scenarios) {
     await t.test(scenario.name, (t) => {
-      checkCodexStartup(t, scenario);
+      return checkCodexStartup(t, scenario);
     });
   }
 });
@@ -427,6 +719,51 @@ test("Codex runtime gates startup and readiness on a successful native authentic
 // Finding 1576: one provider 5xx or dropped stream must not fail a deployment for good.
 // A transient failure gets the single retry a model timeout gets, inside the same 61 s
 // budget; the held cause is the last attempt's, marked as retried.
+// Finding 2412: Codex runs hook commands outside its sandbox with its own environment, and
+// sandboxed commands with the environment shell_environment_policy shapes. The sandbox
+// cannot read the hook directory, so its commands keep the CA path the Pod set.
+test("Codex app-server gives sandboxed commands the Pod's CA path, never the hook directory's", (t) => {
+  const hookCa = "/home/node/.oce-native-hooks/gateway-ca.pem";
+  const podCa = "/run/oce/repository-credentials/sessions/session/ca-bundle.pem";
+  const readyTurn = probe([
+    { type: "turn.started" },
+    { type: "item.completed", item: { type: "agent_message", text: "READY" } },
+    { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+  ]);
+  for (const [name, shellCa, expected] of [
+    ["without a hook CA copy, Codex keeps its settings", undefined, []],
+    [
+      "a Pod CA reaches sandboxed commands",
+      podCa,
+      ["-c", "shell_environment_policy.set.NODE_EXTRA_CA_CERTS=" + JSON.stringify(podCa)],
+    ],
+    [
+      "without a Pod CA, sandboxed commands get none",
+      "",
+      ["-c", 'shell_environment_policy.exclude=["NODE_EXTRA_CA_CERTS"]'],
+    ],
+  ]) {
+    const runtime = createCodexStartup(t, {
+      native: [login(), readyTurn],
+      environment: {
+        NODE_EXTRA_CA_CERTS: hookCa,
+        ...(shellCa === undefined ? {} : { OPENCLAW_SHELL_NODE_EXTRA_CA_CERTS: shellCa }),
+      },
+    });
+    runtime.start();
+    runtime.assertNativeScriptConsumed();
+    assert.equal(runtime.appServerSpawns.length, 1, name);
+    const [{ args, env }] = runtime.appServerSpawns;
+    const caArguments = args.flatMap((argument, index) =>
+      argument.includes("NODE_EXTRA_CA_CERTS") ? [args[index - 1], argument] : [],
+    );
+    assert.deepEqual(caArguments, expected, name);
+    // Hook commands inherit the app-server's own environment.
+    assert.equal(env.NODE_EXTRA_CA_CERTS, hookCa, name);
+    assert.equal(Object.hasOwn(env, "OPENCLAW_SHELL_NODE_EXTRA_CA_CERTS"), false, name);
+  }
+});
+
 test("Codex runtime retries a transient startup model probe failure once", async (t) => {
   const started = { type: "turn.started" };
   const assistant = { type: "item.completed", item: { type: "agent_message", text: "READY" } };
@@ -938,8 +1275,546 @@ test("Codex runtime retries a transient startup model probe failure once", async
     },
   ];
   for (const scenario of scenarios) {
-    await t.test(scenario.name, (t) => {
-      checkCodexStartup(t, scenario);
+    await t.test(scenario.name, (t) => checkCodexStartup(t, scenario));
+  }
+});
+
+// Owner rule (finding 2017): a reliability failure (network, timeout, provider or proxy
+// 5xx) of the native login or the model check is retried within the step's existing time
+// budget; a security failure (a credential rejection, 401 or 403, another 4xx, TLS) or
+// unclassified output is held at once, as before.
+test("Codex runtime retries a reliability failure of its login or model check, never a security failure", async (t) => {
+  const started = { type: "turn.started" };
+  const assistant = { type: "item.completed", item: { type: "agent_message", text: "READY" } };
+  const completed = { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
+  const success = probe([started, assistant, completed]);
+  // Codex exits 1 before printing any event: the 2017 model check shape.
+  const exited = (stderr, result) => probe([], { status: 1, stderr, ...result });
+  const exitCause = (detail) => ({ kind: "PROCESS_EXIT", detail });
+  const exitFailure = (detail) => probeFailure(exitCause(detail));
+  await registerCodexPatLoginRetryCases(t, { success, ready, loginFailure });
+  const probeScenarios = [
+    {
+      name: "a model check that exits with a network failure then succeeds retries once",
+      native: [login(), exited("Error: error sending request for url"), success],
+      retryAfterMs: 1000,
+      expect: ready,
+      probeCodes: ["MODEL_PROBE_FAILED", "READY"],
+      probeFailureClasses: ["network", undefined],
+    },
+    {
+      name: "a model check that exits with a 5xx then succeeds retries once",
+      native: [login(), exited("Error: unexpected status 503 Service Unavailable"), success],
+      retryAfterMs: 1000,
+      expect: ready,
+      probeCodes: ["MODEL_PROBE_FAILED", "READY"],
+      probeFailureClasses: ["http_5xx", undefined],
+    },
+    {
+      name: "a model check that exits with a network failure twice holds the second exit",
+      native: [login(), exited("connection refused"), exited("connection refused")],
+      retryAfterMs: 1000,
+      expect: exitFailure("exit-1-attempt2"),
+      lastProbeCause: exitCause("exit-1"),
+      probeCodes: ["MODEL_PROBE_FAILED", "MODEL_PROBE_FAILED"],
+      probeFailureClasses: ["network", "network"],
+    },
+    {
+      name: "a model check retry waits at most half again its base delay",
+      random: 0.999,
+      native: [login(), exited("connection reset by peer"), success],
+      retryAfterMs: 1500,
+      retryDelayMs: 1500,
+      expect: ready,
+      probeCodes: ["MODEL_PROBE_FAILED", "READY"],
+    },
+    {
+      // The jittered delay must fit in the 61 s budget too.
+      name: "a model check without a second left after its jittered delay is held at once",
+      random: 0.999,
+      native: [login(), probe([], { status: 1, stderr: "connection refused" }, undefined, 58600)],
+      expect: exitFailure("exit-1"),
+    },
+    ...[
+      ["a 401", "Error: unexpected status 401 Unauthorized", "http_401_403"],
+      ["a 403", "Error: unexpected status 403 Forbidden", "http_401_403"],
+      ["a rate limit", "Error: last status: 429 Too Many Requests", "http_other"],
+      ["a TLS failure", "invalid peer certificate: UnknownIssuer", "tls"],
+      ["a TLS failure beside network text", "error sending request: tls handshake eof", "tls"],
+      [
+        "a proxy 5xx naming a certificate",
+        "Error: unexpected status 502 Bad Gateway: upstream certificate verify failed",
+        "http_5xx",
+      ],
+      [
+        "a proxy 5xx naming a TLS handshake",
+        "unexpected status 503: tls handshake eof",
+        "http_5xx",
+      ],
+      ["a proxy 5xx naming an unknown issuer", "status 502: unknown issuer", "http_5xx"],
+      [
+        "a quoted credential rejection beside network text",
+        'error sending request: "status 401 Unauthorized"',
+        "network",
+      ],
+      [
+        "an unresolvable host",
+        "failed to lookup address information: Name does not resolve",
+        "network",
+      ],
+      ["unrecognized output", "something else went wrong", "unknown"],
+      ["no output", "", "empty"],
+    ].map(([description, stderr, failureClass]) => ({
+      name: `a model check that exits with ${description} is held at once`,
+      native: [login(), exited(stderr)],
+      expect: exitFailure("exit-1"),
+      probeFailureClasses: [failureClass],
+    })),
+    {
+      // Only a Codex exit is classified this way; a wrapper-side process error is not.
+      name: "a model check whose output overflowed is held at once, whatever its class",
+      native: [login(), exited("connection refused", { status: null, error: { code: "ENOBUFS" } })],
+      expect: exitFailure("error-ENOBUFS"),
+      probeFailureClasses: ["network"],
+    },
+    // A security class vetoes the timeout and transient retries too.
+    {
+      name: "a model check timeout whose output names a 401 is held at once",
+      native: [
+        login(),
+        probe([], { ...timedOut, stderr: "unexpected status 401 Unauthorized" }, 30000),
+      ],
+      expect: probeTimeout,
+      probeFailureClasses: ["http_401_403"],
+    },
+    {
+      name: "a transient model check failure whose output names a 403 is held at once",
+      native: [
+        login(),
+        probe([started, failedTurn("unexpected status 502: upstream")], {
+          status: 1,
+          stderr: "unexpected status 403 Forbidden",
+        }),
+      ],
+      expect: probeFailure({ kind: "PROBE_STATUS", detail: "turn-failed" }, { status: 502 }),
+      probeFailureClasses: ["http_401_403"],
+    },
+    {
+      name: "a transient model check failure whose output names a usage limit is held at once",
+      native: [
+        login(),
+        probe([started, failedTurn("unexpected status 503")], {
+          status: 1,
+          stderr: "usage limit reached",
+        }),
+      ],
+      expect: probeFailure({ kind: "PROBE_STATUS", detail: "turn-failed" }, { status: 503 }),
+      probeFailureClasses: ["http_5xx"],
+    },
+    {
+      // The second attempt must get at least a second after the delay.
+      name: "a model check with less than a second left after its delay is held at once",
+      native: [login(), probe([], { status: 1, stderr: "connection refused" }, undefined, 59100)],
+      expect: exitFailure("exit-1"),
+    },
+    {
+      // Finding 1599: a protected profile retries nothing, including a Codex exit whose
+      // output names a reliability class.
+      name: "a protected model check that exits with a network failure is held at once",
+      protectedInference: "signed",
+      native: [login(), exited("Error: error sending request for url")],
+      expect: exitFailure("exit-1"),
+      probeCodes: ["MODEL_PROBE_FAILED"],
+      probeFailureClasses: ["network"],
+    },
+    {
+      name: "a model check timeout then a network exit holds without a second retry",
+      native: [login(), probe([], timedOut, 30000), exited("connection refused")],
+      retryAfterMs: 1000,
+      expect: exitFailure("exit-1-attempt2"),
+      lastProbeCause: exitCause("exit-1"),
+      probeCodes: ["MODEL_PROBE_TIMEOUT", "MODEL_PROBE_FAILED"],
+    },
+  ];
+  for (const scenario of probeScenarios) {
+    // checkCodexStartup is async since protected startup awaits its release.
+    await t.test(scenario.name, (t) => checkCodexStartup(t, scenario));
+  }
+});
+
+test("a no-retry marker anywhere in the output vetoes a retry, whatever its class", () => {
+  checkNoRetryOutput();
+});
+
+// Finding 2017: a failed login or model check logs only the class of Codex's error output.
+// Fake credentials, a JWT, a bearer header and a URL with a query string in that output
+// must never reach the held status or any log line.
+const fakeSecrets = [
+  "sk-proj-FAKE0123456789abcdefghijklmnopqrstuv",
+  "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmYWtlLXVzZXIifQ.ZmFrZS1zaWduYXR1cmU",
+  "at-fixture-token",
+  "code=fake-authorization-code",
+];
+const secretOutput = (text) =>
+  `${text} (https://auth.example.invalid/oauth/token?${fakeSecrets[3]}) ` +
+  `Authorization: Bearer ${fakeSecrets[1]} key ${fakeSecrets[0]} token ${fakeSecrets[2]}\n`;
+const leaked = new RegExp(
+  [
+    ...fakeSecrets.map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "Bearer",
+    "example\\.invalid",
+    "://",
+    "error sending",
+    "dns error",
+    "certificate",
+    "Service Unavailable",
+  ].join("|"),
+  "i",
+);
+
+test("Codex runtime logs a failed login or model check's output class, never the output", async (t) => {
+  const loginFailed = (code = "LOGIN_FAILED") => ({
+    phases: [["codex-login", "failed"]],
+    check: "login",
+    code,
+  });
+  const probeExit = {
+    phases: [
+      ["codex-login", "ok"],
+      ["model-probe", "failed"],
+    ],
+    check: "model-probe",
+    code: "MODEL_PROBE_FAILED",
+    cause: { kind: "PROCESS_EXIT", detail: "exit-1" },
+  };
+  // The 2017 shape: Codex exits 1 before printing any event.
+  const exited = (stderr) => probe([], { status: 1, stderr });
+  const pat = { loginMode: "codex_pat" };
+  // A reliability class is retried (finding 2017): five attempts, each logging its class.
+  const attempts = 5;
+  const everyAttempt = (step) => Array.from({ length: attempts }, () => step);
+  const retried = (failureClass) => ({
+    loginClasses: Array.from({ length: attempts }, () => failureClass),
+    loginPauses: [1000, 2000, 4000, 8000],
+  });
+  // The model check retries a reliability class once and holds the second exit.
+  const probeExitRetried = {
+    ...probeExit,
+    cause: { kind: "PROCESS_EXIT", detail: "exit-1-attempt2" },
+  };
+  const probeRetried = {
+    retryAfterMs: 1000,
+    lastProbeCause: { kind: "PROCESS_EXIT", detail: "exit-1" },
+    probeCodes: ["MODEL_PROBE_FAILED", "MODEL_PROBE_FAILED"],
+  };
+  const scenarios = [
+    {
+      name: "a login transport error is network",
+      ...pat,
+      native: everyAttempt(
+        login({
+          status: 1,
+          stderr: secretOutput(
+            "Error logging in with access token: failed to request personal access token metadata: error sending request for url",
+          ),
+        }),
+      ),
+      expect: loginFailed(),
+      failureClass: "network",
+      ...retried("network"),
+    },
+    {
+      name: "a login DNS failure is network",
+      ...pat,
+      native: everyAttempt(
+        login({
+          status: 1,
+          stderr: secretOutput("dns error: failed to lookup address information"),
+        }),
+      ),
+      expect: loginFailed(),
+      failureClass: "network",
+      ...retried("network"),
+    },
+    {
+      name: "a login provider 5xx is http_5xx",
+      ...pat,
+      native: everyAttempt(
+        login({ status: 1, stderr: secretOutput("unexpected status 503 Service Unavailable") }),
+      ),
+      expect: loginFailed(),
+      failureClass: "http_5xx",
+      ...retried("http_5xx"),
+    },
+    {
+      name: "a login credential rejection is http_401_403",
+      ...pat,
+      native: [
+        login({
+          status: 1,
+          stderr: secretOutput(
+            "personal access token metadata request failed with status 401 Unauthorized",
+          ),
+        }),
+      ],
+      expect: loginFailed("AUTHENTICATION_FAILED"),
+      failureClass: "http_401_403",
+      loginClasses: ["http_401_403"],
+    },
+    {
+      name: "another login 4xx is http_other",
+      ...pat,
+      native: [login({ status: 1, stderr: secretOutput("last status: 429 Too Many Requests") })],
+      expect: loginFailed(),
+      failureClass: "http_other",
+      loginClasses: ["http_other"],
+    },
+    {
+      name: "a rejected proxy certificate is tls",
+      ...pat,
+      native: [
+        login({ status: 1, stderr: secretOutput("invalid peer certificate: UnknownIssuer") }),
+      ],
+      expect: loginFailed(),
+      failureClass: "tls",
+      loginClasses: ["tls"],
+    },
+    {
+      name: "three login timeouts are timeout",
+      ...pat,
+      native: [login(timedOut), login(timedOut), login(timedOut)],
+      expect: loginFailed(),
+      failureClass: "timeout",
+      loginClasses: ["timeout", "timeout", "timeout"],
+    },
+    {
+      name: "a silent login failure is empty",
+      ...pat,
+      native: [login({ status: 1, stderr: "" })],
+      expect: loginFailed(),
+      failureClass: "empty",
+      loginClasses: ["empty"],
+    },
+    {
+      name: "unrecognized login output is unknown",
+      ...pat,
+      native: [login({ status: 1, stderr: secretOutput("something else went wrong") })],
+      expect: loginFailed(),
+      failureClass: "unknown",
+      loginClasses: ["unknown"],
+    },
+    {
+      name: "a probe that exits before any event with a transport error is network",
+      native: [
+        login(),
+        exited(secretOutput("Error: error sending request for url")),
+        exited(secretOutput("Error: error sending request for url")),
+      ],
+      expect: probeExitRetried,
+      failureClass: "network",
+      ...probeRetried,
+    },
+    {
+      name: "a probe that exits before any event with a provider 5xx is http_5xx",
+      native: [
+        login(),
+        exited(secretOutput("Error: unexpected status 502 Bad Gateway")),
+        exited(secretOutput("Error: unexpected status 502 Bad Gateway")),
+      ],
+      expect: probeExitRetried,
+      failureClass: "http_5xx",
+      ...probeRetried,
+    },
+    {
+      name: "a probe that exits before any event with a 403 is http_401_403",
+      native: [login(), exited(secretOutput("Error: unexpected status 403 Forbidden"))],
+      expect: probeExit,
+      failureClass: "http_401_403",
+    },
+    {
+      name: "a probe that exits silently is empty",
+      native: [login(), exited("")],
+      expect: probeExit,
+      failureClass: "empty",
+    },
+  ];
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async (t) => {
+      const { status, diagnostics } = await checkCodexStartup(t, scenario);
+      assert.doesNotMatch(JSON.stringify(status) + diagnostics.join("\n"), leaked);
+      // The held status keeps its existing shape: the class is a log field only.
+      assert.equal(JSON.stringify(status).includes("failureClass"), false);
     });
   }
+});
+
+test("the Codex failure output classifier maps output to a closed class", () => {
+  checkFailureOutputClasses(fakeSecrets.join(" "));
+});
+
+test("the Codex failure output classifier reads a bounded tail in linear time", () => {
+  checkBoundedOutputTail();
+});
+
+// Finding 2043: codex exec --json reports a failed turn or a fatal error on stdout, as a
+// turn.failed or error event, often with nothing on stderr. The model check's class reads
+// those events' messages too, still logging only the class.
+test("Codex runtime classifies a failed model check's stdout error events, never logging them", async (t) => {
+  const started = { type: "turn.started" };
+  const quiet = { status: 1, stderr: "" };
+  // Fake secrets without a credential marker, so a transient failure keeps its retry.
+  const transientSecrets = (text) =>
+    `${text} (https://api.example.invalid/v1/responses?key=${fakeSecrets[0]}) ` +
+    `Bearer ${fakeSecrets[1]} token ${fakeSecrets[2]}`;
+  const held = (detail, provider) => probeFailure({ kind: "PROBE_STATUS", detail }, provider);
+  const networkWait = errorEvent(
+    "Reconnecting... waiting for network (Connection failed: error sending request)",
+  );
+  const unreachable = probe([started, networkWait, networkWait], timedOut, 30000);
+  const scenarios = [
+    {
+      name: "a 401 failed turn with empty stderr is http_401_403",
+      events: [
+        started,
+        failedTurn(secretOutput("unexpected status 401 Unauthorized: Incorrect API key provided")),
+      ],
+      result: quiet,
+      expect: probeAuthenticationFailure,
+      failureClass: "http_401_403",
+    },
+    {
+      name: "a 5xx error event with empty stderr is http_5xx",
+      events: [started, errorEvent(secretOutput("unexpected status 502 Bad Gateway"))],
+      result: quiet,
+      expect: held("error-event", { status: 502 }),
+      failureClass: "http_5xx",
+    },
+    {
+      name: "a retried 5xx failed turn is http_5xx on each attempt",
+      native: [
+        login(),
+        probe(
+          [started, failedTurn(transientSecrets("unexpected status 503 Service Unavailable"))],
+          quiet,
+        ),
+        probe(
+          [started, failedTurn(transientSecrets("unexpected status 503 Service Unavailable"))],
+          quiet,
+        ),
+      ],
+      retryAfterMs: 1000,
+      expect: held("turn-failed-attempt2", { status: 503 }),
+      lastProbeCause: { kind: "PROBE_STATUS", detail: "turn-failed" },
+      probeCodes: ["MODEL_PROBE_FAILED", "MODEL_PROBE_FAILED"],
+      probeFailureClasses: ["http_5xx", "http_5xx"],
+    },
+    {
+      name: "a failed turn naming a transport error is network",
+      events: [
+        started,
+        failedTurn(
+          secretOutput("stream disconnected before completion: error sending request for url"),
+        ),
+      ],
+      result: quiet,
+      expect: held("turn-failed"),
+      failureClass: "network",
+    },
+    {
+      name: "a TLS error event is tls",
+      events: [started, errorEvent(secretOutput("invalid peer certificate: UnknownIssuer"))],
+      result: quiet,
+      expect: held("error-event"),
+      failureClass: "tls",
+    },
+    {
+      // Codex waits for the network until the wrapper's timeout: the wait names the cause.
+      name: "a network wait until the timeout is network, not timeout",
+      native: [login(), unreachable, unreachable],
+      retryAfterMs: 1000,
+      expect: held("error-event-attempt2"),
+      lastProbeCause: { kind: "PROBE_STATUS", detail: "error-event" },
+      probeCodes: ["MODEL_PROBE_FAILED", "MODEL_PROBE_FAILED"],
+      probeFailureClasses: ["network", "network"],
+    },
+    {
+      name: "a failed turn without a known marker is unknown",
+      events: [started, failedTurn(secretOutput("something else went wrong"))],
+      result: quiet,
+      expect: held("turn-failed"),
+      failureClass: "unknown",
+    },
+    {
+      // A status on stderr outranks transport text in an event, and the reverse.
+      name: "the more specific class wins across stderr and events",
+      events: [started, failedTurn(secretOutput("error sending request for url"))],
+      result: { status: 1, stderr: secretOutput("Error: unexpected status 403 Forbidden") },
+      expect: held("turn-failed"),
+      failureClass: "http_401_403",
+    },
+    {
+      // A recovered stream notice names nothing; the held error event after it does.
+      // A recovered notice is read too: the class names the output, the cause the failure.
+      name: "a recovered stream notice naming a transport error classifies a later tool event",
+      events: [
+        started,
+        errorEvent(
+          "Reconnecting... 1/3 stream disconnected before completion: error sending request for url",
+        ),
+        { type: "item.completed", item: { type: "command_execution" } },
+      ],
+      result: quiet,
+      expect: held("tool-event"),
+      failureClass: "network",
+    },
+    {
+      name: "a held error event after a recovered stream notice names its own class",
+      events: [
+        started,
+        errorEvent("Reconnecting... 1/3 stream disconnected before completion"),
+        errorEvent("Reconnecting... 2/3 error sending request"),
+      ],
+      result: quiet,
+      expect: held("error-event"),
+      failureClass: "network",
+    },
+    // Malformed stdout is not read: the class comes from stderr alone, as before.
+    {
+      name: "malformed stdout naming a status classifies stderr alone",
+      events: [],
+      result: {
+        status: 1,
+        stdout: `${JSON.stringify(failedTurn("unexpected status 401 Unauthorized"))}\nnot-json`,
+        stderr: "",
+      },
+      expect: probeFailure({ kind: "INVALID_OUTPUT", detail: "json" }),
+      failureClass: "empty",
+    },
+    {
+      name: "non-event stdout naming a status classifies stderr alone",
+      events: [],
+      result: {
+        status: 1,
+        stdout: `${JSON.stringify(failedTurn("unexpected status 401 Unauthorized"))}\nnull`,
+        stderr: secretOutput("error sending request for url"),
+      },
+      expect: probeFailure({ kind: "INVALID_OUTPUT", detail: "shape" }),
+      failureClass: "network",
+    },
+  ];
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async (t) => {
+      const { status, diagnostics } = await checkCodexStartup(t, scenario);
+      assert.doesNotMatch(JSON.stringify(status) + diagnostics.join("\n"), leaked);
+      assert.equal(JSON.stringify(status).includes("failureClass"), false);
+    });
+  }
+});
+
+test("the Codex model check classifier reads only error event messages, most specific first", () => {
+  checkProbeEventPrecedence();
+});
+
+test("the Codex model check classifier reads a bounded share of stdout events in linear time", () => {
+  checkBoundedProbeEvents();
 });

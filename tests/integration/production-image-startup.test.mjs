@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { promisify } from "node:util";
-import { imageSmokeTimeoutMultiplier } from "../helpers/image-smoke-timeout.mjs";
+import { imageSmokeTimeoutMultiplier } from "../helpers/image-smoke-timeout.ts";
+import {
+  assertNoPackagingFailure,
+  registerProductionImageControllerStartupCases,
+  runDocker,
+} from "./production-image-controller-startup-cases.ts";
 
-const execute = promisify(execFile);
-const docker = process.env.OCC_DOCKER_BIN ?? "docker";
 const image = process.env.OCC_TEST_PRODUCTION_IMAGE;
 const imageTestOptions =
   image === undefined
@@ -134,7 +135,7 @@ function productionInstallation(adminKeyPath) {
             networkPolicies: [
               {
                 name: "dns",
-                endpoints: [{ host: "1.1.1.1", ports: [53], protocol: "udp" }],
+                endpoints: [{ host: "1.1.1.1", ports: [53], protocol: "tcp" }],
                 binaries: [{ path: "/app/bin/dns-client" }],
               },
             ],
@@ -143,76 +144,6 @@ function productionInstallation(adminKeyPath) {
       },
     },
   };
-}
-async function runDocker(args, options = {}) {
-  return execute(docker, args, {
-    timeout: 20_000 * imageSmokeTimeoutMultiplier,
-    maxBuffer: 1_000_000,
-    ...options,
-  });
-}
-
-async function runStartupExpectingFailure(args, options = {}) {
-  let failure;
-  try {
-    // Keep Node out of PID 1 so it can receive the forwarded timeout signal.
-    // A Docker client timeout alone does not establish that the container stopped.
-    await runDocker(["run", "--rm", "--init", "--network", "none", ...args], options);
-  } catch (error) {
-    failure = error;
-  }
-
-  assert.ok(failure, "startup must fail with exit code 1, but Docker exited successfully");
-  const { code, killed, signal } = failure;
-  assert.deepEqual(
-    { code, killed, signal },
-    { code: 1, killed: false, signal: null },
-    "startup requires an unforced Docker CLI exit with code 1",
-  );
-  return `${failure.stdout ?? ""}\n${failure.stderr ?? ""}`;
-}
-
-function assertNoPackagingFailure(output) {
-  assert.doesNotMatch(output, /ERR_MODULE_NOT_FOUND|Cannot find module|Cannot find package/);
-  assert.doesNotMatch(output, /ENOENT: no such file or directory/);
-  assert.doesNotMatch(output, /TypeScript .* is not supported in strip-only mode/);
-  assert.doesNotMatch(output, /drivers\.sandbox selects unavailable bundled OpenShell/);
-  assert.doesNotMatch(output, /OpenShell gRPC service was not found in the proto/);
-}
-
-function assertPersistenceBoundary(output, event) {
-  const diagnostic = output
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return undefined;
-      }
-    })
-    .find((line) => line?.event === event);
-  assert.ok(diagnostic, output);
-  assert.equal(diagnostic.code, "PERSISTENCE_UNAVAILABLE");
-  assert.doesNotMatch(output, /The platform persistence repository is unavailable/);
-}
-
-function assertStartupFailureCode(output, event, code) {
-  const diagnostic = output
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return undefined;
-      }
-    })
-    .find((line) => line?.event === event);
-  assert.ok(diagnostic, output);
-  assert.equal(diagnostic.code, code);
 }
 
 async function productionFixture(t) {
@@ -230,108 +161,19 @@ async function productionFixture(t) {
     `${JSON.stringify(productionInstallation(adminKeyPath), undefined, 2)}\n`,
     { encoding: "utf8", mode: 0o644 },
   );
+  // The nonroot container must read these synthetic files under any host umask.
+  await chmod(join(fixture, "admin-key"), 0o644);
+  await chmod(join(fixture, "installation.json"), 0o644);
   return fixture;
 }
 
-test(
-  "production image server startup loads bundled Kubernetes, OpenShell, and ChatGPT modules",
-  imageTestOptions,
-  async (t) => {
-    const fixture = await productionFixture(t);
-
-    const output = await runStartupExpectingFailure(
-      [
-        "--mount",
-        `type=bind,src=${fixture},dst=/tmp/oce-production-image,readonly`,
-        "-e",
-        "NODE_ENV=production",
-        "-e",
-        "OCC_HOST=10.0.0.5",
-        "-e",
-        "OCC_PORT=3000",
-        "-e",
-        "OCC_CONFIG_PATH=/tmp/oce-production-image/installation.json",
-        "-e",
-        "OCC_AUTH_SECRET=openclaw-production-image-smoke-secret",
-        "-e",
-        "OCC_AUTH_BASE_URL=https://occ.example.invalid",
-        "-e",
-        "OCC_DATABASE_URL=postgresql://127.0.0.1:1/openclaw_enterprise",
-        image,
-      ],
-      { timeout: 60_000 * imageSmokeTimeoutMultiplier },
-    );
-    assertPersistenceBoundary(output, "startup-error");
-    assertNoPackagingFailure(output);
-  },
-);
-
-test(
-  "production image startup rejects an invalid gateway StorageClass before persistence",
-  imageTestOptions,
-  async (t) => {
-    const fixture = await productionFixture(t);
-    const path = join(fixture, "installation.json");
-    const installation = JSON.parse(await readFile(path, "utf8"));
-    installation.drivers.compute.configuration.runtime.gatewayStorageClassName = "Bad_Class";
-    await writeFile(path, `${JSON.stringify(installation, undefined, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o644,
-    });
-
-    const output = await runStartupExpectingFailure([
-      "--mount",
-      `type=bind,src=${fixture},dst=/tmp/oce-production-image,readonly`,
-      "-e",
-      "NODE_ENV=production",
-      "-e",
-      "OCC_HOST=10.0.0.5",
-      "-e",
-      "OCC_PORT=3000",
-      "-e",
-      "OCC_CONFIG_PATH=/tmp/oce-production-image/installation.json",
-      "-e",
-      "OCC_AUTH_SECRET=openclaw-production-image-smoke-secret",
-      "-e",
-      "OCC_AUTH_BASE_URL=https://occ.example.invalid",
-      "-e",
-      "OCC_DATABASE_URL=postgresql://127.0.0.1:1/openclaw_enterprise",
-      image,
-    ]);
-    assertStartupFailureCode(output, "startup-error", "GATEWAY_STORAGE_CLASS_INVALID");
-    assert.doesNotMatch(output, /SQLite-compatible gateway storage class/);
-    assert.doesNotMatch(output, /PERSISTENCE_UNAVAILABLE/);
-    assertNoPackagingFailure(output);
-  },
-);
-
-test(
-  "production image worker startup loads the shared runtime graph",
-  imageTestOptions,
-  async (t) => {
-    const fixture = await productionFixture(t);
-
-    const output = await runStartupExpectingFailure([
-      "--mount",
-      `type=bind,src=${fixture},dst=/tmp/oce-production-image,readonly`,
-      "-e",
-      "NODE_ENV=production",
-      "-e",
-      "OCC_CONFIG_PATH=/tmp/oce-production-image/installation.json",
-      "-e",
-      "OCC_DATABASE_URL=postgresql://127.0.0.1:1/openclaw_enterprise",
-      image,
-      "apps/controller/src/worker.mjs",
-    ]);
-    assertPersistenceBoundary(output, "worker.startup-error");
-    assertNoPackagingFailure(output);
-  },
-);
+registerProductionImageControllerStartupCases({ image, imageTestOptions, productionFixture });
 
 test(
   "production image runs the chart's pre-upgrade Installation check",
   imageTestOptions,
   async (t) => {
+    assert.ok(image !== undefined);
     // The initialization hook runs this script with the chart's security context before
     // Helm replaces the API, so a refused Installation leaves the old Pods serving.
     const script = await readFile(
@@ -367,6 +209,27 @@ test(
 
     const path = join(fixture, "installation.json");
     const installation = JSON.parse(await readFile(path, "utf8"));
+    const invalidDriver = structuredClone(installation);
+    invalidDriver.drivers.compute.configuration.runtime.gatewayStorageClassName = "Bad_Class";
+    await writeFile(path, JSON.stringify(invalidDriver), { mode: 0o644 });
+    await assert.rejects(
+      runDocker(check, { timeout: 60_000 * imageSmokeTimeoutMultiplier }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /installation-check:.*DRIVER_CONFIGURATION_INVALID/);
+        const details = JSON.parse(error.stderr.trim().split("DRIVER_CONFIGURATION_INVALID: ")[1]);
+        assert.deepEqual(details, [
+          {
+            path: "/runtime/gatewayStorageClassName",
+            code: "INVALID_FORMAT",
+            message:
+              "SQLite-compatible gateway storage class must be a DNS-safe Kubernetes resource name.",
+          },
+        ]);
+        assert.doesNotMatch(error.stderr, /Bad_Class/);
+        return true;
+      },
+    );
     installation.presets = { files: ["presets/missing.json"] };
     await writeFile(path, `${JSON.stringify(installation, undefined, 2)}\n`, {
       encoding: "utf8",
@@ -387,6 +250,7 @@ test(
 );
 
 test("production image includes the OpenShell gRPC proto asset", imageTestOptions, async () => {
+  assert.ok(image !== undefined);
   const probe = String.raw`
     import assert from "node:assert/strict";
     import { GrpcOpenShellGatewayClient } from "./apps/controller/src/drivers/sandbox/openshell-gateway-client.ts";
@@ -422,6 +286,7 @@ test("production image includes the OpenShell gRPC proto asset", imageTestOption
 });
 
 test("production image includes console shell and public assets", imageTestOptions, async () => {
+  assert.ok(image !== undefined);
   const { stdout: labels } = await runDocker([
     "image",
     "inspect",
@@ -432,6 +297,7 @@ test("production image includes console shell and public assets", imageTestOptio
   const revision = JSON.parse(labels)?.["org.opencontainers.image.revision"] ?? "";
   const probe = String.raw`
     import assert from "node:assert/strict";
+    import { execFileSync } from "node:child_process";
     import { readConsoleAsset } from "./apps/controller/src/console-assets.ts";
 
     const shell = await readConsoleAsset("/console/");
@@ -454,6 +320,15 @@ test("production image includes console shell and public assets", imageTestOptio
     assert.equal(script.statusCode, 200);
     assert.match(script.contentType, /javascript/);
     assert.match(script.body.toString("utf8"), /api\/auth\/session/);
+
+    // Parse the shipped bytes as JavaScript. Browser tests load the module and its imports.
+    const dom = await readConsoleAsset("/console/dom.mjs");
+    assert.equal(dom.statusCode, 200);
+    assert.match(dom.contentType, /javascript/);
+    assert.ok(dom.body.length > 0);
+    execFileSync(process.execPath, ["--no-strip-types", "--check", "--input-type=module"], {
+      input: dom.body,
+    });
 
     const unknown = await readConsoleAsset("/console/index.ts");
     assert.equal(unknown.statusCode, 404);

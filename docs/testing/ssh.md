@@ -1,3 +1,9 @@
+---
+tags: [human_verified]
+# Backfilled from the verification tag recorded in 17ff921c5.
+last_verified: "2026-11-04"
+---
+
 # SSH host tests
 
 ## Overview
@@ -10,8 +16,8 @@ OpenClaw and systemd. The default real-host run checks readiness only; the model
 Run these checks without a disposable host:
 
 ```sh
-node --test tests/conformance/ssh-compute.test.mjs
-node --test tests/integration/ssh-compute-startup.test.mjs
+node --test tests/conformance/ssh-compute.test.ts
+node --test tests/integration/ssh-compute-startup.test.ts
 ```
 
 They execute the actual helper with transport, account-management, and systemd
@@ -28,7 +34,7 @@ provision an SSH host.
 Prepare the disposable rig below before selecting this lane; missing inputs or
 skipped tests fail the lane.
 
-Use a disposable Linux systemd host. This suite verifies readiness, revision
+Use a disposable Linux systemd host. This suite verifies readiness, version
 cutover, state persistence, cleanup, and Unix account isolation over real SSH.
 It makes no model call. Without `OCC_TEST_SSH_REAL=1` it skips; a selected run
 fails when prerequisites are missing.
@@ -44,12 +50,15 @@ disposable test rig, not production packaging. If the Engine cannot run
 systemd, use an explicitly selected disposable Linux VM instead; do not
 substitute the conformance fixture and call it host proof.
 Make sure `oce-ssh-host` is not an existing container before starting the rig.
+In the same Bash shell, [resolve the OpenClaw build arguments](../../deploy/runtime/README.md#resolve-openclaw-build-arguments)
+before building the runtime image:
 
-```sh
+```bash
 SSH_RIG=$(mktemp -d)
 chmod 700 "$SSH_RIG"
 ssh-keygen -q -t ed25519 -N '' -f "$SSH_RIG/id_ed25519"
-docker build -f deploy/runtime/Dockerfile -t localhost/openclaw-runtime:local .
+docker build -f deploy/runtime/Dockerfile "${openclaw_build_args[@]}" \
+  -t localhost/openclaw-runtime:local .
 docker build --build-arg RUNTIME_IMAGE=localhost/openclaw-runtime:local \
   -t oce-ssh-host:local tests/fixtures/ssh-compute/host
 docker run -d --name oce-ssh-host --privileged --cgroupns=host \
