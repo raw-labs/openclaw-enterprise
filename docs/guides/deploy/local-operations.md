@@ -28,13 +28,15 @@ export KUBECONFIG_FILE="$OCC_EXAMPLE_DIRECTORY/kubeconfig"
 export CONTEXT="k3d-$CLUSTER"
 ```
 
-Build and import the images:
+In the same Bash shell, [resolve the OpenClaw build arguments](../../../deploy/runtime/README.md#resolve-openclaw-build-arguments),
+then build and import the images:
 
 ```bash
 docker build --target runtime \
-  --build-arg NODE_BASE_IMAGE=docker.io/library/node:24-bookworm@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0 \
+  --build-arg NODE_BASE_IMAGE=docker.io/library/node:24.22.1-bookworm@sha256:6449e19d8184d84062525b6a7524def03146c2cb04a7f08b076680d0e8e4240a \
   -t "localhost/$CLUSTER/controller:local" .
 docker build -f deploy/runtime/Dockerfile \
+  "${openclaw_build_args[@]}" \
   -t "localhost/$CLUSTER/runtime:local" .
 k3d image import "localhost/$CLUSTER/controller:local" \
   "localhost/$CLUSTER/runtime:local" -c "$CLUSTER"
@@ -73,7 +75,10 @@ These references work in this cluster and retain `requireImmutableDigest: true`.
 Use the generated directory in place of `/secure/occ` in the production commands;
 keep its image values and kubeconfig instead of copying the templates again.
 Set the remaining database, HTTPS, network, and storage inputs for your trial
-(k3d's default StorageClass is `local-path`). The images alone do not configure
+(k3d's default StorageClass is `local-path`). Before Helm installation, prepare
+[private routing](workspace-routing.md#requirements), including its controllers,
+CRDs, GatewayClass, service-key Secret, and matching Installation settings.
+The images alone do not configure
 those dependencies or prove an Agent model turn. When finished with the trial,
 run `KUBECONFIG="$KUBECONFIG_FILE" k3d cluster delete "$CLUSTER"`.
 
@@ -107,9 +112,11 @@ startup, including macOS machine connections. See the
 [cleanup flow](../../flows/docker-compose-development.md#3-clean-up-docker-or-podman-compose)
 for how the host connection and worker socket are handled.
 
-This preserves PostgreSQL, Configuration, and bootstrap-key volumes. Use
-`--volumes` only to delete the local Installation. First account for any Agent
-containers and tenant networks owned by Docker Compute.
+Compose keeps PostgreSQL, Configuration, and bootstrap-key volumes unless you
+pass `--volumes` to delete the local Installation. Account for Agent containers
+and their Namespace networks before deleting the database. Docker Compute owns
+those networks. The service-key copy at the path printed by `dev up` also
+stays on disk. Remove that copy when you no longer need it.
 
 A Kubernetes profile's `Cleanup` command instead deletes its k3d cluster,
 database, Agents, and volumes; see [stop and clean up](local-kubernetes-development.md#stop-and-clean-up).
