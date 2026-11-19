@@ -6,7 +6,7 @@ in Bash, then build the runtime and run its Teams startup test:
 ```bash
 docker build -f deploy/runtime/Dockerfile -t oce-runtime:teams "${openclaw_build_args[@]}" .
 OCC_TEST_RUNTIME_IMAGE=oce-runtime:teams node --test \
-  --test-name-pattern='bundled Teams' tests/integration/runtime-image-startup.test.mjs
+  --test-name-pattern='bundled Teams' tests/integration/runtime-image-startup.test.ts
 ```
 
 This case starts the real bundled plugin and Microsoft Teams SDK in a fresh,
@@ -52,7 +52,7 @@ actual proxy process. Run it with the built image above:
 
 ```sh
 OCC_TEST_RUNTIME_IMAGE=oce-runtime:teams node --test \
-  --test-name-pattern='native guarded Teams media' tests/integration/runtime-image-startup.test.mjs
+  --test-name-pattern='native guarded Teams media' tests/integration/runtime-image-startup.test.ts
 ```
 
 Controlled DNS maps approved public addresses to the local fixture. The case

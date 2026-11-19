@@ -123,7 +123,7 @@ existing limit of 2,000,000 UTF-16 code units. Overflow cancels the body read an
 
 ### 3. Display names and save IDs
 
-`apps/controller/src/console/channels/slack.mjs:appendFields`,
+`apps/controller/src/console/channels/slack.mts:appendFields`,
 `apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`
 
 The Console presents bot-token selection before channel access and explains that

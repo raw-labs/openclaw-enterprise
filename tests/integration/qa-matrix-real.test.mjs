@@ -135,6 +135,33 @@ test(
     for (const exclusion of selection.exclusions) {
       context.diagnostic(`Excluded: ${exclusion}`);
     }
+    if (selection.nativeRestart) {
+      const { arrangeProductionTopology, assertInterruptedGatewayTurnResumes } =
+        await import("../helpers/harness-topology-k3d-real.mjs");
+      const { boundedTeardown } = await import("../helpers/bounded-teardown.ts");
+      await stage(
+        context,
+        "kubernetes/Codex",
+        "native restart continuation and cancellation",
+        async () => {
+          const { context: topologyContext } = boundedTeardown(context, {
+            label: "native restart topology teardown",
+          });
+          const topology = await arrangeProductionTopology(
+            topologyContext,
+            "dedicated",
+            undefined,
+            {
+              gatewayPassword: true,
+              nativeAdmin: { enabled: true },
+            },
+          );
+          // Reuse the real Agent API workflow, retained volumes and native model turns.
+          await assertInterruptedGatewayTurnResumes(topologyContext, topology);
+        },
+        "native-restart",
+      );
+    }
     if (selection.namespaceLifecycle) {
       const { verifyQaSandboxPolicy } = await import("../helpers/qa-sandbox-policy.mjs");
       await stage(context, "kubernetes/OpenShell", "Namespace gateway before any Agent", () =>
@@ -227,6 +254,9 @@ test(
                 artifacts,
                 {
                   repositoryInputs: selection.repository,
+                  disableNativeAdmin: selection.cells
+                    .filter((cell) => cell.installation === installation)
+                    .every((cell) => cell.scenarios.every((scenario) => scenario === "http-chat")),
                 },
               );
               await prepareQaPluginCatalogs(fixture);
@@ -299,7 +329,8 @@ test(
                         async () => {
                           assert.ok(ready, "blocked by preset preparation failure");
                           return createQaAgent(f, preset, browser?.nativeOrigin, suffix, {
-                            apiKeyAuth: name === "codex-search-config",
+                            apiKeyAuth: name === "codex-search-config" || name === "http-chat",
+                            httpChat: name === "http-chat",
                           });
                         },
                       );
@@ -329,6 +360,15 @@ test(
                   });
                 }
                 const scenarios = [
+                  [
+                    "http-chat",
+                    async (agent, step) => {
+                      const { verifyQaHttpChat } = await import("../helpers/qa-http-chat.ts");
+                      await step("human and service HTTP turns and isolated conversations", () =>
+                        verifyQaHttpChat(f, agent),
+                      );
+                    },
+                  ],
                   [
                     "agent-audit",
                     async (agent, step) => {
