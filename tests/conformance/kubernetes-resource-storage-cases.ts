@@ -312,12 +312,9 @@ export function checkResourceRequestLimits() {
       selected.requests[resource] = request;
       selected.limits[resource] = limit;
       if (accepted) {
-        assert.doesNotThrow(() => createKubernetesComputeDriver(configured));
+        assert.doesNotThrow(() => new KubernetesComputeDriver(configured));
       } else {
-        assert.throws(
-          () => createKubernetesComputeDriver(configured),
-          ConfigurationValidationError,
-        );
+        assert.throws(() => new KubernetesComputeDriver(configured), ConfigurationValidationError);
       }
     }
   }
@@ -416,12 +413,12 @@ export function checkGatewayStorageCapacity() {
       () => requireConfiguration(KubernetesComputeDriver, configured),
       ConfigurationValidationError,
     );
-    assert.throws(() => createKubernetesComputeDriver(configured), ConfigurationValidationError);
+    assert.throws(() => new KubernetesComputeDriver(configured), ConfigurationValidationError);
   }
   for (const gatewayStorageSizeGiB of [1, 65536]) {
     const configured = optionsWithRuntime({ gatewayStorageSizeGiB });
     requireConfiguration(KubernetesComputeDriver, configured);
-    assert.doesNotThrow(() => createKubernetesComputeDriver(configured));
+    assert.doesNotThrow(() => new KubernetesComputeDriver(configured));
   }
 }
 

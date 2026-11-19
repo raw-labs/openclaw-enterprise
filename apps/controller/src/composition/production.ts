@@ -26,7 +26,7 @@ import {
 } from "../auth/index.ts";
 import { createFastifyApp } from "../index.ts";
 import type { ConsoleTheme } from "../console-theme.ts";
-import { SlackChannelDriver } from "../drivers/channel/slack.ts";
+import { BundledChannelDriver, bundledChannelProviders } from "../drivers/channel/index.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -200,9 +200,9 @@ export async function composeProduction(
     }
 
     phaseCompleted("computePreflight");
-    const channelDriver =
-      config.drivers.channelDrivers?.find(({ provider }) => provider === "slack")?.driver ??
-      new SlackChannelDriver(globalThis.fetch, undefined, { expectProxy: true });
+    const channelDriver = new BundledChannelDriver(
+      config.drivers.channelDrivers ?? bundledChannelProviders({ expectProxy: true }),
+    );
     const controller = OpenClawController.forInstallation(
       persistedInstallation,
       {

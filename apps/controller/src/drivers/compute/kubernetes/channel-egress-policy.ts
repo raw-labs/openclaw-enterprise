@@ -13,6 +13,7 @@ export interface ChannelEgressOptions {
   readonly inspectionPort: number;
   /** Administrator-supplied Pod, Service and node ranges, including public node addresses. */
   readonly excludedCidrs: readonly string[];
+  readonly teamsFileHosts?: readonly string[];
 }
 
 export const CHANNEL_EGRESS_IMAGE =
@@ -76,6 +77,7 @@ export const channelEgressConfigurationSchema: JSONSchema = {
     occListenerPort: portSchema,
     inspectionPort: portSchema,
     excludedCidrs: { type: "array", minItems: 1, maxItems: 128, items: { type: "string" } },
+    teamsFileHosts: { type: "array", maxItems: 32, items: { type: "string" } },
   },
 };
 

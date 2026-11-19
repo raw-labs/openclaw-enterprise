@@ -218,11 +218,20 @@ test(
       .update(`${namespace}/${gatewayName}`)
       .digest("hex")
       .slice(0, 12);
+    const channels = {
+      enabled: true,
+      hostname: "teams.oce.localhost",
+      tlsSecretName: "teams-callback-tls",
+      ingressPeers: [
+        { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": namespace } } },
+      ],
+    };
     const routing = {
       gatewayName,
       gatewayNamespace: namespace,
       envoyNamespace,
       hostname: `occ-gateway-${routeHash}.${envoyNamespace}.svc`,
+      channels: { hostname: channels.hostname },
     };
     const egress = {
       gatewayName: `channel-egress-${suffix}`,
@@ -234,6 +243,7 @@ test(
       occListenerPort: 10000,
       inspectionPort: 19004,
       excludedCidrs: [...new Set([...podCidrs, ...nodeAddresses, ...serviceCidrs])],
+      teamsFileHosts: ["tenant.sharepoint.com"],
     };
     const configuration = createKubernetesInstallationConfiguration({
       authentication: { mode: "inCluster" },
@@ -263,6 +273,35 @@ test(
       metadata: { name: "private-gateway-key", namespace },
       stringData: { occ: apiKey },
     });
+    const callbackKey = join(directory, "teams.key");
+    const callbackCert = join(directory, "teams.crt");
+    await run("openssl", [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      `/CN=${channels.hostname}`,
+      "-keyout",
+      callbackKey,
+      "-out",
+      callbackCert,
+    ]);
+    await kubectl(
+      "create",
+      "secret",
+      "tls",
+      channels.tlsSecretName,
+      "-n",
+      namespace,
+      "--key",
+      callbackKey,
+      "--cert",
+      callbackCert,
+    );
     const httpsPort = await availablePort();
     const authBaseURL = `https://console.oce.localhost:${httpsPort}`;
     const controlPlane = await installProductionHelmControlPlane({
@@ -291,6 +330,7 @@ test(
         gatewayClassName: gatewayClass,
         envoyNamespace,
         apiKeySecretName: "private-gateway-key",
+        channels,
       },
       run,
       kubernetes: kube,
@@ -728,6 +768,86 @@ test(
       "normal Agent deletion",
       async () => (await request("GET", agentPath)).status === 404,
     );
+    // Exercise the installed Teams Driver via the real API and worker. Synthetic
+    // credentials let the native plugin register its callback without a Teams tenant.
+    const teamsPassword = await saveSecret("teams-app-password", secret());
+    const teamsConfiguration = await api(
+      "POST",
+      `/namespaces/${namespaceId}/configurations`,
+      {
+        kind: "agent",
+        values: {
+          ...values,
+          channels: {
+            msteams: {
+              enabled: true,
+              appId: randomUUID(),
+              tenantId: randomUUID(),
+              appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+            },
+          },
+        },
+        secretBindings: {
+          MSTEAMS_APP_PASSWORD: { source: teamsPassword.ref, delivery: { type: "env" } },
+        },
+      },
+      201,
+    );
+    const teamsAgent = await api(
+      "POST",
+      `/namespaces/${namespaceId}/agents`,
+      {
+        name: `teams-${suffix}`,
+        configurationId: teamsConfiguration.id,
+        executionMode: "dedicated",
+        harnessAuth: { method: "api_key", source: model.ref },
+      },
+      201,
+    );
+    const teamsPath = `/namespaces/${namespaceId}/agents/${string(teamsAgent.id)}`;
+    await api("POST", `${teamsPath}/runtime-credentials`, {});
+    const teamsRevision = await api("POST", `${teamsPath}/deploy`, undefined, 202);
+    await waitFor(
+      "the Teams revision to finish activation",
+      async () => {
+        const deployment = await api("GET", `${teamsPath}/deployments/${string(teamsRevision.id)}`);
+        assert.notEqual(deployment.status, "failed", JSON.stringify(deployment.error));
+        return deployment.status === "succeeded";
+      },
+      480_000,
+    );
+    const teamsPods = await resources(
+      "pods",
+      tenant,
+      "-l",
+      `openclaw.dev/agent=${string(teamsAgent.id)},openclaw.dev/revision=${string(teamsRevision.id)}`,
+    );
+    const teamsGateway = teamsPods
+      ?.map(object)
+      .find(
+        (pod) => object(object(pod.metadata).labels)["openclaw.dev/workload-role"] === "gateway",
+      );
+    assert.ok(teamsGateway);
+    const teamsEnv = array(array(object(teamsGateway.spec).containers)[0]!.env);
+    const teamsProxy = string(teamsEnv.find((entry) => entry.name === "HTTPS_PROXY")?.value);
+    const teamsPod = string(object(teamsGateway.metadata).name);
+    assert.equal(teamsEnv.find((entry) => entry.name === "OPENCLAW_PROXY_ACTIVE")?.value, "1");
+    assert.deepEqual(
+      await probeChannelConnect(tenant, teamsPod, teamsProxy, "graph.microsoft.com"),
+      {
+        status: 200,
+        tlsVerified: true,
+      },
+    );
+    // Reachable public providers and wildcard storage targets cannot use this binding.
+    for (const host of ["slack.com", "neighbor.sharepoint.com"]) {
+      assert.equal((await probeChannelConnect(tenant, teamsPod, teamsProxy, host)).status, 403);
+    }
+    assert.equal((await request("DELETE", teamsPath)).status, 202);
+    await waitFor(
+      "normal Teams Agent deletion",
+      async () => (await request("GET", teamsPath)).status === 404,
+    );
     const slots = array(
       object(JSON.parse(await kubectl("get", "envoypatchpolicies", "-n", namespace, "-o", "json")))
         .items,
@@ -737,7 +857,11 @@ test(
         const value = asRecord(object(slot.metadata).annotations)?.[
           "openclaw.dev/channel-egress-binding"
         ];
-        return typeof value === "string" && value !== "idle" && value.includes(agentId);
+        return (
+          typeof value === "string" &&
+          value !== "idle" &&
+          (value.includes(agentId) || value.includes(string(teamsAgent.id)))
+        );
       }),
     );
     t.diagnostic(

@@ -1,15 +1,16 @@
 ---
 created: 2026-09-27
-updated: 2026-11-19
-last_updated_session: authoring-run/64d7828e-4701-4e9c-8c92-0b3617945c7a
+updated: "2026-11-20"
+last_updated_session: "authoring-run/54a714d8-60c2-4824-b3a2-2fbd2b090ead"
 ---
 
 # Agent Channel Directory Lookup Flow
 
 ## Overview
 
-An operator searches Slack users or channels while creating or editing an
-Agent. The Console uses the selected bot Secret to show names and workspace
+An operator searches Slack users/channels or one Teams Team's standard channels
+and member roster while creating or editing an
+Agent. The Console uses the selected channel credential Secret to show names and workspace
 identity, then saves only the selected IDs in channel Configuration. OpenClaw
 Control Plane (OCC) authorizes and reads the Secret; the selected ChannelDriver
 owns provider calls. This flow ends when the Console displays candidates or an
@@ -17,13 +18,13 @@ actionable error.
 
 ## Entry Points
 
-- Trigger: the Console Slack editor searches or resolves saved IDs, or an
+- Trigger: the Console Slack or Teams editor searches or resolves saved IDs, or an
   authorized caller posts to the Namespace channel directory route.
 - Assumptions: the caller can create an Agent or update the exact Agent or
   Configuration, and can operate the selected same-Namespace Secret.
 - Source: `apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`,
   `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`,
-  and `apps/controller/src/drivers/channel/slack.ts:SlackChannelDriver.lookupDirectory`.
+  and `apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`.
 
 ## Flow
 
@@ -36,10 +37,12 @@ graph TD
   P -->|yes| C["SecretDriver reads current value"]
   C --> D["OCC rechecks target, Secret grant, and backend identity"]
   D -->|changed| X
-  D -->|current| M{"Managed OCC listener configured?"}
-  M -->|no| X
-  M -->|yes| H["Tunnel through the reserved Envoy listener"]
-  H --> E["Slack Driver reads workspace and directory pages"]
+  D -->|current| R{"Selected provider?"}
+  R -->|Slack| E["Slack Driver reads workspace and bounded directory pages"]
+  R -->|Teams| T["Teams Driver exchanges password for Graph token"]
+  T --> V["Resolve native Team ID; read selected Team channels or members"]
+  V -->|provider error| X
+  V --> F
   E -->|provider error| X
   E --> F["Console shows names and exact IDs"]
   F --> G["Configuration saves selected IDs"]
@@ -60,13 +63,11 @@ platform state. A missing or foreign target is rejected before provider I/O.
 
 `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`
 
-Composition binds the Slack Driver to the reserved OCC channel-egress listener
-from the validated Installation configuration. Missing routing prevents provider
-I/O; it never enables direct fallback. Directory failures are returned as
-unavailable. Credential validation reports a configuration conflict when the
-managed route is absent. Helm admits only the authorized API Pods to this
-listener. Agent and Harness grants remain separate. See
-[channel egress](channel-egress.md) for policy enforcement and address checks.
+`apps/controller/src/composition/installation-config.ts` configures the bundled
+Drivers with the managed fleet's OCC listener. Production requests fail if that
+listener is absent or unavailable. The Helm policy permits directory OAuth and
+Graph targets on port 443 alongside the Slack targets. The OCC port is
+separate from the Gateway port and does not include Teams storage or bot hosts.
 
 The selected SecretDriver invokes `withValue` and verifies backend ownership.
 OCC rechecks grants and Secret backend identity after the read. It passes the
@@ -76,6 +77,15 @@ requires a bot identity from `auth.test` and pages through `users.list` or
 The response contains at most 100 candidates and pagination state, never the token.
 An incomplete page cannot establish that a name is absent or unique.
 
+`apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`
+selects the provider adapter inside the Driver boundary. Teams context contains
+nonsecret app, tenant and Entra group UUIDs. The Teams adapter exchanges the app
+password for a Graph token, resolves the native Team ID with `primaryChannel`,
+and reads only that Team's standard channels or member roster. Application RSC
+consent is checked by Microsoft, independently of OCC authorization. The Driver
+bounds requests, bodies and continuation, rejects redirects, and reconstructs
+Graph URLs from checked scope and pagination tokens. Missing Graph consent does
+not participate in bot deployment credential admission.
 `apps/controller/src/drivers/channel/slack.ts:SlackChannelDriver.call`
 cancels an unused response body on a non-success HTTP status before returning
 the safe rate-limit or unavailable error. This releases occupied transport
@@ -130,6 +140,34 @@ Those results are from the last authorized lookup. A new search rechecks the
 exact edit target and Secret `operate` grant, and denied Agent access removes the
 view.
 
+### 4. Select Teams names without changing native access semantics
+
+`apps/controller/src/console/channels/teams.mts:support` first keeps native
+group access based only on sender allowlists outside the limited editor.
+Their JSON remains inspectable; no editor save can disable that existing policy.
+
+`apps/controller/src/console/channels/teams.mts:appendFields`,
+`apps/controller/src/console/agents/teams-directory.mts:createTeamsDirectoryField`
+
+The Teams editor accepts a native Team ID for manual setup, or a Team link/group
+UUID for lookup. A successful lookup resolves a bare group UUID to the native
+bot Team ID before channel access can be saved. Link/native ID mismatch rejects
+the result. Search and saved-name hydration use the selected app-password Secret
+and exact Configuration edit target. Context changes clear names and results,
+abort the browser request and discard stale responses. Selecting a candidate
+adds its exact ID to the editable ID list; names and search text are not saved.
+Result buttons and Load more retain search focus on pointer-down, so Safari does
+not hide them on blur before their click handlers run. Keyboard activation,
+Escape and focus leaving the field retain their existing behavior.
+The existing channel transaction persists separate channel and personal rules.
+It also saves the optional SharePoint site ID in native
+`channels.msteams.sharePointSiteId`; clearing the field removes that key. The
+editor describes outgoing storage and native organization-scoped channel links.
+Saving this setting performs no provider request or permission grant; see
+[outgoing channel files](../guides/integrations/teams.md#configure-outgoing-channel-files).
+Only native IDs persist, so reopening requires a Team link again for browsing.
+Manual IDs remain available after missing-consent or provider errors.
+
 ## Debugging and Verification
 
 - A denied lookup requires checking the exact edit permission and Secret
@@ -144,12 +182,16 @@ view.
   projection. Browser checks cover name display and exact-ID saving.
 - The Agent plugin approver browser check holds the refocus access read and
   verifies that an open directory search remains available without a second lookup.
+- Teams API integration and browser checks exercise real controller and Driver
+  calls against a local HTTP Microsoft protocol fixture; live RSC consent remains
+  a separate [Teams verification](../testing/teams.md) requirement.
 - Fixture and simulated provider tests do not prove a live Slack token, bot
   visibility, or channel message delivery.
 
 ## Related docs
 
 - [ChannelDriver contract](../reference/drivers/channel.md)
+- [Bundled Teams Channel Driver](../reference/drivers/teams-channel.md)
 - [Bundled Slack Channel Driver](../reference/drivers/slack-channel.md)
 - [SecretDriver contract](../reference/drivers/secret.md)
 - [Agent plugin deployment flow](agent-plugins.md)
@@ -160,11 +202,21 @@ view.
 
 ## Changelog
 
+- 2026-11-20 00:40: Document directory provider selection and the managed OCC egress listener. (authoring-run/54a714d8-60c2-4824-b3a2-2fbd2b090ead - e88dc5883143e5fe39cffb0199ae5c0bac147cb7)
+
 - 2026-11-19 00:02: Routed provider requests through managed OCC channel egress (authoring-run/64d7828e-4701-4e9c-8c92-0b3617945c7a - e05a54b4b3daf86249c89aaeb2a8491dd52c80cc)
 
 - 2026-11-14 00:08: Clarify pending client writes and fresh drain budgets in the accompanying Slack proxy correction. (authoring-run/7504b1da-810c-4ead-a42b-831ed5e9c3e8 - 3309c7be21ce3c3c0256eb470f294c75c2c771f1)
 
 - 2026-11-13 22:19: Document bounded client write stalls in the accompanying Slack proxy change. (authoring-run/38e47fe4-fe4c-4f85-9b86-3a9cca43424e - bf84c5566fc92f97e7f9a4f7ae1f4a5778a0e83c)
+- 2026-11-05 00:21: Refresh callback, provider transport, and typed Console owners against pinned upstream in the accompanying uncommitted merge. (authoring-run/eb325c8c-65eb-4385-a7c0-21c2839e6da6 - 93c1dc4f24b9f544b26a451b71a0cfeff34be4fc)
+
+- 2026-10-16 18:08: Expose the optional native Teams upload destination and preserve its save/clear semantics. (01a1345f-9591-7c21-9306-c235c3bd6ee3 - d279f3bcb15a)
+
+- 2026-10-16 11:37: Preserve Teams picker results until pointer selection completes; cover WebKit selection and saved IDs in the accompanying change. (authoring-run/f0d20376-2b63-4a3d-a149-2bf2e44da769 - 17445a8c66ef)
+
+- 2026-10-10 22:48: Keep sender-only native Teams policies outside the limited channel editor (authoring-run/4c4cf7ac-5025-4ac6-9cb5-1ae3fcc217a9 - a2f7ad762117)
+- 2026-10-07 11:21: Add Team-scoped Graph lookup, native Team ID resolution and name selection alongside Slack in the accompanying implementation. (authoring-run/5acd9a8d-44df-4f9b-8daa-9269c2040340 - 948cb3e61636338be4692bd45114446d6c941890)
 
 - 2026-11-04 22:37: Document closed-picker reopening and pending activation cancellation in the accompanying local change. (authoring-run/1bc99c10-f761-424e-9533-b6e6a6ae9975 - 80b9e2c5238385ff8a8f52e9ab047b76da4c8fb4)
 

@@ -1,4 +1,5 @@
-import { channelEgressOptions, slackChannelDrivers } from "../helpers/channel-egress.ts";
+import { bundledChannelProviders } from "../../apps/controller/src/drivers/channel/index.ts";
+import { channelEgressOptions } from "../helpers/channel-egress.ts";
 import { workspaceSetupFixture } from "../helpers/kubernetes-workspace-setup.ts";
 import {
   openShellPolicyOptions,
@@ -48,7 +49,6 @@ import { conformanceKubeconfig } from "../helpers/kubernetes-compute.ts";
 import {
   DEDICATED_OPENCLAW_SANDBOX_REQUIRED,
   EMBEDDED_API_KEY_REQUIRED,
-  unsupportedChannelRefusal,
   unboundReferenceRefusal,
   unreadableSlackTokenRefusal,
   unsubstitutedFallbackRefusal,
@@ -519,6 +519,13 @@ test(
   "workspace node identity is Agent-scoped and only Agent deletion removes it",
   checkAgentScopedWorkspaceNodeIdentity,
 );
+
+function teamsOptions(overrides = {}) {
+  return routedOptions({
+    ...overrides,
+    gatewayRouting: { ...gatewayRouting, channels: { hostname: "callbacks.example.test" } },
+  });
+}
 
 test(
   "retiring an upgraded revision removes its legacy node Secret and keeps the Agent node",
@@ -4590,7 +4597,7 @@ test(
 
 test("dedicated Codex projects the account-owned token through the common PAT login", () => {
   const driver = createKubernetesComputeDriver(
-    options({
+    teamsOptions({
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
@@ -5434,14 +5441,14 @@ test(
 
 test("native channel settings require readable Secret bindings", async () => {
   const driver = new KubernetesComputeDriver(
-    routedOptions({
+    teamsOptions({
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
         channelEgress: channelEgressOptions,
       },
     }),
-    { nodeEnrollment: {}, channelDrivers: slackChannelDrivers },
+    { nodeEnrollment: {}, channelDrivers: bundledChannelProviders() },
   );
   const namespace = kubernetesNamespaceName(tenant.id);
   const agentId = "agent-a";
@@ -5507,6 +5514,49 @@ test("native channel settings require readable Secret bindings", async () => {
 
   // Real Gateway/Harness projection and revocation now run in the credentialed
   // Kubernetes workflow. These cases retain the distinct Secret parsing boundary.
+  // Installation callback routing must be refused at deploy admission, before
+  // a dedicated redeploy can stop its working predecessor. Draft save still works.
+  const callbackOptions = structuredClone(driver.options);
+  delete callbackOptions.gatewayRouting.channels;
+  const withoutCallback = new KubernetesComputeDriver(callbackOptions, {
+    nodeEnrollment: {},
+    channelDrivers: bundledChannelProviders(),
+  });
+  const teamsConfiguration = {
+    agents: { defaults: { model: "codex/gpt-5" } },
+    channels: { msteams: { enabled: true } },
+  };
+  assert.doesNotThrow(() =>
+    withoutCallback.validateHarnessAuth(
+      revision.harness,
+      revision.harnessAuth,
+      teamsConfiguration,
+      null,
+    ),
+  );
+  assert.throws(
+    () =>
+      withoutCallback.validateHarnessAuth(
+        revision.harness,
+        revision.harnessAuth,
+        teamsConfiguration,
+        secretBindings,
+      ),
+    /dedicated public channel callback listener/,
+  );
+
+  for (const msteams of [
+    { enabled: true },
+    { webhook: {} },
+    { webhook: { path: "/api/messages" } },
+  ]) {
+    driver.validateHarnessAuth(
+      revision.harness,
+      revision.harnessAuth,
+      { ...teamsConfiguration, channels: { msteams } },
+      secretBindings,
+    );
+  }
   await assert.rejects(
     driver.prepareRevision({
       ...revision,
@@ -5521,7 +5571,10 @@ test("native channel settings require readable Secret bindings", async () => {
         diagnostics: { otel: { logs: false } },
       },
     }),
-    { message: unsupportedChannelRefusal("channels.discord") },
+    {
+      message:
+        "Configuration setting channels.discord is not a supported channel: use slack or msteams, or set its enabled to false.",
+    },
   );
   assert.throws(
     () =>
@@ -5726,6 +5779,19 @@ test("native channel settings require readable Secret bindings", async () => {
   for (const name of ["$OPS", "${x}", "${OPS_NAME:-ops}"]) {
     driver.validateHarnessAuth(revision.harness, revision.harnessAuth, slackAccount({ name }), {});
   }
+
+  await assert.rejects(
+    driver.prepareRevision({
+      ...revision,
+      configuration: {
+        agents: { defaults: { model: "codex/gpt-5" } },
+        channels: { msteams: { enabled: true, webhook: { path: "/custom-callback" } } },
+        logging: { level: "info", consoleLevel: "info", consoleStyle: "json" },
+        diagnostics: { otel: { logs: false } },
+      },
+    }),
+    /must be \/api\/messages/,
+  );
 });
 
 test(

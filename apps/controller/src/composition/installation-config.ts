@@ -1,5 +1,5 @@
 import type { ChannelProviderDriver } from "../drivers/channel/routing.ts";
-import { SlackChannelDriver } from "../drivers/channel/slack.ts";
+import { bundledChannelProviders } from "../drivers/channel/index.ts";
 import { sandboxNamespaceLifecycleBinding } from "./namespace-lifecycle.ts";
 import type { NamespaceLifecycleBinding } from "@openclaw-enterprise/occ";
 import {
@@ -1600,18 +1600,16 @@ async function composeInstallationConfiguration(
     channelOptions === undefined
       ? undefined
       : `${channelOptions.serviceName}.${channelOptions.envoyNamespace}.svc`;
-  const channelDrivers: readonly ChannelProviderDriver[] = Object.freeze([
-    {
-      provider: "slack",
-      driver: new SlackChannelDriver(
-        globalThis.fetch,
-        channelOptions === undefined
-          ? undefined
-          : `http://${channelHost}:${channelOptions.occListenerPort}`,
-        { expectProxy: true, managedProxyHosts: channelHost === undefined ? [] : [channelHost] },
-      ),
-    },
-  ]);
+  const channelDrivers = bundledChannelProviders({
+    expectProxy: true,
+    ...(channelOptions === undefined
+      ? {}
+      : {
+          proxyUrl: `http://${channelHost}:${channelOptions.occListenerPort}`,
+          managedProxyHosts: [channelHost!],
+          teamsFileHosts: channelOptions.teamsFileHosts,
+        }),
+  });
   let computeDriver: ComputeDriver;
   if (computePackage !== undefined) {
     computeDriver = createExternalDriver(
