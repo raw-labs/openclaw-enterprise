@@ -17,8 +17,10 @@ custody and retirement. Provider adapters own provider-specific scope, injection
 and response rules. The proxy enforces requests and obtains eligible material;
 it does not run a credential renewal loop.
 
-Credential Proxy does not replace every Credential Gateway. Existing static
-Gateway-owned attachments retain their own delivery path.
+Selecting Credential Proxy does not adopt ordinary sources into protected delivery.
+New and existing ordinary sources use Credential Gateway. Protected sources and
+repository bindings require Proxy admission; an Agent with neither needs no Proxy
+plan. An unavailable Proxy never permits Gateway fallback for a protected source.
 
 ## Interface
 
@@ -93,6 +95,10 @@ Material stays in the trusted resolver, sender or verified recipient. Workload
 configuration receives safe references or markers, not issuer inputs or provider
 tokens. Keep material out of logs, receipts and public status. A material read
 permits receipt or installation only; it does not authorize an upstream send.
+For a static exchange, OCC pins the selected Proxy owner and source control before
+looking up Secret metadata. Before reading material, it verifies that the owner,
+control, Backend, sender, resolver and registered provider still match; otherwise
+it refuses the exchange.
 
 ## Lifecycle
 
@@ -123,6 +129,12 @@ also binds provider, attachment epoch, process and network identities. These
 fields must describe authenticated backend observations. Matching names or a
 shared registration do not prove no-bypass networking.
 
+Provider `routes` receives the resolved revision Harness configuration during
+admission. Request-time authority calls the same provider with the saved settings
+and current source, then compares the requested route with that result. A mismatch
+refuses credential delivery, send authorization, or refresh. Source registration
+never chooses the Agent's inference destination. See the [model provider contract](kubernetes-compute/model-provider.md).
+
 ### Request-time exchange
 
 [API binding](../../../apps/controller/src/composition/egress-authority.ts)
@@ -135,6 +147,15 @@ live transport custody, not just stored IDs.
 version and request and returns a deadline-bound decision. Match request and
 injection digests and enforce `sendStartBy` at the last controlled send boundary.
 Do not treat resolution as send permission.
+
+A provider's `classify` may synchronously report one stable rule ID (1–255) through
+its optional refusal callback. IDs must not encode request data or be reassigned.
+OCC records `classificationRule` only when no operation matches and exactly one
+refused route reports a valid ID. Accepted operations, missing or repeated reports,
+and ambiguous diagnostics provide no rule. The audit binds the authenticated
+execution, source and exact request ID without inventing an operation or accessing
+credentials. Interpretation belongs to the selected provider; the wire refusal
+remains generic. See the [diagnostic flow](../../flows/credential-source-egress.md#debugging-and-verification).
 
 Response acceptance and lease renewal remain bound to that exchange.
 `protectResponse` processes the complete response, including trailers; an
@@ -157,7 +178,7 @@ version at the same recipient before `confirmInstall(pending)`. Preserve the
 pair through renewal. A replacement process must re-observe the recipient;
 a lost installation or confirmation remains pending and cannot be replayed or
 adopted as success. OCC stores fences and delivery facts; Token Service stores
-material. The [recipient evidence checks](../../../apps/controller/src/drivers/repo/credentials/protected-repository-git-installation.ts)
+material. The [recipient evidence checks](../../../apps/controller/src/drivers/repo/access/protected-repository-git-installation.ts)
 require installed state and the exact attempt/version for use.
 
 Call `authorize` once for the captured request and installed version. An exact

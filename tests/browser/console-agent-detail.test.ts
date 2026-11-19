@@ -69,7 +69,6 @@ import {
   trackSettledFetches,
   waitForSettledFetches,
 } from "./console-fetch-accounting.ts";
-import { FIRST_ACTIVITY_WAIT_MS } from "../../apps/controller/src/console/agents/detail.mts";
 import { createRuntimeAuthFixture } from "./console-agents-runtime-auth-fixture.ts";
 import {
   withholdPermissionSummary,
@@ -110,7 +109,8 @@ import {
   PLUGINS_READ_ONLY,
   READ_ONLY_DRAFT_NOTICE,
 } from "../helpers/refusal-text.mjs";
-import { liftRestriction, restrict } from "../helpers/iam-grants.mjs";
+import { liftRestriction, restrict } from "../helpers/iam-grants.ts";
+import { importConsoleModule } from "../helpers/console-browser-module.ts";
 
 type ConsoleFixture = Awaited<ReturnType<typeof createConsoleAppFixture>>;
 
@@ -1246,6 +1246,94 @@ test("A refused harness grant read leaves an administrator's Deploy alone", asyn
   await waitForEnabled(page.getByRole("button", { name: "Deploy new version" }));
   assert.equal(await page.getByText(HARNESS_GRANT_MISSING, { exact: true }).count(), 0);
 });
+
+for (const focus of ["status", "editor", "navigation"]) {
+  test(`Configuration save conflict preserves ${focus} focus`, async (t) => {
+    const fixture = await createConsoleAppFixture(t);
+    await fixture.bootstrap();
+    const namespace = await fixture.createNamespace("Conflict focus", { ready: true });
+    const agent = await fixture.createAgent(
+      namespace.id,
+      "Conflict focus Agent",
+      nativeValues("base"),
+    );
+    const { page } = await newPage(t, fixture);
+    await login(
+      page,
+      fixture,
+      detailUrl(fixture, namespace.id, agent.id, "draft", "configuration"),
+    );
+    await page.getByRole("button", { name: "Edit Configuration", exact: true }).click();
+    await openAdvancedSettings(page);
+    const editor = page.getByLabel("Configuration JSON", { exact: true });
+    const draft = JSON.stringify(nativeValues("local draft"), null, 2);
+    await editor.fill(draft);
+    const path = `/namespaces/${namespace.id}/configurations/${agent.configurationId}`;
+    const url = new URL(path, fixture.origin).href;
+    const held = await holdRequests(t, page, url, { method: "PATCH", once: true });
+    await page.getByRole("button", { name: "Save Configuration", exact: true }).click();
+    await held.requested;
+    assert.equal(await hasFocus(page.getByText("Checking Configuration…", { exact: true })), true);
+    const navigation = page.getByRole("link", { name: "Agents", exact: true });
+    if (focus === "editor") {
+      // Read-only JSON must still support keyboard selection while the write is pending.
+      await editor.click();
+      await editor.press("ControlOrMeta+a");
+    } else if (focus === "navigation") {
+      await navigation.focus();
+    }
+    const selection = () =>
+      editor.evaluate((node) => {
+        if (!(node instanceof HTMLTextAreaElement)) {
+          throw new Error("Configuration JSON must be a textarea");
+        }
+        return [node.selectionStart, node.selectionEnd, node.selectionDirection];
+      });
+    const selected = await selection();
+    if (focus === "editor") {
+      assert.deepEqual(selected.slice(0, 2), [0, draft.length]);
+    }
+    const scroll = await page.evaluate(() => [scrollX, scrollY]);
+    // A real concurrent write wins after preflight, before the held PATCH reaches OCC.
+    await fixture.updateConfiguration(
+      namespace.id,
+      agent.configurationId,
+      nativeValues("concurrent edit"),
+    );
+    const before = await fixture.request("GET", path);
+    assert.equal(before.status, 200);
+    const response = page.waitForResponse(
+      (reply) => reply.request().method() === "PATCH" && reply.url() === url,
+    );
+    held.release();
+    assert.equal((await response).status(), 409);
+    const reload = page.getByRole("button", { name: "Reload draft", exact: true });
+    await reload.waitFor();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "The saved Configuration changed while you were editing." })
+      .waitFor();
+    assert.equal(await editor.inputValue(), draft);
+    assert.equal(await editor.getAttribute("readonly"), "");
+    assert.equal(
+      await page.getByRole("button", { name: "Save Configuration", exact: true }).isDisabled(),
+      true,
+    );
+    const after = await fixture.request("GET", path);
+    assert.equal(after.status, 200);
+    assert.deepEqual(after.data, before.data);
+    assert.deepEqual(after.data.values, nativeValues("concurrent edit"));
+    if (focus === "status") {
+      assert.equal(await hasFocus(reload), true);
+    } else {
+      assert.equal(await hasFocus(focus === "editor" ? editor : navigation), true);
+      assert.deepEqual(await page.evaluate(() => [scrollX, scrollY]), scroll);
+      if (focus === "editor") {
+        assert.deepEqual(await selection(), selected);
+      }
+    }
+  });
+}
 
 test("Agent detail blocks repeat Configuration saves after an uncertain draft update", async (t) => {
   const fixture = await createConsoleAppFixture(t);
@@ -2401,6 +2489,7 @@ for (const viewport of [
 }
 
 test("a version editor without Agent update can recover a failed deployment from the draft", async (t) => {
+  const { FIRST_ACTIVITY_WAIT_MS } = await importConsoleModule("agents/detail.mjs");
   const { fixture, namespace } = await createRuntimeAuthFixture(t, "Version editor");
   const agent = await fixture.createAgent(
     namespace.id,
@@ -2671,6 +2760,7 @@ test("a reader without update views the version draft read-only", async (t) => {
 // Edit current Configuration turns into Open draft in place, and the Plugins tab waits
 // for the answer before it reads the policy capabilities, which need Agent update (finding 2436).
 test("a late permission answer relabels a reader's version entry and skips plugin capabilities", async (t) => {
+  const { FIRST_ACTIVITY_WAIT_MS } = await importConsoleModule("agents/detail.mjs");
   const { fixture, namespace } = await createRuntimeAuthFixture(t, "Late plugin reader");
   const agent = await fixture.createAgent(namespace.id, "Late plugin Agent", nativeValues("v1"), {
     harnessAuth: { method: "runtime" },
@@ -2910,6 +3000,7 @@ test("a deployer without update keeps the draft checklist", async (t) => {
 // Configuration update, the Channels tab, the draft card and the Credentials tab's Channel
 // Secrets panel turn read-only in place (findings 2421, 2432).
 test("a late permission answer turns a reader's Channels and Channel Secrets read-only", async (t) => {
+  const { FIRST_ACTIVITY_WAIT_MS } = await importConsoleModule("agents/detail.mjs");
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Late reader answer", { ready: true });
@@ -3402,6 +3493,8 @@ test("a superseded draft Secret metadata read cannot replace the current Configu
   });
   assert.equal(changed.status, 200, JSON.stringify(changed.body));
   await page.getByRole("button", { name: "Reload authentication source", exact: true }).click();
+  // Let the reload replace its view before changing tabs; the old metadata stays held.
+  await waitForInputValue(page.getByLabel("Slack bot token"), secretOptionLabel(replacement));
   await page.getByRole("tab", { name: "Configuration", exact: true }).click();
   const reason =
     "Saving this Configuration needs Secret operate on Current bot token, which your access does not include. Ask an Installation administrator to grant it.";
@@ -3835,6 +3928,7 @@ test("the picker's Create new Secret is disabled when operate covers only some S
 
 // A tab parked before the answer landed is shown again with the answer applied (finding 2421).
 test("a Channels tab parked before a reader's permission answer returns read-only", async (t) => {
+  const { FIRST_ACTIVITY_WAIT_MS } = await importConsoleModule("agents/detail.mjs");
   const { fixture, namespace } = await createRuntimeAuthFixture(t, "Parked reader tab");
   const agent = await fixture.createAgent(namespace.id, "Parked reader Agent", nativeValues("v1"), {
     harnessAuth: { method: "runtime" },
@@ -3942,6 +4036,7 @@ test("a permission reread after a save turns the draft read-only", async (t) => 
 });
 
 test("a negative permission answer reaching an open Stop or Delete dialog prevents submission", async (t) => {
+  const { FIRST_ACTIVITY_WAIT_MS } = await importConsoleModule("agents/detail.mjs");
   const { fixture, namespace } = await createRuntimeAuthFixture(t, "Open confirmation");
   const agent = await fixture.createAgent(
     namespace.id,

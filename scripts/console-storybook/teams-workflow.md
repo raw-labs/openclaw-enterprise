@@ -1,0 +1,37 @@
+# Teams channel editor workflow
+
+Use **Components / Channels / Teams Editor** to inspect app and tenant IDs,
+the app-password Secret picker, channel mentions, and personal-message policy.
+Change the personal policy to Allowlist, enter an exact user ID, save, reopen,
+and inspect native Configuration. Channel access must retain its separate rules.
+The optional **SharePoint site ID** starts with a simulated destination. Change
+it, save and reopen to verify persistence; clear it and save to remove the native
+`sharePointSiteId` setting. Read the storage and organization-link explanation.
+An empty value must not block text-only Teams configuration.
+
+Also inspect **Teams**, **Teams Missing Secret**, **Teams Unsupported**, and
+**Teams Read Only**, **Teams Secrets Loading**, **Teams Save Denied**, and
+**Teams Save Pending**. Missing credentials prevent deployment; advanced native
+settings remain inspectable and cannot be flattened by the editor. In **Teams
+Unsupported**, open native Configuration JSON and confirm the sender allowlist
+remains without a Team map; **Edit Microsoft Teams** stays disabled. Deployed
+versions have no mutable editor. The shared channel transaction provides loading,
+error, permission, and outcome-unknown states; Teams uses the same transaction.
+
+Inspect **Teams Directory Channels**, **Teams Directory Members**, **Teams
+Directory Denied**, **Teams Directory Loading**, **Teams Directory Empty** and
+**Teams Directory Missing Secret**. Paste a Team link, search Engineering, select
+it, choose selected people, search Sam and select that member. Set personal
+messages to Allowlist and choose Alex. Save and reopen: native IDs persist;
+paste the Team link again to resolve names. Check exact-ID entry after the
+missing-consent error. Check that changing Team, app, tenant or Secret prevents
+old search results from becoming selections.
+
+Check mouse selection in Safari/WebKit as well as Chromium: selecting a result
+must immediately show its chip and populate the exact-ID field for channels and
+both people pickers. Check Load more, Enter, Arrow Down then Enter, Escape and an
+outside click. Save and reopen to confirm exact IDs persist.
+
+These are simulated UI fixtures. They do not prove Microsoft credentials,
+persistence, deployment, callback authentication, or actual Teams replies.
+See [Teams verification](../../docs/testing/teams.md) for integration checks.

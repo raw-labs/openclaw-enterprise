@@ -61,6 +61,12 @@ kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-openclaw-tenant-worker
 rules:
+  {{- if .Values.strandsBox.workerReadiness }}
+  # Authenticate the Pod's controller chain before binding a Strands listener.
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get]
+  {{- end }}
   # Read canonical control-plane sources and manage revision-owned runtime material.
   - apiGroups: [""]
     resources: [secrets]
@@ -83,9 +89,9 @@ rules:
     verbs: [get]
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
-    verbs: [get, create, patch, delete]
+    verbs: [get, list, create, patch, delete]
   - apiGroups: [apps]
-    resources: [deployments]
+    resources: [deployments, statefulsets]
     verbs: [get, list, create, patch, delete]
   - apiGroups: [batch]
     resources: [jobs]

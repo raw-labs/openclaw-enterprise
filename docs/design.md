@@ -104,8 +104,9 @@ These approved requirements are not established by the implemented architecture:
 | Runtime trust                | Separate placement is implemented; general mutually authenticated, workload-bound transport and complete two-cluster runtime acceptance remain pending. See [Kubernetes Compute](reference/drivers/kubernetes-compute.md).                                                                                                                             |
 | Resource and policy coverage | Agent-owned SandboxPolicy network additions are implemented. General shared containment policies, the published Harness and Channel resource model, and Restrictions across every integration remain beyond the current contracts. See [resource requirements](design/resources.md) and [Sandbox contract](reference/drivers/sandbox.md).              |
 
-Agent and Plugin Directories, plugin invocation approval workflows, broader audit
-export and retention, Budgets, and Routers remain future work. Existing logging
+Dedicated OpenClaw MCP tools can require human approval for native Gateway-dispatched
+calls; scripts using the credential directly are outside that approval boundary.
+Agent and Plugin Directories, broader plugin approval workflows, audit export and retention, Budgets, and Routers remain future work. Existing logging
 and metrics integrations have their own [operational contracts](guides/observability.md).
 
 ## Control Plane
@@ -116,9 +117,10 @@ platform state, IAM policy, controller work, and audit evidence.
 
 The API authenticates human sessions and non-Agent service keys, resolves an
 explicitly provisioned identity, and authorizes exact resource operations.
-The console at `/console/` uses these same APIs. GitHub and Google sign-in require
-administrator-enrolled identities; neither sign-in nor Namespace membership
-grants permissions. See [authentication](reference/authentication.md) and
+The console at `/console/` uses these same APIs. External sign-in uses enrolled
+identities. GitHub optionally enrolls verified team members into an operator-selected
+native IAM Group; its existing bindings determine access. Namespace membership
+does not grant permissions. See [authentication](reference/authentication.md) and
 [authorization](reference/authorization.md).
 
 Resource mutations, queued work, and audit records commit together. The worker
@@ -129,8 +131,8 @@ ownership and read-only views; the [worker flow](flows/controller-worker.md)
 traces dispatch and persistence.
 
 Compose and Helm initialize the Installation after database migration and before
-starting the API and worker. Only the initializer mounts bootstrap credential
-output. See [startup](flows/platform-startup.md) and
+starting the API and worker. Only the initializer mounts operator-supplied
+bootstrap credential input; upgrades need no retained input. See [startup](flows/platform-startup.md) and
 [bootstrap recovery](guides/deploy/service-keys.md#recover-an-incomplete-bootstrap).
 
 | Component            | Responsibility                                                |
@@ -224,11 +226,14 @@ release cannot enforce this path; qualify the exact pair before rollout.
 
 ### Native admin pilot exception
 
-Trusted human operators with exact-Agent `administer` permission can enter the
-[stock OpenClaw admin UI](reference/agent-native-admin.md) through an opt-in pilot.
-OCC checks admission and session retention, but does not authorize or audit each
-native command. Operators share the selected gateway's exposed conversations
-and credentials; this grants no access to another Agent or platform IAM.
+Human sessions with exact-Agent `operate` can enter native chat; `administer`
+selects the [stock OpenClaw admin UI](reference/agent-native-admin.md). OCC checks
+admission and session retention and selects an administrative route or a chat
+route capped at `operator.sessions.write` under the shared native identity.
+The runtime enforces that ceiling; OCC does not authorize or audit
+each native command. Users share the selected gateway’s exposed conversations,
+including channel conversations; this grants no access to another Agent or
+platform IAM.
 
 Operators can provide a separate [human access path](reference/drivers/kubernetes-compute/gateway-authentication.md)
 to the shared Agent. This path does not grant OCC access.
