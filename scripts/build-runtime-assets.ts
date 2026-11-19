@@ -39,17 +39,21 @@ const appliedPatches: readonly AppliedPatch[] = [
     sha256: "a2f5fcb96f56a58c5e39d44d3597640d3d0780746ab3ddcb66762630851806d7",
   },
   {
+    file: "stock-codex-0.164.0-dependency-pin.patch",
+    sha256: "ddce55b7cd701ae7f5db3c2932d7ddd760077592a8c96376ac7363609227c3be",
+  },
+  {
     file: "openclaw-required-worker-authority-regression.patch",
-    sha256: "5939c62bd62c323c93cd3aa6a96fbb6f4cf9d5df8f5eafffada25a58fe727494",
+    sha256: "b6261ce5be40e7d3c8f2d263aba7320301cbdd66381540edbb4362e95794139a",
     field: "openclawRequiredWorkerAuthorityRegressionPatchSha256",
   },
   {
     file: "openclaw-control-ui-browser-reconnect.patch",
-    sha256: "21fef3589702683a173dd2967d852954e1bfa56ea9d9e9a99bdaa28159ff5d2c",
+    sha256: "292609ff7adffb4962c5ff29f46f9179530f052d7a4fd303f5c18e5faafa77c6",
   },
   {
     file: "openclaw-terminated-gateway-namespace.patch",
-    sha256: "3e400cc9d0fc4a457ff58a4fa62f188c24fe63ecf5b0f7140f7a0cffa2c03889",
+    sha256: "09a448c28e306410dbb3d1ae002620ec4c46f11487893c107e7bebce38e55cb5",
   },
   {
     file: "openclaw-google-worker-placeholder.patch",
@@ -57,23 +61,15 @@ const appliedPatches: readonly AppliedPatch[] = [
   },
   {
     file: "openclaw-node-setup-renewal.patch",
-    sha256: "b4d860d00310e882404d62f630266c80d93df66492230c494e80cc1391bac538",
+    sha256: "cdda7e94a154b3508cf3eaf1513d0dee62cb58b0127c035a769911a86fd51b1e",
   },
   {
     file: "openclaw-planned-completion.patch",
-    sha256: "c4d00ea11a5c65495225f5164397a7251b7acd43bf73d8df888578bc7a7548e4",
+    sha256: "402c51bf4d3f815aea7be1116af08b9170214040d0c66599f0713963fdff8c15",
   },
   {
-    file: "openclaw-native-turn-settlement.patch",
-    sha256: "5f2127b46a4a92d24469e43d67301ee0b99d99eb2582c4e690b81b12fd8b7da6",
-  },
-  {
-    file: "openclaw-chat-main-session-start.patch",
-    sha256: "483c9c4ec832d0a5b0e016106c817a01d1fbd5b53693b08be7b9c18873e782e4",
-  },
-  {
-    file: "openclaw-chat-absent-selected-agent.patch",
-    sha256: "2c0b2da0a3234dcf1b7423289894cc8e0132eca23abbf9773da5a02794797899",
+    file: "openclaw-restart-harness-readiness.patch",
+    sha256: "fb6541b16a0318d43c521f58902447be1436f1d973d676d3bc8baf70bd9d417f",
   },
 ];
 const runtimePaths = [

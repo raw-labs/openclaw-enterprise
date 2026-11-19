@@ -81,7 +81,7 @@ export async function probePackagedCodex(
     provenance.openclawRequiredWorkerAuthorityRegressionPatchSha256,
     historicalCodex
       ? "4d7b31957dab6e8427eeb9a8cce0a8013f0f96b999e2692fdd6903595c3c4804"
-      : "5939c62bd62c323c93cd3aa6a96fbb6f4cf9d5df8f5eafffada25a58fe727494",
+      : "b6261ce5be40e7d3c8f2d263aba7320301cbdd66381540edbb4362e95794139a",
   );
   assert.deepEqual(provenance.patches, {
     "openclaw-codex-read-only-paths.patch": provenance.openclawBridgePatchSha256,
@@ -102,20 +102,18 @@ export async function probePackagedCodex(
             "d7eea3944eaaf4469ede0261d4f706148cd672f29f1efedd59e325c46c90d119",
         }
       : {
+          "stock-codex-0.164.0-dependency-pin.patch":
+            "ddce55b7cd701ae7f5db3c2932d7ddd760077592a8c96376ac7363609227c3be",
           "openclaw-control-ui-browser-reconnect.patch":
-            "21fef3589702683a173dd2967d852954e1bfa56ea9d9e9a99bdaa28159ff5d2c",
+            "292609ff7adffb4962c5ff29f46f9179530f052d7a4fd303f5c18e5faafa77c6",
           "openclaw-terminated-gateway-namespace.patch":
-            "3e400cc9d0fc4a457ff58a4fa62f188c24fe63ecf5b0f7140f7a0cffa2c03889",
+            "09a448c28e306410dbb3d1ae002620ec4c46f11487893c107e7bebce38e55cb5",
           "openclaw-planned-completion.patch":
-            "c4d00ea11a5c65495225f5164397a7251b7acd43bf73d8df888578bc7a7548e4",
-          "openclaw-native-turn-settlement.patch":
-            "5f2127b46a4a92d24469e43d67301ee0b99d99eb2582c4e690b81b12fd8b7da6",
+            "402c51bf4d3f815aea7be1116af08b9170214040d0c66599f0713963fdff8c15",
           "openclaw-node-setup-renewal.patch":
-            "b4d860d00310e882404d62f630266c80d93df66492230c494e80cc1391bac538",
-          "openclaw-chat-main-session-start.patch":
-            "483c9c4ec832d0a5b0e016106c817a01d1fbd5b53693b08be7b9c18873e782e4",
-          "openclaw-chat-absent-selected-agent.patch":
-            "2c0b2da0a3234dcf1b7423289894cc8e0132eca23abbf9773da5a02794797899",
+            "cdda7e94a154b3508cf3eaf1513d0dee62cb58b0127c035a769911a86fd51b1e",
+          "openclaw-restart-harness-readiness.patch":
+            "fb6541b16a0318d43c521f58902447be1436f1d973d676d3bc8baf70bd9d417f",
         }),
   });
   assert.equal(read(provenance.codex).version, stagingCodexVersion);

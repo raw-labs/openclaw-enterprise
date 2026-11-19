@@ -74,7 +74,7 @@ proxy need its destination authorization too. Embedded processes retain their
 existing direct public egress and can bypass these environment settings.
 
 The runtime image selects upstream `msteams` in
-`deploy/runtime/Dockerfile` and `scripts/build-runtime-assets.mjs`. No independent
+`deploy/runtime/Dockerfile` and `scripts/build-runtime-assets.ts`. No independent
 Teams message engine or channel credential broker is introduced.
 
 ### 3. Publish the serving callback
