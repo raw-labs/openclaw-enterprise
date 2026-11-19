@@ -82,7 +82,7 @@ API keys. Other paths have no callback route.
 
 ### 3. Authenticate and process the activity
 
-The [pinned native monitor](https://github.com/openclaw/openclaw/blob/554f0b886bde6c089578c49967227f8b50d1cf16/extensions/msteams/src/monitor.ts)
+The [pinned native monitor](https://github.com/openclaw/openclaw/blob/44f24d8398428dd8593f4f3842f404545a642ad9/extensions/msteams/src/monitor.ts)
 `extensions/msteams/src/monitor.ts:monitorMSTeamsProvider` registers
 `/api/messages` with plugin authentication. Its Express adapter and
 Microsoft Teams SDK reject unauthenticated activities before Agent execution.
@@ -91,7 +91,7 @@ sends the response using its admitted app credentials through provider egress.
 
 ### 4. Fetch remote attachment bytes
 
-The [pinned native attachment downloader](https://github.com/openclaw/openclaw/blob/554f0b886bde6c089578c49967227f8b50d1cf16/extensions/msteams/src/attachments/download.ts)
+The [pinned native attachment downloader](https://github.com/openclaw/openclaw/blob/44f24d8398428dd8593f4f3842f404545a642ad9/extensions/msteams/src/attachments/download.ts)
 `extensions/msteams/src/attachments/download.ts:downloadMSTeamsAttachments` retains its media-host admission,
 redirect and authentication-header policy. Its guarded fetch uses the Gateway's
 proxy transport when Compute supplies the reviewed-proxy declaration.
