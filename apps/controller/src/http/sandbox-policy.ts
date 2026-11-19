@@ -37,13 +37,53 @@ function policyBody(policy: Readonly<SandboxPolicy>) {
 }
 
 export const sandboxPolicyHandlers = {
-  async getAgentSandboxPolicy({ controller, context, namespaceId, params, reply, request }) {
+  async discoverAgentConfigurations({ controller, context, namespaceId, params, reply, request }) {
+    const configurations = await controller.discoverConfigurations(context.actorId, {
+      scope: "agent",
+      namespaceId,
+      agentId: params.agentId!,
+    });
+    reply.send({ data: { configurations }, meta: { requestId: request.id } });
+  },
+  async validateAgentSandboxPolicy({
+    controller,
+    context,
+    namespaceId,
+    params,
+    body,
+    reply,
+    request,
+  }) {
+    const result = await controller.validateAgentSandboxPolicy(
+      context.actorId,
+      namespaceId,
+      params.agentId!,
+      params.facet as SandboxFacet,
+      body!.expectedVersion as number,
+      body!.additions,
+    );
+    reply.send({ data: result, meta: { requestId: request.id } });
+  },
+  async getAgentSandboxPolicy({
+    controller,
+    context,
+    namespaceId,
+    params,
+    reply,
+    request,
+    setAuditReadTarget,
+  }) {
     const view = await controller.getAgentSandboxPolicy(
       context.actorId,
       namespaceId,
       params.agentId!,
       params.facet as SandboxFacet,
     );
+    setAuditReadTarget({
+      kind: "sandbox_policy",
+      id: view.policy.id,
+      namespaceId: view.policy.namespaceId,
+    });
     reply.send({
       data: { ...view, policy: policyBody(view.policy) },
       meta: { requestId: request.id },
@@ -129,12 +169,16 @@ export const sandboxPolicyHandlers = {
         params.facet as SandboxFacet,
         body!.expectedVersion as number,
         body!.revisionId as string,
+        body!.additions as readonly SandboxNetworkGrant[] | undefined,
       );
       await unit.audit.append(
         mutationEvent(
           { kind: "sandbox_policy", id: updated.id, namespaceId },
           {
             policyVersion: updated.version,
+            ...(body!.additions === undefined
+              ? {}
+              : { agentId: updated.agentId, additions: updated.additions }),
             revisionId: updated.application!.revisionId,
             applicationId: updated.application!.id,
           },

@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { createOccLogger } from "../../apps/controller/src/logging.ts";
 import { createOpenShellBackend } from "../../apps/controller/src/backends/openshell.ts";
 import { OpenShellCredentialGatewayDriver } from "../../apps/controller/src/drivers/credential-gateway/openshell.ts";
 import { OpenShellCredentialRefreshDriver } from "../../apps/controller/src/drivers/credential-refresh/openshell.ts";
-import { createControlledClock } from "../fixtures/repository-credentials/clock.mjs";
+import { createControlledClock } from "../fixtures/repository-credentials/clock.ts";
+import { assertApiError } from "../helpers/api-error.mjs";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
+import { jsonLineDestination } from "../helpers/json-lines.mjs";
 import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
-import { createTestSecretDriver } from "../helpers/secret-driver.mjs";
+import { DEVICE_LOGIN_FAILED } from "../helpers/refusal-text.mjs";
+import { assertSameAnswer } from "../helpers/refusal-answers.ts";
 
 function jwt(payload) {
   return `${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.synthetic`;
@@ -20,17 +24,7 @@ test("Console device login completes through the paired OpenShell Refresh Driver
   const logger = createOccLogger({
     component: "occ-api",
     level: "info",
-    destination: {
-      write(chunk) {
-        logs.push(
-          ...String(chunk)
-            .split("\n")
-            .filter(Boolean)
-            .map((line) => JSON.parse(line)),
-        );
-        return true;
-      },
-    },
+    destination: jsonLineDestination(logs),
   });
   const providers = new Map();
   const operations = [];
@@ -126,10 +120,8 @@ test("Console device login completes through the paired OpenShell Refresh Driver
       return { ...namespace, name: "oauth-api-fixture" };
     },
   });
-  const secrets = createTestSecretDriver();
   const fixture = await createConsoleAppFixture(t, {
     computeDriver: compute,
-    secretDriver: secrets,
     logger,
     now: () => new Date(clock.wallNow()),
   });
@@ -271,9 +263,10 @@ test("Console device login completes through the paired OpenShell Refresh Driver
   assert.equal(updated.status, 409, JSON.stringify(updated.body));
   assert.deepEqual(operations, settled);
   const sessionRecord = await fixture.controller.transact((unit) =>
-    unit.secrets.findSecret(namespace.id, started.data.session.id),
+    unit.authenticationStates.findDevice(namespace.id, started.data.session.id),
   );
-  const session = JSON.parse(secrets.valueFor(sessionRecord));
+  assert.ok(sessionRecord);
+  const session = sessionRecord;
   assert.equal(session.credentialGatewayId, gateway.id);
   assert.equal(session.credentialRefreshId, refresh.id);
   assert.equal(session.privateState, undefined);
@@ -286,11 +279,35 @@ test("Console device login completes through the paired OpenShell Refresh Driver
   const interruptedPath = `${path}/${interrupted.data.session.id}/poll`;
   const failed = await fixture.request("POST", interruptedPath, { body: {} });
   assert.equal(failed.status, 503, JSON.stringify(failed.body));
+  // The 503 says the login was cancelled and to start a new one (finding 2536).
+  assert.equal(failed.body.error.message, DEVICE_LOGIN_FAILED);
+  // The text sends the caller to an operator. The API's 503 record for this request names the
+  // Refresh Driver's failure by class (and code, when it has one), never by its message.
+  const record = logs.find(
+    (line) =>
+      line.event === "http.dependency_unavailable" && line.requestId === failed.body.meta.requestId,
+  );
+  assert.equal(record?.errorClass, "RetryLaterError", JSON.stringify(record));
+  assert.deepEqual(record.causes, [{ errorClass: "TypeError" }]);
+  assert.equal(JSON.stringify(logs).includes("synthetic lost token-exchange response"), false);
+  assert.equal(exchanges, 2);
+  // It comes only after the caller's grants: a Namespace reader polling this login and a missing
+  // one gets the same denial, each request's own ID hidden.
+  const reader = await fixture.createNamespaceMember("device-login-reader", namespace.id, [
+    ["read", "namespace"],
+  ]);
+  const readerSession = await fixture.signIn(reader.credentials);
+  const sessionId = interrupted.data.session.id;
+  await assertSameAnswer(
+    (id) => fixture.request("POST", `${path}/${id}/poll`, { session: readerSession, body: {} }),
+    [sessionId, `${sessionId.slice(0, sessionId.indexOf("_"))}_${randomUUID()}`],
+  );
   assert.equal(exchanges, 2);
   const failedRecord = await fixture.controller.transact((unit) =>
-    unit.secrets.findSecret(namespace.id, interrupted.data.session.id),
+    unit.authenticationStates.findDevice(namespace.id, interrupted.data.session.id),
   );
-  const failedSession = JSON.parse(secrets.valueFor(failedRecord));
+  assert.ok(failedRecord);
+  const failedSession = failedRecord;
   assert.equal(failedSession.phase, "cancelled");
   assert.equal(failedSession.privateState, undefined);
   assert.equal((await fixture.request("POST", interruptedPath, { body: {} })).status, 409);
@@ -401,8 +418,7 @@ test("Console device login completes through the paired OpenShell Refresh Driver
     const before = operations.length;
     const rotated = await fixture.request("POST", `${source.path}/rotate`);
     const removed = await fixture.request("DELETE", source.path);
-    assert.equal(removed.status, 404, JSON.stringify(removed.body));
-    assert.equal(removed.body.error.code, "NOT_FOUND");
+    assertApiError(removed, 404, "NOT_FOUND");
     assert.deepEqual(
       operations.slice(before),
       [],

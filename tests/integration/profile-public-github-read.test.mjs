@@ -1,3 +1,4 @@
+import { requireConfiguration } from "../../packages/contracts/src/index.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -7,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { KubernetesComputeDriver } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
 import { fileTemporaryDirectory } from "../helpers/temporary-directory.mjs";
+import { chartTooling, helmTemplate } from "../helpers/production-chart.ts";
 
 const digestA = "a".repeat(64);
 const digestB = "b".repeat(64);
@@ -31,7 +33,7 @@ function baseInput(overrides = {}) {
       controllerImage: `registry.example.invalid/openclaw-enterprise/controller@sha256:${digestA}`,
       authBaseUrl: "https://console.oce.example.internal",
       adminEmail: "admin@example.invalid",
-      bootstrapPasswordClaimName: "occ-bootstrap-admin-password",
+      bootstrapCredentialsSecretName: "occ-bootstrap-credentials",
       apiClients: [{ namespace: "operator-tools", podLabels: { app: "occ-operator" } }],
       databaseCidrs: ["192.0.2.10/32"],
       clusterCidrs: ["192.0.2.11/32"],
@@ -39,7 +41,6 @@ function baseInput(overrides = {}) {
       gatewayClassName: "eg",
       gatewayApiKeySecretName: "occ-private-gateway-key",
       agentNativeAdminDomain: "agents.oce.example.internal",
-      sharedCookieDomain: "oce.example.internal",
       gatewayTrustedProxyCidrs: ["192.0.2.12/32"],
       pluginStatusProxySourceCidrs: ["192.0.2.13/32"],
       nodeSelector: { "oce-role": "control" },
@@ -79,29 +80,15 @@ function codexInput(overrides = {}) {
   };
 }
 
-function render(
-  profile,
-  input,
-  directory = fileTemporaryDirectory(`oce-profile-${profile}-`),
-  root = repository,
-  dnsServer,
-) {
+function render(profile, input, directory = fileTemporaryDirectory(`oce-profile-${profile}-`)) {
   const inputPath = join(directory, "input.json");
   writeFileSync(inputPath, `${JSON.stringify(input, null, 2)}\n`);
-  const dnsPreload = join(directory, "dns-preload.mjs");
-  if (dnsServer !== undefined) {
-    writeFileSync(
-      dnsPreload,
-      `import dns from "node:dns/promises"; dns.setServers([${JSON.stringify(dnsServer)}]);\n`,
-    );
-  }
   let summary;
   try {
     summary = execFileSync(
       process.execPath,
       [
-        ...(dnsServer === undefined ? [] : ["--import", dnsPreload]),
-        "scripts/render-installation-profile.mjs",
+        "scripts/render-installation-profile.ts",
         "--profile",
         profile,
         "--input",
@@ -109,7 +96,7 @@ function render(
         "--out-dir",
         directory,
       ],
-      { cwd: root, encoding: "utf8" },
+      { cwd: repository, encoding: "utf8" },
     );
   } catch (error) {
     error.profileRendererOutput = `${error.stdout ?? ""}${error.stderr ?? ""}`;
@@ -123,29 +110,6 @@ function render(
     installation: readFileSync(join(directory, "installation.yaml"), "utf8"),
     preflight: JSON.parse(readFileSync(join(directory, "preflight.json"), "utf8")),
   };
-}
-
-function helmTemplate(output, extraValueFiles = [], releaseName = "oce", extraArgs = []) {
-  return execFileSync(
-    helm,
-    [
-      "template",
-      releaseName,
-      "deploy/helm/openclaw-enterprise",
-      "--namespace",
-      "openclaw-system",
-      "--values",
-      join(output.directory, "values.yaml"),
-      ...extraValueFiles.flatMap((path) => ["--values", path]),
-      ...extraArgs,
-    ],
-    {
-      cwd: repository,
-      encoding: "utf8",
-      maxBuffer: 2_000_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
 }
 
 test(
@@ -163,7 +127,7 @@ test(
     assert.equal(compute.network.publicGithubRead.address, clusterIP);
     assert.match(output.values, /publicGithubRead:\n {2}enabled: true/);
     assert.doesNotMatch(output.installation, /repositoryCredentials:|registryPath:|controlSocket:/);
-    KubernetesComputeDriver.validateConfiguration(compute);
+    requireConfiguration(KubernetesComputeDriver, compute);
     const name = "openclaw-enterprise-public-github-read";
     const objects = helmTemplate(output)
       .split(/\n---\n/)
@@ -202,7 +166,6 @@ test(
 );
 
 test("reader fixture waits for a current ready endpoint owned by its Service", async (t) => {
-  const { chartTooling } = await import("../helpers/production-chart.mjs");
   const tooling = await chartTooling();
   if (tooling.skip) {
     t.skip(tooling.skip);

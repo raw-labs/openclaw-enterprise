@@ -55,7 +55,7 @@ message naming the fix. Update the Configuration with replacement
 `secretBindings`, or assign the Agent another Configuration. Namespace membership,
 Configuration access, Agent access, or possession of a ref does not grant
 consumption. Deployment stores normalized references and the selected
-SecretDriver identity in the immutable AgentRevision; it does not store backend
+SecretDriver identity in the AgentRevision; it does not store backend
 locators or value bytes. Secret storage CRUD, update/restart semantics,
 Kubernetes Secret RBAC, no-leakage rules, and troubleshooting are owned by the
 [Kubernetes Secret Driver](../drivers/kubernetes-secret.md).
@@ -102,6 +102,10 @@ key naming where a credential is read from (ending in `File`, `Path`, `Dir` or
 `headers` map there follows the header rule. Environment maps keep their own
 rules, and a hook mapping's `sessionKey`, a routing key, stays as written. A
 literal `gateway.auth.password` is refused on Configuration and Preset saves.
+A plugin secret input that OpenClaw resolves (a bundled manifest's secret inputs,
+such as Codex `appServer.authToken` and `appServer.headers`, and web search and
+fetch `apiKey`s) also takes a whole `$NAME` value: OpenClaw reads it as an
+environment SecretRef. The other slots refuse a `$NAME` value.
 
 A stored document that predates one of these rules still reads, so its
 operator can replace it.
@@ -132,9 +136,39 @@ gateway-only credential values:
 | `slack`   | `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN` for the default account; account-specific keys for named accounts |
 | `msteams` | `MSTEAMS_APP_PASSWORD`                                                                                    |
 
-Every environment SecretRef used by an enabled native channel must have a
-matching `secretBindings` entry before deployment admission. Disabled channel
-provider blocks do not require bindings.
+On the bundled Kubernetes Compute, every `${NAME}` reference and environment
+SecretRef in an enabled native channel needs a matching `secretBindings` entry,
+including a reference inside other text (`xoxb-${NAME}`). Outside credential
+fields a reference with a fallback (`${NAME:-text}`) needs none: the fallback
+fills the unset name. `$${NAME}` is literal text, not a reference.
+
+A channel secret-input field (Slack `appToken`, `botToken`, `signingSecret`,
+`userToken` and `relay.authToken`, on the channel or a named account; Teams
+`appPassword` on the channel) has stricter rules:
+
+- A Slack `appToken` or `botToken` written as an object must be an env SecretRef
+  with provider `default`: the Slack Channel Driver reads no other SecretRef or
+  object. The rule covers the tokens that Driver checks, so it skips the app
+  token in HTTP mode and disabled accounts.
+- A reference with a fallback needs a binding: this Compute sets only bound
+  names, so the fallback, often empty, would replace the credential.
+- OpenClaw reads a whole `$NAME` value as an environment SecretRef, so it needs
+  a binding too.
+- OpenClaw substitutes only uppercase names, so any other `${`, such as
+  `${slack_bot}` or `${NAME-text}`, is refused: OpenClaw would send that text
+  as the credential. The message quotes no other text of the value than a lowercase
+  `${name}` or the name before `-`.
+- The Configuration Driver accepts a credential field only as exactly one
+  `${NAME}` or a SecretRef, so even with a binding it refuses a fallback, a
+  `$NAME` value, or a reference with other text, spaces or references. The
+  message names the form.
+
+Configuration create and update and Agent provisioning refuse these values with
+`400 INVALID_REQUEST`. The message names the setting, and also the binding when
+one is missing, so send the values and their bindings in one request.
+Deployment refuses a stored Configuration that predates this rule with the same
+message. Disabled channel provider blocks do not require
+bindings.
 
 Add a native default Slack account with environment SecretRefs:
 
@@ -207,6 +241,30 @@ omitted policies remain omitted until explicitly selected. Organization-wide
 installs support Disabled or Open when DMs are enabled; Disabled is recommended.
 The editor preserves `enterpriseOrgInstall` and `dm.enabled`; a native
 `dm.enabled: false` continues to block DMs regardless of the selected policy.
+
+#### Direct-message sessions
+
+When the Configuration enables a channel and leaves `session.dmScope` unset,
+deployment sets it to `"per-account-channel-peer"`. An enabled channel is any
+`channels` entry except `defaults` and `modelByChannel` whose `enabled` is not
+`false`. Each direct-message sender then gets a separate session for each
+channel and channel account, including named `channels.slack.accounts` entries.
+OpenClaw's own default, `"main"`, puts every sender in the main session that
+browser chat opens and turns on recall across conversations, so a sender could
+get the Agent to repeat members' chat content. With the OCE default, that
+recall stays off unless `memory.search.rememberAcrossConversations` turns it on.
+An explicit value, including `"main"`, is kept.
+
+An Agent without an enabled channel gets no `session.dmScope`, so OpenClaw's
+`"main"` and its recall across conversations stay. When you enable a channel
+later, the next deployment sets the default.
+
+After the next deployment of an Agent with a channel that used `"main"` by
+default, each direct-message sender starts a new session without the earlier
+shared context. The main session keeps its history, and new browser chat
+sessions are no longer grouped under it. Members can still read
+channel conversations, as the [native admin pilot exception](../../design.md#native-admin-pilot-exception)
+describes.
 
 Microsoft Teams uses the native `msteams` provider identifier. Its application
 and tenant identifiers are ordinary nonsecret configuration strings; only the

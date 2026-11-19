@@ -1,7 +1,7 @@
 ---
 created: 2026-08-31
-updated: 2026-09-22
-last_updated_session: authoring-run/ffffed03-0b85-4984-990e-aa0705a91645
+updated: 2026-11-16
+last_updated_session: authoring-run/e8039d10-1e3b-41aa-82f2-0d2c709b421f
 ---
 
 # Production TUI Flow
@@ -9,8 +9,7 @@ last_updated_session: authoring-run/ffffed03-0b85-4984-990e-aa0705a91645
 ## Overview
 
 An operator provisions a production Namespace and embedded OpenClaw Agent
-through the authenticated OCC API, waits for the worker to activate an immutable
-AgentRevision, then attaches to the Agent-owned gateway Pod with
+through the authenticated OCC API, waits for the worker to activate an AgentRevision, then attaches to the Agent-owned gateway Pod with
 `node /app/openclaw.mjs tui`. This flow starts at the first protected API
 request after production startup and ends when the operator exits the TUI
 client. It does not cover Helm installation internals, remote shared-cluster
@@ -60,11 +59,12 @@ graph TD
 `apps/controller/src/auth/index.ts:ControllerAdmissionVerifier.verify`,
 `apps/controller/src/index.ts:createFastifyApp`
 
-After the initialization Job completes successfully, the operator retrieves
-`initial-admin-service-key.json` from its protected output PVC. Neither the API
-nor worker mounts that PVC. The [OCC CLI](../guides/cli.md) reads `data.key` from
-the protected response file, sends `x-api-key`, and first
-verifies `GET /installation`. The API validates the key, resolves the
+After the initialization Job completes successfully, the operator uses the
+retained precreated key in private CLI JSON containing `data.key`.
+[Bootstrap key access](../reference/authentication/service-api-keys.md#retrieve-the-bootstrap-service-key)
+owns file preparation. Neither API nor worker receives the bootstrap inputs.
+The [OCC CLI](../guides/cli.md) sends `x-api-key` and first verifies
+`GET /installation`, which supplies the server-owned Installation ID. The API validates the key, resolves the
 Installation-scoped service principal, and applies its current IAM grants; an
 invalid, expired, or revoked key returns `401` without cookie fallback.
 
@@ -97,7 +97,7 @@ existing workspaces with bootstrap files are unaffected. The bodyless deploy req
 requires the Namespace to be `ready`, reauthorizes `deploy` on the Agent,
 reauthorizes `read` on the selected Configuration, validates the required API-key
 `harnessAuth` and any gateway Secret bindings, resolves the approved `openclaw`
-embedded Harness, and stores an immutable AgentRevision. Both the actor and Agent
+embedded Harness, and stores an AgentRevision. Both the actor and Agent
 service principal need exact Secret `operate`; the API checks physical backend
 identity before admission. An administrator with controller-owned IAM-state access
 must establish the Agent grant before this request.
@@ -199,9 +199,9 @@ ConfigMap-mounted gateway is Running and Ready.
   kubeconfig/context, and `OPENAI_API_KEY`.
 - Adjacent source-backed checks remain
   `node --test tests/integration/harness-topology-k3d-real.test.mjs`,
-  `node --test tests/integration/kubernetes-compute-real.test.mjs`,
+  `node --test tests/integration/kubernetes-compute-real.test.ts`,
   `node --test tests/integration/kubernetes-compute-provisioning-real.test.mjs` and
-  `node --test tests/integration/kubernetes-compute-driver-real.test.mjs`.
+  `node --test tests/integration/kubernetes-compute-driver-real.test.ts`.
 
 ## Related docs
 
@@ -218,6 +218,8 @@ ConfigMap-mounted gateway is Running and Ready.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-16 09:42: Use retained precreated credentials at the authenticated startup handoff. (authoring-run/e8039d10-1e3b-41aa-82f2-0d2c709b421f - 81ab0a9fbe38cd2eea88f599a5e0ac9aad9c4f92)
 
 - 2026-09-22 21:24: Render Kubernetes operator proxy trust and retain optional loopback passwords. (authoring-run/ffffed03-0b85-4984-990e-aa0705a91645 - cbf1851308a2db398820ae9e1000f57837703ace)
 - Kubernetes Compute uses trusted proxy for native gateway authentication. (NOT_IN_SPEC)

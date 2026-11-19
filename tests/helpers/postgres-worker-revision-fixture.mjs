@@ -2,17 +2,85 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { prepareFile } from "../../scripts/ci/prepare.mjs";
+import { prepareFile } from "../../scripts/ci/prepare.ts";
+import { authorizedPrincipal } from "./development-iam-state.ts";
 import {
-  authorizedPrincipal,
   createBackendWorkerDrivers,
   createBackendController,
   ensureInstallation,
   requiresPostgres,
 } from "./postgres-backend-state.mjs";
-import { waitFor } from "./wait-for.mjs";
+import { waitFor } from "./wait-for.ts";
+import { installationDriverConfigurations } from "../../apps/controller/src/composition/installation-config.ts";
+import { freezeAgentRevision } from "../../packages/contracts/src/index.ts";
+
+/**
+ * @import { SuiteContext, TestContext } from "node:test"
+ * @import { Pool } from "pg"
+ * @import { Agent, AgentRevision, BackendDefinition, ComputeDriver, Namespace, Principal, RepositoryRevisionState, RevisionHarnessDescriptor } from "../../packages/contracts/src/index.ts"
+ * @import { ControllerWorkerOptions } from "../../apps/controller/src/worker.ts"
+ * @import { ControllerWork, ControllerWorkState } from "../../packages/occ/src/controller-work.ts"
+ * @import { RepositoryWorkerDriver } from "./postgres-worker-revision-support.mjs"
+ * @typedef {{ id: string, idempotencyKey: string }} RevisionWork
+ * @typedef {AgentRevision & RevisionWork} AdmittedRevision
+ * @typedef {{ state: ControllerWorkState, claim_token: string | null, attempt_count: number }} WorkRow
+ * @typedef {{ idempotency_key: string, actor_id: string, attempt_count: number }} MaintenanceRow
+ * @typedef {{ reason_code: string | null, result_data: NonNullable<ControllerWork["resultData"]> | null }} WorkResultRow
+ * @typedef {NonNullable<ControllerWorkerOptions["drivers"]>} RuntimeDrivers
+ * @typedef {RuntimeDrivers["installation"]["drivers"]} DriverSelections
+ * @typedef {Partial<{ [Key in keyof DriverSelections]: Partial<DriverSelections[Key]> }>} DriverOverrides
+ * @typedef {Pick<RevisionWork, "idempotencyKey"> & Partial<Pick<RevisionWork, "id">>} WorkLookup
+ * @typedef {{
+ *   harness?: RevisionHarnessDescriptor,
+ *   sandboxDriverId?: string,
+ *   protectedRepositoryDriver?: { require(capability: "sandbox"): { id: string } },
+ *   repositoryCredentials?: RepositoryRevisionState,
+ *   actorId?: string,
+ *   plugins?: AgentRevision["plugins"],
+ *   workAge?: string,
+ *   controllerSkewMs?: number,
+ *   compute?: Pick<ComputeDriver, "id" | "implementation">
+ * }} RevisionOptions
+ * @typedef {{
+ *   executionMode?: Agent["executionMode"],
+ *   serviceAccountId?: string,
+ *   backendId?: string | null,
+ *   grantHarnessSecret?: boolean,
+ *   auth?: string,
+ *   nonModelSources?: number | undefined,
+ *   modelConfig?: Record<string, unknown> | undefined
+ * }} AgentOptions
+ */
 
 export const CREDENTIAL_GATEWAY_FIXTURE_ID = "credential-gateway-worker-fixture";
+
+// Keep the two worker roles distinct. Tests can still replace the boundary's methods
+// after a worker starts to simulate a lost response or a changed grant.
+function repositoryWorkerRoles(driver) {
+  if (driver === undefined) {
+    return {};
+  }
+  const { id, implementation } = driver;
+  return {
+    repositoryPolicy: {
+      id,
+      implementation,
+      capability: driver.capability,
+      listOptions: (input) => driver.listOptions(input),
+      resolve: (input) => driver.resolve(input),
+    },
+    nativeRepositorySender: {
+      id,
+      implementation,
+      maintenanceIntervalMs: driver.maintenanceIntervalMs,
+      durableBrokerReceipts: driver.durableBrokerReceipts,
+      checkAdmissionReady: (signal) => driver.checkAdmissionReady(signal),
+      open: (input, signal) => driver.open(input, signal),
+      status: (sessionId, signal) => driver.status(sessionId, signal),
+      close: (sessionId, signal) => driver.close(sessionId, signal),
+    },
+  };
+}
 
 // Admission locks a Namespace, then its Agent. Every worker transaction that locks a claim's
 // Agent must already hold the Namespace (#1742), or it deadlocks with a concurrent deploy,
@@ -60,7 +128,7 @@ const disposeLimitsMs = {
   "worker stop": 30_000,
   "pool end": 15_000,
   // Waits for the CI state lock, which other files' test databases also take. The drop's lock
-  // wait shares this limit; its psql command has its own (scripts/ci/cleanup.mjs).
+  // wait shares this limit; the drop itself has its own (scripts/ci/cleanup.ts).
   "drop database": 120_000,
 };
 
@@ -139,6 +207,7 @@ export async function disposeStep(step, limitMs, work) {
 // Importing this helper registers no tests or hooks.
 // `exitGraceMs` and `exitBackstopMs` replace the abandoned-step grace and backstop for the
 // fixture's own exit tests.
+/** @param {string} testFile */
 export function createWorkerRevisionFixtures(
   testFile,
   {
@@ -148,12 +217,17 @@ export function createWorkerRevisionFixtures(
 ) {
   exitGraceMs = graceMs;
   // The owning file registers this as a root after hook: `after(cleanup)`.
+  /** @param {TestContext | SuiteContext} [context] */
   function cleanup(context) {
     exitBackstopMs ??= backstopMs;
     exitAfterBackstop();
     exitAfterRootHooks(context);
   }
 
+  /**
+   * @param {Pick<TestContext, "after">} context
+   * @param {Partial<typeof disposeLimitsMs>} limitsMs
+   */
   async function prepareDatabase(context, limitsMs = {}) {
     const limits = { ...disposeLimitsMs, ...limitsMs };
     assert.ok(
@@ -165,8 +239,9 @@ export function createWorkerRevisionFixtures(
     // that database: PostgreSQL refuses to copy a database that has sessions, and a write to it
     // would reach every later copy. Whoever prepared it drops it after the file. A copy holds the
     // CI state lock briefly, but a file's first test still waits for that lock while the runner
-    // migrates the files that start with it. Before, each file migrated a template of its own
-    // under the lock as well, and a 4 s first test took 10-30 s on CI (findings 1209, 1270).
+    // prepares the files that start with it. Those are copies of one migrated lane template
+    // since finding 2178; a migration per file there made a 4 s first test take 10-26 s on CI.
+    // Before that, each file also migrated a template of its own (findings 1209, 1270).
     assert.ok(
       process.env.OCC_TEST_DATABASE_URL,
       "Worker tests copy the database prepared for their file; see docs/testing/postgresql.md.",
@@ -196,6 +271,11 @@ export function createWorkerRevisionFixtures(
           await run("worker stop", () => worker.stop());
         }
         for (const pool of pools) {
+          // pg-pool's end() resolves once its idle clients are removed, before their sessions
+          // close. The drop below can end a session still closing; the server's 57P01 then
+          // reaches the pool's idle listener, which re-emits it on the pool, and with no
+          // listener that throws in this test's teardown (finding 2379). The pool is done.
+          pool.on("error", () => {});
           // A pool already ending was ended by its worker's stop or by the test.
           if (!pool.ending) {
             await run("pool end", () => pool.end());
@@ -219,6 +299,23 @@ export function createWorkerRevisionFixtures(
     return { url: prepared.env.OCC_TEST_DATABASE_URL, pools, workers, dispose };
   }
 
+  /**
+   * @param {Pick<TestContext, "after">} context
+   * @param {{
+   *   database?: Pick<Awaited<ReturnType<typeof prepareDatabase>>, "url" | "pools" | "workers">,
+   *   leaseDurationMs?: number,
+   *   maxAttempts?: number,
+   *   onHealthy?: ControllerWorkerOptions["onHealthy"],
+   *   healthClock?: ControllerWorkerOptions["healthClock"],
+   *   onProgress?: ControllerWorkerOptions["onProgress"],
+   *   metrics?: ControllerWorkerOptions["metrics"],
+   *   repoDriver?: RepositoryWorkerDriver,
+   *   driverSelections?: DriverOverrides,
+   *   backends?: BackendDefinition[],
+   *   secretAuthMethod?: string,
+   *   disposeLimitsMs?: Partial<typeof disposeLimitsMs>
+   * }} [options]
+   */
   async function setup(
     context,
     {
@@ -226,9 +323,12 @@ export function createWorkerRevisionFixtures(
       leaseDurationMs = 30_000,
       maxAttempts = 5,
       onHealthy,
+      healthClock,
       onProgress,
       metrics,
       repoDriver,
+      driverSelections = {},
+      backends = [],
       secretAuthMethod = "api_key",
       // Shorter teardown step limits, for a test of the teardown itself.
       disposeLimitsMs: limitsMs,
@@ -250,6 +350,7 @@ export function createWorkerRevisionFixtures(
       import("../../packages/occ/src/state/postgres-work-queue.ts"),
     ]);
     database ??= await prepareDatabase(context, limitsMs);
+    /** @param {number} max */
     function createPool(max) {
       const pool = new Pool({ connectionString: database.url, max });
       database.pools.add(pool);
@@ -259,7 +360,9 @@ export function createWorkerRevisionFixtures(
     const createWorkerPool = () => createPool(1);
     let workerPool = createWorkerPool();
     const state = new PostgresPlatformState(observerPool);
+    repoDriver?.bindReceiptState?.(state);
     const installation = await ensureInstallation(state, "revision-worker");
+    /** @type {Principal | undefined} */
     const actor = authorizedPrincipal(await state.loadNativeIAMState(), [
       ["deploy", "agent"],
       ["delete", "agent"],
@@ -270,6 +373,7 @@ export function createWorkerRevisionFixtures(
       "persisted IAM must contain a Principal authorized for Agent lifecycle and Secret cleanup",
     );
 
+    /** @type {Namespace} */
     const namespace = {
       id: `ns_${randomUUID()}`,
       name: `revision-worker-${randomUUID()}`,
@@ -290,6 +394,7 @@ export function createWorkerRevisionFixtures(
       ),
     );
     await state.transact((unit) => unit.namespaces.createNamespace(namespace));
+    /** @type {ComputeDriver} */
     const compute = {
       ...createDevelopmentComputeDriver(),
       ...(repoDriver === undefined
@@ -302,7 +407,13 @@ export function createWorkerRevisionFixtures(
           }),
     };
     const secretDriver = createBackendWorkerDrivers(compute, []).secretDriver;
-    const controller = createBackendController({ installation, state }, { backends: [] });
+    const controller = createBackendController(
+      { installation, state },
+      {
+        backends,
+        driverConfigurations: installationDriverConfigurations({ drivers: driverSelections }),
+      },
+    );
     controller.registerDriver(secretDriver);
     controller.selectDriver("secret", secretDriver.id);
     const secretRoleId = `role-${randomUUID()}`;
@@ -317,6 +428,10 @@ export function createWorkerRevisionFixtures(
       ],
     );
 
+    /**
+     * @param {string} label
+     * @param {AgentOptions} [options]
+     */
     async function agent(
       label,
       {
@@ -326,6 +441,7 @@ export function createWorkerRevisionFixtures(
         grantHarnessSecret = true,
         auth = "secret",
         nonModelSources = 0,
+        modelConfig = {},
       } = {},
     ) {
       const id = `agt_${randomUUID()}`;
@@ -339,6 +455,7 @@ export function createWorkerRevisionFixtures(
           type: "bearer-token",
           config: { host: `api-${index}.example.com`, env_var: `TOOL_TOKEN_${index}` },
           secrets: {},
+          ownerCapability: "credential_gateway",
           driverId: CREDENTIAL_GATEWAY_FIXTURE_ID,
           state: "registering",
           createdAt: new Date().toISOString(),
@@ -360,8 +477,9 @@ export function createWorkerRevisionFixtures(
           namespaceId: namespace.id,
           name: `${label}-${randomUUID()}`,
           type: "openai",
-          config: {},
+          config: modelConfig,
           secrets: {},
+          ownerCapability: "credential_gateway",
           driverId: CREDENTIAL_GATEWAY_FIXTURE_ID,
           state: "registering",
           createdAt: new Date().toISOString(),
@@ -472,12 +590,19 @@ export function createWorkerRevisionFixtures(
       return owner;
     }
 
+    /**
+     * @param {Agent} owner
+     * @param {number} number
+     * @param {RevisionOptions} [options]
+     * @returns {Promise<AdmittedRevision>}
+     */
     async function revision(
       owner,
       number,
       {
         harness,
         sandboxDriverId,
+        protectedRepositoryDriver,
         repositoryCredentials,
         actorId = actor.id,
         plugins,
@@ -485,6 +610,7 @@ export function createWorkerRevisionFixtures(
         // How far the controller clock that stamps the admission runs ahead of PostgreSQL's
         // (negative: behind). The store restamps admission on its own clock (finding 1195).
         controllerSkewMs = 0,
+        compute: admittedCompute = { id: compute.id, implementation: compute.implementation },
       } = {},
     ) {
       let harnessAuth;
@@ -536,13 +662,15 @@ export function createWorkerRevisionFixtures(
         namespaceId: namespace.id,
         agentId: owner.id,
         revision: number,
+        gatewayManagedMode: owner.gatewayManagedMode,
         backendId: owner.backendId,
         configuration: { revision: String(number) },
         configurationId: owner.configurationId,
         configurationKind: "agent",
         configurationGeneration: 1,
-        harness: approvedHarness,
-        compute: { id: compute.id, implementation: compute.implementation },
+        executionAdmission: { version: 2, mode: "unprotected" },
+        harness: { ...approvedHarness, overrides: {}, configuration: {} },
+        compute: { ...admittedCompute },
         ...(sandboxDriverId === undefined ? {} : { sandboxDriverId }),
         ...(plugins === undefined ? {} : { plugins }),
         harnessAuth,
@@ -551,6 +679,60 @@ export function createWorkerRevisionFixtures(
         ...(repositoryCredentials === undefined ? {} : { repositoryCredentials }),
         createdAt: new Date(Date.now() + controllerSkewMs).toISOString(),
       };
+      if (protectedRepositoryDriver) {
+        const sandbox = protectedRepositoryDriver.require("sandbox");
+        await state.transact(async (unit) => {
+          const [auth] = await controller.admitHarnessAuth(unit, actorId, owner);
+          assert.deepEqual(auth, harnessAuth);
+          const sources = await controller.admitCredentialSources(
+            unit,
+            actorId,
+            owner,
+            sandbox,
+            undefined,
+            candidate.harness,
+            compute,
+          );
+          assert.deepEqual(sources, credentialSources);
+          const configuration = { agents: { defaults: { model: "codex/fixture-model" } } };
+          const plan = (chosen) =>
+            controller.admitProxyPlan(
+              unit,
+              owner,
+              candidate.id,
+              configuration,
+              sandbox.id,
+              repositoryCredentials,
+              chosen,
+              candidate.harness.configuration,
+            );
+          await assert.rejects(
+            plan({ ...auth, sourceId: "unselected" }),
+            /created or adopted under the Proxy/,
+          );
+          const egressPlan = await plan(auth);
+          assert.deepEqual(egressPlan.harnessCredentialSource, auth);
+          assert.deepEqual(
+            egressPlan.routes,
+            [],
+            "no model route or credential was granted to Git",
+          );
+          Object.assign(candidate, {
+            configuration,
+            egressPlan,
+            executionAdmission: {
+              version:
+                egressPlan.repositoryGitAuthorization === "request-hook-observed"
+                  ? 6
+                  : egressPlan.repositoryGitAuthorization === "online-request"
+                    ? 5
+                    : 4,
+              mode: "protected",
+            },
+            sandboxDriverId: sandbox.id,
+          });
+        });
+      }
       const idempotencyKey = `agent_revision:${candidate.id}:reconcile`;
       let admitted;
       await state.transactWithQueue(async (unit, queue) => {
@@ -558,6 +740,20 @@ export function createWorkerRevisionFixtures(
         // cannot deadlock with a worker holding the Namespace while locking the Agent.
         await unit.namespaces.lockNamespace(namespace.id);
         await unit.agents.lockAgent(namespace.id, owner.id);
+        candidate.harness.configuration =
+          compute.resolveHarnessConfiguration?.(
+            candidate.harness,
+            harnessAuth,
+            candidate.configuration,
+          ) ?? {};
+        const admission = compute.admitRevision?.(freezeAgentRevision(candidate));
+        if (admission !== undefined) {
+          candidate.compute = { ...candidate.compute, admission };
+        }
+        const runtimeInputs = compute.snapshotRuntimeInputs?.(candidate);
+        if (runtimeInputs !== undefined) {
+          candidate.compute = { ...candidate.compute, runtimeInputs };
+        }
         admitted = await unit.revisions.createRevision(candidate);
         await unit.agents.transitionAgentDesiredRuntimeState(
           namespace.id,
@@ -593,6 +789,12 @@ export function createWorkerRevisionFixtures(
       return { ...candidate, createdAt: admitted.createdAt, idempotencyKey };
     }
 
+    /**
+     * @param {WorkLookup} candidate
+     * @param {ControllerWorkState} expected
+     * @param {Parameters<typeof waitFor>[2]} [timeoutMs]
+     * @returns {Promise<WorkRow>}
+     */
     async function work(candidate, expected, timeoutMs) {
       return waitFor(
         `revision ${candidate.id} to become ${expected}`,
@@ -607,6 +809,10 @@ export function createWorkerRevisionFixtures(
       );
     }
 
+    /**
+     * @param {Pick<Agent, "id">} owner
+     * @returns {Promise<RevisionWork>}
+     */
     async function requestStop(owner) {
       await controller.stopAgent(actor.id, namespace.id, owner.id);
       const work = await observerPool.query(
@@ -625,21 +831,39 @@ export function createWorkerRevisionFixtures(
       return { id: owner.id, idempotencyKey };
     }
 
+    /**
+     * @param {ComputeDriver} computeDriver
+     * @param {{
+     *   emit?: ControllerWorkerOptions["emit"],
+     *   convergenceTimeoutMs?: number | undefined,
+     *   providers?: Parameters<typeof createBackendWorkerDrivers>[1],
+     *   pool?: Pool,
+     *   transformDrivers?: (drivers: RuntimeDrivers) => object | undefined,
+     *   repositoryGitMaterial?: ControllerWorkerOptions["repositoryGitMaterial"]
+     * }} [options]
+     */
     function start(
       computeDriver,
       {
-        emit = () => {},
+        emit = /** @type {NonNullable<Parameters<typeof createControllerWorker>[0]["emit"]>} */ (
+          () => {}
+        ),
         convergenceTimeoutMs,
         providers,
         pool = workerPool,
         transformDrivers = (drivers) => drivers,
+        repositoryGitMaterial,
       } = {},
     ) {
       const configuredDrivers = createBackendWorkerDrivers(computeDriver, providers ?? []);
       const drivers = transformDrivers({
         ...configuredDrivers,
+        installation: {
+          ...configuredDrivers.installation,
+          drivers: { ...configuredDrivers.installation.drivers, ...driverSelections },
+        },
         secretDriver,
-        ...(repoDriver === undefined ? {} : { repoDriver }),
+        ...repositoryWorkerRoles(repoDriver),
       });
       worker = createControllerWorker({
         metrics,
@@ -648,9 +872,11 @@ export function createWorkerRevisionFixtures(
         leaseDurationMs,
         maxAttempts,
         onHealthy,
+        ...(healthClock === undefined ? {} : { healthClock }),
         onProgress,
         ...(drivers === undefined ? { computeDriver } : { drivers }),
         ...(convergenceTimeoutMs === undefined ? {} : { convergenceTimeoutMs }),
+        ...(repositoryGitMaterial === undefined ? {} : { repositoryGitMaterial }),
         emit,
       });
       database.workers.add(worker);
@@ -666,6 +892,10 @@ export function createWorkerRevisionFixtures(
       }
     }
 
+    /**
+     * @param {string} label
+     * @param {{ agent?: AgentOptions, revision?: RevisionOptions }} [options]
+     */
     async function admitInitialRevision(
       label,
       { agent: agentOptions, revision: revisionOptions } = {},
@@ -675,6 +905,7 @@ export function createWorkerRevisionFixtures(
       return { owner, candidate };
     }
 
+    /** @param {Pick<Agent, "id">} owner */
     function currentAgent(owner) {
       return state.read((view) => view.agents.findAgent(namespace.id, owner.id));
     }
@@ -690,6 +921,10 @@ export function createWorkerRevisionFixtures(
       return controller.getDeploymentStatus(actor.id, namespace.id, owner.id, candidate.id);
     }
 
+    /**
+     * @param {WorkLookup} candidate
+     * @returns {Promise<import("pg").QueryResult<WorkResultRow>>}
+     */
     function workResult(candidate) {
       return observerPool.query(
         "SELECT reason_code, result_data FROM occ.controller_work WHERE idempotency_key = $1",
@@ -697,6 +932,10 @@ export function createWorkerRevisionFixtures(
       );
     }
 
+    /**
+     * @param {Pick<RevisionWork, "idempotencyKey">} candidate
+     * @param {string} claimToken
+     */
     function expireClaim(candidate, claimToken) {
       return observerPool.query(
         `UPDATE occ.controller_work
@@ -712,6 +951,10 @@ export function createWorkerRevisionFixtures(
     // every resource kind (["delete"] also drops delete secret). The copied roles keep the
     // source role's scope, usually Installation-wide, so Namespace teardown never removes them;
     // like the copied identity they live until the per-file database is dropped.
+    /**
+     * @param {string} actorId
+     * @param {{ withoutActions?: string[] }} [options]
+     */
     async function copyActorGrants(actorId, { withoutActions = [] } = {}) {
       await observerPool.query(
         `INSERT INTO occ.iam_identities (id, kind, issuer, subject)
@@ -767,6 +1010,10 @@ export function createWorkerRevisionFixtures(
     }
 
     // Advance only this revision's queued observation, preserving its claim and actor.
+    /**
+     * @param {Pick<AgentRevision, "id">} candidate
+     * @returns {Promise<import("pg").QueryResult<MaintenanceRow>>}
+     */
     function advanceMaintenance(candidate) {
       return observerPool.query(
         `UPDATE occ.controller_work SET available_at = clock_timestamp()
