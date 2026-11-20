@@ -964,9 +964,7 @@ export const UpdateAgentBody = Type.Object(
 
 const ChannelDirectoryLookupFields = {
   secretId: SecretId,
-  provider: Type.Optional(
-    Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$" }),
-  ),
+  provider: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$" }),
   context: Type.Optional(
     Type.Record(
       Type.String({ pattern: "^[a-zA-Z][a-zA-Z0-9_]{0,63}$" }),

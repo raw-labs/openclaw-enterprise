@@ -26,7 +26,7 @@ import {
 } from "../auth/index.ts";
 import { createFastifyApp } from "../index.ts";
 import type { ConsoleTheme } from "../console-theme.ts";
-import { BundledChannelDriver, bundledChannelProviders } from "../drivers/channel/index.ts";
+import { createChannelProviders } from "../drivers/channel/index.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -200,9 +200,6 @@ export async function composeProduction(
     }
 
     phaseCompleted("computePreflight");
-    const channelDriver = new BundledChannelDriver(
-      config.drivers.channelDrivers ?? bundledChannelProviders({ expectProxy: true }),
-    );
     const controller = OpenClawController.forInstallation(
       persistedInstallation,
       {
@@ -230,8 +227,9 @@ export async function composeProduction(
     controller.selectDriver("compute", computeDriver.id);
     controller.registerDriver(secretDriver);
     controller.selectDriver("secret", secretDriver.id);
-    controller.registerDriver(channelDriver);
-    controller.selectDriver("channel", channelDriver.id);
+    controller.installChannelDrivers(
+      config.drivers.channelDrivers ?? createChannelProviders(undefined, { expectProxy: true }),
+    );
     if (protectedDriver !== undefined) {
       controller.installDriver(protectedDriver, ["sandbox", "credential_proxy"]);
     } else if (sandboxDriver !== undefined) {

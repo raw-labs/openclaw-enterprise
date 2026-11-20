@@ -75,10 +75,9 @@ test("Channel directory accepts Slack's null terminal cursor without losing prio
     });
   });
   assert(fixture.controller, "bootstrap must create the controller");
-  fixture.controller.registerDriver(driver);
-  fixture.controller.selectDriver("channel", driver.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver }]);
   const path = `/namespaces/${namespace.id}/channel-directory/lookup`;
-  const body = { secretId: secretData.id, kind: "channels", query: "ann" };
+  const body = { provider: "slack", secretId: secretData.id, kind: "channels", query: "ann" };
   const found = await controller.request("POST", path, { body });
   assert.deepEqual(checkedInjectedBody(found, 200, ChannelDirectoryLookupResponse).data, {
     workspaceId: "TWORKSPACE",
@@ -152,8 +151,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
     },
   };
   assert(fixture.controller, "bootstrap must create the controller");
-  fixture.controller.registerDriver(channelDriver);
-  fixture.controller.selectDriver("channel", channelDriver.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver: channelDriver }]);
   const expected = {
     workspaceId: "T123",
     workspaceName: "Example workspace",
@@ -205,6 +203,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   // At most 20 IDs are hydrated in one request.
   const tooManyIds = await controller.request("POST", path, {
     body: {
+      provider: "slack",
       secretId: secretData.id,
       kind: "users",
       ids: Array.from({ length: 21 }, (_, index) => `U${index}`),

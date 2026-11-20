@@ -13,10 +13,7 @@ import type {
 } from "@openclaw-enterprise/contracts";
 import { chromium, webkit } from "playwright";
 
-import {
-  BundledChannelDriver,
-  bundledChannelProviders,
-} from "../../apps/controller/src/drivers/channel/index.ts";
+import { createChannelProviders } from "../../apps/controller/src/drivers/channel/index.ts";
 import {
   teamsDirectoryProvider,
   teamsDirectoryContext,
@@ -126,7 +123,7 @@ const browser = fileBrowser();
 async function readyNamespace(
   t: TestContext,
   name: string,
-  channelDrivers?: ReturnType<typeof bundledChannelProviders>,
+  channelDrivers?: ReturnType<typeof createChannelProviders>,
 ) {
   const fixture = await createConsoleAppFixture(t, { channelDrivers });
   await fixture.bootstrap();
@@ -2376,7 +2373,7 @@ for (const [name, access] of [
     const { fixture, namespace } = await readyNamespace(
       t,
       "Native Teams sender access",
-      bundledChannelProviders(),
+      createChannelProviders(),
     );
     const teams = {
       enabled: true,
@@ -2417,7 +2414,7 @@ test("Teams editor persists separate personal and channel access with an authori
   const { fixture, namespace } = await readyNamespace(
     t,
     "Teams channels",
-    bundledChannelProviders(),
+    createChannelProviders(),
   );
   const password = await fixture.createSecret(
     namespace.id,
@@ -2546,7 +2543,7 @@ test("Teams editor persists separate personal and channel access with an authori
 // Real Console/Fastify/OCC/Drivers and HTTP Microsoft protocol fixture: not live RSC proof.
 async function teamsDirectorySelection(t: TestContext, browserType: BrowserType) {
   const provider = await teamsDirectoryProvider(t);
-  const providers = bundledChannelProviders({ teamsRequest: provider.request });
+  const providers = createChannelProviders(undefined, { teamsRequest: provider.request });
   const { fixture, namespace } = await readyNamespace(t, "Teams directory UI", providers);
   // More than one bounded lookup is needed to reach Engineering; Load more must stay clickable.
   const channelPages = [
@@ -2567,9 +2564,6 @@ async function teamsDirectorySelection(t: TestContext, browserType: BrowserType)
       },
     });
   }
-  const driver = new BundledChannelDriver(providers);
-  fixture.controller.registerDriver(driver);
-  fixture.controller.selectDriver("channel", driver.id);
   const password = await fixture.createSecret(
     namespace.id,
     "Teams password",
@@ -2735,7 +2729,7 @@ test("Teams conflict recovery preserves concurrent channel and sender revocation
   const { fixture, namespace } = await readyNamespace(
     t,
     "Teams concurrent access",
-    bundledChannelProviders(),
+    createChannelProviders(),
   );
   const team = "19:team@thread.tacv2";
   const channel = (name: string) => `19:${name}@thread.tacv2`;

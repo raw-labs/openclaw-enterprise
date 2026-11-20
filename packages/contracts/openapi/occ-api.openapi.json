@@ -35178,6 +35178,7 @@
                   "summary": "Example request",
                   "value": {
                     "kind": "channels",
+                    "provider": "slack",
                     "query": "engineering",
                     "secretId": "sec_123e4567-e89b-42d3-a456-426614174000"
                   }
@@ -35222,7 +35223,7 @@
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind"],
+                    "required": ["secretId", "provider", "kind"],
                     "type": "object"
                   },
                   {
@@ -35266,7 +35267,7 @@
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "agentId"],
+                    "required": ["secretId", "provider", "kind", "agentId"],
                     "type": "object"
                   },
                   {
@@ -35310,7 +35311,7 @@
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "configurationId"],
+                    "required": ["secretId", "provider", "kind", "configurationId"],
                     "type": "object"
                   },
                   {
@@ -35355,7 +35356,7 @@
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "ids"],
+                    "required": ["secretId", "provider", "kind", "ids"],
                     "type": "object"
                   },
                   {
@@ -35404,7 +35405,7 @@
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "ids", "agentId"],
+                    "required": ["secretId", "provider", "kind", "ids", "agentId"],
                     "type": "object"
                   },
                   {
@@ -35453,7 +35454,7 @@
                         "type": "string"
                       }
                     },
-                    "required": ["secretId", "kind", "ids", "configurationId"],
+                    "required": ["secretId", "provider", "kind", "ids", "configurationId"],
                     "type": "object"
                   }
                 ]

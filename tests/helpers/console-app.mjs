@@ -502,6 +502,8 @@ export async function createConsoleAppFixture(t, options = {}) {
       ? {}
       : { observabilityUrl: options.observabilityUrl }),
     ...(options.consoleTheme === undefined ? {} : { consoleTheme: options.consoleTheme }),
+    // Composition gives Compute and OCC the same provider-to-Driver set.
+    ...(options.channelDrivers === undefined ? {} : { channelDrivers: options.channelDrivers }),
     ...(options.nativeAdmin === undefined ? {} : { nativeAdmin: options.nativeAdmin }),
     ...(options.agentRuntimeLogs === undefined
       ? {}

@@ -28,15 +28,11 @@ export type ChannelRequest = (
   }
 >;
 
-/** Preserve the operator-selected, bounded egress endpoint for every channel provider. */
-export function channelRequest(
-  request: ChannelRequest = globalThis.fetch,
-  proxyUrl?: string,
-  options: { readonly managedProxyHosts?: readonly string[] } = {},
-): ChannelRequest {
-  if (proxyUrl === undefined) {
-    return request;
-  }
+/** Admit only a literal IPv4 proxy or the exact managed OCC egress Service, with a port. */
+export function channelProxyAgent(
+  proxyUrl: string,
+  options: { readonly managedProxyHosts?: readonly string[]; readonly label: string },
+): ProxyAgent {
   const endpoint = PROXY_ENDPOINT.exec(proxyUrl);
   const managedEndpoint = MANAGED_SERVICE_PROXY_ENDPOINT.exec(proxyUrl);
   const address = endpoint?.[1];
@@ -50,14 +46,25 @@ export function channelRequest(
     (!managedService && (address === undefined || isIP(address) !== 4))
   ) {
     throw new Error(
-      "Channel directory proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
+      `${options.label} must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.`,
     );
   }
+  // The unspecified address cannot identify a managed listener.
   if (address === "0.0.0.0") {
-    throw new Error(
-      "Channel directory proxy must not use host 0.0.0.0, which names no proxy address.",
-    );
+    throw new Error(`${options.label} must not use host 0.0.0.0, which names no proxy address.`);
   }
-  const proxy = new ProxyAgent(proxyUrl);
+  return new ProxyAgent(proxyUrl);
+}
+
+/** Route a provider request through the operator-selected OCC egress listener. */
+export function channelRequest(
+  request: ChannelRequest = globalThis.fetch,
+  proxyUrl?: string,
+  options: { readonly managedProxyHosts?: readonly string[] } = {},
+): ChannelRequest {
+  if (proxyUrl === undefined) {
+    return request;
+  }
+  const proxy = channelProxyAgent(proxyUrl, { ...options, label: "Teams directory proxy" });
   return (url, init) => undiciFetch(url, { ...init, dispatcher: proxy });
 }

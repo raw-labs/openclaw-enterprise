@@ -243,7 +243,6 @@ test(
       occListenerPort: 10000,
       inspectionPort: 19004,
       excludedCidrs: [...new Set([...podCidrs, ...nodeAddresses, ...serviceCidrs])],
-      teamsFileHosts: ["tenant.sharepoint.com"],
     };
     const configuration = createKubernetesInstallationConfiguration({
       authentication: { mode: "inCluster" },
@@ -266,6 +265,13 @@ test(
       },
     });
     configuration.drivers.compute.configuration.resources.gateway.limits.memory = "4Gi";
+    // The Teams Driver owns its storage hosts; only Teams Gateway listeners receive them.
+    Object.assign(configuration.drivers, {
+      channel: [
+        { id: "slack-channel", configuration: {} },
+        { id: "teams-channel", configuration: { fileHosts: ["tenant.sharepoint.com"] } },
+      ],
+    });
     const apiKey = secret();
     await apply({
       apiVersion: "v1",
@@ -602,6 +608,7 @@ test(
     await api("POST", `${agentPath}/runtime-credentials`, {});
     await waitFor("OCC directory access through the Helm-installed listener", async () => {
       const result = await request("POST", `/namespaces/${namespaceId}/channel-directory/lookup`, {
+        provider: "slack",
         agentId,
         secretId: bot.id,
         kind: "channels",
@@ -616,6 +623,7 @@ test(
       return array(found.candidates).some((candidate) => candidate.id === slack.channelId);
     });
     const users = await api("POST", `/namespaces/${namespaceId}/channel-directory/lookup`, {
+      provider: "slack",
       agentId,
       secretId: bot.id,
       kind: "users",
@@ -682,6 +690,11 @@ test(
         status: 200,
         tlsVerified: true,
       });
+      // Teams Driver settings never widen a Slack-only Agent's listener.
+      assert.equal(
+        (await probeChannelConnect(tenant, gatewayName, proxy, "tenant.sharepoint.com")).status,
+        403,
+      );
       assert.notEqual(
         (
           await probeChannelConnect(

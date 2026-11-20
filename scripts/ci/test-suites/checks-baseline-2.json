@@ -63,6 +63,7 @@
     "tests/integration/google-login-transport.test.ts",
     "tests/conformance/slack-channel-directory.test.ts",
     "tests/integration/teams-directory.test.ts",
+    "tests/integration/channel-driver-startup.test.ts",
     "tests/conformance/bounded-response-reads.test.ts",
     "tests/conformance/repository-credentials-github.test.ts",
     "tests/integration/repository-credentials-driver.test.ts",
@@ -173,6 +174,9 @@
   "files": [
     {
       "path": "tests/integration/teams-directory.test.ts"
+    },
+    {
+      "path": "tests/integration/channel-driver-startup.test.ts"
     },
     {
       "path": "tests/conformance/strands-box-transport.test.ts",

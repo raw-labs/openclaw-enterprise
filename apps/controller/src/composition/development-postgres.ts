@@ -26,7 +26,7 @@ import { createDockerDevelopmentComputeDriverFromEnv } from "../drivers/compute/
 import { createFilesystemDevelopmentConfigurationDriverFromEnv } from "../drivers/configuration/filesystem/index.ts";
 import { createFastifyApp } from "../index.ts";
 import type { ConsoleTheme } from "../console-theme.ts";
-import { BundledChannelDriver, bundledChannelProviders } from "../drivers/channel/index.ts";
+import { createChannelProviders } from "../drivers/channel/index.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -179,9 +179,6 @@ export async function composePostgresDevelopment(
     });
 
     const loggingLevel = config.logging?.level ?? drivers?.installation.logging.level;
-    const channelDriver = new BundledChannelDriver(
-      drivers?.channelDrivers ?? bundledChannelProviders({ expectProxy: true }),
-    );
     const controller = OpenClawController.forInstallation(
       persistedInstallation,
       {
@@ -207,8 +204,9 @@ export async function composePostgresDevelopment(
     controller.selectDriver("iam", driverId);
     controller.registerDriver(computeDriver);
     controller.selectDriver("compute", computeDriver.id);
-    controller.registerDriver(channelDriver);
-    controller.selectDriver("channel", channelDriver.id);
+    controller.installChannelDrivers(
+      drivers?.channelDrivers ?? createChannelProviders(undefined, { expectProxy: true }),
+    );
     if (protectedDriver !== undefined) {
       controller.installDriver(protectedDriver, ["sandbox", "credential_proxy"]);
     } else if (sandboxDriver !== undefined) {

@@ -1,71 +1,96 @@
-import type {
-  ChannelCredentialReader,
-  ChannelDirectoryLookupInput,
-  ChannelDriver,
-} from "@openclaw-enterprise/contracts";
-import { ChannelDirectoryError } from "@openclaw-enterprise/occ";
-import type { ChannelProviderDriver } from "./routing.ts";
+import type { ChannelProviderDriver, DriverImplementation } from "@openclaw-enterprise/contracts";
+import { match } from "ts-pattern";
+
 import { SlackChannelDriver } from "./slack.ts";
-import { TeamsChannelDriver } from "./teams.ts";
+import { TeamsChannelDriver, type TeamsChannelConfiguration } from "./teams.ts";
 import { channelRequest, type ChannelRequest } from "./transport.ts";
 
-export function bundledChannelProviders(
-  options: {
-    readonly proxyUrl?: string;
-    readonly managedProxyHosts?: readonly string[];
-    readonly expectProxy?: boolean;
-    readonly teamsFileHosts?: readonly string[];
-    readonly teamsRequest?: ChannelRequest;
-  } = {},
-): readonly ChannelProviderDriver[] {
-  return [
+export type BundledChannelDriverId = "slack-channel" | "teams-channel";
+
+/** Bundled `drivers.channel` selections and the provider each one serves. */
+export const BUNDLED_CHANNEL_DRIVERS: Readonly<
+  Record<
+    BundledChannelDriverId,
     {
-      provider: "slack",
-      driver: new SlackChannelDriver(globalThis.fetch, options.proxyUrl, options),
-    },
-    {
-      provider: "msteams",
-      driver: new TeamsChannelDriver(
-        channelRequest(options.teamsRequest, options.proxyUrl, options),
-        options.teamsFileHosts,
-        options.expectProxy === true && options.proxyUrl === undefined,
-      ),
-    },
-  ];
+      readonly provider: string;
+      readonly implementation: string;
+      readonly definition: DriverImplementation;
+    }
+  >
+> = Object.freeze({
+  "slack-channel": {
+    provider: "slack",
+    implementation: "occ/slack-channel",
+    definition: SlackChannelDriver,
+  },
+  "teams-channel": {
+    provider: "msteams",
+    implementation: "occ/teams-channel",
+    definition: TeamsChannelDriver as DriverImplementation,
+  },
+});
+
+export function isBundledChannelDriverId(value: unknown): value is BundledChannelDriverId {
+  return typeof value === "string" && Object.hasOwn(BUNDLED_CHANNEL_DRIVERS, value);
 }
 
-/** Select a provider for OCC directory requests and channel credential validation. */
-export class BundledChannelDriver implements ChannelDriver {
-  readonly capability = "channel" as const;
-  readonly id = "bundled-channel";
-  readonly implementation = "occ/bundled-channel";
+/** A validated `drivers.channel` entry. */
+export interface ChannelDriverSelection {
+  readonly id: BundledChannelDriverId;
+  readonly configuration: Readonly<Record<string, unknown>>;
+}
 
-  private readonly providers: readonly ChannelProviderDriver[];
+/** Omitting `drivers.channel` installs every bundled Channel Driver with default settings. */
+export const DEFAULT_CHANNEL_DRIVER_SELECTIONS: readonly ChannelDriverSelection[] = Object.freeze([
+  { id: "slack-channel", configuration: {} },
+  { id: "teams-channel", configuration: {} },
+]);
 
-  constructor(providers: readonly ChannelProviderDriver[]) {
-    this.providers = providers;
-  }
+/** The OCC provider listener shared by every bundled Channel Driver. */
+export interface ChannelProviderTransport {
+  readonly proxyUrl?: string;
+  readonly managedProxyHosts?: readonly string[];
+  /** Production refuses provider requests when the managed OCC listener is absent. */
+  readonly expectProxy?: boolean;
+  /** HTTP seam at the Microsoft boundary for protocol fixtures. */
+  readonly teamsRequest?: ChannelRequest;
+}
 
-  enableRouting() {
-    return this.providers.flatMap(({ driver }) => driver.enableRouting());
-  }
-
-  async validateCredentials(
-    values: Readonly<Record<string, unknown>>,
-    withSecret: ChannelCredentialReader,
-  ): Promise<void> {
-    for (const { driver } of this.providers) {
-      await driver.validateCredentials?.(values, withSecret);
-    }
-  }
-
-  lookupDirectory(input: ChannelDirectoryLookupInput, signal?: AbortSignal) {
-    const provider = this.providers.find(
-      ({ provider }) => provider === (input.provider ?? "slack"),
-    );
-    if (!provider) {
-      throw new ChannelDirectoryError("invalid_response");
-    }
-    return provider.driver.lookupDirectory(input, signal);
-  }
+/** Build the provider-to-Driver set that trusted composition gives to OCC and Compute. */
+export function createChannelProviders(
+  selections: readonly ChannelDriverSelection[] = DEFAULT_CHANNEL_DRIVER_SELECTIONS,
+  transport: ChannelProviderTransport = {},
+): readonly ChannelProviderDriver[] {
+  const proxyMissing = transport.expectProxy === true && transport.proxyUrl === undefined;
+  return Object.freeze(
+    selections.map(({ id, configuration }) =>
+      Object.freeze({
+        provider: BUNDLED_CHANNEL_DRIVERS[id].provider,
+        driver: match(id)
+          .with(
+            "slack-channel",
+            () =>
+              new SlackChannelDriver(globalThis.fetch, transport.proxyUrl, {
+                ...(transport.managedProxyHosts === undefined
+                  ? {}
+                  : { managedProxyHosts: transport.managedProxyHosts }),
+                expectProxy: transport.expectProxy === true,
+              }),
+          )
+          .with(
+            "teams-channel",
+            () =>
+              new TeamsChannelDriver(configuration as TeamsChannelConfiguration, {
+                request: channelRequest(transport.teamsRequest, transport.proxyUrl, {
+                  ...(transport.managedProxyHosts === undefined
+                    ? {}
+                    : { managedProxyHosts: transport.managedProxyHosts }),
+                }),
+                proxyMissing,
+              }),
+          )
+          .exhaustive(),
+      }),
+    ),
+  );
 }

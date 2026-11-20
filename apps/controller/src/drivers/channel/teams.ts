@@ -1,11 +1,14 @@
-import type {
-  ChannelDirectoryLookupInput,
-  ChannelDirectoryResult,
-  ChannelDriver,
-  NetworkDestinationRule,
+import {
+  requireConfiguration,
+  type ChannelDirectoryLookupInput,
+  type ChannelDirectoryResult,
+  type ChannelDriver,
+  type ErrorDetail,
+  type JSONSchema,
+  type NetworkDestinationRule,
 } from "@openclaw-enterprise/contracts";
 import { ChannelDirectoryError, ResourceStateConflictError } from "@openclaw-enterprise/occ";
-import { asRecord } from "@openclaw-enterprise/utils";
+import { asRecord, deepFreeze, readCappedBody } from "@openclaw-enterprise/utils";
 
 import type { ChannelRequest } from "./transport.ts";
 
@@ -14,6 +17,7 @@ const DIRECTORY_HOSTS = ["login.microsoftonline.com", "graph.microsoft.com"];
 const BOT_HOSTS = ["login.botframework.com", "api.botframework.com", "smba.trafficmanager.net"];
 const STORAGE_HOST =
   /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:sharepoint(?:-df)?\.com|1drv\.com|onedrive\.com|blob\.core\.windows\.net)$/;
+const CONTEXT_KEYS = ["appId", "tenantId", "teamId"] as const;
 
 function httpsDestinations(hosts: readonly string[]): NetworkDestinationRule[] {
   return hosts.map((name) => ({
@@ -39,35 +43,69 @@ function text(value: unknown): string | undefined {
     : undefined;
 }
 
+/** `drivers.channel[].configuration` for `teams-channel`. */
+export interface TeamsChannelConfiguration {
+  /** Exact storage and redirect hosts that Teams Gateways may reach for attachment downloads. */
+  readonly fileHosts?: readonly string[];
+}
+
+export interface TeamsChannelDriverOptions {
+  readonly request?: ChannelRequest;
+  /** Production refuses provider requests when the managed OCC listener is absent. */
+  readonly proxyMissing?: boolean;
+}
+
 /** Read-only RSC lookup: only one selected Team, never the tenant-wide directory. */
 export class TeamsChannelDriver implements ChannelDriver {
   readonly capability = "channel" as const;
   readonly id = "teams-channel";
   readonly implementation = "occ/teams-channel";
 
+  static readonly configurationSchema: JSONSchema = deepFreeze({
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      fileHosts: {
+        type: "array",
+        maxItems: 32,
+        items: { type: "string", minLength: 1, maxLength: 253 },
+      },
+    },
+  });
+
+  static validateConfiguration(
+    configuration: Readonly<TeamsChannelConfiguration>,
+  ): readonly ErrorDetail[] {
+    const hosts = configuration.fileHosts ?? [];
+    return hosts.flatMap((host, index): ErrorDetail[] =>
+      !STORAGE_HOST.test(host)
+        ? [
+            {
+              path: `/fileHosts/${index}`,
+              code: "INVALID_VALUE",
+              message:
+                "must be an exact lowercase subdomain of sharepoint.com, sharepoint-df.com, 1drv.com, onedrive.com or blob.core.windows.net",
+            },
+          ]
+        : hosts.indexOf(host) !== index
+          ? [{ path: `/fileHosts/${index}`, code: "INVALID_VALUE", message: "must be unique" }]
+          : [],
+    );
+  }
+
   private readonly request: ChannelRequest;
   private readonly proxyMissing: boolean;
   private readonly fileHosts: readonly string[];
 
   constructor(
-    request: ChannelRequest = globalThis.fetch,
-    fileHosts: readonly string[] = [],
-    proxyMissing = false,
+    configuration: Readonly<TeamsChannelConfiguration> = {},
+    options: TeamsChannelDriverOptions = {},
   ) {
-    if (
-      !Array.isArray(fileHosts) ||
-      fileHosts.length > 32 ||
-      fileHosts.some(
-        (host) => typeof host !== "string" || host.length > 253 || !STORAGE_HOST.test(host),
-      )
-    ) {
-      throw new Error(
-        "Teams file hosts must be at most 32 exact lowercase Microsoft storage hostnames.",
-      );
-    }
-    this.request = request;
-    this.proxyMissing = proxyMissing;
-    this.fileHosts = [...new Set(fileHosts)];
+    this.fileHosts = Object.freeze([
+      ...(requireConfiguration(TeamsChannelDriver, configuration).fileHosts ?? []),
+    ]);
+    this.request = options.request ?? globalThis.fetch;
+    this.proxyMissing = options.proxyMissing === true;
   }
 
   enableRouting(): readonly NetworkDestinationRule[] {
@@ -104,35 +142,17 @@ export class TeamsChannelDriver implements ChannelDriver {
       throw new ChannelDirectoryError("unavailable");
     }
     // Bound consumption, not just parsing: a bad provider must not exhaust API memory.
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new ChannelDirectoryError("invalid_response");
-    }
-    const chunks: Uint8Array[] = [];
-    let size = 0;
+    let body: Record<string, unknown> | undefined;
     try {
-      while (true) {
-        const part = await reader.read();
-        if (part.done) {
-          break;
-        }
-        size += part.value.byteLength;
-        if (size > 2_000_000) {
-          await reader.cancel();
-          throw new ChannelDirectoryError("invalid_response");
-        }
-        chunks.push(part.value);
-      }
-      const body = asRecord(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      if (body) {
-        return body;
-      }
+      const bytes = await readCappedBody(response.body, 2_000_000);
+      body = bytes === undefined ? undefined : asRecord(JSON.parse(bytes.toString("utf8")));
     } catch {
       throw new ChannelDirectoryError("invalid_response");
-    } finally {
-      reader.releaseLock();
     }
-    throw new ChannelDirectoryError("invalid_response");
+    if (!body) {
+      throw new ChannelDirectoryError("invalid_response");
+    }
+    return body;
   }
 
   async lookupDirectory(
@@ -144,12 +164,14 @@ export class TeamsChannelDriver implements ChannelDriver {
         "Managed channel egress is not configured for OCC provider requests. Ask an Installation administrator to enable the channel egress fleet.",
       );
     }
-    const { appId, tenantId, teamId } = input.context ?? {};
+    const context = input.context ?? {};
+    const { appId, tenantId, teamId } = context;
+    // Context is caller input: refuse it before any provider request.
     if (
       ![appId, tenantId, teamId].every((id) => typeof id === "string" && GUID.test(id)) ||
-      Object.keys(input.context ?? {}).some((key) => !["appId", "tenantId", "teamId"].includes(key))
+      Object.keys(context).some((key) => !(CONTEXT_KEYS as readonly string[]).includes(key))
     ) {
-      throw new ChannelDirectoryError("invalid_response");
+      throw new ChannelDirectoryError("invalid_request");
     }
     const path = `/v1.0/teams/${teamId}/${input.kind === "users" ? "members" : "channels"}`;
     const query = (input.query ?? "").trim().toLocaleLowerCase();
@@ -176,7 +198,7 @@ export class TeamsChannelDriver implements ChannelDriver {
         skip = cursor.skip as string | undefined;
         offset = cursor.offset as number;
       } catch {
-        throw new ChannelDirectoryError("invalid_response");
+        throw new ChannelDirectoryError("invalid_request");
       }
     }
     const boundedSignal = signal

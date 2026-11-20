@@ -105,6 +105,7 @@ test(
         "POST",
         `/namespaces/${topology.agent.namespaceId}/channel-directory/lookup`,
         {
+          provider: "slack",
           agentId: topology.agent.id,
           secretId: topology.secretApi.slackBot.id,
           kind,
@@ -353,6 +354,7 @@ test(
           "POST",
           `/namespaces/${topology.agent.namespaceId}/channel-directory/lookup`,
           {
+            provider: "slack",
             agentId: topology.agent.id,
             secretId: topology.secretApi.slackBot.id,
             kind: "users",

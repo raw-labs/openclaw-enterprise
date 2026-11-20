@@ -3,10 +3,7 @@ import test from "node:test";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { ChannelDirectoryLookupResponse } from "../../packages/contracts/src/api/resources.ts";
-import {
-  BundledChannelDriver,
-  bundledChannelProviders,
-} from "../../apps/controller/src/drivers/channel/index.ts";
+import { createChannelProviders } from "../../apps/controller/src/drivers/channel/index.ts";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
 import {
   teamsDirectoryProvider,
@@ -17,13 +14,10 @@ import {
 
 test("Agent-scoped Teams lookup uses the authorized password and Team roster, then saves native access IDs", async (t) => {
   const provider = await teamsDirectoryProvider(t);
-  const providers = bundledChannelProviders({ teamsRequest: provider.request });
+  const providers = createChannelProviders(undefined, { teamsRequest: provider.request });
   const fixture = await createConsoleAppFixture(t, { channelDrivers: providers });
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Teams lookup", { ready: true });
-  const driver = new BundledChannelDriver(providers);
-  fixture.controller.registerDriver(driver);
-  fixture.controller.selectDriver("channel", driver.id);
   const password = await fixture.createSecret(
     namespace.id,
     "Teams app password",
@@ -125,17 +119,31 @@ test("Agent-scoped Teams lookup uses the authorized password and Team roster, th
   });
   assert.notEqual(denied.status, 200);
   assert.equal(provider.calls.length, before);
+  // Context is Teams-owned caller input: an unknown key is refused before any Microsoft request.
+  const unknownContext = await fixture.request("POST", path, {
+    body: { ...body, kind: "users", context: { ...teamsDirectoryContext, tenant: "extra" } },
+  });
+  assert.equal(unknownContext.status, 400, JSON.stringify(unknownContext.body));
+  assert.equal(unknownContext.body.error.code, "INVALID_REQUEST");
+  // Slack uses no context, so a Slack lookup with Teams context never reaches Slack.
+  const slackWithContext = await fixture.request("POST", path, {
+    body: { ...body, provider: "slack", kind: "users" },
+  });
+  assert.equal(slackWithContext.status, 400, JSON.stringify(slackWithContext.body));
+  // A provider without an installed Driver is unavailable, not a provider response failure.
+  const uninstalled = await fixture.request("POST", path, {
+    body: { ...body, provider: "discord", kind: "users" },
+  });
+  assert.equal(uninstalled.status, 501, JSON.stringify(uninstalled.body));
+  assert.equal(provider.calls.length, before);
 });
 
 test("Teams lookup bounds pagination, rejects foreign continuations, and reports missing consent without changing access", async (t) => {
   const provider = await teamsDirectoryProvider(t);
-  const providers = bundledChannelProviders({ teamsRequest: provider.request });
+  const providers = createChannelProviders(undefined, { teamsRequest: provider.request });
   const fixture = await createConsoleAppFixture(t, { channelDrivers: providers });
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Teams directory errors", { ready: true });
-  const driver = new BundledChannelDriver(providers);
-  fixture.controller.registerDriver(driver);
-  fixture.controller.selectDriver("channel", driver.id);
   const password = await fixture.createSecret(
     namespace.id,
     "Teams app password",
@@ -227,7 +235,8 @@ test("Teams lookup bounds pagination, rejects foreign continuations, and reports
       cursor: firstData.nextCursor,
     },
   });
-  assert.equal(changed.status, 503);
+  // A continuation cursor belongs to one Team; reusing it for another is caller error.
+  assert.equal(changed.status, 400, JSON.stringify(changed.body));
   assert.equal(provider.calls.length, before);
   provider.routes.set(`${provider.path}/members`, {
     body: { value: [], "@odata.nextLink": "https://example.com/steal?$skiptoken=one" },

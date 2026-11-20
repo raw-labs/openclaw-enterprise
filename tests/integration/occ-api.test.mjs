@@ -440,7 +440,7 @@ async function firstDeploymentFixture({ ready = true, slackFetch } = {}) {
   const secretDriver = createTestSecretDriver();
   const controller = await configuredController({
     recordOperations: true,
-    channelDriver,
+    channelDrivers: [{ provider: "slack", driver: channelDriver }],
     secretDriver,
   });
   await bootstrap(controller);
@@ -1628,8 +1628,7 @@ test("guarded first deployment supports trusted registered validators and hides 
         }
       },
     };
-    controller.fixture.controller.registerDriver(custom);
-    controller.fixture.controller.selectDriver("channel", custom.id);
+    controller.fixture.controller.installChannelDrivers([{ provider: "slack", driver: custom }]);
     const result = await controller.request("POST", `${path}/deploy-first`, { body: intent });
     assert.equal(result.status, fails ? 500 : 202, JSON.stringify(result.body));
     assert.equal(calls, 1);
@@ -1696,12 +1695,17 @@ test("guarded first deployment rechecks configuration after outside-transaction 
           : createTestConfigurationDriver({ id: "late-configuration" });
       if (change === "late-channel") {
         driver.id = "late-channel";
+      } else {
+        controller.fixture.controller.registerDriver(driver);
       }
-      controller.fixture.controller.registerDriver(driver);
       // The second Configuration validation runs inside admission, after its
       // initial Driver checks. A database lock cannot prevent this selection change.
       controller.fixture.configurationDriver.validate = async () => {
-        controller.fixture.controller.selectDriver(driver.capability, driver.id);
+        if (change === "late-channel") {
+          controller.fixture.controller.installChannelDrivers([{ provider: "slack", driver }]);
+        } else {
+          controller.fixture.controller.selectDriver(driver.capability, driver.id);
+        }
       };
     } else if (change === "configuration") {
       const driver = controller.fixture.configurationDriver;
@@ -1714,8 +1718,7 @@ test("guarded first deployment rechecks configuration after outside-transaction 
     } else if (change === "channel") {
       const driver = new SlackChannelDriver(async () => assert.fail("Unexpected provider"));
       driver.id = "replacement-channel";
-      controller.fixture.controller.registerDriver(driver);
-      controller.fixture.controller.selectDriver("channel", driver.id);
+      controller.fixture.controller.installChannelDrivers([{ provider: "slack", driver }]);
     }
     release();
     const result = await admission;
@@ -5050,8 +5053,7 @@ test("Agent provisioning and deploy name a refused channel token reference form 
     calls++;
     return new Response(JSON.stringify({ ok: true, bot_id: "B123", team_id: "T123" }));
   });
-  fixture.controller.registerDriver(channel);
-  fixture.controller.selectDriver("channel", channel.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver: channel }]);
   const form = (name) => referenceFormRefusal("channels.slack.botToken", name);
   const unbound = unboundReferenceRefusal("channels.slack.botToken", "SLACK_SPARE_TOKEN");
   const forms = [
@@ -5126,8 +5128,7 @@ test("Slack validation rejects swapped credentials and preserves authorization",
     }
     return new Response(JSON.stringify(response));
   });
-  fixture.controller.registerDriver(channel);
-  fixture.controller.selectDriver("channel", channel.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver: channel }]);
   const configuration = slackValidationConfiguration({
     appSource: bot.ref,
     botSource: app.ref,
@@ -5255,8 +5256,7 @@ test("Slack validation reads a whole ${NAME} token as the env SecretRef it binds
     tokens.push(options.headers.authorization);
     return new Response(JSON.stringify({ ok: true, bot_id: "B123", team_id: "T123" }));
   });
-  fixture.controller.registerDriver(channel);
-  fixture.controller.selectDriver("channel", channel.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver: channel }]);
   // Configuration save accepts the whole-reference form and Edit Slack keeps it; OpenClaw reads
   // it as the env SecretRef to that name (finding 2511).
   const configuration = slackValidationConfiguration({
@@ -5306,8 +5306,7 @@ test("Slack activation without managed egress fails before provider transport", 
     undefined,
     { expectProxy: true },
   );
-  fixture.controller.registerDriver(channel);
-  fixture.controller.selectDriver("channel", channel.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver: channel }]);
   const configuration = slackValidationConfiguration({
     appSource: app.ref,
     botSource: app.ref,
@@ -5521,8 +5520,7 @@ test("ordinary deployment admits only the Configuration and Drivers whose channe
         } else if (change === "channel") {
           const driver = new SlackChannelDriver(async () => assert.fail("Unexpected provider"));
           driver.id = "replacement-channel";
-          fixture.controller.registerDriver(driver);
-          fixture.controller.selectDriver("channel", driver.id);
+          fixture.controller.installChannelDrivers([{ provider: "slack", driver }]);
         } else if (change === "channel-validator") {
           channelDriver.validateCredentials = async () => assert.fail("Unexpected validation");
         }

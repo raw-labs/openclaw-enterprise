@@ -14,7 +14,10 @@ import type {
   SecretMetadata,
   SecretReference,
 } from "../../packages/contracts/src/index.ts";
-import type { ChannelCredentialReader } from "../../packages/contracts/src/drivers/channel/index.ts";
+import type {
+  ChannelCredentialReader,
+  ChannelDriver,
+} from "../../packages/contracts/src/drivers/channel/index.ts";
 import { NativeIAMDriver } from "../../packages/iam/src/index.ts";
 import {
   AuthorizationDeniedError,
@@ -265,6 +268,11 @@ async function buildFixture(options: FixtureOptions) {
     controller.selectDriver(driver.capability, driver.id);
     return driver;
   }
+  /** Install one test Channel Driver as the Installation's only provider. */
+  function installChannel<T extends ChannelDriver>(driver: T) {
+    controller.installChannelDrivers([{ provider: "test", driver }]);
+    return driver;
+  }
   /** The Installation re-selects its Secret Driver; Secrets stored so far keep the old one. */
   const replaceSecretDriver = () => select(createTestSecretDriver({ id: "secret-replacement" }));
   const denyOperate = (resourceId: string) =>
@@ -335,6 +343,7 @@ async function buildFixture(options: FixtureOptions) {
     replaceSecretDriver,
     secretDriver,
     select,
+    installChannel,
     updateAgent,
     updateSecret,
   };
@@ -1000,7 +1009,7 @@ function createTestChannelDriver(binding?: string) {
       }
     },
     async lookupDirectory() {
-      return { entries: [] };
+      return { workspaceId: "test-workspace", candidates: [], complete: true };
     },
   };
   return driver;
@@ -1035,7 +1044,7 @@ test("after a Secret Driver change Agent provisioning names the fix for its old-
       assert.fail("Provisioning admission must not inspect a Configuration.");
     },
   });
-  const channel = f.select(createTestChannelDriver());
+  const channel = f.installChannel(createTestChannelDriver());
   const oldToken = await createSecret("old-gateway-token");
   const oldKey = await createSecret("old-model-key");
   f.replaceSecretDriver();
@@ -1088,11 +1097,11 @@ test("after a Secret Driver change Agent provisioning names the fix for its old-
 });
 
 test("after a Secret Driver change a Channel Driver's deploy check names the Configuration fix", async () => {
-  const { agent, deploy, select, ...f } = await fixture();
+  const { agent, deploy, installChannel, ...f } = await fixture();
   const old = await f.createSecret("old-channel-token");
   f.grantAgentSecretOperate(agent, old);
   await f.assignBound(old, { harnessAuth: { method: "runtime" } });
-  select(createTestChannelDriver("GATEWAY_TOOL_TOKEN"));
+  installChannel(createTestChannelDriver("GATEWAY_TOOL_TOKEN"));
   f.replaceSecretDriver();
 
   // The Channel Driver reads the binding before admission does; both name the same fix.

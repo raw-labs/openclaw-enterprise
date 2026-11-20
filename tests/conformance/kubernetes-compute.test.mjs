@@ -1,4 +1,4 @@
-import { bundledChannelProviders } from "../../apps/controller/src/drivers/channel/index.ts";
+import { createChannelProviders } from "../../apps/controller/src/drivers/channel/index.ts";
 import { channelEgressOptions } from "../helpers/channel-egress.ts";
 import { workspaceSetupFixture } from "../helpers/kubernetes-workspace-setup.ts";
 import {
@@ -5448,7 +5448,7 @@ test("native channel settings require readable Secret bindings", async () => {
         channelEgress: channelEgressOptions,
       },
     }),
-    { nodeEnrollment: {}, channelDrivers: bundledChannelProviders() },
+    { nodeEnrollment: {}, channelDrivers: createChannelProviders() },
   );
   const namespace = kubernetesNamespaceName(tenant.id);
   const agentId = "agent-a";
@@ -5520,7 +5520,7 @@ test("native channel settings require readable Secret bindings", async () => {
   delete callbackOptions.gatewayRouting.channels;
   const withoutCallback = new KubernetesComputeDriver(callbackOptions, {
     nodeEnrollment: {},
-    channelDrivers: bundledChannelProviders(),
+    channelDrivers: createChannelProviders(),
   });
   const teamsConfiguration = {
     agents: { defaults: { model: "codex/gpt-5" } },

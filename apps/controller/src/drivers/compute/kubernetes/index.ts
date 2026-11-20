@@ -1,5 +1,5 @@
 import { enabledChannelEntries } from "@openclaw-enterprise/occ";
-import { resolveChannelRouting, type ChannelProviderDriver } from "../../channel/routing.ts";
+import { resolveChannelRouting } from "../../channel/routing.ts";
 import {
   KubernetesChannelEgress,
   CHANNEL_EGRESS_BINDING_LABEL,
@@ -15,7 +15,10 @@ import {
   observeWorkspaceNodeRead,
   recordWorkspaceNodeObservation,
 } from "../../../gateway/workspace-node-observation.ts";
-import type { CredentialPolicyWithdrawalOptions } from "@openclaw-enterprise/contracts";
+import type {
+  ChannelProviderDriver,
+  CredentialPolicyWithdrawalOptions,
+} from "@openclaw-enterprise/contracts";
 import type { OpenShellCredentialAttachments } from "../../sandbox/openshell-credential-attachments.ts";
 import { OpenShellSandboxConfigurationFailure } from "../../sandbox/openshell-sandbox-errors.ts";
 import { networkPolicySpecToJson, resolverEgress } from "../../kubernetes/network-policy.ts";
