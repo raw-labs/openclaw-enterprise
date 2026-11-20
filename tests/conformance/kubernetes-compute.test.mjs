@@ -3765,6 +3765,12 @@ test("gateway chat routes enforce a distinct exact-Agent scope ceiling", () => {
     );
     assert.ok(headers.remove.includes("authorization"));
     assert.ok(headers.remove.includes("cookie"));
+    // The route sets the trusted identity and scope cap; removing the same headers would make
+    // that grant depend on proxy evaluation order.
+    assert.deepEqual(
+      headers.set.filter(({ name }) => headers.remove.includes(name)),
+      [],
+    );
     assert.deepEqual(rule.backendRefs, [
       { group: "", kind: "Service", name: service.metadata.name, port: 8080 },
     ]);

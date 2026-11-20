@@ -14230,7 +14230,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           "cookie",
           "forwarded",
           "x-forwarded-for",
-          ...(access !== "operator"
+          // Operator and chat routes set their own trusted identity and scopes above.
+          ...(access === "node" || access === "node-transfer" || access === "channel"
             ? [
                 TRUSTED_PROXY_SCOPES_HEADER,
                 "x-occ-identity",
