@@ -4699,6 +4699,81 @@ test("dedicated Codex projects the account-owned token through the common PAT lo
   assert.equal(gatewayEnvironment.has("MSTEAMS_APP_PASSWORD"), false);
 });
 
+test("Teams Gateways route only provider traffic through the process-wide channel proxy", () => {
+  const runtime = {
+    transportSecretPrefix: "transport",
+    gatewayStorageClassName: "local-path",
+    channelEgress: channelEgressOptions,
+  };
+  const ownership = { namespaceId: tenant.id, agentId: "agent-routed", revisionId: "revision-1" };
+  const namespace = { name: kubernetesNamespaceName(tenant.id), plane: "execution" };
+  const routing = (providers) => ({
+    providers,
+    drivers: [],
+    destinations: [],
+    proxyUrl: "http://channel-egress.envoy-gateway-system.svc:10001",
+    binding: {
+      id: "binding-1",
+      namespaceId: tenant.id,
+      namespace: namespace.name,
+      agentId: ownership.agentId,
+      revisionId: ownership.revisionId,
+      policyHash: "policy",
+      port: 10001,
+      state: "reserved",
+    },
+  });
+  const render = (driver, providers) =>
+    Object.fromEntries(
+      driver
+        .deployment(
+          "teams-gateway",
+          ownership,
+          namespace,
+          { runtime: "gateway:local", workspaceSetup: driver.options.images.gateway },
+          "teams-gateway",
+          "gateway",
+          {},
+          "info",
+          driver.gatewayConfiguration(routedRevision(driver), undefined, namespace),
+          false,
+          undefined,
+          undefined,
+          routing(providers),
+        )
+        .spec.template.spec.containers[0].env.map(({ name, value }) => [name, value]),
+    );
+  for (const executionCluster of [undefined, twoClusterOptions().executionCluster]) {
+    const driver = createKubernetesComputeDriver({
+      ...teamsOptions({ runtime }),
+      ...(executionCluster === undefined ? {} : { executionCluster }),
+    });
+    const env = render(driver, ["msteams"]);
+    // The Teams SDK follows Node's process-wide proxy, so Envoy sees every CONNECT it makes.
+    assert.equal(env.NODE_USE_ENV_PROXY, "1");
+    assert.equal(env.HTTPS_PROXY, routing([]).proxyUrl);
+    // Compute-assigned Harness and peer status routes are not channel destinations: through
+    // the Agent's listener, Envoy would refuse them and the Gateway could not reach its Harness.
+    const bypass = env.NO_PROXY.split(",");
+    const peers = ["APP_SERVER_URL", "OPENCLAW_PEER_PLUGIN_STATUS_URL"].filter(
+      (name) => env[name] !== undefined,
+    );
+    assert.deepEqual(
+      peers,
+      executionCluster === undefined
+        ? ["APP_SERVER_URL"]
+        : ["APP_SERVER_URL", "OPENCLAW_PEER_PLUGIN_STATUS_URL"],
+    );
+    for (const name of peers) {
+      assert.ok(bypass.includes(new URL(env[name]).hostname), name);
+    }
+    // Slack's SDK reads HTTPS_PROXY itself; its Gateway keeps Node's default direct routing.
+    const slack = render(driver, ["slack"]);
+    assert.equal(slack.NODE_USE_ENV_PROXY, undefined);
+    assert.equal(slack.NO_PROXY, undefined);
+  }
+});
+
 test(
   "a ServiceAccount credential Secret create that applied but answered an error retains its recovery receipt",
   checkUnconfirmedAccountSecretCreate,

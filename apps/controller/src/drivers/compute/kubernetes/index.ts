@@ -17571,6 +17571,12 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         );
       }
       if (role === "gateway") {
+        // Compute-assigned peers that a process-wide channel proxy must never carry.
+        const internalHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+        if (dedicated && this.options.executionCluster !== undefined) {
+          // OPENCLAW_PEER_PLUGIN_STATUS_URL below uses the execution cluster's Harness route.
+          internalHosts.add(this.options.executionCluster.harnessRouting.hostname);
+        }
         if (embedded) {
           variables.push({
             name: "HOME",
@@ -17578,15 +17584,14 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           });
         } else if (configuration?.nativeWorkerProfile === undefined) {
           // TODO(workload-transport-mtls): Replace per-Agent capability-token ws:// with mTLS.
-          variables.push({
-            name: "APP_SERVER_URL",
-            value:
-              providerUrl !== undefined
-                ? providerUrl.toString()
-                : this.options.executionCluster === undefined
-                  ? `ws://agent-${suffix}.${required(configuration?.harnessNamespace?.name, "Harness namespace")}.svc:${AGENT_TRANSPORT_PORT}`
-                  : `wss://${this.options.executionCluster.harnessRouting.hostname}${this.harnessRoutePath(ownership)}`,
-          });
+          const appServerUrl =
+            providerUrl !== undefined
+              ? providerUrl.toString()
+              : this.options.executionCluster === undefined
+                ? `ws://agent-${suffix}.${required(configuration?.harnessNamespace?.name, "Harness namespace")}.svc:${AGENT_TRANSPORT_PORT}`
+                : `wss://${this.options.executionCluster.harnessRouting.hostname}${this.harnessRoutePath(ownership)}`;
+          internalHosts.add(new URL(appServerUrl).hostname);
+          variables.push({ name: "APP_SERVER_URL", value: appServerUrl });
           if (providerEndpoint?.codexPermissionProfile !== undefined) {
             variables.push({
               name: "OPENCLAW_CODEX_PROVIDER_PERMISSION_PROFILE",
@@ -17621,10 +17626,11 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           }
           variables.push({ name: "HTTPS_PROXY", value: enabledChannels.proxyUrl });
           if (enabledChannels.providers.includes("msteams")) {
-            // Envoy checks the address it connects to for every CONNECT, including redirects.
+            // The Teams SDK honors only Node's process-wide proxy. Envoy then checks every
+            // CONNECT target, including redirects; the Harness and peer routes bypass it.
             variables.push(
               { name: "NODE_USE_ENV_PROXY", value: "1" },
-              { name: "NO_PROXY", value: "localhost,127.0.0.1,::1" },
+              { name: "NO_PROXY", value: [...internalHosts].join(",") },
               { name: "OPENCLAW_PROXY_ACTIVE", value: "1" },
             );
           }

@@ -845,6 +845,15 @@ test(
     const teamsProxy = string(teamsEnv.find((entry) => entry.name === "HTTPS_PROXY")?.value);
     const teamsPod = string(object(teamsGateway.metadata).name);
     assert.equal(teamsEnv.find((entry) => entry.name === "OPENCLAW_PROXY_ACTIVE")?.value, "1");
+    // The Harness route bypasses the process-wide proxy; Envoy would refuse it.
+    const harnessHost = new URL(
+      string(teamsEnv.find((entry) => entry.name === "APP_SERVER_URL")?.value),
+    ).hostname;
+    assert.ok(
+      string(teamsEnv.find((entry) => entry.name === "NO_PROXY")?.value)
+        .split(",")
+        .includes(harnessHost),
+    );
     assert.deepEqual(
       await probeChannelConnect(tenant, teamsPod, teamsProxy, "graph.microsoft.com"),
       {
