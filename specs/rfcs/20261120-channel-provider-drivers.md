@@ -1,6 +1,6 @@
 ---
 status: Proposed
-implementation_status: Not implemented
+implementation_status: Implemented
 author: miguelbranco80
 ---
 
@@ -171,8 +171,16 @@ composite and its incorrect `enableRouting` result.
 ## Delivery and verification
 
 Delivery is in [TASK-0045](../plans/0045-teams-channel-support.md), together
-with the Teams channel implementation. Verification results map to the
-criteria above in that plan.
+with the Teams channel implementation, in
+[raw-labs/openclaw-enterprise#39](https://github.com/raw-labs/openclaw-enterprise/pull/39).
+
+- **AC-1, AC-2:** the Teams directory and OCC API channel directory integration
+  tests pass through the real Fastify API, OCC and Drivers, with an HTTP fixture
+  at the Microsoft boundary.
+- **AC-3:** the Channel Driver startup integration test passes through the real
+  Installation loader.
+- **AC-4:** the real Helm and Envoy suite asserts it, but it has not run for this
+  change. It needs a disposable k3d cluster and matching runtime images.
 
 ## Rationale and alternatives
 
