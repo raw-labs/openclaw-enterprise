@@ -17571,7 +17571,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         );
       }
       if (role === "gateway") {
-        // Compute-assigned peers that a process-wide channel proxy must never carry.
+        // Compute-assigned peers that a process-wide channel proxy must never carry. NO_PROXY
+        // only selects a direct connection; default-deny NetworkPolicy still admits just the
+        // granted Harness and peer routes, so a bypassed name reaches nothing else.
         const internalHosts = new Set(["localhost", "127.0.0.1", "::1"]);
         if (dedicated && this.options.executionCluster !== undefined) {
           // OPENCLAW_PEER_PLUGIN_STATUS_URL below uses the execution cluster's Harness route.

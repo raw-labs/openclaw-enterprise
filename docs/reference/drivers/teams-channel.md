@@ -2,15 +2,25 @@
 
 ## Overview
 
-The bundled `TeamsChannelDriver` reads standard channels and members from one
-selected Team for the console name picker. The bundled Channel Driver routes
-`provider: "msteams"` lookups to this adapter. Message delivery remains the
-native `msteams` plugin's responsibility.
+The bundled `teams-channel` Driver serves the `msteams` provider. It reads
+standard channels and members from one selected Team for the console name
+picker and declares the Microsoft destinations of Teams Gateways. Message
+delivery remains the native `msteams` plugin's responsibility.
+
+## Configuration
+
+Select it in [`drivers.channel`](channel.md#installation-selection). Its optional
+`fileHosts` list adds exact attachment storage hosts to the Envoy listener of
+each Gateway with Teams enabled; see
+[attachment setup](../../guides/integrations/teams.md#prepare-attachment-downloads).
+OCC directory requests never use these hosts.
 
 ## Interface
 
 Lookup uses the [ChannelDriver contract](channel.md), with `context` containing
-`appId`, `tenantId` and `teamId` UUIDs. `teamId` is the Entra group ID used by
+exactly the `appId`, `tenantId` and `teamId` UUIDs. Other keys, missing keys, or
+a cursor from another app, tenant, Team, kind or query return
+`400 INVALID_REQUEST` before any Microsoft request. `teamId` is the Entra group ID used by
 Graph; returned `workspaceId` is the native Team ID used for bot routing.
 `kind` selects `channels` or `users`. Searches match names, IDs and available
 member email addresses. Hydration resolves up to twenty selected IDs.

@@ -114,19 +114,28 @@ network requirements. Live outgoing file delivery remains unqualified.
 
 For a controlled trial, review the actual attachment and redirect hostnames
 without recording signed URLs. Set the required hosts in the Installation's
-Kubernetes Compute configuration under `runtime.channelEgress`:
+[Teams Channel Driver selection](../../reference/drivers/channel.md#installation-selection).
+List every Channel Driver that the Installation needs, because a supplied list
+installs only its entries:
 
 ```yaml
-teamsFileHosts:
-  - tenant.sharepoint.com
-  - files.blob.core.windows.net
+drivers:
+  channel:
+    - id: slack-channel
+      configuration: {}
+    - id: teams-channel
+      configuration:
+        fileHosts:
+          - tenant.sharepoint.com
+          - files.blob.core.windows.net
 ```
 
-The list defaults to empty and accepts up to 32 exact lowercase subdomains of
-`sharepoint.com`, `sharepoint-df.com`, `1drv.com`, `onedrive.com` or
-`blob.core.windows.net`. Enter each required redirect hostname separately.
-The Teams Driver adds these hosts only to Gateways with Teams enabled. Deploy
-a revision to apply the updated destination policy. Envoy checks the address
+`fileHosts` defaults to empty and accepts up to 32 unique, exact lowercase
+subdomains of `sharepoint.com`, `sharepoint-df.com`, `1drv.com`, `onedrive.com`
+or `blob.core.windows.net`. Enter each required redirect hostname separately.
+Restart OCC to load the change, then deploy a revision to apply the updated
+destination policy. The Teams Driver adds these hosts only to Gateways with
+Teams enabled. Envoy checks the address
 it connects to on each tunnel. Native media and credential checks still apply.
 
 Native `channels.msteams.mediaAllowHosts` may also need an exact destination

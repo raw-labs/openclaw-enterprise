@@ -1,9 +1,14 @@
+---
+rfc: ../rfcs/20261120-channel-provider-drivers.md
+---
+
 # Implementation plan: Teams channel support
 
 - **ID:** TASK-0045
 - **Delivery status:** In progress
 - **Owner:** Kubernetes Compute Driver, native OpenClaw runtime packaging, and console channel editors
 - **Authority:** [Platform design](../../docs/design.md), existing Compute-owned gateway routing and Agent-owned Secret delivery
+- **RFCs:** [Teams channels](https://github.com/raw-labs/openclaw-enterprise/pull/29), [per-Agent channel egress](../rfcs/20261118-channel-egress.md), [per-provider Channel Drivers](../rfcs/20261120-channel-provider-drivers.md)
 - **Source baseline:** `447c387b63c1b781fec03655f06c318caeb91e36`
 
 ## Outcome and scope
@@ -12,12 +17,15 @@ A Dedicated Agent can receive Microsoft Teams personal messages and mentions in
 selected channels, then reply through the bundled native plugin. OCE exposes
 essential access controls and an app-password Secret picker alongside Slack.
 The Kubernetes Compute Driver owns the exact callback route, serving-revision
-ownership, provider-only authentication override, and cleanup. Platform core
-continues to consume the existing Compute and Secret contracts.
+ownership, provider-only authentication override, and cleanup. OCC installs
+one Channel Driver per provider, as
+[RFC-20261120-channel-provider-drivers](../rfcs/20261120-channel-provider-drivers.md)
+proposes; the Teams Driver owns Team-scoped directory lookup and its
+attachment storage hosts.
 
-This first implementation targets Microsoft Public cloud and password-based
-bot credentials. Directory lookup, attachment hosts, SSO, sovereign clouds,
-federated credentials, and Teams approvers are deferred. Existing Slack behavior
+This implementation targets Microsoft Public cloud and password-based bot
+credentials. SSO, sovereign clouds, federated credentials, and Teams approvers
+are deferred. Existing Slack behavior
 and the OpenClaw source pin stay in scope for regression verification.
 
 ## Delivery and proof
@@ -29,9 +37,11 @@ and the OpenClaw source pin stay in scope for regression verification.
   listener and exact POST route. Preserve Microsoft Authorization while removing
   OCE administrative headers. Follow the serving Deployment's revision marker
   and remove callback resources during disable, stop, and deletion.
-- Extend the chart's existing proxy with an opt-in list of exact Microsoft
-  Public cloud hosts. Keep default Slack-only behavior and isolated gateway
-  egress. Verify rejected destinations and retained Slack tunnels.
+- Declare Microsoft Public cloud destinations through the Teams Channel Driver
+  for [managed channel egress](../rfcs/20261118-channel-egress.md). Teams
+  Gateways get their own Envoy listener; OCC directory requests use the
+  reserved OCC listener. Verify rejected destinations and retained Slack
+  tunnels. Earlier drafts extended the Slack proxy that upstream later removed.
 - Add the Teams editor through the shared channel save transaction and Secret
   authorization workflow. Exercise persistence through the real development
   API and inspect rebuilt Storybook states with screenshots and a short video.
@@ -83,6 +93,27 @@ docs and flow checks passed; the 17-node flow rendered without errors and was
 visually inspected. Later changes record this result only. Exact-final-head native
 qualification on both architectures, approved live Teams messages/attachments,
 production public Envoy ingress and required CI remain before-merge holds.
+
+## Envoy egress port and Channel Driver selection (2026-11-20)
+
+[raw-labs/openclaw-enterprise#39](https://github.com/raw-labs/openclaw-enterprise/pull/39)
+moves the Teams implementation onto upstream `e88dc58831`, which includes managed
+per-Agent channel egress. Review of that port changed the following:
+
+- OCC installs the Slack and Teams Drivers per provider instead of one composite
+  Driver. The lookup Driver input has no `provider` field; Drivers refuse
+  foreign context and cursors with `400 INVALID_REQUEST`. Teams storage hosts
+  move from Kubernetes Compute `runtime.channelEgress` to the `teams-channel`
+  selection in `drivers.channel`.
+- The chat route again keeps the trusted identity and scope headers that it
+  sets, and it now also strips client `x-api-key` and Tailscale headers.
+- Teams Gateways exclude the Compute-assigned Harness and peer status hosts from
+  the process-wide channel proxy.
+- Startup and the upgrade check refuse a Compute channel callback hostname that
+  differs from the Helm `channels` listener.
+
+Verification for this change is in the PR. Live Microsoft delivery, public
+callback ingress, attachments and native image qualification remain pending.
 
 ## Original local verification record
 

@@ -64,9 +64,12 @@ can stop a predecessor. Draft saves may precede listener setup.
 that serving Deployment owns a Teams callback.
 `configuration-rules.ts:requireChannelProxyEnvironment` refuses Agent-authored
 proxy environment overrides. After the worker verifies the revision's Envoy
-binding, `deployment` sets `HTTPS_PROXY` and the Teams runtime's proxy flags
-on the Gateway. `OPENCLAW_PROXY_ACTIVE=1` delegates guarded-fetch address
-selection to Envoy while native media and credential checks stay in place.
+binding, `deployment` sets `HTTPS_PROXY` and, for Teams, `NODE_USE_ENV_PROXY=1`
+on the Gateway, because the Teams SDK follows only Node's process-wide proxy.
+`NO_PROXY` names loopback and the exact hosts of the Compute-assigned Harness
+and peer status URLs, so Envoy carries only provider traffic.
+`OPENCLAW_PROXY_ACTIVE=1` delegates guarded-fetch address selection to Envoy
+while native media and credential checks stay in place.
 
 ### 2. Reconcile the serving revision's callback
 

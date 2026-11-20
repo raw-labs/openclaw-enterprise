@@ -11,8 +11,8 @@ credentials and looks up provider identities for an authorized Namespace edit.
 OpenClaw Control Plane (OCC) owns caller authorization, Secret access, and the
 saved Agent or Configuration. The Driver owns the provider request and returns
 bounded display candidates with stable provider IDs. It does not send messages
-or grant channel access. The current controller selects the bundled Slack and Teams
-implementation for directory lookup; see [Driver selection](selection.md).
+or grant channel access. Each implementation serves one channel provider; see
+[Driver selection](selection.md) for the bundled Slack and Teams Drivers.
 
 ## Interface
 
@@ -32,22 +32,58 @@ require an explicit matching IP or CIDR rule. Installation address restrictions
 still apply. See [Kubernetes enforcement limits](kubernetes-compute/channel-egress.md).
 
 The [shared interface](../../../packages/contracts/src/drivers/channel/index.ts) requires a
-Driver identity and `lookupDirectory({ token, provider, context?, kind, query?, cursor?, ids? })`. `kind`
-selects users or channels. `provider` selects a provider-owned adapter; optional
-`context` contains at most eight nonsecret strings of at most 200 characters.
-Adapters validate their own context, authentication and pagination; OCC remains
-provider-neutral. `ids` resolves saved IDs directly and cannot be
-combined with a search query or cursor. The method returns workspace identity, candidates,
-an optional next cursor, and `complete`. A returned name is a display hint;
-callers save IDs. A missing selected Driver makes lookup unavailable.
+Driver identity and `lookupDirectory({ token, context?, kind, query?, cursor?, ids? })`.
+`kind` selects users or channels. Optional `context` contains at most eight
+nonsecret strings of at most 200 characters. Each Driver validates its own
+context, authentication and pagination. A Driver rejects missing, unknown or
+malformed context, and a cursor from another lookup, with the `invalid_request`
+reason before it sends a request; OCC returns `400 INVALID_REQUEST`. A Driver
+that uses no context rejects any context. `ids` resolves saved IDs directly and
+cannot be combined with a search query or cursor. The method returns workspace
+identity, candidates, an optional next cursor, and `complete`. A returned name
+is a display hint; callers save IDs.
+
+The lookup request names its `provider`. OCC sends the request only to the
+Driver that composition installed for that provider. A provider without an
+installed Driver returns `501 NOT_IMPLEMENTED`.
 
 The optional `validateCredentials(values, withSecret)` method checks configured
-channel credentials before API provisioning or deployment. `withSecret(binding,
+channel credentials before API provisioning or deployment. OCC runs it for every
+installed Driver, so each Driver reads only its own provider section and returns
+when that section is absent or disabled. `withSecret(binding,
 path, validate)` authorizes the exact same-Namespace Secret and supplies its value
 only inside the SecretDriver callback. Provider calls run before the write
 transaction. Deployment admission retains the Configuration and selected Driver
 identities that were checked and rejects changes before recording a revision.
 Validation does not pin Secret versions or revalidate queued work.
+
+## Installation selection
+
+`drivers.channel` lists the bundled Channel Drivers to install. Each entry has
+an `id` and a closed `configuration` object:
+
+```yaml
+drivers:
+  channel:
+    - id: slack-channel
+      configuration: {}
+    - id: teams-channel
+      configuration:
+        fileHosts:
+          - tenant.sharepoint.com
+```
+
+| ID              | Provider  | Configuration                                                                                          |
+| --------------- | --------- | ------------------------------------------------------------------------------------------------------ |
+| `slack-channel` | `slack`   | None.                                                                                                  |
+| `teams-channel` | `msteams` | Optional [`fileHosts`](../../guides/integrations/teams.md#prepare-attachment-downloads); default `[]`. |
+
+If you omit `drivers.channel`, startup installs both Drivers with default
+configuration. If you supply the list, startup installs only the listed
+Drivers, and Agent admission refuses a channel whose Driver is not installed.
+Startup refuses an unknown ID, a repeated ID and unknown or invalid
+configuration. OCC directory lookup and Compute admission use the same
+installed set.
 
 ## IAM
 

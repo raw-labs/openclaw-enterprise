@@ -108,9 +108,9 @@ cleanup for retry. Cleanup for one revision cannot release another binding.
 OCC provider requests use the reserved listener and an API-only network grant.
 The generated Helm policy consumes the bundled Drivers' routing declarations.
 The OCC listener permits Slack and Teams directory targets. Teams bot and
-storage destinations are declared for Gateways with Teams enabled. Configure
-optional exact storage hosts using `runtime.channelEgress.teamsFileHosts`.
-See [Teams attachment setup](../../../guides/integrations/teams.md#prepare-attachment-downloads).
+storage destinations are declared for Gateways with Teams enabled. The Teams
+Channel Driver's `fileHosts` setting adds exact storage hosts; see
+[Teams attachment setup](../../../guides/integrations/teams.md#prepare-attachment-downloads).
 Provider credentials stay with their authorized consumers.
 
 ## Verification and troubleshooting

@@ -12,8 +12,8 @@ An operator searches Slack users/channels or one Teams Team's standard channels
 and member roster while creating or editing an
 Agent. The Console uses the selected channel credential Secret to show names and workspace
 identity, then saves only the selected IDs in channel Configuration. OpenClaw
-Control Plane (OCC) authorizes and reads the Secret; the selected ChannelDriver
-owns provider calls. This flow ends when the Console displays candidates or an
+Control Plane (OCC) authorizes and reads the Secret, then sends the request to
+the ChannelDriver installed for the named provider, which owns provider calls. This flow ends when the Console displays candidates or an
 actionable error.
 
 ## Entry Points
@@ -24,7 +24,7 @@ actionable error.
   Configuration, and can operate the selected same-Namespace Secret.
 - Source: `apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`,
   `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`,
-  and `apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`.
+  and `apps/controller/src/drivers/channel/index.ts:createChannelProviders`.
 
 ## Flow
 
@@ -32,14 +32,15 @@ actionable error.
 graph TD
   A["Operator selects bot Secret and searches"] --> B["OCC checks edit target and exact Secret operate"]
   B -->|denied or missing| X["Return safe lookup error"]
-  B -->|authorized| P{"ChannelDriver selected?"}
+  B -->|authorized| P{"Driver installed for the named provider?"}
   P -->|no| U["Return 501; Console offers exact-ID entry"]
   P -->|yes| C["SecretDriver reads current value"]
   C --> D["OCC rechecks target, Secret grant, and backend identity"]
   D -->|changed| X
-  D -->|current| R{"Selected provider?"}
-  R -->|Slack| E["Slack Driver reads workspace and bounded directory pages"]
-  R -->|Teams| T["Teams Driver exchanges password for Graph token"]
+  D -->|current| R{"Provider"}
+  R -->|slack| E["Slack Driver reads workspace and bounded directory pages"]
+  R -->|msteams| T["Teams Driver checks context, exchanges password for Graph token"]
+  T -->|invalid context or cursor| I["Return 400 before provider I/O"]
   T --> V["Resolve native Team ID; read selected Team channels or members"]
   V -->|provider error| X
   V --> F
@@ -63,8 +64,10 @@ platform state. A missing or foreign target is rejected before provider I/O.
 
 `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`
 
-`apps/controller/src/composition/installation-config.ts` configures the bundled
-Drivers with the managed fleet's OCC listener. Production requests fail if that
+`apps/controller/src/composition/installation-config.ts` builds one Driver for
+each `drivers.channel` selection with `createChannelProviders`, configures each
+with the managed fleet's OCC listener, and gives the same provider set to OCC
+(`installChannelDrivers`) and Kubernetes Compute. Production requests fail if that
 listener is absent or unavailable. The Helm policy permits directory OAuth and
 Graph targets on port 443 alongside the Slack targets. The OCC port is
 separate from the Gateway port and does not include Teams storage or bot hosts.
@@ -77,9 +80,11 @@ requires a bot identity from `auth.test` and pages through `users.list` or
 The response contains at most 100 candidates and pagination state, never the token.
 An incomplete page cannot establish that a name is absent or unique.
 
-`apps/controller/src/drivers/channel/index.ts:BundledChannelDriver.lookupDirectory`
-selects the provider adapter inside the Driver boundary. Teams context contains
-nonsecret app, tenant and Entra group UUIDs. The Teams adapter exchanges the app
+`packages/occ/src/index.ts:OpenClawController.channelDriver` selects the Driver
+installed for the request's `provider`; OCC does not interpret `context`.
+`apps/controller/src/drivers/channel/teams.ts:TeamsChannelDriver.lookupDirectory`
+requires context with exactly the nonsecret app, tenant and Entra group UUIDs,
+and the Slack Driver refuses any context, both before provider I/O. The Teams adapter exchanges the app
 password for a Graph token, resolves the native Team ID with `primaryChannel`,
 and reads only that Team's standard channels or member roster. Application RSC
 consent is checked by Microsoft, independently of OCC authorization. The Driver
