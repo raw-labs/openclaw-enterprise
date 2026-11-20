@@ -921,7 +921,7 @@ capabilities:
 {{- end }}
 {{- if .Values.gatewayRouting.enabled }}
 - name: OCC_CHART_GATEWAY_ROUTING
-  value: {{ dict "gatewayName" (include "openclaw.gatewayRouting.gatewayName" .) "gatewayNamespace" .Release.Namespace "envoyNamespace" .Values.gatewayRouting.envoyNamespace "hostname" (include "openclaw.gatewayRouting.hostname" .) "defaultHostname" (include "openclaw.gatewayRouting.defaultHostname" .) | toJson | quote }}
+  value: {{ dict "gatewayName" (include "openclaw.gatewayRouting.gatewayName" .) "gatewayNamespace" .Release.Namespace "envoyNamespace" .Values.gatewayRouting.envoyNamespace "hostname" (include "openclaw.gatewayRouting.hostname" .) "defaultHostname" (include "openclaw.gatewayRouting.defaultHostname" .) "channelsHostname" (ternary .Values.gatewayRouting.channels.hostname "" .Values.gatewayRouting.channels.enabled) | toJson | quote }}
 {{- end }}
 {{- end -}}
 

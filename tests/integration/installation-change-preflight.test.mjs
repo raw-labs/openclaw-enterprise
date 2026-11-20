@@ -382,8 +382,9 @@ test(
   "the upgrade hook refuses private Gateway routing that differs from the chart",
   tooling,
   async (t) => {
-    for (const variant of ["default", "custom-automatic", "custom-hostname"]) {
-      const custom = variant !== "default";
+    for (const variant of ["default", "custom-automatic", "custom-hostname", "channel-callbacks"]) {
+      const custom = variant === "custom-automatic" || variant === "custom-hostname";
+      const callbacks = variant === "channel-callbacks" ? "teams.callbacks.example" : undefined;
       const hostname = variant === "custom-hostname" ? "agents.internal.example" : undefined;
       const namespace = custom ? "team-control" : "openclaw-system";
       const gatewayName = custom ? "private-agents" : "oce-agent-gateways";
@@ -400,6 +401,14 @@ test(
                   }
                 : {}),
               ...(hostname === undefined ? {} : { "gatewayRouting.hostname": hostname }),
+              ...(callbacks === undefined
+                ? {}
+                : {
+                    "gatewayRouting.channels.enabled": "true",
+                    "gatewayRouting.channels.hostname": callbacks,
+                    "gatewayRouting.channels.tlsSecretName": "teams-callback-tls",
+                    "gatewayRouting.channels.ingressPeers[0].ipBlock.cidr": "0.0.0.0/0",
+                  }),
             },
             { isUpgrade: true, namespace },
           )
@@ -423,6 +432,7 @@ test(
         gatewayNamespace: namespace,
         envoyNamespace,
         ...(hostname === undefined ? {} : { hostname }),
+        ...(callbacks === undefined ? {} : { channels: { hostname: callbacks } }),
       };
 
       // Both automatic Service DNS and custom routing must pass the actual chart hook.
@@ -450,6 +460,10 @@ test(
         ["envoyNamespace", "other-namespace"],
         ["hostname", "other.example"],
         ...(hostname === undefined ? [] : [["hostname", undefined]]),
+        // Teams callback routes attach to the chart's channel listener by name. A Compute
+        // hostname the chart does not serve, or a listener it does not render, drops callbacks.
+        ["channels", { hostname: "other.example" }],
+        ...(callbacks === undefined ? [] : [["channels", undefined]]),
       ];
       for (const [field, value] of mismatches) {
         const different = structuredClone(configuration);
