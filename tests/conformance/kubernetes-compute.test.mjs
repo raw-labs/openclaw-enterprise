@@ -3771,6 +3771,16 @@ test("gateway chat routes enforce a distinct exact-Agent scope ceiling", () => {
       headers.set.filter(({ name }) => headers.remove.includes(name)),
       [],
     );
+    // Client credential and identity claims never reach the tenant Gateway through chat.
+    for (const name of [
+      "x-api-key",
+      "tailscale-user-login",
+      "tailscale-user-name",
+      "tailscale-user-profile-pic",
+      "tailscale-funnel-request",
+    ]) {
+      assert.ok(headers.remove.includes(name), name);
+    }
     assert.deepEqual(rule.backendRefs, [
       { group: "", kind: "Service", name: service.metadata.name, port: 8080 },
     ]);

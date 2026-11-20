@@ -14230,18 +14230,21 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           "cookie",
           "forwarded",
           "x-forwarded-for",
-          // Operator and chat routes set their own trusted identity and scopes above.
-          ...(access === "node" || access === "node-transfer" || access === "channel"
-            ? [
-                TRUSTED_PROXY_SCOPES_HEADER,
-                "x-occ-identity",
+          // Only the administrative route forwards client credential and identity headers.
+          ...(access === "operator"
+            ? []
+            : [
                 "x-api-key",
                 "tailscale-user-login",
                 "tailscale-user-name",
                 "tailscale-user-profile-pic",
                 "tailscale-funnel-request",
-              ]
-            : []),
+              ]),
+          // Chat sets its own trusted identity and scope cap above; removing them would make
+          // that grant depend on proxy evaluation order.
+          ...(access === "operator" || access === "chat"
+            ? []
+            : [TRUSTED_PROXY_SCOPES_HEADER, TRUSTED_PROXY_HEADER]),
         ],
       },
     };
