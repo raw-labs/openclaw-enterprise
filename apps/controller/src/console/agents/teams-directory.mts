@@ -53,6 +53,8 @@ function lookupError(error: unknown) {
           "Check the Team reference. Microsoft returned an unexpected directory response.",
         CHANNEL_DIRECTORY_UNAVAILABLE:
           "Teams directory is unavailable. Try again or enter exact IDs.",
+        // The Teams Driver refused the app, tenant or Team context before calling Microsoft.
+        INVALID_REQUEST: "Check the app ID, tenant ID and Team reference, then search again.",
       } as Record<string, string>
     )[failure.code ?? ""] ??
     (failure.status === 403

@@ -109,6 +109,7 @@ export const TeamsSavePending = story("teamsSavePending");
 export const TeamsDirectoryChannels = story("teamsDirectoryChannels");
 export const TeamsDirectoryMembers = story("teamsDirectoryMembers");
 export const TeamsDirectoryDenied = story("teamsDirectoryDenied");
+export const TeamsDirectoryRequestRejected = story("teamsDirectoryRequestRejected");
 export const TeamsDirectoryLoading = story("teamsDirectoryLoading");
 export const TeamsDirectoryEmpty = story("teamsDirectoryEmpty");
 export const TeamsDirectoryMissingSecret = story("teamsDirectoryMissingSecret");

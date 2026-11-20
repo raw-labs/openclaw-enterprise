@@ -143,6 +143,27 @@ export function channelsScenarios({
       description:
         "Missing Team-scoped consent preserves exact-ID entry and existing access rules.",
     },
+    teamsDirectoryRequestRejected: {
+      group: "Components/Channels",
+      name: "Teams directory request rejected",
+      path: `${draft}&tab=channels`,
+      teams: true,
+      rules: [
+        {
+          suffix: "/channel-directory/lookup",
+          method: "POST",
+          status: 400,
+          code: "INVALID_REQUEST",
+        },
+      ],
+      actions: [
+        click("Edit Microsoft Teams"),
+        { selector: "#msteams-team-id", value: "33333333-3333-4333-8333-333333333333" },
+        { selector: "#msteams-channel-ids-search", focus: true },
+      ],
+      description:
+        "The Teams Driver refuses lookup context before calling Microsoft; exact-ID entry stays available.",
+    },
     teamsDirectoryLoading: {
       group: "Components/Channels",
       name: "Teams directory loading",

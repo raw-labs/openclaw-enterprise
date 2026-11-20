@@ -22,6 +22,9 @@ function isLookupBody(body: unknown): body is ChannelDirectoryLookupBody {
     return false;
   }
   if (
+    // The API requires the provider whose installed Channel Driver serves the lookup.
+    !("provider" in body) ||
+    (body.provider !== "slack" && body.provider !== "msteams") ||
     !("kind" in body) ||
     (body.kind !== "users" && body.kind !== "channels") ||
     !("secretId" in body) ||
