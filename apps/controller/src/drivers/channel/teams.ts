@@ -1,5 +1,6 @@
 import {
   requireConfiguration,
+  type ChannelCredentialReader,
   type ChannelDirectoryLookupInput,
   type ChannelDirectoryResult,
   type ChannelDriver,
@@ -7,12 +8,19 @@ import {
   type JSONSchema,
   type NetworkDestinationRule,
 } from "@openclaw-enterprise/contracts";
-import { ChannelDirectoryError, ResourceStateConflictError } from "@openclaw-enterprise/occ";
+import {
+  ChannelCredentialError,
+  ChannelDirectoryError,
+  ResourceStateConflictError,
+  secretInputReference,
+} from "@openclaw-enterprise/occ";
 import { asRecord, deepFreeze, readCappedBody } from "@openclaw-enterprise/utils";
 
 import type { ChannelRequest } from "./transport.ts";
 
 const GRAPH = "https://graph.microsoft.com";
+const BOT_CONNECTOR = "https://api.botframework.com";
+const REQUEST_TIMEOUT_MS = 8_000;
 const DIRECTORY_HOSTS = ["login.microsoftonline.com", "graph.microsoft.com"];
 const BOT_HOSTS = ["login.botframework.com", "api.botframework.com", "smba.trafficmanager.net"];
 const STORAGE_HOST =
@@ -55,7 +63,7 @@ export interface TeamsChannelDriverOptions {
   readonly proxyMissing?: boolean;
 }
 
-/** Read-only RSC lookup: only one selected Team, never the tenant-wide directory. */
+/** Teams bot credential validation, egress destinations, and Team-scoped directory lookup. */
 export class TeamsChannelDriver implements ChannelDriver {
   readonly capability = "channel" as const;
   readonly id = "teams-channel";
@@ -115,6 +123,51 @@ export class TeamsChannelDriver implements ChannelDriver {
     ];
   }
 
+  async validateCredentials(
+    values: Readonly<Record<string, unknown>>,
+    withSecret: ChannelCredentialReader,
+  ): Promise<void> {
+    const teams = asRecord(asRecord(values.channels)?.msteams);
+    if (teams === undefined || teams.enabled === false) {
+      return;
+    }
+    const field = "/channels/msteams/appPassword";
+    const ref = secretInputReference(teams.appPassword, values.secrets);
+    if (ref === undefined || !("variable" in ref)) {
+      throw new ChannelCredentialError("binding_required", field);
+    }
+    const appId = typeof teams.appId === "string" ? teams.appId.trim() : "";
+    const tenantId = typeof teams.tenantId === "string" ? teams.tenantId.trim() : undefined;
+    if (!GUID.test(appId)) {
+      throw new ChannelCredentialError("credentials_rejected", "/channels/msteams/appId");
+    }
+    if (teams.tenantId !== undefined && (tenantId === undefined || !GUID.test(tenantId))) {
+      throw new ChannelCredentialError("credentials_rejected", "/channels/msteams/tenantId");
+    }
+    if (this.proxyMissing || (teams.cloud !== undefined && teams.cloud !== "Public")) {
+      throw new ChannelCredentialError("unavailable", field);
+    }
+    await withSecret(ref.variable, field, async (password) => {
+      try {
+        // Use the messaging scope. Directory consent is optional for a messaging-only bot.
+        await this.accessToken(
+          tenantId ?? "botframework.com",
+          appId,
+          password.trim(),
+          BOT_CONNECTOR,
+          AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        );
+      } catch (error) {
+        throw new ChannelCredentialError(
+          error instanceof ChannelDirectoryError && error.reason === "credentials_rejected"
+            ? "credentials_rejected"
+            : "unavailable",
+          field,
+        );
+      }
+    });
+  }
+
   private async call(
     url: URL,
     options: Parameters<ChannelRequest>[1],
@@ -153,6 +206,37 @@ export class TeamsChannelDriver implements ChannelDriver {
       throw new ChannelDirectoryError("invalid_response");
     }
     return body;
+  }
+
+  private async accessToken(
+    tenant: string,
+    appId: string,
+    password: string,
+    resource: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const auth = await this.call(
+      new URL(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`),
+      {
+        method: "POST",
+        signal,
+        body: new URLSearchParams({
+          client_id: appId,
+          client_secret: password,
+          grant_type: "client_credentials",
+          scope: `${resource}/.default`,
+        }),
+      },
+      true,
+    );
+    if (
+      typeof auth.access_token !== "string" ||
+      !auth.access_token ||
+      auth.access_token.length > 32_768
+    ) {
+      throw new ChannelDirectoryError("invalid_response");
+    }
+    return auth.access_token;
   }
 
   async lookupDirectory(
@@ -202,32 +286,12 @@ export class TeamsChannelDriver implements ChannelDriver {
       }
     }
     const boundedSignal = signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-      : AbortSignal.timeout(8_000);
-    const auth = await this.call(
-      new URL(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`),
-      {
-        method: "POST",
-        signal: boundedSignal,
-        body: new URLSearchParams({
-          client_id: appId!,
-          client_secret: input.token,
-          grant_type: "client_credentials",
-          scope: `${GRAPH}/.default`,
-        }),
-      },
-      true,
-    );
-    if (
-      typeof auth.access_token !== "string" ||
-      !auth.access_token ||
-      auth.access_token.length > 32_768
-    ) {
-      throw new ChannelDirectoryError("invalid_response");
-    }
+      ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const token = await this.accessToken(tenantId!, appId!, input.token, GRAPH, boundedSignal);
     const options = {
       signal: boundedSignal,
-      headers: { authorization: `Bearer ${auth.access_token}` },
+      headers: { authorization: `Bearer ${token}` },
     };
     // Graph uses the Entra group UUID; native bot routing uses the General channel's ID.
     const primaryUrl = new URL(`/v1.0/teams/${teamId}/primaryChannel`, GRAPH);
