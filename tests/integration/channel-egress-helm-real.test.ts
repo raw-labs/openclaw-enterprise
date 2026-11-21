@@ -265,11 +265,13 @@ test(
       },
     });
     configuration.drivers.compute.configuration.resources.gateway.limits.memory = "4Gi";
+    // Use a public storage endpoint so the allowed probe can complete verified TLS.
+    const teamsFileHost = "api.onedrive.com";
     // The Teams Driver owns its storage hosts; only Teams Gateway listeners receive them.
     Object.assign(configuration.drivers, {
       channel: [
         { id: "slack-channel", configuration: {} },
-        { id: "teams-channel", configuration: { fileHosts: ["tenant.sharepoint.com"] } },
+        { id: "teams-channel", configuration: { fileHosts: [teamsFileHost] } },
       ],
     });
     const apiKey = secret();
@@ -692,7 +694,7 @@ test(
       });
       // Teams Driver settings never widen a Slack-only Agent's listener.
       assert.equal(
-        (await probeChannelConnect(tenant, gatewayName, proxy, "tenant.sharepoint.com")).status,
+        (await probeChannelConnect(tenant, gatewayName, proxy, teamsFileHost)).status,
         403,
       );
       assert.notEqual(
@@ -861,8 +863,13 @@ test(
         tlsVerified: true,
       },
     );
-    // Reachable public providers and wildcard storage targets cannot use this binding.
-    for (const host of ["slack.com", "neighbor.sharepoint.com"]) {
+    // The same host refused to the Slack-only Gateway must work through the Teams listener.
+    assert.deepEqual(await probeChannelConnect(tenant, teamsPod, teamsProxy, teamsFileHost), {
+      status: 200,
+      tlsVerified: true,
+    });
+    // Reachable public providers and unlisted storage targets cannot use this binding.
+    for (const host of ["slack.com", "neighbor.onedrive.com"]) {
       assert.equal((await probeChannelConnect(tenant, teamsPod, teamsProxy, host)).status, 403);
     }
     assert.equal((await request("DELETE", teamsPath)).status, 202);

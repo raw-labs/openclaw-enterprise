@@ -57,8 +57,8 @@ test("drivers.channel selects the installed providers and owns Teams storage hos
   });
   // Compute admission resolves enabled providers through this same set.
   assert.ok(
-    hosts(resolveChannelRouting(["msteams"], loaded.channelDrivers).destinations).includes(
-      "tenant.sharepoint.com",
+    hosts(resolveChannelRouting(["msteams"], loaded.channelDrivers).destinations).some(
+      (host) => host === "tenant.sharepoint.com",
     ),
   );
   // Slack is not selected, so an Agent that enables it cannot be admitted.
