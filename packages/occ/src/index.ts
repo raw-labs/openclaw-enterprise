@@ -230,7 +230,9 @@ import type {
   PluginCatalogPage,
   PluginDriver,
   PluginDriverIdentity,
+  ChannelCredentialReader,
   ChannelDriver,
+  ChannelProviderDriver,
   ChannelDirectoryResult,
   ChannelDirectoryLookupInput,
   PluginRevisionState,
@@ -1024,6 +1026,8 @@ export interface UpdateAgentInput {
 
 export interface LookupChannelDirectoryInput {
   readonly secretId: string;
+  readonly provider: string;
+  readonly context?: ChannelDirectoryLookupInput["context"];
   readonly kind: ChannelDirectoryLookupInput["kind"];
   readonly query?: string;
   readonly cursor?: string;
@@ -1211,8 +1215,8 @@ export type { FirstDeploymentReceipt } from "@openclaw-enterprise/contracts";
 interface PreparedDeploymentChannels {
   readonly configuration: Readonly<Configuration>;
   readonly configurationDriver: ConfigurationDriver;
-  readonly channel: ChannelDriver | undefined;
-  readonly channelValidator: ChannelDriver["validateCredentials"];
+  readonly channels: readonly ChannelDriver[];
+  readonly channelValidators: readonly ChannelDriver["validateCredentials"][];
 }
 
 interface FirstDeploymentGuard {
@@ -1263,6 +1267,8 @@ export interface AgentProvisioningWorkerOptions {
 
 interface RegisteredDriver {
   readonly harnessId?: string;
+  /** The channel provider that trusted composition bound to this Channel Driver. */
+  readonly provider?: string;
   readonly owner?: InstalledDriver;
   readonly driver: Driver;
   readonly capability: DriverCapability;
@@ -2306,6 +2312,7 @@ export class OpenClawController {
   private readonly selections = new Map<DriverCapability, RegisteredDriver>();
   private readonly namespaceLifecycleBindings: readonly NamespaceLifecycleBinding[];
   private pluginRegistrations: readonly RegisteredDriver[] = [];
+  private channelRegistrations: readonly RegisteredDriver[] = [];
   private readonly backends: readonly BackendDefinition[];
   private readonly defaultPresets: readonly PresetDraftDefinition[];
   private readonly bundledPresetVersions: readonly BundledPresetVersion[];
@@ -2435,8 +2442,36 @@ export class OpenClawController {
   }
 
   private selectPluginRegistrations(entries: readonly RegisteredDriver[]): void {
-    this.applyLifecycleDrivers(this.selections, entries);
+    this.applyLifecycleDrivers(this.selections, [...entries, ...this.channelRegistrations]);
     this.pluginRegistrations = entries;
+  }
+
+  /** Install the provider-to-Driver set that trusted composition also gives Compute. */
+  installChannelDrivers(providers: readonly ChannelProviderDriver[]): void {
+    if (
+      providers.some(
+        ({ provider, driver }) =>
+          !isNonEmptyString(provider) ||
+          !/^[a-z][a-z0-9_-]{0,63}$/.test(provider) ||
+          driver?.capability !== "channel",
+      ) ||
+      new Set(providers.map(({ provider }) => provider)).size !== providers.length ||
+      new Set(providers.map(({ driver }) => driver.id)).size !== providers.length
+    ) {
+      throw new DriverSelectionError(
+        "Each channel provider must bind one distinct Channel Driver identity.",
+      );
+    }
+    const registrations = providers.map(({ provider, driver }) => {
+      const [key, entry] = this.driverRegistrationEntry(driver);
+      return [key, Object.freeze({ ...entry, provider })] as const;
+    });
+    const entries = registrations.map(([, entry]) => entry);
+    this.applyLifecycleDrivers(this.selections, [...this.pluginRegistrations, ...entries]);
+    for (const [key, entry] of registrations) {
+      this.registry.set(key, entry);
+    }
+    this.channelRegistrations = entries;
   }
 
   /** Register one configured owner, then select its exact capability views. */
@@ -2503,6 +2538,9 @@ export class OpenClawController {
         "The Driver capability or implementation identity is invalid.",
       );
     }
+    if (selectedCapability === "channel") {
+      throw new DriverSelectionError("Install Channel Drivers per provider.");
+    }
     const selected = this.registry.get(this.driverKey(selectedCapability, driverId));
     if (!selected || !this.unchangedDriver(selected)) {
       throw new DriverSelectionError(
@@ -2519,7 +2557,7 @@ export class OpenClawController {
   selectedDriver<Capability extends DriverCapability>(
     selectedCapability: Capability,
   ): DriverFor<Capability> {
-    if (!capability(selectedCapability)) {
+    if (!capability(selectedCapability) || selectedCapability === "channel") {
       throw new DriverSelectionError("The requested Driver capability is invalid.");
     }
     const selected =
@@ -3872,7 +3910,7 @@ export class OpenClawController {
         input.namespaceId,
         configurationInput,
         () => new ProvisioningSecretDriverError(),
-        undefined,
+        this.installedChannelDrivers(),
         () => this.authorizeProvisioningRequest(principalId, input.namespaceId),
       );
     }
@@ -10437,6 +10475,17 @@ export class OpenClawController {
       !value.includes("\u0000");
     if (
       !bounded(input.secretId, 200) ||
+      !bounded(input.provider, 64) ||
+      !/^[a-z][a-z0-9_-]*$/.test(input.provider) ||
+      (input.context !== undefined &&
+        (!asRecord(input.context) ||
+          Object.keys(input.context).length > 8 ||
+          Object.entries(input.context).some(
+            ([key, value]) =>
+              !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key) ||
+              !bounded(value, 200) ||
+              hasControlCharacter(value),
+          ))) ||
       (input.kind !== "users" && input.kind !== "channels") ||
       (input.query !== undefined && !bounded(input.query, 200, true)) ||
       (input.cursor !== undefined && !bounded(input.cursor, 2048)) ||
@@ -10461,15 +10510,7 @@ export class OpenClawController {
       throw new ScopeViolationError("The channel directory lookup input is invalid.");
     }
     const first = await this.channelDirectorySecret(principalId, namespaceId, input);
-    let driver: ChannelDriver;
-    try {
-      driver = this.selectedDriver("channel");
-    } catch {
-      throw new NotImplementedError(
-        "channel_directory.lookup",
-        "Channel directory lookup is unavailable.",
-      );
-    }
+    const driver = this.channelDriver(input.provider);
     if (!first.driver.withValue) {
       throw new DependencyUnavailableError(
         "The selected Secret Driver cannot use credentials for directory lookup.",
@@ -10497,6 +10538,7 @@ export class OpenClawController {
           const result = await driver.lookupDirectory(
             {
               token,
+              ...(input.context === undefined ? {} : { context: input.context }),
               kind: input.kind,
               ...(input.query === undefined ? {} : { query: input.query }),
               ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
@@ -13031,10 +13073,10 @@ export class OpenClawController {
     namespaceId: string,
     configuration: Pick<Configuration, "values" | "secretBindings">,
     driverFailure: () => SecretDriverOwnershipError,
-    driver = this.selections.get("channel")?.driver as ChannelDriver | undefined,
+    drivers: readonly ChannelDriver[] = this.installedChannelDrivers(),
     authorizeUse?: () => Promise<void>,
   ): Promise<void> {
-    if (driver?.validateCredentials === undefined) {
+    if (drivers.every((driver) => driver.validateCredentials === undefined)) {
       return undefined;
     }
     if (this.transactionContext.getStore() !== undefined) {
@@ -13043,7 +13085,7 @@ export class OpenClawController {
       );
     }
     const bindings = this.bindings(configuration.secretBindings);
-    await driver.validateCredentials(configuration.values, async (binding, path, validate) => {
+    const withSecret: ChannelCredentialReader = async (binding, path, validate) => {
       const source = bindings[binding]?.source;
       if (source === undefined) {
         throw new ChannelCredentialError("binding_required", path);
@@ -13097,18 +13139,45 @@ export class OpenClawController {
       if (outcome?.error !== undefined) {
         throw outcome.error;
       }
+    };
+    // Each Driver checks only its own provider section, so every installed validator runs.
+    for (const driver of drivers) {
+      await driver.validateCredentials?.(configuration.values, withSecret);
+    }
+  }
+
+  private installedChannelDrivers(): readonly ChannelDriver[] {
+    return this.channelRegistrations.map((entry) => {
+      if (!this.unchangedDriver(entry)) {
+        throw new DriverSelectionError("An installed Channel Driver changed identity.");
+      }
+      return entry.driver as ChannelDriver;
     });
+  }
+
+  private channelDriver(provider: string): ChannelDriver {
+    const entry = this.channelRegistrations.find((candidate) => candidate.provider === provider);
+    if (entry === undefined || !this.unchangedDriver(entry)) {
+      throw new NotImplementedError(
+        "channel_directory.lookup",
+        "Channel directory lookup is unavailable for this provider.",
+      );
+    }
+    return entry.driver as ChannelDriver;
   }
 
   private assertPreparedDeploymentDrivers(prepared: PreparedDeploymentChannels): void {
     const configuration = this.selections.get("configuration");
-    const channel = this.selections.get("channel");
+    const channels = this.installedChannelDrivers();
     if (
       configuration?.driver !== prepared.configurationDriver ||
       !this.unchangedDriver(configuration) ||
-      channel?.driver !== prepared.channel ||
-      (channel !== undefined && !this.unchangedDriver(channel)) ||
-      prepared.channel?.validateCredentials !== prepared.channelValidator
+      channels.length !== prepared.channels.length ||
+      channels.some(
+        (driver, index) =>
+          driver !== prepared.channels[index] ||
+          driver.validateCredentials !== prepared.channelValidators[index],
+      )
     ) {
       throw new ResourceStateConflictError(
         "The selected Drivers changed after guarded validation.",
@@ -13120,7 +13189,7 @@ export class OpenClawController {
     principalId: string,
     input: DeployAgentInput,
   ): Promise<PreparedDeploymentChannels | undefined> {
-    if (this.selections.get("channel") === undefined) {
+    if (this.channelRegistrations.length === 0) {
       return undefined;
     }
     await this.authorize(principalId, "deploy", {
@@ -13173,14 +13242,14 @@ export class OpenClawController {
     // would, as provisioning does (findings 2506, 2516).
     this.requireBundledChannelBindings(configuration.values, configuration.secretBindings ?? {});
     await configurationDriver.validate(configuration);
-    const channel = this.selections.has("channel") ? this.selectedDriver("channel") : undefined;
-    const channelValidator = channel?.validateCredentials;
+    const channels = this.installedChannelDrivers();
+    const channelValidators = channels.map((driver) => driver.validateCredentials);
     await this.validateChannelCredentials(
       principalId,
       namespaceId,
       configuration,
       () => new SecretBindingDriverError(),
-      channel,
+      channels,
       async () => {
         await this.authorize(principalId, "deploy", {
           kind: "agent",
@@ -13194,7 +13263,7 @@ export class OpenClawController {
         });
       },
     );
-    return { configuration, configurationDriver, channel, channelValidator };
+    return { configuration, configurationDriver, channels, channelValidators };
   }
 
   async deployAgentWithAuthorization(
@@ -14545,7 +14614,11 @@ export class OpenClawController {
     signal: AbortSignal,
     record: (evidence: NamespaceLifecycleEvidence) => void | Promise<void>,
   ): Promise<NamespaceEnsureResult | NamespaceDeleteResult> {
-    const owners = [...this.selections.values(), ...this.pluginRegistrations].map((selected) => {
+    const owners = [
+      ...this.selections.values(),
+      ...this.pluginRegistrations,
+      ...this.channelRegistrations,
+    ].map((selected) => {
       if (!this.unchangedDriver(selected)) {
         throw new DriverSelectionError("A selected Namespace lifecycle Driver changed identity.");
       }
@@ -18291,9 +18364,11 @@ export class OpenClawController {
   }
 
   private configurationDriverSelected(capability: DriverCapability, id: string): boolean {
-    return capability === "plugin"
-      ? this.pluginRegistrations.some((entry) => entry.id === id)
-      : this.selections.get(capability)?.id === id;
+    if (capability === "plugin" || capability === "channel") {
+      const listed = capability === "plugin" ? this.pluginRegistrations : this.channelRegistrations;
+      return listed.some((entry) => entry.id === id);
+    }
+    return this.selections.get(capability)?.id === id;
   }
 
   private enabledPluginDrivers(): readonly PluginDriver[] {
@@ -18758,20 +18833,23 @@ export class OpenClawController {
   ): DriverFor<Capability> {
     const proposed = new Map(this.selections);
     proposed.set(selectedCapability, selected);
-    this.applyLifecycleDrivers(proposed, this.pluginRegistrations);
+    this.applyLifecycleDrivers(proposed, [
+      ...this.pluginRegistrations,
+      ...this.channelRegistrations,
+    ]);
     this.selections.set(selectedCapability, selected);
     return selected.driver as DriverFor<Capability>;
   }
 
   private applyLifecycleDrivers(
     proposed: ReadonlyMap<DriverCapability, RegisteredDriver>,
-    plugins: readonly RegisteredDriver[],
+    listed: readonly RegisteredDriver[],
   ): void {
     const namespaceParticipants = selectedNamespaceLifecycle(
-      [...proposed.values(), ...plugins].map((entry) => entry.owner ?? entry.driver),
+      [...proposed.values(), ...listed].map((entry) => entry.owner ?? entry.driver),
       this.namespaceLifecycleBindings,
     );
-    const lifecycleDrivers = this.lifecycleDrivers(proposed, plugins);
+    const lifecycleDrivers = this.lifecycleDrivers(proposed, listed);
     const compute = proposed.get("compute");
     if (compute !== undefined) {
       if (!this.unchangedDriver(compute)) {
@@ -18798,10 +18876,10 @@ export class OpenClawController {
 
   private lifecycleDrivers(
     selections: ReadonlyMap<DriverCapability, RegisteredDriver>,
-    plugins: readonly RegisteredDriver[],
+    listed: readonly RegisteredDriver[],
   ): readonly Driver[] {
     const drivers = new Set<Driver>();
-    for (const selected of [...selections.values(), ...plugins]) {
+    for (const selected of [...selections.values(), ...listed]) {
       if (selected.capability === "compute") {
         continue;
       }

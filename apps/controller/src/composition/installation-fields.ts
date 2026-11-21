@@ -308,7 +308,8 @@ export function requireChartGatewayRouting(
     declared === undefined ||
     ["gatewayName", "gatewayNamespace", "envoyNamespace", "hostname", "defaultHostname"].some(
       (field) => !isNonEmptyString(declared?.[field]),
-    )
+    ) ||
+    typeof declared.channelsHostname !== "string"
   ) {
     throw new ChartListenerMismatchError(
       "OCC_CHART_GATEWAY_ROUTING must contain the private Gateway expectation rendered by the Helm chart.",
@@ -333,6 +334,14 @@ export function requireChartGatewayRouting(
     throw new ChartListenerMismatchError(
       `${path}.hostname must match Helm gatewayRouting.hostname. Set both to the same DNS name, or omit both for automatic Service DNS.`,
       `${path}.hostname`,
+    );
+  }
+  // Compute attaches channel callback routes to the chart's `channels` listener by name; a
+  // different hostname, or a listener the chart does not render, leaves callbacks unrouted.
+  if ((routing.channels?.hostname ?? "") !== declared.channelsHostname) {
+    throw new ChartListenerMismatchError(
+      `${path}.channels.hostname must match Helm gatewayRouting.channels.hostname. Enable both with the same DNS name, or omit both.`,
+      `${path}.channels.hostname`,
     );
   }
 }

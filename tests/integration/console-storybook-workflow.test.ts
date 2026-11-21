@@ -279,7 +279,7 @@ test("directory preview rejects malformed requests without losing search or ID l
   const canonicalSecretId = "sec_00000000-0000-4000-8000-000000000001";
   const configurationId = "cfg_00000000-0000-4000-8000-000000000001";
   const agentId = "agt_00000000-0000-4000-8000-000000000001";
-  const base = { kind: "users", secretId };
+  const base = { provider: "slack", kind: "users", secretId };
   const secrets = new Map([[secretId, {}]]);
   const evidence: Parameters<typeof serveChannelDirectory>[2] = { directoryResponses: [] };
   const fixture = createFixtureFetch([], [], async (_url, _method, body) =>
@@ -344,6 +344,7 @@ test("directory preview rejects malformed requests without losing search or ID l
     { ...base, query: "😀".repeat(201) },
     { ...base, agentId, configurationId },
     { ...base, unexpected: true },
+    { kind: "users", secretId },
   ]) {
     await rejected(body, "Malformed channel directory preview request.");
   }

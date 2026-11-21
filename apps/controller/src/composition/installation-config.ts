@@ -1,5 +1,11 @@
-import type { ChannelProviderDriver } from "../drivers/channel/routing.ts";
-import { SlackChannelDriver } from "../drivers/channel/slack.ts";
+import type { ChannelProviderDriver } from "@openclaw-enterprise/contracts";
+import {
+  BUNDLED_CHANNEL_DRIVERS,
+  createChannelProviders,
+  DEFAULT_CHANNEL_DRIVER_SELECTIONS,
+  isBundledChannelDriverId,
+  type BundledChannelDriverId,
+} from "../drivers/channel/index.ts";
 import { sandboxNamespaceLifecycleBinding } from "./namespace-lifecycle.ts";
 import type { NamespaceLifecycleBinding } from "@openclaw-enterprise/occ";
 import {
@@ -170,6 +176,8 @@ export interface InstallationStartupConfiguration {
     readonly credential_refresh?: SelectedDriverConfiguration;
     readonly credential_proxy?: SelectedDriverConfiguration;
     readonly plugin?: readonly SelectedDriverConfiguration[];
+    /** Resolved bundled Channel Drivers; an omitted list selects every bundled Driver. */
+    readonly channel: readonly SelectedDriverConfiguration[];
     readonly service_account?: { readonly id: string };
   };
 }
@@ -178,10 +186,11 @@ export interface InstallationStartupConfiguration {
 export function installationDriverConfigurations(
   installation: InstallationStartupConfiguration | undefined,
 ): readonly import("@openclaw-enterprise/occ").DriverConfigurationRegistration[] {
-  const { plugin = [], ...drivers } = installation?.drivers ?? {};
+  const { plugin = [], channel = [], ...drivers } = installation?.drivers ?? {};
   const selections = [
     ...Object.entries(drivers),
     ...plugin.map((selection) => ["plugin", selection] as const),
+    ...channel.map((selection) => ["channel", selection] as const),
   ];
   return selections.flatMap(([capability, selection]) => {
     if (!("definition" in selection)) {
@@ -738,6 +747,31 @@ export function backendSummariesFromDefinitions(
   );
 }
 
+/** `drivers.channel`: bundled Channel Drivers only, each at most once. */
+function channelSelections(value: unknown): readonly SelectedDriverConfiguration[] {
+  const entries = value === undefined ? DEFAULT_CHANNEL_DRIVER_SELECTIONS : value;
+  if (!Array.isArray(entries)) {
+    throw new Error("drivers.channel must be an array of Channel Driver selections.");
+  }
+  const ids = new Set<string>();
+  return Object.freeze(
+    entries.map((entry, index) => {
+      const path = `drivers.channel[${index}]`;
+      const selection = object(entry, path);
+      closed(selection, ["id", "configuration"], path);
+      if (!isBundledChannelDriverId(selection.id)) {
+        throw new Error(`${path}.id must select slack-channel or teams-channel.`);
+      }
+      if (ids.has(selection.id)) {
+        throw new Error(`${path}.id duplicates another Channel Driver selection.`);
+      }
+      ids.add(selection.id);
+      const bundled = BUNDLED_CHANNEL_DRIVERS[selection.id];
+      return selected(selection, "channel", bundled.implementation, bundled.definition, path);
+    }),
+  );
+}
+
 function selected(
   value: unknown,
   capability:
@@ -750,6 +784,7 @@ function selected(
     | "credential_refresh"
     | "credential_proxy"
     | "plugin"
+    | "channel"
     | "repo",
   implementation: string,
   driver: DriverImplementation,
@@ -912,6 +947,7 @@ async function composeInstallationConfiguration(
       "credential_refresh",
       "credential_proxy",
       "plugin",
+      "channel",
       "service_account",
       "repo",
     ],
@@ -1098,6 +1134,7 @@ async function composeInstallationConfiguration(
     const config = selected(selection, "plugin", implementation, Driver, path);
     return { config, driver: new Driver(config.configuration, config) };
   });
+  const channels = channelSelections(drivers.channel);
   for (const [capability, selection] of [
     ["configuration", configurationSelection],
     ["iam", iamSelection],
@@ -1372,6 +1409,7 @@ async function composeInstallationConfiguration(
       ...(credentialRefresh === undefined ? {} : { credential_refresh: credentialRefresh }),
       ...(proxySelection === undefined ? {} : { credential_proxy: proxySelection }),
       plugin: plugins.map(({ config }) => config),
+      channel: channels,
       ...(serviceAccount === undefined ? {} : { service_account: serviceAccount }),
     }),
   });
@@ -1600,18 +1638,21 @@ async function composeInstallationConfiguration(
     channelOptions === undefined
       ? undefined
       : `${channelOptions.serviceName}.${channelOptions.envoyNamespace}.svc`;
-  const channelDrivers: readonly ChannelProviderDriver[] = Object.freeze([
+  const channelDrivers = createChannelProviders(
+    installation.drivers.channel.map(({ id, configuration }) => ({
+      id: id as BundledChannelDriverId,
+      configuration,
+    })),
     {
-      provider: "slack",
-      driver: new SlackChannelDriver(
-        globalThis.fetch,
-        channelOptions === undefined
-          ? undefined
-          : `http://${channelHost}:${channelOptions.occListenerPort}`,
-        { expectProxy: true, managedProxyHosts: channelHost === undefined ? [] : [channelHost] },
-      ),
+      expectProxy: true,
+      ...(channelHost === undefined
+        ? {}
+        : {
+            proxyUrl: `http://${channelHost}:${channelOptions!.occListenerPort}`,
+            managedProxyHosts: [channelHost],
+          }),
     },
-  ]);
+  );
   let computeDriver: ComputeDriver;
   if (computePackage !== undefined) {
     computeDriver = createExternalDriver(

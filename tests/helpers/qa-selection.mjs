@@ -18,6 +18,7 @@ const scenarioPresets = {
   "git-write": ["Codex"],
   "git-push-denied": ["Codex"],
   slack: ["Codex"],
+  teams: ["Codex"],
 };
 
 // One selection contract serves local execution and hosted credential setup.
@@ -74,7 +75,8 @@ export function selectQaMatrix(env = process.env) {
   const installations = installation === "all" ? ["compose", "kubernetes"] : [installation];
   const applies = (scenario, installation, preset) =>
     scenarioPresets[scenario].includes(preset) &&
-    (scenario !== "agent-audit" || installation === "compose");
+    (scenario !== "agent-audit" || installation === "compose") &&
+    (scenario !== "teams" || installation === "kubernetes");
   for (const name of scenarios) {
     assert.ok(
       input === "all" ||

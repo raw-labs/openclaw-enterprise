@@ -66,6 +66,7 @@
   "prepare": {
     "sourceBuildFiles": [
       "tests/integration/qa-matrix-real.test.mjs",
+      "tests/helpers/qa-teams.ts",
       "tests/integration/openshell-git-retention-real.test.ts"
     ]
   },

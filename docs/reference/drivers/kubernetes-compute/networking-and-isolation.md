@@ -1,7 +1,7 @@
 # Kubernetes networking and isolation
 
-Configure tenant network boundaries, private Agent routes, and existing
-namespace ownership for the [Kubernetes Compute Driver](../kubernetes-compute.md).
+Configure networking and private routes for the
+[Kubernetes Compute Driver](../kubernetes-compute.md).
 
 ## Networking
 
@@ -117,6 +117,8 @@ Channels require [managed channel egress](channel-egress.md) in
 `runtime.channelEgress`. Each Gateway uses its assigned Envoy listener;
 NetworkPolicies select its Agent revision and binding. Direct public
 channel-provider access is denied. OCC uses a separate provider listener.
+
+Teams Gateways use their Envoy listener for [guarded attachment downloads](../../../guides/integrations/teams.md#prepare-attachment-downloads).
 
 ## Explicit network profiles
 
@@ -316,3 +318,8 @@ receive controller credentials.
 
 - [Driver configuration and troubleshooting](../kubernetes-compute.md)
 - [Kubernetes security controls](../../security.md)
+
+## Teams callbacks
+
+See [Teams setup](../../../guides/integrations/teams.md) for public callbacks,
+credentials, routing, cleanup, and verification.
