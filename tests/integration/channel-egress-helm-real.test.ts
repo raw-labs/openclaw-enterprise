@@ -37,6 +37,7 @@ import {
   ProductionTuiRequestError,
 } from "../helpers/production-tui-request.ts";
 import { availablePort } from "../helpers/available-port.ts";
+import { protectedText } from "../helpers/qa-secrets.ts";
 
 function object(value: unknown): Record<string, unknown> {
   const result = asRecord(value);
@@ -86,6 +87,17 @@ test(
     for (const value of Object.values(slack)) {
       assert.ok(value);
     }
+    const teams = {
+      appId: process.env.OCC_TEST_TEAMS_APP_ID,
+      tenantId: process.env.OCC_TEST_TEAMS_TENANT_ID,
+      password: await protectedText(
+        process.env.OCC_TEST_TEAMS_APP_PASSWORD_FILE,
+        "Teams test bot password",
+      ),
+    };
+    for (const id of [teams.appId, teams.tenantId]) {
+      assert.match(id ?? "", /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
+    }
     const targetIdentity = await slackApi("auth.test", slack.botToken);
     const senderIdentity = await slackApi("auth.test", slack.senderBotToken);
     assert.equal(targetIdentity.team_id, senderIdentity.team_id);
@@ -106,6 +118,7 @@ test(
       slack.appToken,
       slack.botToken,
       slack.senderBotToken,
+      teams.password,
     ];
     const secret = () => {
       const value = randomBytes(32).toString("hex");
@@ -778,14 +791,19 @@ test(
         { mode: 0o600 },
       );
     }
-    assert.equal((await request("DELETE", agentPath)).status, 202);
-    await waitFor(
-      "normal Agent deletion",
-      async () => (await request("GET", agentPath)).status === 404,
-    );
-    // Exercise the installed Teams Driver via the real API and worker. Synthetic
-    // credentials let the native plugin register its callback without a Teams tenant.
-    const teamsPassword = await saveSecret("teams-app-password", secret());
+    // Keep both Gateways serving so the test can attempt to borrow each listener.
+    const teamsPassword = await saveSecret("teams-app-password", teams.password);
+    const teamsChannel = {
+      enabled: true,
+      appId: teams.appId,
+      tenantId: teams.tenantId,
+      appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+      dmPolicy: "disabled",
+      groupPolicy: "disabled",
+    };
+    const teamsBindings = {
+      MSTEAMS_APP_PASSWORD: { source: teamsPassword.ref, delivery: { type: "env" } },
+    };
     const teamsConfiguration = await api(
       "POST",
       `/namespaces/${namespaceId}/configurations`,
@@ -793,18 +811,9 @@ test(
         kind: "agent",
         values: {
           ...values,
-          channels: {
-            msteams: {
-              enabled: true,
-              appId: randomUUID(),
-              tenantId: randomUUID(),
-              appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
-            },
-          },
+          channels: { msteams: teamsChannel },
         },
-        secretBindings: {
-          MSTEAMS_APP_PASSWORD: { source: teamsPassword.ref, delivery: { type: "env" } },
-        },
+        secretBindings: teamsBindings,
       },
       201,
     );
@@ -872,6 +881,99 @@ test(
     for (const host of ["slack.com", "neighbor.onedrive.com"]) {
       assert.equal((await probeChannelConnect(tenant, teamsPod, teamsProxy, host)).status, 403);
     }
+    const slackPod = string(object(gatewayPod.metadata).name);
+    const slackProxy = string(
+      array(array(object(gatewayPod.spec).containers)[0]!.env).find(
+        (entry) => entry.name === "HTTPS_PROXY",
+      )?.value,
+    );
+    for (const [pod, otherProxy, host] of [
+      [slackPod, teamsProxy, teamsFileHost],
+      [teamsPod, slackProxy, "slack.com"],
+    ] as const) {
+      assert.notEqual(
+        (await probeChannelConnect(tenant, pod, otherProxy, host)).status,
+        200,
+        "a Gateway cannot use another Agent's listener",
+      );
+    }
+    const teamsHarness = teamsPods
+      ?.map(object)
+      .find((pod) => object(object(pod.metadata).labels)["openclaw.dev/workload-role"] === "agent");
+    assert.ok(teamsHarness);
+    assert.notEqual(
+      (
+        await probeChannelConnect(
+          tenant,
+          string(object(teamsHarness.metadata).name),
+          teamsProxy,
+          teamsFileHost,
+        )
+      ).status,
+      200,
+      "the dedicated Harness cannot use the Teams Gateway's listener",
+    );
+    assert.equal((await request("DELETE", agentPath)).status, 202);
+    await waitFor(
+      "normal Slack Agent deletion",
+      async () => (await request("GET", agentPath)).status === 404,
+    );
+    // Stop the first Socket Mode consumer before deploying the combined provider configuration.
+    await api(
+      "PATCH",
+      `/namespaces/${namespaceId}/configurations/${string(teamsConfiguration.id)}`,
+      {
+        values: { ...values, channels: { ...object(values.channels), msteams: teamsChannel } },
+        secretBindings: {
+          ...teamsBindings,
+          SLACK_APP_TOKEN: { source: app.ref, delivery: { type: "env" } },
+          SLACK_BOT_TOKEN: { source: bot.ref, delivery: { type: "env" } },
+        },
+      },
+    );
+    const combined = await api("POST", `${teamsPath}/deploy`, undefined, 202);
+    await waitFor(
+      "the combined channel revision to finish activation",
+      async () => {
+        const deployment = await api("GET", `${teamsPath}/deployments/${string(combined.id)}`);
+        assert.notEqual(deployment.status, "failed", JSON.stringify(deployment.error));
+        return deployment.status === "succeeded";
+      },
+      480_000,
+    );
+    const combinedPods = await resources(
+      "pods",
+      tenant,
+      "-l",
+      `openclaw.dev/agent=${string(teamsAgent.id)},openclaw.dev/revision=${string(combined.id)}`,
+    );
+    const combinedGateway = combinedPods
+      ?.map(object)
+      .find(
+        (pod) => object(object(pod.metadata).labels)["openclaw.dev/workload-role"] === "gateway",
+      );
+    assert.ok(combinedGateway);
+    const combinedPod = string(object(combinedGateway.metadata).name);
+    const combinedProxy = string(
+      array(array(object(combinedGateway.spec).containers)[0]!.env).find(
+        (entry) => entry.name === "HTTPS_PROXY",
+      )?.value,
+    );
+    for (const host of ["slack.com", "graph.microsoft.com", teamsFileHost]) {
+      assert.deepEqual(
+        await probeChannelConnect(tenant, combinedPod, combinedProxy, host),
+        {
+          status: 200,
+          tlsVerified: true,
+        },
+        host,
+      );
+    }
+    assert.equal(
+      (await probeChannelConnect(tenant, combinedPod, combinedProxy, "neighbor.onedrive.com"))
+        .status,
+      403,
+    );
     assert.equal((await request("DELETE", teamsPath)).status, 202);
     await waitFor(
       "normal Teams Agent deletion",

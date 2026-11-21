@@ -1,7 +1,7 @@
 ---
 created: "2026-10-06"
-updated: "2026-11-20"
-last_updated_session: "authoring-run/54a714d8-60c2-4824-b3a2-2fbd2b090ead"
+updated: "2026-11-21"
+last_updated_session: "authoring-run/a12fb922-8253-47eb-99b7-937292ecd93a"
 ---
 
 # Agent channel callback flow
@@ -28,7 +28,9 @@ Slack Socket Mode uses an outbound connection and does not enter this flow.
 
 ```mermaid
 graph TD
-  I["Deploy request"] --> V["Compute checks channel prerequisites"]
+  I["Deploy request"] --> O["OCC checks bot credentials with Microsoft"]
+  O -->|"Refused or unavailable"| E
+  O -->|"Accepted"| V["Compute checks channel prerequisites"]
   V -->|"Missing callback routing"| E["Refuse before deployment work"]
   V -->|"Admitted"| D
   D["Serving Gateway Deployment"] --> R["Compute-owned exact callback route"]
@@ -51,6 +53,13 @@ graph TD
 ## Execution Trace
 
 ### 1. Admit runtime prerequisites and credentials
+
+`packages/occ/src/index.ts:prepareDeploymentChannels` checks the bound Secret
+and requests credential validation before queuing deployment.
+`apps/controller/src/drivers/channel/teams.ts:validateCredentials` requests a Bot
+Connector token through the managed OCC listener. OCC refuses rejected or
+unavailable credentials and leaves the serving revision in place. Draft saves
+do not make the OAuth request.
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:enabledChannels`
 uses `configuration-rules.ts:enabledChannelProviders` and `requireChannelTopology`
@@ -133,6 +142,8 @@ by the serving revision.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-21 10:29: Document Microsoft Teams credential refusal before deployment. (authoring-run/a12fb922-8253-47eb-99b7-937292ecd93a - 0fe994ad187a0b59dc0107279d24284697776d1d)
 
 - 2026-11-20 00:40: Describe Teams callbacks and guarded media with managed Envoy egress. (authoring-run/54a714d8-60c2-4824-b3a2-2fbd2b090ead - e88dc5883143e5fe39cffb0199ae5c0bac147cb7)
 

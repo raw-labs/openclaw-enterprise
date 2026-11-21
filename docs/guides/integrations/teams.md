@@ -58,9 +58,10 @@ messaging and authentication hosts over TCP 443.
    and channel IDs empty for personal messages only. Pairing requires the native
    approval workflow for new senders; the console does not approve pairings.
 3. Save the configuration. The **Credentials** tab identifies a missing app
-   password binding. Stored credentials do not prove Microsoft has accepted
-   them. Deploy a new version to apply settings and deliver the password only
-   to this Agent's Gateway.
+   password binding. When you deploy a version, OCC checks the app password with
+   Microsoft before it starts deployment. If Microsoft rejects it, check the app
+   and tenant IDs and select a valid Secret. The deployment delivers the password
+   only to this Agent's Gateway.
 4. Set the Azure Bot messaging endpoint to
    `https://teams.example.com/namespaces/<namespace-id>/agents/<agent-id>/channels/msteams`.
    Use OCE resource IDs, not Kubernetes namespace names. Send a permitted

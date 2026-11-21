@@ -27,6 +27,12 @@ member email addresses. Hydration resolves up to twenty selected IDs.
 
 ## Authentication and authorization
 
+Before provisioning or deploying an Agent with Teams enabled, OCC reads the
+authorized app-password Secret. Microsoft checks the app ID, tenant ID, and
+password for the Bot Connector scope. A rejected credential or unavailable
+OAuth service stops the request before OCC queues work. This check requires
+neither Graph consent nor a Teams message.
+
 OCC requires the exact edit permission and `operate` on the same-Namespace
 app-password Secret, rechecking both after the Secret read. The adapter exchanges
 that password through the tenant-specific OAuth client-credentials endpoint

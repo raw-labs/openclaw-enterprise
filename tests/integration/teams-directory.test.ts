@@ -12,6 +12,56 @@ import {
   teamsMemberId,
 } from "../helpers/teams-directory.ts";
 
+test("Teams rejects an invalid bot password before the Agent deploys", async (t) => {
+  const provider = await teamsDirectoryProvider(t);
+  const oauth = `/${teamsDirectoryContext.tenantId}/oauth2/v2.0/token`;
+  provider.routes.set(oauth, {
+    status: 401,
+    body: { error: "invalid_client", error_description: "private Microsoft diagnostic" },
+  });
+  const fixture = await createConsoleAppFixture(t, {
+    channelDrivers: createChannelProviders(undefined, { teamsRequest: provider.request }),
+  });
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Teams deployment", { ready: true });
+  const password = await fixture.createSecret(
+    namespace.id,
+    "Teams bot password",
+    "bad-test-password",
+  );
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Teams credential check",
+    {
+      channels: {
+        msteams: {
+          enabled: true,
+          appId: teamsDirectoryContext.appId,
+          tenantId: teamsDirectoryContext.tenantId,
+          appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+        },
+      },
+    },
+    {
+      executionMode: "dedicated",
+      secretBindings: { MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } } },
+    },
+  );
+  const path = `/namespaces/${namespace.id}/agents/${agent.id}`;
+  const rejected = await fixture.request("POST", `${path}/deploy`);
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.body.error.code, "CHANNEL_CREDENTIAL_CREDENTIALS_REJECTED");
+  assert.doesNotMatch(
+    JSON.stringify(rejected.body),
+    /bad-test-password|private Microsoft diagnostic/,
+  );
+  assert.equal(provider.calls.length, 1);
+  const form = new URLSearchParams(provider.calls[0]!.body);
+  assert.equal(form.get("scope"), "https://api.botframework.com/.default");
+  assert.equal(form.get("client_secret"), "bad-test-password");
+  assert.equal((await fixture.request("GET", `${path}/revisions`)).body.data.length, 0);
+});
+
 test("Agent-scoped Teams lookup uses the authorized password and Team roster, then saves native access IDs", async (t) => {
   const provider = await teamsDirectoryProvider(t);
   const providers = createChannelProviders(undefined, { teamsRequest: provider.request });
