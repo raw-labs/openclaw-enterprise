@@ -44,7 +44,7 @@ import {
   type ActionsByKind,
 } from "../helpers/iam-grants.ts";
 import { createTestSecretDriver } from "../helpers/secret-driver.mjs";
-import { servedAs } from "../helpers/agent-identity.mjs";
+import { servedAs } from "../helpers/agent-identity.ts";
 import { withGatewaySecurityDefaults } from "../helpers/admitted-configuration.mjs";
 
 const administrator = "principal-secret-administrator";
@@ -696,7 +696,6 @@ function directoryLookup() {
   return (input: Partial<Parameters<OpenClawController["lookupChannelDirectory"]>[2]>) =>
     controller.lookupChannelDirectory(administrator, "ns_directory", {
       secretId: "secret_directory",
-      provider: "slack",
       kind: "users",
       ...input,
     });
@@ -988,6 +987,7 @@ function createTestChannelDriver(binding?: string) {
   const driver = {
     id: "channel-test",
     capability: "channel" as const,
+    enableRouting: () => [],
     implementation: "test-channel",
     binding,
     async validateCredentials(

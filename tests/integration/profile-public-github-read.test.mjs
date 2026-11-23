@@ -33,7 +33,7 @@ function baseInput(overrides = {}) {
       controllerImage: `registry.example.invalid/openclaw-enterprise/controller@sha256:${digestA}`,
       authBaseUrl: "https://console.oce.example.internal",
       adminEmail: "admin@example.invalid",
-      bootstrapPasswordClaimName: "occ-bootstrap-admin-password",
+      bootstrapCredentialsSecretName: "occ-bootstrap-credentials",
       apiClients: [{ namespace: "operator-tools", podLabels: { app: "occ-operator" } }],
       databaseCidrs: ["192.0.2.10/32"],
       clusterCidrs: ["192.0.2.11/32"],
@@ -56,7 +56,10 @@ function baseInput(overrides = {}) {
       gatewayNodeSelector: { "oce-role": "control" },
       transportSecretPrefix: "openclaw-agent-transport",
     },
-    proxy: { bundled: true },
+    channels: {
+      managedEgress: true,
+      excludedCidrs: ["10.0.0.0/8", "192.0.2.11/32"],
+    },
     ...overrides,
   };
 }

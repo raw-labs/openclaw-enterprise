@@ -75,8 +75,8 @@ auth:
   # Optional generic OpenID Connect sign-in (Keycloak, Okta, Entra ID, Auth0) for
   # existing password accounts (API Pod only). Requires HTTPS and a recovery account. Its
   # Secret must differ from auth.google's. Copy issuer and the three URLs
-  # from the IdP's discovery document: each must be https on port 443 on the issuer's
-  # host, with no query or fragment. The API never runs discovery.
+  # from the IdP's discovery document: each must use https on port 443 with a DNS host,
+  # no query or fragment. Hosts can differ. The API never runs discovery.
   oidc:
     enabled: false
     # The exact "iss" value, trailing slash included where the IdP uses one.
@@ -103,7 +103,7 @@ auth:
     # or false email_verified claim without marking the email as verified.
     # Admission group strings are one exact group; arrays contain exact strings.
     # API Pod HTTPS egress for the token and JWKS URLs. Empty allows TCP 443 to any
-    # address except link-local 169.254.0.0/16; list the IdP's IPv4 ranges to narrow it.
+    # address except link-local 169.254.0.0/16; list both endpoint hosts' IPv4 ranges to narrow it.
     egressCidrs: []
 
 agentNativeAdmin:
@@ -127,12 +127,10 @@ controlPlaneAudit:
 
 bootstrap:
   adminEmail: ""
-  password:
-    claimName: ""
-    mountPath: /var/lib/openclaw/bootstrap
-    fileName: initial-admin-password
-  serviceKey:
-    fileName: initial-admin-service-key.json
+  credentials:
+    secretName: ""
+    passwordKey: admin-password
+    serviceKeyKey: admin-service-key
 
 backend:
   openshell:
@@ -197,6 +195,10 @@ publicGithubRead:
   # Operator-approved IPv4 CIDRs for api.github.com; no default Internet grant.
   upstreamCidrs: []
 
+# Enable when the Installation selects the in-Pod Strands Box Sandbox Driver.
+strandsBox:
+  workerReadiness: false
+
 gatewayRouting:
   # Requires operator-installed routing controllers/CRDs, an existing GatewayClass,
   # and the service-key Secret below. Helm does not install those prerequisites.
@@ -217,13 +219,6 @@ gatewayRouting:
   remoteNodeCidrs: []
   tenantGatewayPort: 8080
   envoyHttpsTargetPort: 10443
-  channels:
-    enabled: false
-    # Public DNS and an existing publicly trusted certificate for Microsoft callbacks.
-    hostname: ""
-    tlsSecretName: ""
-    listenerPort: 8444
-    ingressPeers: []
   sandbox:
     enabled: false
     # A dedicated wildcard domain outside the OCE session cookie domain, at most
@@ -265,9 +260,6 @@ api:
     checksum: ""
   port: 8080
   clients: []
-  # Optional API-only directory proxy override. Empty inherits the Gateway proxy.
-  # Use a credential-free HTTP(S) literal IPv4 endpoint with an explicit port.
-  channelDirectoryProxyUrl: ""
   # API-only HTTPS egress to explicit provider IPv4 /32 hosts for discovery and login.
   # Hosted codex-plugin needs auth.openai.com and chatgpt.com. Its installation
   # profile resolves these unless CIDRs are supplied; refresh on DNS changes.
@@ -296,24 +288,27 @@ api:
     # generic only; ingress-nginx and aws always read x-forwarded-for.
     clientAddressHeader: ""
 
-gatewayProxy:
-  # Select bundled (enabled) OR an external literal IPv4 HTTP(S) endpoint (url).
-  # No selection preserves networking behavior. No Console editor is required.
-  enabled: false
-  url: ""
-  # Exact DNS names, or *.example.com for subdomains only; CONNECT to TCP 443.
-  # Replace/extend this list for Teams, ClawHub, and other required services.
-  # Use ["*"] for all hosts; TCP 443 and public-IPv4-only egress still apply.
-  allowedHosts: [slack.com, "*.slack.com", slack-edge.com, "*.slack-edge.com", slack-msgs.com, "*.slack-msgs.com"]
-  serviceName: openclaw-enterprise-gateway-proxy
-  port: 3128
+channelEgress:
+  enabled: true
+  gatewayName: openclaw-channel-egress
+  gatewayClassName: eg
+  envoyNamespace: envoy-gateway-system
+  serviceName: openclaw-channel-egress
+  listenerPortStart: 10001
+  listenerPortEnd: 10062
+  occListenerPort: 10000
+  inspectionPort: 19004
+  # Include every Pod, Service and node CIDR, including public node addresses.
+  excludedCidrs: []
+  image: envoyproxy/envoy@sha256:ccb37e93d8274a525fe00d67287716dbe3d58bc4237d7627af9e64fae0fd25c8
+  replicas: 1
   resources:
     requests:
-      cpu: 25m
-      memory: 64Mi
+      cpu: 100m
+      memory: 128Mi
     limits:
-      cpu: 250m
-      memory: 256Mi
+      cpu: "1"
+      memory: 512Mi
 
 cluster:
   cidrs: []

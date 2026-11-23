@@ -1,7 +1,7 @@
 import { requireConfiguration } from "../../packages/contracts/src/index.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -26,7 +26,6 @@ import {
   propertyAt,
   objectAt,
   textAt,
-  readJson,
 } from "./profile-renderer-fixture.ts";
 
 export function registerCliCases(): void {
@@ -37,7 +36,7 @@ export function registerCliCases(): void {
     symlinkSync(renderer, link);
     const usage = [
       "Usage: node scripts/render-installation-profile.ts --profile openclaw|codex \\",
-      "  --input <site-inputs.json> --out-dir <rendered-directory> [--profile-file <profile.json>]",
+      "  --input <site-inputs.json> --out-dir <rendered-directory>",
       "",
       "The renderer writes values.yaml, installation.yaml, and preflight.json. Missing",
       "or invalid required inputs write preflight.json and exit nonzero.",
@@ -94,16 +93,19 @@ export function registerCliCases(): void {
     ]);
     assert.match(openclaw.values, /agentNativeAdmin:\n {2}enabled: true/);
     assert.match(openclaw.values, /repositoryCredentials:\n {2}enabled: false/);
-    assert.match(openclaw.values, /gatewayProxy:\n {2}enabled: true/);
-    assert.match(
-      openclaw.installation,
-      /proxy:\n\s+proxyUrl: http:\/\/openclaw-enterprise-gateway-proxy\.openclaw-system\.svc:3128/,
+    assert.equal(propertyAt(loadYaml(openclaw.values), "channelEgress", "enabled"), true);
+    assert.equal(
+      propertyAt(
+        loadYaml(openclaw.installation),
+        "drivers",
+        "compute",
+        "configuration",
+        "runtime",
+        "channelEgress",
+        "gatewayName",
+      ),
+      "openclaw-channel-egress",
     );
-    assert.match(
-      openclaw.installation,
-      /managedProxy:\n\s+hostname: openclaw-enterprise-gateway-proxy\.openclaw-system\.svc/,
-    );
-    assert.match(openclaw.installation, /app\.kubernetes\.io\/component: gateway-proxy/);
 
     const codex = renderCli("codex", codexInput());
     assert.equal(codex.summary.ok, true);
@@ -112,102 +114,9 @@ export function registerCliCases(): void {
       { id: "codex-plugin", configuration: { catalogSource: "hosted" } },
     ]);
     assert.doesNotMatch(codex.installation, /service_account: chatgpt-service-accounts/);
-    assert.match(codex.values, /gatewayProxy:\n {2}enabled: true/);
-    assert.match(
-      codex.installation,
-      /proxy:\n\s+proxyUrl: http:\/\/openclaw-enterprise-gateway-proxy\.openclaw-system\.svc:3128/,
-    );
-    assert.match(
-      codex.preflight.prerequisites.join("\n"),
-      /bundled Gateway proxy permits only configured hostnames/,
-    );
-    assert.match(codex.preflight.prerequisites.join("\n"), /Hosted plugin discovery.*PAT/);
-    assert.match(codex.preflight.prerequisites.join("\n"), /runtime credentials.*Agent/);
-  });
-
-  test("an invalid explicit profile revokes prior outputs without falling back to the bundled profile", async (t) => {
-    const directory = temporaryDirectorySync(t, "oce-profile-selection-invalid-");
-    const profileFile = join(directory, "selected-profile.json");
-    for (const [contents, expected] of [
-      [undefined, /unavailable or invalid JSON/],
-      ["{", /unavailable or invalid JSON/],
-      [JSON.stringify({ name: "openclaw" }), /must declare matching name/],
-      [JSON.stringify({ name: "codex" }), /profile.installation must be an object/],
-      [JSON.stringify([]), /must declare matching name/],
-      ...[{}, [], { id: "codex-plugin" }].map((plugin): [string, RegExp] => [
-        JSON.stringify({
-          ...objectAt(
-            readJson(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-          ),
-          installation: { drivers: { plugin } },
-        }),
-        /plugin must be a nonempty array/,
-      ]),
-      [
-        JSON.stringify({
-          ...objectAt(
-            readJson(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-          ),
-          installation: {
-            drivers: { plugin: [{ id: "occ-plugin" }, { id: "uninstalled-plugin" }] },
-          },
-        }),
-        /plugin\[1\].id must select occ-plugin or codex-plugin/,
-      ],
-      ...[{ catalogSource: "hostd" }, { catalogSource: null }].map(
-        (configuration): [string, RegExp] => [
-          JSON.stringify({
-            ...objectAt(
-              readJson(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-            ),
-            installation: { drivers: { plugin: [{ id: "codex-plugin", configuration }] } },
-          }),
-          /profile.installation.drivers.plugin\[0\].configuration/,
-        ],
-      ),
-      [
-        JSON.stringify({
-          ...objectAt(
-            readJson(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-          ),
-          installation: {
-            drivers: { plugin: [{ id: "codex-plugin", configuration: [] }] },
-          },
-        }),
-        /profile.installation.drivers.plugin\[0\].configuration must be an object/,
-      ],
-      [
-        JSON.stringify({
-          ...objectAt(
-            readJson(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-          ),
-          installation: { drivers: { plugin: [{ id: "uninstalled-plugin" }] } },
-        }),
-        /must select occ-plugin or codex-plugin/,
-      ],
-      [
-        JSON.stringify({
-          ...objectAt(
-            readJson(readFileSync(join(repository, "deploy/profiles/codex.json"), "utf8")),
-          ),
-          installation: {
-            drivers: { plugin: [{ id: "codex-plugin" }] },
-            presets: { includeDefaults: false },
-          },
-        }),
-        /profile.installation.presets is not supported/,
-      ],
-    ] as const) {
-      await render("codex", codexInput(), directory);
-      if (contents !== undefined) {
-        writeFileSync(profileFile, contents);
-      }
-      const error = await renderError(() => render("codex", codexInput(), directory, profileFile));
-      assert.match(profileFailure(error).output, expected);
-      for (const name of ["values.yaml", "installation.yaml", "preflight.json"]) {
-        assert.equal(existsSync(join(directory, name)), false);
-      }
-    }
+    assert.equal(propertyAt(loadYaml(codex.values), "channelEgress", "enabled"), true);
+    assert.match(codex.preflight.prerequisites.join("\n"), /EnvoyPatchPolicy/);
+    assert.match(codex.preflight.warnings.join("\n"), /existing codex_pat token/);
   });
 
   // Tenant runtimes may burst to four cores; 100m requests keep the scheduling
@@ -286,7 +195,7 @@ export function registerCliCases(): void {
       );
       assert.deepEqual(
         propertyAt(resources, "namespace", "quota"),
-        { pods: "10" },
+        { pods: "20" },
         `${name} quota`,
       );
     }
@@ -393,12 +302,23 @@ export function registerCliCases(): void {
           const releaseName = "r".repeat(length);
           input.controlPlane.releaseName = releaseName;
           const output = await render(profile, input);
+          const routingName = propertyAt(
+            loadYaml(output.installation),
+            "drivers",
+            "compute",
+            "configuration",
+            "gatewayRouting",
+            "gatewayName",
+          );
           const gateway = helmTemplate(output, [], releaseName)
             .split(/\n---\n/)
-            .find((document) => /\nkind: Gateway\n/.test(document));
+            .find(
+              (document) =>
+                /\nkind: Gateway\n/.test(document) &&
+                propertyAt(loadYaml(document), "metadata", "name") === routingName,
+            );
           assert.ok(gateway, "Helm must render the Gateway referenced by Compute");
           const gatewayName = gateway.match(/^ {2}name: "([^"]+)"$/m)?.[1];
-          const routingName = output.installation.match(/^\s+gatewayName: (\S+)$/m)?.[1];
           assert.ok(gatewayName && gatewayName.length <= 63);
           assert.equal(routingName, gatewayName, `${profile}: release length ${length}`);
         }

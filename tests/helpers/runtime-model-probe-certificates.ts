@@ -4,7 +4,6 @@ import { caAndLeaf, type OpenSslRunner } from "./certificates.ts";
 interface ModelProbeCertificateOptions {
   directory: string;
   caName: string;
-  dnsNames?: string[];
   run?: OpenSslRunner | undefined;
 }
 
@@ -14,7 +13,6 @@ export async function createModelProbeCertificates({
   directory,
   caName,
   run,
-  dnsNames = ["api.openai.com"],
 }: ModelProbeCertificateOptions): Promise<void> {
   const caKeyPem: unknown = sharedRsaPrivateKeyPem("model-probe-ca");
   const leafKeyPem: unknown = sharedRsaPrivateKeyPem("model-probe-leaf");
@@ -23,8 +21,8 @@ export async function createModelProbeCertificates({
   }
   await caAndLeaf(directory, {
     caName,
-    commonName: dnsNames[0],
-    subjectAltName: dnsNames.map((name) => `DNS:${name}`).join(","),
+    commonName: "api.openai.com",
+    subjectAltName: "DNS:api.openai.com",
     caKeyPem,
     leafKeyPem,
     run,

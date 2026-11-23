@@ -68,41 +68,9 @@ function firstContainer(spec: unknown, placement: ContainerPlacement) {
   return requiredRecord(containers[0], `expected a container in ${placement}`);
 }
 
-function apiEnvironment(state: RecoveryState) {
-  const api = resource(state, "Deployment/openclaw-enterprise-api");
-  return array(
-    firstContainer(templateSpec(api.spec), "containers").env,
-    "expected the API container environment",
-  );
-}
-
 // These cases run the upgrade script against controlled Helm and Kubernetes
 // responses. The disposable-cluster proof checks Helm itself.
 export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtureFactory }): void {
-  test("image-only candidates can remove an explicitly disabled legacy Slack proxy", async (t) => {
-    const f = await fixture(t, { candidates: true });
-    // Previous production examples saved this disabled block. Removing it must
-    // cross preflight without granting permission to alter an active proxy.
-    for (const file of ["values.json", "live-values"]) {
-      const path = join(f.directory, file);
-      const values = requiredRecord(await yamlFile(path), "Helm values");
-      values.slackProxy = { enabled: false };
-      await writeFile(path, JSON.stringify(values));
-    }
-    await f.run("--preflight-only");
-    assert.equal(existsSync(join(f.evidence, "startup-preflight-passed")), true);
-  });
-
-  test("image-only candidates reject Gateway proxy changes before writes", async (t) => {
-    const f = await fixture(t, { candidates: true });
-    const path = join(f.directory, "candidate-values.json");
-    const candidate = requiredRecord(JSON.parse(await readFile(path, "utf8")), "candidate values");
-    candidate.gatewayProxy = { url: "http://198.51.100.25:3128" };
-    await writeFile(path, JSON.stringify(candidate));
-    await assert.rejects(f.run(), /candidate values change a protected setting/);
-    assert.deepEqual(await f.events(), []);
-  });
-
   async function interruptedUpgradeWithCompletedHook(
     t: TestContext,
     initializationResources?: FixtureOptions["initializationResources"],
@@ -129,14 +97,16 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
     assert.equal(existsSync(join(f.evidence, "helm-recovery")), false);
   }
 
-  // The new chart retires a predecessor directory-proxy resource without changing protected proxy settings.
-  async function interruptedProxyRemoval(t: TestContext) {
+  // A chart revision may retire an ordinary policy. Retain the predecessor
+  // inventory while simulating an interrupted Helm response; the recovery
+  // protocol must verify actual absence before acknowledging the candidate.
+  async function interruptedPolicyRetirement(t: TestContext) {
     const f = await fixture(t, { recoveryHooks: true });
     const policy = {
       apiVersion: "networking.k8s.io/v1",
       kind: "NetworkPolicy",
       metadata: {
-        name: "openclaw-enterprise-api-channel-directory-egress",
+        name: "openclaw-enterprise-retired-client-ingress",
         namespace: "system",
         uid: "old-egress-policy",
         resourceVersion: "1",
@@ -154,17 +124,14 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
     };
     const state = await f.state();
     state.recoveryBaselineResources = [policy];
-    state.recoveryBaselineApiEnvironment = [
-      { name: "OCC_CHANNEL_DIRECTORY_PROXY_URL", value: "http://198.51.100.25:3128" },
-    ];
     await writeFile(join(f.directory, "state.json"), JSON.stringify(state));
-    const run = (...args: string[]) => f.run(...args);
+    const run = f.run;
     const pending = await loseHelmResponseWithCompletedHook(f, run);
     return { f, run, pending, policy, key: `${policy.kind}/${policy.metadata.name}` };
   }
 
   test("same-candidate recovery refuses retained predecessor resources and checks their absence on resume", async (t) => {
-    const { f, run, pending, policy, key } = await interruptedProxyRemoval(t);
+    const { f, run, pending, policy, key } = await interruptedPolicyRetirement(t);
     const originalIntent = await f.readEvidence("helm-started");
     for (const mode of ["live", "deleting", "keep", "forbidden"]) {
       await t.test(mode, async () => {
@@ -190,12 +157,8 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
         );
       });
     }
-    const withRetiredEnv = structuredClone(pending);
-    const oldEnv = { name: "OCC_CHANNEL_DIRECTORY_PROXY_URL", value: "http://198.51.100.25:3128" };
-    apiEnvironment(withRetiredEnv).push(oldEnv);
-    await assertRecoveryRefusedBeforeRollback(f, withRetiredEnv, /live environment differs/, run);
-    // Explicit operator reconciliation removes the retired policy and env entry. If a later
-    // acceptance step fails, its recreation must also block ordinary resume.
+    // Explicit reconciliation removes the retired policy. If a later acceptance
+    // step fails, recreating it must still block ordinary resume.
     await writeFile(join(f.directory, "state.json"), JSON.stringify(pending));
     await f.failNext("fail-rollout-api");
     await assert.rejects(run(...recoverHelm), injectedFault);
@@ -210,12 +173,6 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
     await assert.rejects(run("--resume"), /predecessor-only resource still exists/);
     assert.equal(existsSync(join(f.evidence, "completed")), false);
     delete resources[key];
-    const apiEnv = apiEnvironment(recovered);
-    apiEnv.push(oldEnv);
-    await writeFile(join(f.directory, "state.json"), JSON.stringify(recovered));
-    await assert.rejects(run("--resume"), /live environment differs/);
-    assert.equal(existsSync(join(f.evidence, "completed")), false);
-    apiEnv.pop();
     await writeFile(join(f.directory, "state.json"), JSON.stringify(recovered));
     await run("--resume");
     assert.equal((await f.state()).rollbackSubmissions, 1);
@@ -223,59 +180,12 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
     assert.equal(await f.readEvidence("helm-started"), originalIntent);
   });
 
-  test("same-candidate recovery verifies a changed retained environment selection after rollback", async (t) => {
-    const f = await fixture(t, { recoveryHooks: true });
-    // Recorded release manifests can move a mounted configuration file. Reconcile
-    // the selected environment from those manifests, not from mutable values.
-    const previous = {
-      apiVersion: "apps/v1",
-      kind: "Deployment",
-      metadata: { name: "configuration-worker", namespace: "system" },
-      spec: {
-        template: {
-          spec: {
-            containers: [
-              {
-                name: "worker",
-                image: controller,
-                env: [
-                  { name: "OCC_CONFIG_PATH", value: "/etc/openclaw/installation/previous.yaml" },
-                ],
-              },
-            ],
-          },
-        },
-      },
-    };
-    const candidate = structuredClone(previous);
-    const configurationVariable = candidate.spec.template.spec.containers[0]?.env[0];
-    assert.ok(configurationVariable);
-    configurationVariable.value = "/etc/openclaw/installation/installation.yaml";
-    const initial = await f.state();
-    initial.recoveryBaselineResources = [previous];
-    initial.recoveryCandidateResources = [candidate];
-    await writeFile(join(f.directory, "state.json"), JSON.stringify(initial));
-    const pending = await loseHelmResponseWithCompletedHook(f);
-    const run = (...args: string[]) => f.run(...args);
-    const worker = resource(pending, "Deployment/configuration-worker");
-    const entries = array(
-      firstContainer(templateSpec(worker.spec), "containers").env,
-      "worker environment",
-    );
-    const entry = requiredRecord(entries[0], "configuration path environment");
-    entry.value = "/etc/openclaw/installation/previous.yaml";
-    await writeFile(join(f.directory, "state.json"), JSON.stringify(pending));
-    await assert.rejects(run(...recoverHelm), /live environment differs/);
-    assert.equal((await f.state()).rollbackSubmissions, 1);
-    assert.equal(existsSync(join(f.evidence, "helm-recovery", "acknowledged.json")), false);
-  });
-
   for (const [stage, rollbacks] of [
     ["before dispatch", 0],
     ["after rollback", 1],
   ] as const) {
     test(`same-candidate recovery refuses a predecessor resource recreated ${stage}`, async (t) => {
-      const { f, run, pending, key, policy } = await interruptedProxyRemoval(t);
+      const { f, run, pending, key, policy } = await interruptedPolicyRetirement(t);
       const originalIntent = await f.readEvidence("helm-started");
       pending.retiredResourceRecreation = { stage, key, resource: policy };
       await writeFile(join(f.directory, "state.json"), JSON.stringify(pending));
@@ -718,12 +628,12 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
   });
 
   test("a staged retry with replaced local values still cannot replace the published attempt", async (t) => {
-    const f = await fixture(t);
+    const f = await fixture(t, { failBeforeHelmIntent: true });
     await runWithInjectedFault(f, "fail-migration");
     const original = await assertHelmIntent(f, 1, 2);
     const preparation = await f.readEvidence("parameters.json");
-    // Simulate loss at the last native read after local values replacement, before
-    // publishing the next intent. Resume must require explicit reconciliation.
+    // Simulate loss on the local record command after local values replacement,
+    // before publishing the next intent. Resume must require explicit reconciliation.
     await runWithInjectedFault(
       f,
       "fail-before-helm-intent",
@@ -748,15 +658,27 @@ export function registerHelmRollbackCases({ fixture }: { fixture: RecoveryFixtur
   test("certificate admission refusal leaves the incumbent controllers running", async (t) => {
     const f = await fixture(t, { controllerOnly: true, certificate: true });
     await f.failNext("refuse-certificate-admission");
-    await assert.rejects(f.run(), /certificate admission preflight failed/);
+    await assert.rejects(f.run(), (error) => {
+      assert.ok(error instanceof Error);
+      assert.ok("stderr" in error && typeof error.stderr === "string");
+      assert.match(error.stderr, /certificate admission preflight failed/);
+      assert.match(error.stderr, /No OCC writer was stopped/);
+      assert.match(error.stderr, /preflight-certificates\.err/);
+      assert.match(
+        error.stderr,
+        /If the webhook call timed out, check reachability from the Kubernetes API server to the cert-manager webhook/,
+      );
+      assert.doesNotMatch(error.stderr, /certificate webhook call timed out/);
+      return true;
+    });
     assert.deepEqual(await f.events(), ["certificate-admission"]);
     const state = await f.state();
     assert.equal(state.api, 1);
     assert.equal(state.worker, 1);
     assert.equal(state.version, 1);
-    assert.equal(
-      await f.readEvidence("preflight-certificates.err"),
-      "certificate webhook refused dry-run\n",
+    await assertPrivateReceipt(
+      join(f.evidence, "preflight-certificates.err"),
+      "certificate webhook call timed out\n",
     );
   });
 

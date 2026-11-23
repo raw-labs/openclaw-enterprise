@@ -9,7 +9,7 @@ import { AgentDeploymentStatusSchema } from "../../packages/contracts/src/api/re
 import {
   deploymentErrorForWork,
   deploymentProgressForWork,
-} from "../../packages/occ/src/state/controller-work.ts";
+} from "../../packages/occ/src/deployment-work-status.ts";
 
 import type {
   AgentRevisionWire,
@@ -21,7 +21,6 @@ import type { TestContext } from "node:test";
 import type {
   APIResponse,
   Browser,
-  BrowserType,
   BrowserContext,
   ElementHandle,
   Locator,
@@ -85,7 +84,7 @@ import { waitForIdleFetches } from "./console-fetch-accounting.ts";
 import { fulfillPatchedJson } from "./console-patched-response.ts";
 
 import { watchBrowserContext } from "../helpers/browser-failure-diagnostics.ts";
-import { keepRequestInterceptionEnabled } from "../helpers/browser-request-interception.mjs";
+import { keepRequestInterceptionEnabled } from "../helpers/browser-request-interception.ts";
 import { memberRole } from "../helpers/console-app.mjs";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import { restrict } from "../helpers/iam-grants.ts";
@@ -298,17 +297,14 @@ async function artifactDirectory(t: TestContext) {
   return directory;
 }
 
-async function launchBrowser(options: { args?: string[]; browserType?: BrowserType } = {}) {
-  const browserType = options.browserType ?? chromium;
+async function launchBrowser(options: { args?: string[] } = {}) {
   const browserExecutable =
     process.env.OCC_TEST_BROWSER_EXECUTABLE === undefined ||
     process.env.OCC_TEST_BROWSER_EXECUTABLE.length === 0
       ? undefined
       : process.env.OCC_TEST_BROWSER_EXECUTABLE;
-  const browser = await browserType.launch({
-    ...(browserType !== chromium || browserExecutable === undefined
-      ? {}
-      : { executablePath: browserExecutable }),
+  const browser = await chromium.launch({
+    ...(browserExecutable === undefined ? {} : { executablePath: browserExecutable }),
     headless: true,
     ...(options.args === undefined ? {} : { args: options.args }),
   });
@@ -377,7 +373,6 @@ export async function newPage(
   fixture: PageFixture,
   options: {
     args?: string[];
-    browserType?: BrowserType;
     launch?: () => Promise<Browser>;
     browser?: (args?: string[]) => Promise<Browser>;
     context?: Parameters<Browser["newContext"]>[0];
@@ -385,29 +380,14 @@ export async function newPage(
 ) {
   const artifacts = await artifactDirectory(t);
   assert.ok(
-    options.browserType === undefined ||
-      (options.browser === undefined && options.launch === undefined),
-    "pass a browser type only with launch arguments",
-  );
-  assert.ok(
     [options.browser, options.args, options.launch].filter((option) => option !== undefined)
       .length <= 1,
     "pass one of a shared browser, launch arguments, or a dedicated browser factory",
   );
-  const shared =
-    options.args === undefined && options.launch === undefined && options.browserType === undefined;
+  const shared = options.args === undefined && options.launch === undefined;
   const browser = shared
     ? await (options.browser ?? sharedBrowser)(fixture.browserArgs)
-    : await (options.launch?.() ??
-        launchBrowser({
-          ...options,
-          args: [
-            ...(options.browserType === undefined || options.browserType.name() === "chromium"
-              ? fixture.browserArgs
-              : []),
-            ...(options.args ?? []),
-          ],
-        }));
+    : await (options.launch?.() ?? launchBrowser(options));
   const resources: {
     context?: BrowserContext;
     diagnostics?: Awaited<ReturnType<typeof watchBrowserContext>>;
@@ -501,7 +481,9 @@ export async function login(
   } else {
     const response = await page.request.post(new URL("/api/auth/sign-in/email", origin).href, {
       data: { email: credentials.email, password: credentials.password },
-      headers: { origin: origin.origin },
+      // A later route.fetch() shares this request context. Retire the sign-in
+      // socket before an intercepted write can race the ingress idle timeout.
+      headers: { origin: origin.origin, connection: "close" },
     });
     assert.equal(response.status(), 200, `password sign-in failed: ${await response.text()}`);
   }
@@ -1658,7 +1640,8 @@ export async function expectNoHorizontalScroll(page: Page) {
 
 // The in-memory fixture has no worker records. A test that supplies a failed deployment
 // record builds its error with the API's own code, so the console shows the exact code,
-// message and data that the API and occ return for that failure.
+// message and data that the API and occ return for that failure. The Agent ID has a real
+// ID's length, so the message length checks see what the API returns.
 export function persistedDeploymentError(
   code: NonNullable<Parameters<typeof deploymentErrorForWork>[0]["reasonCode"]>,
   data?: Parameters<typeof deploymentErrorForWork>[0]["resultData"],
@@ -1666,6 +1649,7 @@ export function persistedDeploymentError(
   const error = deploymentErrorForWork({
     state: "failed_permanent",
     reasonCode: code,
+    agentId: "agt_00000000-0000-4000-8000-000000000000",
     ...(data === undefined ? {} : { resultData: data }),
   });
   assert.ok(error);

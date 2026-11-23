@@ -88,3 +88,11 @@ Use the existing runner overrides in [CI configuration](../testing/ci.md#ci-conf
 when the fork's kernel differs from upstream's. Keep sandbox probes enabled and
 ordinary CI aligned with same-source qualification; a runner label alone does
 not establish compatibility.
+
+## Native browser access after alpha.22
+
+For new Agents, select **Enable browser chat** during creation. For an existing
+Agent whose browser access came from fork PR #12, check the saved Configuration
+for its exact Agent origin. Follow [Configure each Agent](../guides/deploy/native-admin.md#configure-each-agent)
+and redeploy the Agent. The newer controller requires a delegation credential
+that is created when the new revision is prepared.

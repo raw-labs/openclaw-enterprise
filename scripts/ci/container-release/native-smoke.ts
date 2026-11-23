@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,7 +47,7 @@ export async function smoke(directory: string | undefined, env: NodeJS.ProcessEn
   assert.equal(env.PLATFORM, `linux/${arch}`, "Smoke requires the target's native runner.");
   assert.ok(directory !== undefined, "An OCI layout directory is required.");
   // Resolve native runtime tooling before loading an image that would need cleanup.
-  const runtimePreparation = env.IMAGE === "runtime" ? await import("../prepare.mjs") : undefined;
+  const runtimePreparation = env.IMAGE === "runtime" ? await import("../prepare.ts") : undefined;
   assert.equal(inspectDigest(`oci:${directory}`), env.IMAGE_DIGEST);
   const root: unknown = JSON.parse(await readFile(join(directory, "index.json"), "utf8"));
   function singleDescriptor(index: unknown): unknown {
@@ -75,28 +75,9 @@ export async function smoke(directory: string | undefined, env: NodeJS.ProcessEn
   assert.ok(config !== null && config !== undefined);
   const configDigest = field(config, "digest");
   const tag = `localhost/enterprise-${env.IMAGE}:prepared-${arch}`;
-  const importDirectory = await mkdtemp(join(tmpdir(), "oce-native-image-import-"));
-  try {
-    // Older Skopeo daemon clients cannot negotiate the current Docker API floor.
-    // Convert locally and let the installed Docker CLI perform the verified load.
-    const archive = join(importDirectory, "image.tar");
-    skopeo(["copy", `oci:${directory}`, `docker-archive:${archive}:${tag}`], {
-      stdio: "inherit",
-    });
-    const converted: unknown = JSON.parse(
-      skopeo(["inspect", "--raw", `docker-archive:${archive}`]).toString("utf8"),
-    );
-    assert.equal(
-      field(field(converted, "config"), "digest"),
-      configDigest,
-      "Converted image configuration differs from the sealed OCI export.",
-    );
-    execFileSync("docker", ["image", "load", "--input", archive], { stdio: "inherit" });
-  } finally {
-    await rm(importDirectory, { recursive: true, force: true });
-  }
+  skopeo(["copy", `oci:${directory}`, `docker-daemon:${tag}`], { stdio: "inherit" });
   let prepared:
-    Awaited<ReturnType<(typeof import("../prepare.mjs"))["prepareRuntimeImageSmoke"]>> | undefined;
+    Awaited<ReturnType<(typeof import("../prepare.ts"))["prepareRuntimeImageSmoke"]>> | undefined;
   try {
     const inspected: unknown = JSON.parse(
       execFileSync("docker", ["image", "inspect", tag], { encoding: "utf8" }),

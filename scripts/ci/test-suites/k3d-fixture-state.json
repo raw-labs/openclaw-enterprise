@@ -11,7 +11,8 @@
   "prepare": {
     "postgres": true,
     "k3d": true,
-    "requiresPreparedStateForFile": true
+    "requiresPreparedStateForFile": true,
+    "selfProvisionedFiles": ["tests/integration/production-preflight-cleanup-k3d.test.ts"]
   },
   "fileConcurrency": 2,
   "parallelFiles": [
@@ -33,14 +34,22 @@
       "path": "tests/integration/kubernetes-compute-provisioning-real.test.mjs",
       "expectedTests": [
         "real Kubernetes Drivers safely use and preserve an externally managed tenant namespace",
-        "provisioning API retains the first deployment outcome with real Kubernetes fixture storage",
-        "trusted embedded channel opt-in projects exact Secrets through API provisioning, revisions and stop"
+        "provisioning API retains the first deployment outcome with real Kubernetes fixture storage"
       ]
     },
     {
       "path": "tests/integration/production-install-retained-job-k3d.test.ts",
       "expectedTests": [
         "Helm install preserves the initialization Job when release history is absent"
+      ]
+    },
+    {
+      "path": "tests/integration/production-preflight-cleanup-k3d.test.ts",
+      "env": {
+        "OCC_TEST_PRODUCTION_OBSERVABILITY": "1"
+      },
+      "expectedTests": [
+        "interrupted preflight recovery respects real Kubernetes identity and consumer lifetime"
       ]
     }
   ]

@@ -1,7 +1,7 @@
 ---
 created: 2026-08-19
-updated: 2026-11-11
-last_updated_session: authoring-run/f2efc59c-e63d-4f5b-a392-e38ad865f04d
+updated: "2026-11-20"
+last_updated_session: "authoring-run/a6c7283a-ee8f-4603-ad88-67df4c2f9eea"
 ---
 
 # Configuration Driver and Agent Revision Flow
@@ -29,7 +29,7 @@ outside this flow's scope.
   `OCC_CONFIG_PATH`; production requires the file, while development may use
   its explicit development defaults.
 - Source: `apps/controller/src/composition/installation-config.ts:loadInstallationConfiguration`
-  and `packages/occ/src/index.ts:OpenClawController.createConfiguration`.
+  and `packages/occ/src/configuration-operations.ts:createConfiguration`.
 - Requests: [Configuration routes](../../packages/contracts/src/api/routes.ts)
   accept `POST /namespaces/:namespaceId/configurations` and
   `GET`, `PATCH`, or `DELETE` of
@@ -72,26 +72,22 @@ graph TD
 
 `apps/controller/src/composition/installation-config.ts:loadInstallationConfiguration`
 
-The API and worker load trusted Installation selections and validate the chosen
-Configuration Driver's schema and implementation-owned rules before
-constructing its bundled or installed implementation. OCC receives that exact
-capability and identity; invalid settings or a mismatched factory reject
-startup. Installation settings never come from a Configuration Driver. The
-[Driver package loading flow](driver-plugin-loading.md) owns package identity,
-validation, trust boundaries, and IAM construction.
+The API and worker validate trusted Installation settings against the chosen
+Configuration Driver's schema and rules before constructing it. OCC binds its
+exact capability and identity. Invalid settings or a mismatched factory stop
+startup. See the [Driver loading flow](driver-plugin-loading.md) for package
+identity, validation, trust boundaries, and IAM construction.
 
 ### 2. Resolve singleton state and select Drivers
 
 `apps/controller/src/composition/production.ts:composeProduction`
 
-[Production composition](../../apps/controller/src/composition/production.ts)
-loads the sole persisted Installation from
-[PostgreSQL platform state](../../packages/occ/src/state/postgres-state.ts).
-Both processes use the same startup document and Installation identity. The [Driver loading flow](driver-plugin-loading.md)
-traces process-local construction and the selected Secret, Sandbox, and
-ServiceAccount branches. Existing AgentRevisions retain their selected Compute
-identity and immutable admitted configuration; subsequent Configuration edits
-apply only to later deployments.
+The API and worker use the same startup document and load the sole persisted
+Installation from [PostgreSQL](../../packages/occ/src/state/postgres-state.ts).
+The [Driver loading flow](driver-plugin-loading.md) traces their Secret,
+Sandbox, and ServiceAccount selections. Existing Agent revisions retain their
+selected Compute identity and immutable configuration. Later Configuration
+edits apply to subsequent deployments.
 
 Provisioning's `KubernetesConfigurationDriver.createExact` and `inspectExact`
 use the same verified CP namespace as ordinary Configuration CRUD. Recovery checks
@@ -108,12 +104,12 @@ the exact Configuration.
 
 ### 3. Authorize the exact Namespace Configuration operation
 
-`packages/occ/src/index.ts:OpenClawController.createConfiguration`
+`packages/occ/src/configuration-operations.ts:createConfiguration`
 
 [Configuration route contracts](../../packages/contracts/src/api/routes.ts)
 define requests the [controller request handler](../../apps/controller/src/index.ts)
 dispatches to `createConfiguration`, `getConfiguration`, `updateConfiguration`,
-or `deleteConfiguration` in [OCC](../../packages/occ/src/index.ts). OCC resolves
+or `deleteConfiguration` in [OCC](../../packages/occ/src/configuration-operations.ts). OCC resolves
 the server-owned Namespace and checks the selected IAM Driver before accessing
 tenant data. Create checks Configuration permission at Namespace scope. Read,
 update, and delete target the exact Configuration in that Namespace.
@@ -171,7 +167,7 @@ intact until rename succeeds, and other writers' temporary files remain untouche
 and cleanup failures propagate to the caller; this does not add automatic retries
 or alter OCC's metadata transaction and compensation boundary.
 
-[Configuration persistence and version snapshots](configuration-driver/persistence-and-revisions.md) traces locking, Driver effects, reference resolution and admission. See [channel admission](agent-channel-runtime.md).
+[Configuration persistence and version snapshots](configuration-driver/persistence-and-revisions.md) traces metadata locking, Driver effects, Agent reference resolution, and snapshot validation after request authorization.
 
 Ordinary deployment retains validated Configuration and Driver identities.
 Admission rejects changed Agent bindings, Configuration content or generation,
@@ -234,6 +230,7 @@ its optional integration is skipped.
 
 ## Changelog
 
+- 2026-11-20 16:35: Update OCC Configuration operation source pointers. (authoring-run/a6c7283a-ee8f-4603-ad88-67df4c2f9eea - 81cdb33c3d2d2ba64dfd783b0216b5dbcfebe395)
 - 2026-11-13 12:50: Retain validated Configuration and Driver identities. (authoring-run/01a1d4f7-afbf-7f20-8109-a5f81d8b7d5b - a056cbd25)
 
 - 2026-11-11 21:03: Trace text validation and denial ID lookup. (authoring-run/f2efc59c-e63d-4f5b-a392-e38ad865f04d - dfbdd7bfa6ccfba7d3d2e6b28f2770988c0cfc0d)
@@ -260,8 +257,6 @@ its optional integration is skipped.
 - 2026-10-25: Writes refuse a Slack token SecretRef the Slack Channel Driver cannot read. (finding 2514)
 - 2026-10-25 13:00: Writes, provisioning and the Create Agent preflight refuse an enabled channel's unbound credential reference. (fix-2319, finding 2319)
 - 2026-10-23 13:40: Writes and Preset saves refuse an `agents` model without its provider, with deployment's text. (fix-1828, finding 1828)
-- 2026-10-14 11:41: Document the Installation-controlled embedded channel admission exception in the revision companion. (authoring-run/63947ba2-fb2a-4559-b79d-a00d1cd4043c - fcce5e6ba64f16d55bb60a8a1be3a8ae39c6835f)
-
 - 2026-10-14 10:30: Writes refuse literals in the other slots OpenClaw marks sensitive ([rules](configuration-driver/persistence-and-revisions.md)). (fix-1309, finding 1309)
 - 2026-10-14 09:30: Writes and deployment require references in the other key and header slots the Gateway sends ([list](../reference/configuration/secrets.md#secret-boundaries)); those header slots and MCP headers refuse invalid header names. Stored documents still read. (fix-1307, finding 1307)
 - 2026-10-14 09:00: The Kubernetes model provider rule also checks `agents.*.modelPolicy.allow` entries, which the Dedicated Codex projection qualifies like `models` keys; Dedicated Codex refuses `mediaModels.*` and `voiceModel`. Preset saves run the `agents` shape and roster rules Configuration save runs, checking a templated Agent ID or ownership as far as its written text goes. (fix-1306-1308, findings 1306, 1308)
@@ -277,5 +272,8 @@ its optional integration is skipped.
 - 2026-10-11 13:00: Configuration save refuses a Codex approval policy the Gateway refuses and a literal `gateway.auth.password`; Kubernetes deployment admission and provisioning refuse the gateway password, channel topology and workspace-node plugin settings that preparation or the Gateway refused only after predecessors stopped. (fix-1112-1115, findings 1112-1115)
 - 2026-10-11 12:00: Configuration POST/PATCH admit every Configuration the Kubernetes Driver stores (6 x (1 MiB + 32 KiB) body) and check the create or update grant before reading the body. (fix-1118, finding 1118)
 - 2026-10-10 08:00: Kubernetes renders `gateway.bind: lan` for an omitted or `auto` bind; Kubernetes and Docker Compute refuse other unreachable listeners (other binds, non-`0.0.0.0` custom hosts, Tailscale exposure) before version creation. (fix-996-999, findings 996-998)
+- 2026-10-10 11:29: Refuse Kubernetes native listeners that pass local readiness but cannot serve Pod-IP routes before version creation. (authoring-run/f29e292f-76cb-44a1-88b5-e0244f9164fc - f8a837e33b5c03bc0c92065e979485ee06960150)
+- 2026-10-09 19:00: Configuration create and update refuse an `agents` roster every deployment refuses, with deployment's text, through the shared `requireDeployableRoster`; an existing row still reads and deploys as before. (q35-roster-save, finding 874)
+- 2026-10-09 15:00: OCC rechecks metadata after the failed Configuration delete or update transaction releases its row locks. OCC skips compensation if the recheck detects a changed or deleted row. Compensation proceeds if the recheck fails. (fix-944-945)
 
 [Configuration Driver flow documentation history](configuration-driver/history.md) preserves the older dated entries.

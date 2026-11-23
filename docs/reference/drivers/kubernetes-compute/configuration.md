@@ -48,6 +48,12 @@ The [installation profiles](../../../guides/deploy/installation-profiles.md) exp
 the measured memory defaults. Invalid resource pairs, quotas, and selector labels
 fail before resource creation.
 
+Size `pods` by the Agents in one tenant namespace. An embedded OpenClaw Agent
+uses one Pod and a dedicated Codex Agent two; with a Strands Box Sandbox, a
+dedicated Agent uses two, and with an OpenShell Sandbox three, plus one
+short-lived workspace preparation Pod while a native OpenClaw Agent deploys.
+The example `"20"` fits six OpenShell Agents with one deploy in flight.
+
 Object-count quotas, such as `pods`, `services`, and `count/deployments.apps`,
 must satisfy Kubernetes integer precision. Use whole counts such as `"4"`;
 quantity suffixes that represent a whole count, such as `"1000m"` or `"1.5Ki"`,
@@ -97,7 +103,7 @@ Omission selects the verification runtime. Storage requirements are defined in
 | `runtime.nativeOpenClawSessionCapacity` | integer      | Optional    | `1`–`1024`, default `8` retained native session workers per AgentRevision Sandbox.                                                                                     |
 | `runtime.codexSeccompProfile`           | string       | Optional    | Relative localhost profile installed on every eligible node. Omission uses `RuntimeDefault`.                                                                           |
 | `runtime.modelProvider`                 | object       | Optional    | Default OpenAI-compatible provider for new revisions. Requires `protocol` and `baseUrl`; see [model providers](model-provider.md).                                     |
-| `runtime.proxy`                         | object       | Optional    | Requires `proxyUrl`; optional `managedProxy` has `hostname`, `namespace`, `podLabels`, and `port`. No proxy by default. See [Gateway routing](gateway-proxy.md).       |
+| `runtime.channelEgress`                 | object       | Optional    | Managed fleet, listener range, reserved OCC and inspection ports, and installation address exclusions. Disabled by default. See [channel egress](channel-egress.md).   |
 | `runtime.scratchVolumes`                | object array | Optional    | Exclusive per-Agent bindings to existing scratch PVCs. Omission adds no scratch mount; see [scratch volumes](#scratch-volumes).                                        |
 
 Stopping a hosted native session releases its slot; saved history does not consume
@@ -210,7 +216,7 @@ drivers:
           requests: { cpu: 100m, memory: 768Mi }
           limits: { cpu: "4", memory: 6Gi }
         namespace:
-          quota: { pods: "10" }
+          quota: { pods: "20" }
           containerDefaults:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: "4", memory: 256Mi }

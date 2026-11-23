@@ -2,7 +2,6 @@
   "env": {
     "NODE_OPTIONS": "--max-old-space-size=4096"
   },
-  "optionalEnv": ["OCC_TEST_BROWSER_EXECUTABLE"],
   "fileConcurrency": 8,
   "parallelFiles": [
     "tests/browser/console-agent-presets.test.ts",

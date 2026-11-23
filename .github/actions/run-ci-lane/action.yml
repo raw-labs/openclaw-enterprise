@@ -134,11 +134,13 @@ runs:
         LOGGING_SETUP_STARTED_NS: ${{ steps.logging-docker-start.outputs.started-ns }}
         LOGGING_SETUP_OUTCOME: ${{ steps.test-docker.outcome }}
       run: node scripts/ci/logging-setup-timing.ts finish docker-setup
+    # Repository Credentials builds all three images with --builder default.
     - id: builder
       uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       if: >-
         (inputs.profile == 'full' || inputs.profile == 'images' || inputs.profile == 'k3d') &&
         inputs.lane != 'docker-model' && inputs.lane != 'logging-collector' &&
+        !(inputs.lane == 'repository-credentials-container' && steps.image-mode.outputs.source-build == 'false' && steps.image-mode.outputs.first-agent == 'false') &&
         !startsWith(inputs.lane, 'k3d-fixture-') && !startsWith(inputs.lane, 'k3d-observability') &&
         (inputs.runtime-artifact-id == '' || !contains(fromJSON('["images-runtime-startup","images-runtime-startup-2","images-runtime-startup-3"]'), inputs.lane))
       with:
@@ -154,15 +156,6 @@ runs:
       uses: ./.github/actions/setup-ci-tools
       with:
         profile: ${{ inputs.profile }}
-    - name: Install CI Codex AppArmor profile
-      id: install-codex-apparmor
-      if: inputs.lane == 'images-runtime-startup'
-      shell: bash
-      run: |
-        if docker info --format '{{json .SecurityOptions}}' | jq -e 'any(.[]; contains("apparmor"))' >/dev/null; then
-          sudo apparmor_parser --add scripts/ci/codex-bwrap.apparmor
-          echo 'OCC_TEST_CODEX_APPARMOR_PROFILE=oce-ci-codex-bwrap' >> "$GITHUB_ENV"
-        fi
     - name: Install registry transport for image tests
       id: install-registry-transport
       if: inputs.lane == 'images-packaging' || inputs.runtime-artifact-id != ''
@@ -209,14 +202,9 @@ runs:
       if: inputs.lane == 'dev-up-k3d' || (inputs.lane == 'openshell' || inputs['suite-view'] == 'full-integration') || inputs.lane == 'qa-matrix' || startsWith(inputs.lane, 'checks-browser') || inputs.lane == 'gateway-routing' || inputs.lane == 'k3d-observability-demo' || inputs.lane == 'postgres-auth' || inputs.lane == 'keycloak-oidc'
       shell: bash
       run: bash scripts/ci/setup-tools.sh browser
-    - name: Install Teams directory WebKit browser
-      id: install-teams-webkit
-      if: inputs.lane == 'checks-browser-2'
-      shell: bash
-      run: pnpm exec playwright install --with-deps webkit
     - name: Set up Go toolchain
       id: setup-go
-      if: inputs.lane == 'dev-up-k3d' || inputs.lane == 'qa-matrix' || startsWith(inputs.lane, 'checks-baseline-') || inputs.lane == 'postgres-platform' || inputs.lane == 'docker-model' || inputs.lane == 'production-tui' || (inputs.lane == 'openshell' || inputs['suite-view'] == 'full-integration') || inputs.lane == 'k3d-fixture-configuration' || inputs.lane == 'k3d-observability' || (inputs.lane == 'checks-browser' && (inputs.test-file == '' || inputs.test-file == 'tests/browser/console-agent-detail-2.test.mjs' || inputs.test-file == 'tests/browser/console-agent-detail-2.test.ts'))
+      if: inputs.lane == 'dev-up-k3d' || inputs.lane == 'qa-matrix' || inputs.lane == 'images-packaging' || startsWith(inputs.lane, 'checks-baseline-') || inputs.lane == 'postgres-platform' || inputs.lane == 'docker-model' || inputs.lane == 'production-tui' || (inputs.lane == 'openshell' || inputs['suite-view'] == 'full-integration') || inputs.lane == 'k3d-fixture-configuration' || inputs.lane == 'k3d-observability' || (inputs.lane == 'checks-browser' && (inputs.test-file == '' || inputs.test-file == 'tests/browser/console-agent-detail-2.test.mjs' || inputs.test-file == 'tests/browser/console-agent-detail-2.test.ts'))
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: go.mod
@@ -282,7 +270,27 @@ runs:
       # CI Impact also selects part 2 for a change confined to a TypeScript test.
       if: inputs.lane == 'checks-baseline-2'
       shell: bash
-      run: pnpm typecheck
+      run: |
+        if [[ ! -e .build/tests/tsconfig.tsbuildinfo && ! -L .build/tests/tsconfig.tsbuildinfo ]]; then
+          printf 'fresh-tests-build=true\n' >> "$GITHUB_OUTPUT" || true
+        fi
+        pnpm typecheck
+    - name: Report TypeScript test graph advisory
+      if: >-
+        inputs.lane == 'checks-baseline-2' && inputs.artifact-prefix == 'ci-results' &&
+        (github.event_name == 'pull_request' || github.event_name == 'push') &&
+        steps.typecheck-workspace.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        FRESH_TESTS_BUILD: ${{ steps.typecheck-workspace.outputs.fresh-tests-build }}
+      run: |
+        if [[ "$FRESH_TESTS_BUILD" == true ]] &&
+          report=$(timeout -k 1s 5s node scripts/ci/test-graph-advisory.ts 2>/dev/null); then
+          printf '::notice title=CI TypeScript test graph advisory::%s\n' "$report"
+        else
+          printf '::notice title=CI TypeScript test graph advisory::{"version":1,"fallback":["graph_unavailable"],"omissions":0}\n'
+        fi
     - name: Build Go CLI for development installation proof
       id: build-go-cli
       if: inputs.lane == 'checks-baseline-2' || inputs.lane == 'dev-up-k3d' || (inputs.lane == 'openshell' || inputs['suite-view'] == 'full-integration') || inputs.lane == 'qa-matrix'
@@ -339,7 +347,7 @@ runs:
       id: prepare-lane
       shell: bash
       env:
-        # Image builds keep a few minutes of it for the lane's tests (prepare.mjs).
+        # Image builds keep a few minutes of it for the lane's tests (prepare.ts).
         CI_RUNNER_DEADLINE_MS: ${{ steps.deadline.outputs.ms }}
         OCC_CI_IMAGE_CACHE: ${{ ((inputs.lane == 'openshell' || inputs['suite-view'] == 'full-integration') || steps.image-mode.outputs.source-build == 'true' || inputs.lane == 'gateway-routing' || inputs.lane == 'k3d-otel' || inputs.lane == 'slack' || inputs.lane == 'production-tui' || inputs.lane == 'images-packaging' || inputs.lane == 'images-runtime-startup' || inputs.lane == 'images-runtime-startup-2' || inputs.lane == 'images-runtime-startup-3') && '1' || '' }}
         BUILDX_BUILDER: ${{ steps.image-mode.outputs.source-build == 'true' && steps.builder.outputs.name || '' }}
@@ -358,7 +366,7 @@ runs:
         if [[ -n "$CI_SELECTED_TEST_FILE" ]]; then
           selection=(--selected-file "$CI_SELECTED_TEST_FILE")
         fi
-        node scripts/ci/prepare.mjs --lane "${{ inputs.lane }}" --state "$RUNNER_TEMP/state/${{ inputs.lane }}.json" --github-env "$GITHUB_ENV" "${selection[@]}"
+        node scripts/ci/prepare.ts --lane "${{ inputs.lane }}" --state "$RUNNER_TEMP/state/${{ inputs.lane }}.json" --github-env "$GITHUB_ENV" "${selection[@]}"
     - name: Mark OpenShell preparation end
       id: openshell-prepare-end
       if: always() && (inputs.lane == 'openshell' || inputs.lane == 'openshell-policy' || inputs.lane == 'openshell-installers') && steps.openshell-prepare-start.outputs.uptime != ''
@@ -457,11 +465,6 @@ runs:
       if: always()
       shell: bash
       run: node scripts/ci/cleanup.ts --state "$RUNNER_TEMP/state/${{ inputs.lane }}.json" --results "$RUNNER_TEMP/results/${{ inputs.lane }}.json"
-    - name: Remove CI Codex AppArmor profile
-      id: remove-codex-apparmor
-      if: always() && inputs.lane == 'images-runtime-startup' && env.OCC_TEST_CODEX_APPARMOR_PROFILE == 'oce-ci-codex-bwrap'
-      shell: bash
-      run: sudo apparmor_parser --remove scripts/ci/codex-bwrap.apparmor
     - name: Stop memory sampling
       if: always() && steps.memory-sampler.outputs.pid != ''
       continue-on-error: true
@@ -628,13 +631,11 @@ runs:
           test-docker=${{ steps.test-docker.conclusion }}
           builder=${{ steps.builder.conclusion }}
           setup-ci-tools=${{ steps.setup-ci-tools.conclusion }}
-          install-codex-apparmor=${{ steps.install-codex-apparmor.conclusion }}
           install-registry-transport=${{ steps.install-registry-transport.conclusion }}
           kubernetes-bridge=${{ steps.kubernetes-bridge.conclusion }}
           install-dependencies=${{ steps.install-dependencies.conclusion }}
           save-pnpm-store=${{ steps.save-pnpm-store.conclusion }}
           install-browser=${{ steps.install-browser.conclusion }}
-          install-teams-webkit=${{ steps.install-teams-webkit.conclusion }}
           setup-go=${{ steps.setup-go.conclusion }}
           workspace-check=${{ steps.workspace-check.conclusion }}
           static-lint=${{ steps.static-lint.conclusion }}
@@ -655,7 +656,6 @@ runs:
           install-browser-certificates=${{ steps.install-browser-certificates.conclusion }}
           run-lane=${{ steps.run-lane.conclusion }}
           cleanup-lane=${{ steps.cleanup-lane.conclusion }}
-          remove-codex-apparmor=${{ steps.remove-codex-apparmor.conclusion }}
           image_reconciliation=${{ steps.image_reconciliation.conclusion }}
           retain-image-reconciliation=${{ steps.retain-image-reconciliation.conclusion }}
           retain-runtime-fixture=${{ steps.retain-runtime-fixture.conclusion }}

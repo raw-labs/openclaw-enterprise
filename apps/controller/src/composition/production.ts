@@ -7,9 +7,13 @@ import {
 } from "./control-plane-audit.ts";
 import { OAuthAccountTokens } from "../backends/token-service/oauth-connection.ts";
 import { closeResources } from "./close-resources.ts";
-import { nativeAdminOriginResolver } from "../gateway/native-admin-origin.ts";
 import { installEgressAuthority } from "./egress-authority.ts";
-import { installationControllerOptions } from "./installation-config.ts";
+import {
+  credentialSourceDeliveryBinding,
+  installationControllerOptions,
+} from "./installation-config.ts";
+import { installTokenServiceDriver } from "./token-service.ts";
+import { installSelectedSandboxDrivers } from "./sandbox-drivers.ts";
 import { validatePersistedNativeIAMState } from "@openclaw-enterprise/iam";
 import {
   createPostgresPool,
@@ -27,7 +31,7 @@ import {
 } from "../auth/index.ts";
 import { createFastifyApp } from "../index.ts";
 import type { ConsoleTheme } from "../console-theme.ts";
-import { BundledChannelDriver } from "../drivers/channel/index.ts";
+import { SlackChannelDriver } from "../drivers/channel/slack.ts";
 import type {
   InstallationRuntimeDrivers,
   ServiceAccountDriverFactory,
@@ -67,13 +71,6 @@ export interface ProductionConfig {
   readonly serviceAccountDriverFactory?: ServiceAccountDriverFactory;
   readonly workspaceFilesAccess?: ControllerWorkspaceFilesAccess;
   readonly gatewayApiKeyPath?: string;
-  readonly channelDirectoryProxyUrl?: string;
-  readonly channelDirectoryManagedProxyHost?: string;
-  /**
-   * OCC_API_HTTPS_EGRESS_OPEN: a sign-in egress rule lets the API reach any address on TCP 443,
-   * so Slack can answer without a proxy. Default: closed.
-   */
-  readonly apiHttpsEgressOpen?: boolean;
   readonly nativeAdmin?: NativeAdminAccessConfig;
   /** Default: enabled. `false` makes both runtime routes answer 501. */
   readonly agentRuntimeLogsEnabled?: boolean;
@@ -208,23 +205,15 @@ export async function composeProduction(
     }
 
     phaseCompleted("computePreflight");
-    const channelDriver = new BundledChannelDriver(
-      globalThis.fetch,
-      config.channelDirectoryProxyUrl,
-      {
-        managedProxyHosts:
-          config.channelDirectoryManagedProxyHost === undefined
-            ? []
-            : [config.channelDirectoryManagedProxyHost],
-        // A closed egress reaches Slack only through a proxy; an open one may reach it
-        // directly, so a timeout there stays a retryable outage (finding 2533).
-        expectProxy: config.apiHttpsEgressOpen !== true,
-      },
-    );
+    const channelDriver =
+      config.drivers.channelDrivers?.find(({ provider }) => provider === "slack")?.driver ??
+      new SlackChannelDriver(globalThis.fetch, undefined, { expectProxy: true });
     const controller = OpenClawController.forInstallation(
       persistedInstallation,
       {
+        authenticationStateEncryptionSecret: config.authSecret,
         ...installationControllerOptions(config.drivers.installation),
+        credentialSourceDelivery: credentialSourceDeliveryBinding(config.drivers),
         namespaceLifecycleBindings: config.drivers.namespaceLifecycleBindings,
         state,
         ...(auditEnabled ? { agentAuditState: postgresAgentAuditState(state) } : {}),
@@ -233,11 +222,6 @@ export async function composeProduction(
           ? {}
           : { pluginSourceReader: config.drivers.pluginSourceReader }),
         recordOperations: true,
-        ...(config.nativeAdmin?.enabled === true
-          ? {
-              nativeAdminOrigin: nativeAdminOriginResolver(config.nativeAdmin, config.authBaseURL)!,
-            }
-          : {}),
         backends: installation.backend,
         defaultPresets: config.drivers.defaultPresets ?? [],
         bundledPresetVersions: config.drivers.bundledPresetVersions ?? [],
@@ -254,12 +238,8 @@ export async function composeProduction(
     controller.selectDriver("secret", secretDriver.id);
     controller.registerDriver(channelDriver);
     controller.selectDriver("channel", channelDriver.id);
-    if (protectedDriver !== undefined) {
-      controller.installDriver(protectedDriver, ["sandbox", "credential_proxy"]);
-    } else if (sandboxDriver !== undefined) {
-      controller.registerDriver(sandboxDriver);
-      controller.selectDriver("sandbox", sandboxDriver.id);
-    }
+    installSelectedSandboxDrivers(controller, config.drivers);
+    await installTokenServiceDriver(controller, config.drivers, state);
     if (credentialGatewayDriver !== undefined) {
       controller.registerDriver(credentialGatewayDriver);
       controller.selectDriver("credential_gateway", credentialGatewayDriver.id);

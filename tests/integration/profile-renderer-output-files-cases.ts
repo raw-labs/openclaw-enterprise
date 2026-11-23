@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, linkSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import { baseInput, codexInput } from "./profile-renderer-inputs.ts";
 import {
-  repository,
   render,
+  renderCliFromFile,
   renderError,
   profileFailure,
   readPreflight,
@@ -15,71 +14,48 @@ import {
 
 export function registerOutputFileCases(): void {
   test("profile renderer refuses input paths owned by its output directory without deleting files", async (t) => {
-    for (const source of ["input", "profile-file"]) {
-      for (const name of ["values.yaml", "installation.yaml", "preflight.json"]) {
-        for (const alias of ["direct", "input-directory", "output-directory", "file", "hardlink"]) {
-          await t.test(`${source}: ${name}, alias=${alias}`, async () => {
-            const directory = fileTemporaryDirectory("occ-profile-input-collision-");
-            const output = join(directory, "output");
-            mkdirSync(output);
-            // Seed real rendered files. A naming mistake must not destroy the input or its siblings.
-            await render("openclaw", baseInput(), output);
-            const input = join(output, name);
-            writeFileSync(
-              input,
-              source === "input"
-                ? JSON.stringify(baseInput())
-                : readFileSync(join(repository, "deploy/profiles/openclaw.json")),
-            );
-            const siteInput = join(directory, "site-input.json");
-            writeFileSync(siteInput, JSON.stringify(baseInput()));
-            const before = new Map(
-              ["values.yaml", "installation.yaml", "preflight.json"].map((file) => [
-                file,
-                readFileSync(join(output, file)),
-              ]),
-            );
-            let inputPath = input;
-            let outputPath = output;
-            if (alias === "input-directory" || alias === "output-directory") {
-              const link = join(directory, "output-alias");
-              symlinkSync(output, link, "dir");
-              if (alias === "input-directory") {
-                inputPath = join(link, name);
-              } else {
-                outputPath = link;
-              }
-            } else if (alias === "file" || alias === "hardlink") {
-              inputPath = join(directory, "input-alias.json");
-              if (alias === "file") {
-                symlinkSync(input, inputPath);
-              } else {
-                linkSync(input, inputPath);
-              }
+    for (const name of ["values.yaml", "installation.yaml", "preflight.json"]) {
+      for (const alias of ["direct", "input-directory", "output-directory", "file", "hardlink"]) {
+        await t.test(`${name}, alias=${alias}`, async () => {
+          const directory = fileTemporaryDirectory("occ-profile-input-collision-");
+          const output = join(directory, "output");
+          mkdirSync(output);
+          // Seed real rendered files. A naming mistake must not destroy the input or its siblings.
+          await render("openclaw", baseInput(), output);
+          const input = join(output, name);
+          writeFileSync(input, JSON.stringify(baseInput()));
+          const before = new Map(
+            ["values.yaml", "installation.yaml", "preflight.json"].map((file) => [
+              file,
+              readFileSync(join(output, file)),
+            ]),
+          );
+          let inputPath = input;
+          let outputPath = output;
+          if (alias === "input-directory" || alias === "output-directory") {
+            const link = join(directory, "output-alias");
+            symlinkSync(output, link, "dir");
+            if (alias === "input-directory") {
+              inputPath = join(link, name);
+            } else {
+              outputPath = link;
             }
-            assert.throws(
-              () =>
-                execFileSync(
-                  process.execPath,
-                  [
-                    "scripts/render-installation-profile.ts",
-                    "--profile",
-                    "openclaw",
-                    "--input",
-                    source === "input" ? inputPath : siteInput,
-                    ...(source === "profile-file" ? ["--profile-file", inputPath] : []),
-                    "--out-dir",
-                    outputPath,
-                  ],
-                  { cwd: repository, stdio: "pipe" },
-                ),
-              /input must not name a generated output file/,
-            );
-            for (const [file, contents] of before) {
-              assert.deepEqual(readFileSync(join(output, file)), contents, file);
+          } else if (alias === "file" || alias === "hardlink") {
+            inputPath = join(directory, "input-alias.json");
+            if (alias === "file") {
+              symlinkSync(input, inputPath);
+            } else {
+              linkSync(input, inputPath);
             }
-          });
-        }
+          }
+          assert.throws(
+            () => renderCliFromFile("openclaw", inputPath, outputPath),
+            /input must not name a generated output file/,
+          );
+          for (const [file, contents] of before) {
+            assert.deepEqual(readFileSync(join(output, file)), contents, file);
+          }
+        });
       }
     }
   });
@@ -108,20 +84,7 @@ export function registerOutputFileCases(): void {
       assert.equal((await render(profile, input, output.directory)).preflight.ok, true);
       writeFileSync(join(output.directory, "input.json"), "{");
       assert.throws(
-        () =>
-          execFileSync(
-            process.execPath,
-            [
-              "scripts/render-installation-profile.ts",
-              "--profile",
-              profile,
-              "--input",
-              join(output.directory, "input.json"),
-              "--out-dir",
-              output.directory,
-            ],
-            { cwd: repository, stdio: "pipe" },
-          ),
+        () => renderCliFromFile(profile, join(output.directory, "input.json"), output.directory),
         /unavailable or invalid JSON/,
       );
       for (const name of ["values.yaml", "installation.yaml", "preflight.json"]) {
@@ -134,20 +97,7 @@ export function registerOutputFileCases(): void {
       const loop = join(output.directory, "loop.json");
       symlinkSync(loop, loop);
       assert.throws(
-        () =>
-          execFileSync(
-            process.execPath,
-            [
-              "scripts/render-installation-profile.ts",
-              "--profile",
-              profile,
-              "--input",
-              loop,
-              "--out-dir",
-              output.directory,
-            ],
-            { cwd: repository, stdio: "pipe" },
-          ),
+        () => renderCliFromFile(profile, loop, output.directory),
         /unavailable or invalid JSON/,
       );
       for (const name of ["values.yaml", "installation.yaml", "preflight.json"]) {

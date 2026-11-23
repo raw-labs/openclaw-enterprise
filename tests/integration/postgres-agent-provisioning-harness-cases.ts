@@ -1,5 +1,3 @@
-import { createTestKubernetesComputeDriver } from "../helpers/kubernetes-compute.mjs";
-import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -17,7 +15,7 @@ import {
   nativeAdminConfigurationSupported,
 } from "../../apps/controller/src/gateway/native-admin.ts";
 import { ConfigurationHarnessError } from "../../packages/occ/src/index.ts";
-import { assertApiError } from "../helpers/api-error.mjs";
+import { assertApiError } from "../helpers/api-error.ts";
 import { requiresPostgres } from "../helpers/postgres-database.mjs";
 import { createTestSecretDriver } from "../helpers/secret-driver.ts";
 import { waitFor } from "../helpers/wait-for.ts";
@@ -391,116 +389,6 @@ export function registerNativeAdminCases() {
       assert.equal(completedReplay.status, 202, JSON.stringify(completedReplay.body));
       assert.equal(completedReplay.data.provisioning.agentId, status.agentId);
       assert.equal(completedReplay.data.provisioning.revisionId, status.revisionId);
-    },
-  );
-  test(
-    "guided provisioning prepares native policy after Gateway security defaults without changing the saved Configuration",
-    { ...requiresPostgres, timeout: 60_000 },
-    async (context) => {
-      const compute = createRuntimeComputeDriver();
-      const native = createTestKubernetesComputeDriver(compute.id, {
-        gatewayRuntime: true,
-        privateStatus: true,
-      });
-      // Only readiness and credentials are simulated; preparation uses production Compute.
-      compute.preflight = async () => undefined;
-      compute.configureAgent = native.configureAgent.bind(native);
-      compute.validateAgentProvisioning = native.validateAgentProvisioning.bind(native);
-      compute.validateHarnessAuth = native.validateHarnessAuth.bind(native);
-      compute.getGatewayEndpoint = native.getGatewayEndpoint.bind(native);
-      const fixture = await createFixture(context, {
-        computeDriver: compute,
-        stopAfterProvisioning: true,
-        nativeAdmin: true,
-      });
-      const namespace = await fixture.bootstrapNamespace();
-      const secrets = await createProvisioningSecrets(fixture, namespace.id);
-      const base = provisioningBody(namespace.id, secrets);
-      const body = {
-        ...base,
-        configuration: {
-          ...base.configuration,
-          values: {
-            ...createHarnessConfiguration("codex", "gpt-6-astra"),
-            gateway: {
-              mode: "local",
-              bind: "lan",
-              controlUi: { enabled: true, allowedOrigins: ["https://tools.example.test"] },
-              auth: {
-                password: { source: "env", provider: "default", id: "OPENCLAW_GATEWAY_PASSWORD" },
-              },
-            },
-          },
-          secretBindings: {
-            ...base.configuration.secretBindings,
-            EXTERNAL_SERVICE_TOKEN: {
-              ...base.configuration.secretBindings.EXTERNAL_SERVICE_TOKEN,
-              delivery: { type: "env" },
-            },
-          },
-        },
-      };
-      const original = structuredClone(body.configuration);
-      const path = `/namespaces/${namespace.id}/agents/provision`;
-      const admitted = await fixture.requestChecked(AgentProvisioningResponse, "POST", path, {
-        body,
-      });
-      assert.equal(admitted.status, 202, JSON.stringify(admitted.body));
-      await fixture.startWorker();
-      const status = await waitFor("native policy worker handoff", async () => {
-        const observed = await fixture.requestChecked(
-          AgentProvisioningStatusResponse,
-          "GET",
-          admitted.data.provisioning.url,
-        );
-        assert.equal(observed.status, 200, JSON.stringify(observed.body));
-        assert.notEqual(observed.data.status, "failed", JSON.stringify(observed.body));
-        return observed.data.revisionId && observed.data.status === "queued"
-          ? handedOff(observed.data)
-          : undefined;
-      });
-      await fixture.stopWorker();
-      fixture.cancelProvisioningAtTeardown(namespace.id, status.agentId);
-      const revisions = await fixture.state.read((view) =>
-        view.revisions.listRevisions(namespace.id, status.agentId),
-      );
-      assert.equal(revisions.length, 1);
-      const revision = required(revisions[0]);
-      const installation = required(await fixture.state.loadInstallation());
-      const origin = `https://${deriveNativeAdminHost(
-        installation.id,
-        { namespaceId: namespace.id, id: status.agentId },
-        "agents.oce.localhost",
-      )}:9443`;
-      const tools = required(asRecord(revision.configuration.tools));
-      assert.equal(
-        required(asRecord(required(asRecord(tools.exec)).applyPatch)).workspaceOnly,
-        true,
-      );
-      const defaults = required(
-        asRecord(required(asRecord(revision.configuration.agents)).defaults),
-      );
-      assert.equal(required(asRecord(defaults.sandbox)).mode, "off");
-      assert.equal(nativeAdminConfigurationSupported(revision, origin), true);
-      const gateway = required(asRecord(revision.configuration.gateway));
-      assert.equal(gateway.publicOrigin, origin);
-      assert.deepEqual(required(asRecord(gateway.controlUi)).allowedOrigins, [
-        "https://tools.example.test",
-        origin,
-      ]);
-      assert.deepEqual(revision.secretBindings, original.secretBindings);
-      const saved = await fixture.requestChecked(
-        ConfigurationResponse,
-        "GET",
-        `/namespaces/${namespace.id}/configurations/${status.configurationId}`,
-      );
-      assert.equal(saved.data.generation, 1);
-      assert.deepEqual(saved.data.values, original.values);
-      const replay = await fixture.requestChecked(AgentProvisioningResponse, "POST", path, {
-        body,
-      });
-      assert.equal(replay.data.provisioning.workId, admitted.data.provisioning.workId);
-      assert.equal(replay.data.provisioning.revisionId, revision.id);
     },
   );
 }

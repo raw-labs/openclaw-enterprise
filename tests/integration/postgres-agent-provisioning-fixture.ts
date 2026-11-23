@@ -1,4 +1,3 @@
-import { nativeAdminOriginResolver } from "../../apps/controller/src/gateway/native-admin-origin.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -24,11 +23,12 @@ import {
   createControllerWorker,
   type ControllerWorkerOptions,
 } from "../../apps/controller/src/worker.ts";
+import { SlackChannelDriver } from "../../apps/controller/src/drivers/channel/slack.ts";
 import { NativeIAMDriver } from "../../packages/iam/src/index.ts";
 import { PostgresPlatformState } from "../../packages/occ/src/index.ts";
 import { asRecord } from "../../packages/utils/src/objects.ts";
 import { authenticatedHeaders } from "../helpers/auth-session.mjs";
-import { composePostgresDevelopment } from "../helpers/password-hasher.mjs";
+import { composePostgresDevelopment } from "../helpers/password-hasher.ts";
 import type { createTestSecretDriver as runtimeSecretFixture } from "../helpers/secret-driver.ts";
 import { temporaryDirectory } from "../helpers/temporary-directory.mjs";
 import { waitFor } from "../helpers/wait-for.ts";
@@ -235,6 +235,9 @@ function installationDrivers({
     computeDriver,
     configurationDriver,
     secretDriver,
+    // This PostgreSQL workflow supplies an explicit Driver with mocked Slack
+    // transport. It does not prove Envoy availability or network enforcement.
+    channelDrivers: [{ provider: "slack", driver: new SlackChannelDriver(globalThis.fetch) }],
     ...(sandboxDriver === undefined ? {} : { sandboxDriver }),
     ...(credentialGatewayDriver === undefined ? {} : { credentialGatewayDriver }),
     ...(repoDriver === undefined
@@ -503,9 +506,6 @@ export async function createProvisioningFixture<
     const started = createControllerWorker({
       pool: workerPool,
       drivers,
-      ...(options.nativeAdmin
-        ? { nativeAdminOrigin: nativeAdminOriginResolver(nativeAdminSettings.nativeAdmin, origin)! }
-        : {}),
       pollIntervalMs: 15,
       leaseDurationMs: options.leaseDurationMs ?? 30_000,
       maxAttempts: 3,

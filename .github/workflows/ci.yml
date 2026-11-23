@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - codex/raw-integration
   merge_group:
   workflow_dispatch:
 
@@ -25,7 +24,6 @@ concurrency:
 
 env:
   CI: "1"
-  CI_RUNNER_FILE_CONCURRENCY: ${{ vars.CI_RUNNER_FILE_CONCURRENCY }}
   NODE_VERSION: "24.22.1"
   # Metadata gates use the same patched runtime as the other CI lanes.
   GATE_NODE_VERSION: "24.22.1"
@@ -170,7 +168,7 @@ jobs:
               {"lane": "k3d-fixture-network", "title": "k3d Network Isolation", "profile": "k3d", "timeout": 45, "runner": "blacksmith-2vcpu-ubuntu-2404"},
               {"lane": "k3d-fixture-plugins", "title": "k3d Plugin Status", "profile": "k3d", "timeout": 45, "runner": "blacksmith-2vcpu-ubuntu-2404"},
               {"lane": "k3d-observability", "title": "Production Observability", "profile": "k3d", "timeout": 45, "runner": "blacksmith-2vcpu-ubuntu-2404"},
-              {"lane": "logging-collector", "title": "Logging Collector", "profile": "images", "timeout": 30, "runner": "blacksmith-2vcpu-ubuntu-2404"},
+              {"lane": "logging-collector", "title": "Logging Collector", "profile": "baseline", "timeout": 30, "runner": "blacksmith-2vcpu-ubuntu-2404"},
               {"lane": "repository-credentials-container", "title": "Repository Credentials", "profile": "images", "timeout": 40, "runner": "blacksmith-4vcpu-ubuntu-2404"},
               {"lane": "keycloak-oidc", "title": "Keycloak OIDC", "profile": "postgres", "timeout": 25, "runner": "blacksmith-4vcpu-ubuntu-2404"}
             ]
@@ -301,7 +299,7 @@ jobs:
     # Both run in every mode. Start beside CI Impact, audit the workflow and
     # suite first, then reuse this checkout, Node and runner for static checks.
     # The measured 3.2 GiB peak fits the 4-CPU / 15.2 GiB runner.
-    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -411,16 +409,13 @@ jobs:
     needs: impact
     if: ${{ (needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests') && needs.impact.outputs.has-matrix == 'true' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ matrix.lane == 'images-runtime-startup' && (vars.CI_SANDBOX_RUNNER || vars.CI_COMPAT_RUNNER) || vars.CI_LARGE_RUNNER || matrix.runner }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
         # Lane rows live in the CI Impact "Build lane matrix" step.
         include: ${{ fromJSON(needs.impact.outputs.matrix) }}
-    env:
-      # The host Chrome package provides the sandbox support these TLS tests require.
-      OCC_TEST_BROWSER_EXECUTABLE: ${{ (matrix.lane == 'postgres-auth' || startsWith(matrix.lane, 'checks-browser')) && '/usr/bin/google-chrome' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -459,7 +454,7 @@ jobs:
     needs: [impact, runtime-artifact]
     if: ${{ (needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests') && needs.impact.outputs.has-images == 'true' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ matrix.lane == 'images-runtime-startup' && (vars.CI_SANDBOX_RUNNER || vars.CI_COMPAT_RUNNER) || vars.CI_LARGE_RUNNER || matrix.runner }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
@@ -600,6 +595,35 @@ jobs:
       - name: Install, deploy, chat, stop and start
         id: smoke
         run: node scripts/ci/first-agent-smoke.ts run
+      - name: Verify First Agent Smoke retirement notices
+        if: ${{ !cancelled() && (steps.smoke.outcome == 'success' || steps.smoke.outcome == 'failure') }}
+        continue-on-error: true
+        env:
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          RETIREMENT_NOTICES: ${{ steps.smoke.outputs.retirement-notices }}
+        run: |
+          expected='["held-sockets","peer-withdrawal","old-harness-pod-termination","retired-sockets-closed","successor-deploy","selected-control-after-unselected-probe"]'
+          if [[ ${#RETIREMENT_NOTICES} -gt 1024 ]] ||
+            ! jq -es --arg smoke "$SMOKE_OUTCOME" --argjson expected "$expected" '
+            length == 1 and (.[0] |
+              .rows as $rows |
+              keys == ["completed", "rows", "status"] and
+              (.rows | type == "array" and length <= ($expected | length)) and
+              .completed == ($rows | length) and
+              all($rows[]; keys == ["durationMs", "outcome", "stage"] and
+                (.durationMs | type == "number" and . >= 0 and . <= 9007199254740991 and . == floor) and
+                (.outcome == "ok" or .outcome == "failed")) and
+              [$rows[].stage] == $expected[:($rows | length)] and
+              all($rows[:-1][]; .outcome == "ok") and
+              (if .status == "ok" then
+                ($rows | length) == ($expected | length) and all($rows[]; .outcome == "ok")
+              elif $smoke == "failure" and .status == "failed" then true
+              else $smoke == "failure" and .status == "unreached" and $rows == []
+              end))
+          ' <<< "$RETIREMENT_NOTICES" >/dev/null 2>&1; then
+            echo "::warning title=First Agent Smoke retirement notices::Retirement notice sequence or outcome is incomplete or invalid"
+            exit 1
+          fi
       - name: Show Docker Hub pull endpoints
         if: ${{ !cancelled() }}
         run: bash scripts/ci/docker-hub-mirror.sh report

@@ -6,30 +6,33 @@ go to the Agent's gateway; model credentials are configured separately.
 
 ## Before you start
 
-- Enable Slack Socket Mode and create an app-level token (`xapp-`) with
+- Create and install a Slack app in your workspace. Enable
+  [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode/) and
+  create an app-level token (`xapp-`) with
   [`connections:write`](https://docs.slack.dev/reference/scopes/connections.write/).
   Subscribe to the bot event [`app_mention`](https://docs.slack.dev/reference/events/app_mention/).
   Grant the bot token (`xoxb-`) [`app_mentions:read`](https://docs.slack.dev/reference/scopes/app_mentions.read/)
   to receive channel mentions and [`chat:write`](https://docs.slack.dev/reference/scopes/chat.write/)
   to send replies. [Reinstall the Slack app](https://docs.slack.dev/app-management/distribution/#when-is-a-reinstall-required)
   if you add bot scopes to an existing installation.
+- For Console name lookup, grant the bot `users:read` and `channels:read`, plus
+  `groups:read` if you use private channels. See the
+  [Slack directory reference](../../reference/drivers/slack-channel.md) for
+  visibility and lookup limits.
 - Use one Slack app, with its own app-level and bot tokens, for each Agent.
   Slack can deliver an event to any active Socket Mode connection for that app.
   If Agents share an app, the intended Agent can miss the event.
 - Invite the app's bot to the channel. Your Installation operator must allow
   the gateway's Slack network traffic and provide a runtime image that includes
   the native Slack plugin.
-- Require the operator to [configure and verify the Slack route](#configure-the-slack-route)
+- Require the operator to [configure managed channel egress](#configure-managed-channel-egress)
   before enabling Slack: gateway messaging and Console directory lookup use
-  a shared proxy by default, with an optional directory-only override and
-  separate client egress rules.
+  separate Envoy listeners and network grants.
 - Choose a dedicated Codex Agent on Kubernetes and configure its
   [model authentication](../../reference/agents.md#harness-authentication).
   Embedded OpenClaw execution cannot isolate channel credentials from the
   Harness, and Kubernetes Compute rejects embedded versions with external
   channels enabled. The Standard OpenClaw preset must leave channels disabled.
-  The separate [embedded evaluation exception](embedded-channel-trial.md) requires
-  an Installation administrator's explicit opt-in and a weaker credential boundary.
 - First deployment generates required connection credentials. It requires Agent
   `deploy`, plus Agent `read` and `operate` when generation is needed.
   Selecting Secrets requires [readable Secret metadata](../../reference/drivers/secret.md#iam)
@@ -40,66 +43,56 @@ go to the Agent's gateway; model credentials are configured separately.
 
 <a id="configure-both-slack-proxies"></a>
 
-## Configure the Slack route
+## Configure managed channel egress
 
-Ask your operator to [configure the Gateway proxy](gateway-proxy.md). The bundled
-proxy permits Slack by default; an external proxy must permit `slack.com`,
-`slack-edge.com`, `slack-msgs.com`, and their subdomains on TCP 443. By default,
-one endpoint serves Gateway messaging and API directory requests. The operator
-can [override the directory endpoint](gateway-proxy.md#directory-proxy-override-optional)
-when the API needs a different route. Tokens remain in Agent-owned
-Secrets, not operator proxy configuration.
+Ask the Installation operator to enable the
+[dedicated Envoy egress fleet](../../reference/drivers/kubernetes-compute/channel-egress.md)
+and provide the actual Pod, Service and node address exclusions. The
+installation profile accepts `channels.managedEgress: true` with
+`channels.excludedCidrs` and writes matching Helm and Compute settings.
+Follow [dependency setup](../deploy/channel-egress.md) before installing the
+channel resources. Enabled Helm defaults do not install Envoy dependencies;
+the Kubernetes and EKS quickstart templates explicitly disable channels until
+you configure them.
+Envoy Gateway must enable EnvoyPatchPolicy support. The egress fleet uses its
+qualified image separately from private workspace ingress.
 
-Apply the protected Installation and Helm configuration through the installation
-procedure, then roll out OCC and replace affected Agent revisions. The Compute
-Driver grants Gateway access to its selected endpoint independently of
-channel enablement. Existing channel placement restrictions still apply.
+Each enabled Agent receives its own actual listener port. OCC uses a separate
+listener for credential validation and directory lookup. The Harness receives
+neither grant. No Slack token belongs in Helm values or Envoy configuration.
+Customer upstream proxies are not supported.
 
-Verify directory lookup and Slack messaging separately. Directory requests need
-`CONNECT slack.com:443`; Socket Mode also uses Slack's returned WSS endpoints.
-Keep TLS verification enabled, and never put tokens or signed WSS URLs in proxy
-configuration. A successful lookup does not prove Socket Mode or model access.
-See the [directory proxy contract](../../reference/drivers/slack-channel.md#enable-lookup-in-production).
+Verify both consumers before handing off the setup:
+
+1. In the Console, select the bot Secret and search for a known user and channel.
+2. Deploy the Agent. Require its Gateway and Harness to be Ready and confirm
+   that Slack Socket Mode connected. Complete the message proof below.
+3. Verify that the same Gateway cannot reach another Agent's listener, an
+   unlisted destination or a private upstream address. Direct internet fallback
+   must remain denied.
+
+A directory `503` can mean the OCC listener or Slack is unavailable. An absent
+managed route makes credential validation return a configuration conflict.
+Repair the fleet and retry; entering exact IDs does not verify directory access.
+A missing-scope error requires updating the Slack app's scopes. No new
+channel-enabled Gateway starts until its own listener and network grants are installed.
 
 ## Connect and verify
 
-1. Open the Agent's **Create new version** draft in the console, then open
-   **Channels** and **Configure Slack** (or **Edit Slack** for an existing setup).
-   Start with **Slack credentials** at the top: select a Namespace Secret or
-   **Create new Secret...** for each token. The bot token enables channel and
-   people name lookup; the app token is used for Socket Mode. An enabled Slack
-   setup saves only with both. Exact-ID entry remains available without name lookup.
-   Enable Slack and choose **Channels**, then select **Specific people** or
-   **Everyone in these channels** under channel access. Leave **Require a mention**
-   enabled for this setup. To receive messages without a mention, follow
-   [Enable channel messages without mentions](#enable-channel-messages-without-mentions-optional).
-   New Slack setups use
-   [threaded channel replies](../../reference/configuration/secrets.md#native-channel-configuration).
-   Choose **Disabled** under **Direct-message policy** for channel-only access,
-   or keep **Allowlist** and select **Allowed people in direct messages**.
-   When creating a Secret, the modal prefills the token key and accepts its value
-   in a password field.
-   **Create Secret** stores it immediately; **Save configuration** saves the
-   selected bindings. Cancelling the drawer discards selections but keeps any
-   newly created Secrets. If multiple Agents use this Configuration, the edit
-   also affects their future deployments.
-2. Open **Credentials**. If tokens are still missing (a Configuration saved
-   before this check), select their Secrets and **Save channel Secrets**. OCC stores them as Namespace Secrets, grants the
-   Agent access, and saves Configuration bindings for gateway delivery. Stored
-   Secret bindings confirm storage only; they do not prove Slack accepted the tokens.
-   Bound tokens show a synthetic password mask. To replace one token, edit that
-   field and leave the other unchanged; its stored value is preserved.
-3. Select **Deploy new version** to apply the saved bindings. OCC generates
-   missing connection credentials during the first deployment when the Compute
-   Driver requires them. After a channel
-   draft or Secret value change, explicitly redeploy each consumer. Follow
-   [Secret updates](../../reference/drivers/kubernetes-secret.md#update-and-redeploy)
-   when replacing an existing token.
-4. From a real Slack user account, send an explicit `@mention` to the Agent
-   in an allowed channel. Ask it to repeat a short unique phrase. A reply
-   containing that phrase confirms that the message reached the Agent and
-   a response returned to Slack. An accepted deployment or `Stored`
-   credentials alone do not prove that path.
+Open your Agent’s draft in the Console and follow the illustrated
+[Channels walkthrough](channels.md#add-slack-in-the-console) to bind the token
+Secrets, choose channels and people, save, deploy, and verify a threaded reply.
+
+![fred’s saved Slack card with one channel and both token Secrets bound](../../assets/slack-channel/saved-slack.png)
+
+_Storybook example. Configured (enabled) means the settings are saved.
+Deploy the new version and [verify a reply](channels.md#verify-a-reply) in Slack._
+
+For an older Configuration with missing token bindings, open **Credentials**,
+select the token Secrets, and choose **Save channel Secrets**. Bound tokens show
+a password mask. To replace one token, edit that field and leave the other
+unchanged. Follow [Secret updates](../../reference/drivers/kubernetes-secret.md#update-and-redeploy)
+and explicitly redeploy each consumer after a token value or channel change.
 
 If you manage Configuration through the API, use the
 [native Slack Socket Mode example](../../reference/configuration/secrets.md#native-channel-configuration).

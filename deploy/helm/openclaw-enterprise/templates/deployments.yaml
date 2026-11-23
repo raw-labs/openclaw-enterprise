@@ -394,14 +394,6 @@ spec:
             - name: NODE_EXTRA_CA_CERTS
               value: /etc/openclaw/gateway-ca/ca.crt
             {{- end }}
-            {{- if ne $component "api" }}
-            - name: OCC_AGENT_NATIVE_ADMIN_ENABLED
-              value: {{ ternary "true" "false" $.Values.agentNativeAdmin.enabled | quote }}
-            - name: OCC_AGENT_NATIVE_ADMIN_DOMAIN
-              value: {{ $.Values.agentNativeAdmin.domain | quote }}
-            - name: OCC_AUTH_BASE_URL
-              value: {{ $.Values.auth.baseUrl | quote }}
-            {{- end }}
             {{- if eq $component "api" }}
             - name: OCC_HOST
               valueFrom:
@@ -463,20 +455,6 @@ spec:
               value: {{ include "openclaw.trustedProxy.header" $ | quote }}
             {{- end }}
             {{- end }}
-            {{- if $.Values.api.channelDirectoryProxyUrl }}
-            - name: OCC_CHANNEL_DIRECTORY_PROXY_URL
-              value: {{ $.Values.api.channelDirectoryProxyUrl | quote }}
-            {{- else if $.Values.gatewayProxy.enabled }}
-            - name: OCC_CHANNEL_DIRECTORY_PROXY_URL
-              value: {{ include "openclaw.gatewayProxy.url" $ | quote }}
-            - name: OCC_CHANNEL_DIRECTORY_MANAGED_PROXY_HOST
-              value: {{ printf "%s.%s.svc" (include "openclaw.gatewayProxy.serviceName" $) $.Release.Namespace | quote }}
-            {{- else if $.Values.gatewayProxy.url }}
-            - name: OCC_CHANNEL_DIRECTORY_PROXY_URL
-              value: {{ $.Values.gatewayProxy.url | quote }}
-            {{- end }}
-            - name: OCC_API_HTTPS_EGRESS_OPEN
-              value: {{ include "openclaw.api.httpsEgressOpen" $ | quote }}
             - name: OCC_AGENT_NATIVE_ADMIN_ENABLED
               value: {{ ternary "true" "false" $.Values.agentNativeAdmin.enabled | quote }}
             - name: OCC_AGENT_RUNTIME_LOGS_ENABLED

@@ -6,21 +6,34 @@ kind: reference/driver
 
 ## Overview
 
-`ChannelDriver` validates configured credentials and looks up provider identities for an authorized Namespace edit.
+`ChannelDriver` declares provider network destinations, validates configured
+credentials and looks up provider identities for an authorized Namespace edit.
 OpenClaw Control Plane (OCC) owns caller authorization, Secret access, and the
 saved Agent or Configuration. The Driver owns the provider request and returns
-bounded display candidates with stable provider IDs. It does not send messages
-or grant channel access. The current controller selects the bundled Slack and Teams
+display candidates with stable provider IDs. It does not send messages
+or grant channel access. The current controller selects the bundled Slack
 implementation for directory lookup; see [Driver selection](selection.md).
 
 ## Interface
 
+The required `enableRouting(): readonly NetworkDestinationRule[]` method declares
+TCP destinations. It is deterministic, takes no credentials and has no
+infrastructure effects. Empty results grant no destinations; exceptions reject
+activation. Trusted composition must resolve each enabled provider to exactly
+one installed Driver. Compute owns enforcement and cleanup.
+
+The [shared schema and validator](../../../packages/contracts/src/network-destination.ts)
+accept DNS rules with `match: exact` or `subdomains`, canonical IPv4/IPv6 IPs,
+and canonical network CIDRs. DNS names normalize to lowercase ASCII labels;
+`subdomains` excludes the apex. Names cannot contain wildcards, URLs, paths or
+ports. Each rule has distinct integer TCP ports from 1 through 65535. Malformed
+or unsupported forms fail; implementations cannot ignore them. IP literals
+require an explicit matching IP or CIDR rule. Installation address restrictions
+still apply. See [Kubernetes enforcement limits](kubernetes-compute/channel-egress.md).
+
 The [shared interface](../../../packages/contracts/src/drivers/channel/index.ts) requires a
-Driver identity and `lookupDirectory({ token, provider, context?, kind, query?, cursor?, ids? })`. `kind`
-selects users or channels. `provider` selects a provider-owned adapter; optional
-`context` contains at most eight nonsecret strings of at most 200 characters.
-Adapters validate their own context, authentication and pagination; OCC remains
-provider-neutral. `ids` resolves saved IDs directly and cannot be
+Driver identity and `lookupDirectory({ token, kind, query?, cursor?, ids? })`. `kind`
+selects users or channels. `ids` resolves saved IDs directly and cannot be
 combined with a search query or cursor. The method returns workspace identity, candidates,
 an optional next cursor, and `complete`. A returned name is a display hint;
 callers save IDs. A missing selected Driver makes lookup unavailable.
@@ -45,7 +58,9 @@ audit event, or Console script. Provider access does not grant OCC permissions.
 
 ## Lifecycle
 
-The controller selects one ChannelDriver at startup. Lookups are read-only and
+Composition binds installed Channel Drivers to provider IDs. The worker derives
+the enabled providers' current requirements from each saved Agent revision on
+every deployment attempt. It does not persist a separate rule snapshot. Lookups are read-only and
 make no platform state change. They use the current selected Secret and can be
 retried after a transient provider failure. Saving a selected ID remains the
 Agent or Configuration update's responsibility. A later Secret replacement may
@@ -68,8 +83,6 @@ A successful lookup does not prove the bot can post to a channel.
 
 ## Implementations
 
-- [Bundled Teams Channel Driver](teams-channel.md) reads a selected Team's
-  standard channels and member roster with resource-specific consent.
 - [Bundled Slack Channel Driver](slack-channel.md) uses a Slack bot token for
   user and channel directory reads.
 

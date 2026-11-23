@@ -2,6 +2,7 @@ import type {
   ChannelCredentialReader,
   ChannelDirectoryResult,
   ChannelDriver,
+  NetworkDestinationRule,
 } from "@openclaw-enterprise/contracts";
 import {
   ChannelCredentialError,
@@ -11,27 +12,26 @@ import {
   wholeEnvironmentReferenceName,
 } from "@openclaw-enterprise/occ";
 import { asRecord, readCappedBody } from "@openclaw-enterprise/utils";
-import { channelRequest, type ChannelRequest } from "./transport.ts";
+import { isIP } from "node:net";
+import { fetch as undiciFetch, ProxyAgent, type Response as UndiciResponse } from "undici";
 
 const SLACK_API = "https://slack.com/api/";
 const PAGE_SIZE = 100;
 const SEARCH_PAGES = 3;
 const REQUEST_TIMEOUT_MS = 8_000;
 const INFO_BATCH_SIZE = 5;
+const PROXY_ENDPOINT =
+  /^https?:\/\/((?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}):([1-9][0-9]{0,4})$/;
+const MANAGED_SERVICE_PROXY_ENDPOINT =
+  /^https?:\/\/([a-z]([-a-z0-9]*[a-z0-9])?\.[a-z0-9]([-a-z0-9]*[a-z0-9])?\.svc):([1-9][0-9]{0,4})$/;
+
 type SlackRecord = Record<string, unknown>;
 
-/**
- * Finding 2521: the production API's egress is default-deny unless sign-in settings open it. With
- * no Slack proxy configured, a token check that gets no answer from Slack usually means the
- * Installation has no Slack route, but an open route can also time out (finding 2531). The fixed
- * text names the setting and keeps the retry for that case. It is raised only after the binding
- * and token-prefix checks, and it names no token. The error contract caps messages at 256
- * characters.
- */
+/** Provider calls require the separate managed OCC channel-egress listener. */
 export class SlackRouteNotConfiguredError extends ResourceStateConflictError {
   constructor() {
     super(
-      "The API could not reach Slack and has no Slack proxy. If the API has another approved route to Slack, try again. Otherwise ask an Installation administrator to give the API a route to Slack; the Slack integration guide lists the Helm settings.",
+      "Managed channel egress is not configured for OCC provider requests. Ask an Installation administrator to enable the channel egress fleet.",
     );
     this.name = "SlackRouteNotConfiguredError";
   }
@@ -112,19 +112,54 @@ export class SlackChannelDriver implements ChannelDriver {
   readonly capability = "channel" as const;
   readonly id = "slack-channel";
   readonly implementation = "occ/slack-channel";
-  private readonly request: ChannelRequest;
+  private readonly request: typeof fetch;
+  private readonly proxy?: ProxyAgent;
+  // Production never falls back to direct provider access.
   private readonly proxyMissing: boolean;
 
   constructor(
-    request: ChannelRequest = globalThis.fetch,
+    request: typeof fetch = globalThis.fetch,
     proxyUrl?: string,
     options: {
       readonly managedProxyHosts?: readonly string[];
       readonly expectProxy?: boolean;
     } = {},
   ) {
-    this.request = channelRequest(request, proxyUrl, options);
+    this.request = request;
     this.proxyMissing = options.expectProxy === true && proxyUrl === undefined;
+    if (proxyUrl !== undefined) {
+      const endpoint = PROXY_ENDPOINT.exec(proxyUrl);
+      const managedEndpoint = MANAGED_SERVICE_PROXY_ENDPOINT.exec(proxyUrl);
+      const address = endpoint?.[1];
+      const managedHost = managedEndpoint?.[1];
+      const managedService =
+        managedHost !== undefined && (options.managedProxyHosts ?? []).includes(managedHost);
+      const port = endpoint?.[2] ?? managedEndpoint?.[4];
+      if (port === undefined || Number(port) > 65535) {
+        throw new Error(
+          "Slack directory proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
+        );
+      }
+      if (!managedService && (address === undefined || isIP(address) !== 4)) {
+        throw new Error(
+          "Slack directory proxy must be an HTTP(S) literal IPv4 endpoint or the exact managed Kubernetes Service endpoint with an explicit port.",
+        );
+      }
+      // The unspecified address cannot identify a managed listener.
+      if (address === "0.0.0.0") {
+        throw new Error(
+          "Slack directory proxy must not use host 0.0.0.0, which names no proxy address.",
+        );
+      }
+      this.proxy = new ProxyAgent(proxyUrl);
+    }
+  }
+
+  enableRouting(): readonly NetworkDestinationRule[] {
+    return ["slack.com", "slack-edge.com", "slack-msgs.com"].flatMap((name) => [
+      { destination: { kind: "dns" as const, name, match: "exact" as const }, ports: [443] },
+      { destination: { kind: "dns" as const, name, match: "subdomains" as const }, ports: [443] },
+    ]);
   }
 
   async validateCredentials(
@@ -134,6 +169,9 @@ export class SlackChannelDriver implements ChannelDriver {
     const slack = asRecord(asRecord(values.channels)?.slack);
     if (slack === undefined || slack.enabled === false) {
       return;
+    }
+    if (this.proxyMissing) {
+      throw new SlackRouteNotConfiguredError();
     }
     const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     // OpenClaw still starts an implicit "default" account from the top-level bot and app
@@ -168,7 +206,6 @@ export class SlackChannelDriver implements ChannelDriver {
         ) {
           throw new ChannelCredentialError("binding_required", field);
         }
-        let unanswered = false;
         await withSecret(ref.id, field, async (value) => {
           if (!(role === "appToken" ? /^xapp-/ : /^xoxb-/).test(value)) {
             throw new ChannelCredentialError("role_mismatch", field);
@@ -194,11 +231,6 @@ export class SlackChannelDriver implements ChannelDriver {
             if (error instanceof ChannelCredentialError) {
               throw error;
             }
-            if (error instanceof SlackUnansweredError && this.proxyMissing) {
-              // Refused below: OCC wraps any other error from this callback as unavailable.
-              unanswered = true;
-              return;
-            }
             throw new ChannelCredentialError(
               error instanceof ChannelDirectoryError &&
                 ["credentials_rejected", "missing_scope"].includes(error.reason)
@@ -208,9 +240,6 @@ export class SlackChannelDriver implements ChannelDriver {
             );
           }
         });
-        if (unanswered) {
-          throw new SlackRouteNotConfiguredError();
-        }
       }
     }
   }
@@ -221,11 +250,14 @@ export class SlackChannelDriver implements ChannelDriver {
     parameters: URLSearchParams,
     signal?: AbortSignal,
   ): Promise<SlackRecord> {
+    if (this.proxyMissing) {
+      throw new SlackRouteNotConfiguredError();
+    }
     const url = new URL(method, SLACK_API);
     if (method !== "auth.test") {
       url.search = parameters.toString();
     }
-    let response: Awaited<ReturnType<ChannelRequest>>;
+    let response: Response | UndiciResponse;
     try {
       const options = {
         method: method === "auth.test" ? "POST" : "GET",
@@ -237,7 +269,11 @@ export class SlackChannelDriver implements ChannelDriver {
             ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
             : AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
       };
-      response = await this.request(url, options);
+      // Node's built-in fetch does not use an external Undici dispatcher.
+      response =
+        this.proxy === undefined
+          ? await this.request(url, options)
+          : await undiciFetch(url, { ...options, dispatcher: this.proxy });
     } catch (error) {
       throw neverAnswered(error)
         ? new SlackUnansweredError()

@@ -6,7 +6,6 @@ interface SiteOverrides extends InputRecord {
   controlPlane?: InputRecord;
   runtime?: InputRecord;
   channels?: InputRecord;
-  proxy?: InputRecord;
   codex?: InputRecord;
   repository?: InputRecord;
 }
@@ -31,7 +30,7 @@ export function baseInput(overrides: SiteOverrides = {}): SiteInput {
       controllerImage: `registry.example.invalid/openclaw-enterprise/controller@sha256:${digestA}`,
       authBaseUrl: "https://console.oce.example.internal",
       adminEmail: "admin@example.invalid",
-      bootstrapPasswordClaimName: "occ-bootstrap-admin-password",
+      bootstrapCredentialsSecretName: "occ-bootstrap-credentials",
       apiClients: [{ namespace: "operator-tools", podLabels: { app: "occ-operator" } }],
       databaseCidrs: ["192.0.2.10/32"],
       clusterCidrs: ["192.0.2.11/32"],
@@ -54,8 +53,10 @@ export function baseInput(overrides: SiteOverrides = {}): SiteInput {
       gatewayNodeSelector: { "oce-role": "control" },
       transportSecretPrefix: "openclaw-agent-transport",
     },
-    channels: {},
-    proxy: { bundled: true },
+    channels: {
+      managedEgress: true,
+      excludedCidrs: ["10.0.0.0/8", "172.16.0.0/12"],
+    },
     ...overrides,
   };
 }

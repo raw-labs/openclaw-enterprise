@@ -19,7 +19,10 @@ import {
   renderProductionChart,
 } from "./production-chart.ts";
 import { createDriver, fixtureComputeConfiguration } from "./kubernetes-compute-real.mjs";
+import { createManagementPolicyControls } from "./production-network-management-access.ts";
 import { createProductionNetworkProbe } from "./production-network-probe.ts";
+
+/** @import { ManagementTenant } from "./production-network-management-access.ts" */
 
 const execute = promisify(execFile);
 const componentLabel = "app.kubernetes.io/component";
@@ -32,6 +35,7 @@ export async function createProductionNetworkAccess(t, { selection, image }) {
   const destinations = `${namespace}-destinations`;
   const envoyNamespace = `${namespace}-envoy`;
   const ownedNamespaces = [];
+  /** @param {...string} args */
   const kubectl = async (...args) =>
     (await kubectlGetJson(selection, args, { timeoutMs: 30_000 })) ??
     (await execute("kubectl", kubectlArguments(selection, args), { timeout: 30_000 })).stdout;
@@ -40,6 +44,7 @@ export async function createProductionNetworkAccess(t, { selection, image }) {
     kubectl,
     waitTimeoutMs: 60_000,
   });
+  /** @returns {Promise<string>} */
   const kubectlWithInput = (args, object) =>
     new Promise((resolve, reject) => {
       const child = execFile(
@@ -269,6 +274,7 @@ export async function createProductionNetworkAccess(t, { selection, image }) {
   );
   const runDir = await temporaryDirectory(t, "oce-network-");
   await symlink(join(quickstart, "kubernetes"), join(runDir, "kubernetes"));
+  /** @param {string} command @param {ManagementTenant} [tenant] */
   const runNetworkHelper = (command, tenant, path = process.env.PATH) =>
     execute(
       "bash",
@@ -304,6 +310,7 @@ export async function createProductionNetworkAccess(t, { selection, image }) {
     metadata: { name, namespace: space },
     spec,
   });
+  /** @type {ManagementTenant[] | undefined} */
   let managementTenants;
   let ownedApiDiscoveryPath;
   async function updateApiEndpointSlice(update) {
@@ -323,102 +330,6 @@ export async function createProductionNetworkAccess(t, { selection, image }) {
     apiEndpointSlice = updated;
   }
   return {
-    async installGatewayProxy(routing) {
-      const documents = await chart({
-        "gatewayProxy.enabled": true,
-        "gatewayRouting.enabled": routing,
-      });
-      const service = documents.find(
-        ({ kind, metadata }) =>
-          kind === "Service" && metadata.name === "openclaw-enterprise-gateway-proxy",
-      );
-      const policies = documents.filter(
-        ({ kind, metadata }) =>
-          kind === "NetworkPolicy" &&
-          [
-            "openclaw-enterprise-gateway-proxy",
-            "openclaw-enterprise-api-managed-gateway-proxy-egress",
-          ].includes(metadata.name),
-      );
-      assert.equal(policies.length, 2);
-      await apply(
-        policies.map((policy) => ({ ...policy, metadata: { ...policy.metadata, namespace } })),
-      );
-      if (!targets.bundledProxy) {
-        targets.bundledProxy = {
-          host: await pod("bundled-proxy", namespace, service.spec.selector, 3128),
-          port: 3128,
-        };
-      }
-      for (const foreign of [false, true]) {
-        const proxyNamespace = foreign ? destinations : namespace;
-        const hostname = `${service.metadata.name}.${proxyNamespace}.svc`;
-        const configured = fixtureComputeConfiguration();
-        if (routing) {
-          delete configured.network.gatewayClients;
-          configured.gatewayRouting = {
-            gatewayNamespace: namespace,
-            gatewayName: "access",
-            envoyNamespace,
-          };
-        }
-        const { driver } = await createDriver({
-          ...configured,
-          runtime: {
-            transportSecretPrefix: "transport",
-            gatewayStorageClassName: "local-path",
-            proxy: {
-              proxyUrl: `http://${hostname}:3128`,
-              managedProxy: {
-                hostname,
-                namespace: proxyNamespace,
-                podLabels: service.spec.selector,
-                port: 3128,
-              },
-            },
-          },
-        });
-        const namespaceId = `ns_${randomUUID()}`;
-        const tenant = driver.gatewayNamespaceManifest({ namespaceId });
-        // Create, never adopt, Driver-owned namespaces. Only the selected proxy differs;
-        // private routing and Gateway Pod labels cannot authorize a foreign Installation.
-        await apply([tenant], "create");
-        ownedNamespaces.push(tenant.metadata.name);
-        const source = `${foreign ? "foreign" : "own"}proxy${routing ? "routed" : "direct"}`;
-        sources[source] = {
-          namespace: tenant.metadata.name,
-          labels: driver.deployment(
-            source,
-            { namespaceId, agentId: `agt_${randomUUID()}` },
-            { name: tenant.metadata.name, plane: "execution" },
-            image,
-            source,
-            "gateway",
-            {},
-            "info",
-            {
-              name: "configuration-one",
-              revision: 1,
-              revisionId: "revision-one",
-              gatewayManagedMode: true,
-              annotations: {},
-            },
-            true,
-            undefined,
-            {
-              loginMode: "api_key",
-              environment: [
-                {
-                  name: "OPENAI_API_KEY",
-                  valueFrom: { secretKeyRef: { name: "model-key", key: "value" } },
-                },
-              ],
-            },
-          ).spec.template.metadata.labels,
-        };
-        await pod(source, tenant.metadata.name, sources[source].labels, 8080);
-      }
-    },
     async installOpenShellManagement(tenantIndex) {
       if (!managementTenants) {
         const api = baseline.find(
@@ -740,67 +651,26 @@ print(json.dumps(payload))
       );
       assert.match(result.stderr, /No ready Kubernetes API endpoint/);
     },
-    async confirmManagementPortControls() {
-      // Change only destination ingress. A successful connection from each caller
-      // proves that its preceding 8081 denial was not caused by source egress.
-      const name = "verify-management-listener";
-      await apply([
-        policy(name, system, {
-          podSelector: { matchLabels: sources.management.labels },
-          policyTypes: ["Ingress"],
-          ingress: [{ ports: [{ protocol: "TCP", port: 8081 }] }],
-        }),
-      ]);
-      try {
-        await Promise.all(
-          [
-            "managementapi",
-            "managementworker",
-            "supervisor0",
-            "gateway0",
-            "supervisor1",
-            "gateway1",
-          ].map((source) => controls(["managementWrongPort"], source)),
-        );
-      } finally {
-        await kubectl("delete", "networkpolicy", "-n", system, name);
-      }
-    },
-    async removeRecordedServicePolicies() {
-      await runNetworkHelper("delete_service_peers");
-      for (const tenant of managementTenants) {
-        const remaining = await kubectl(
-          "get",
-          "networkpolicy",
-          "-n",
-          system,
-          "--ignore-not-found",
-          "-o",
-          "name",
-          "oce-management-from-supervisors-" + kubernetesHash(tenant.id),
-          "oce-management-from-" + kubernetesHash(tenant.agent),
-        );
-        assert.equal(remaining.trim(), "", "uninstall must remove earlier and later tenant grants");
-      }
-    },
-    async withdrawSupervisorGrant(index) {
-      const tenant = managementTenants[index];
-      await kubectl(
-        "delete",
-        "networkpolicy",
-        "-n",
-        "oce-system",
-        "oce-management-from-supervisors-" + kubernetesHash(tenant.id),
-      );
-    },
-    async removeTenantOwnership(index) {
-      await kubectl(
-        "label",
-        "namespace",
-        managementTenants[index].namespace,
-        "openclaw.dev/namespace-",
-      );
-    },
+    ...createManagementPolicyControls({
+      system,
+      allowManagementPort: (name, port) =>
+        apply([
+          policy(name, system, {
+            podSelector: { matchLabels: sources.management.labels },
+            policyTypes: ["Ingress"],
+            ingress: [{ ports: [{ protocol: "TCP", port }] }],
+          }),
+        ]),
+      controls,
+      kubectl,
+      runNetworkHelper,
+      *recordedTenants() {
+        for (const tenant of managementTenants) {
+          yield tenant;
+        }
+      },
+      tenantField: (index, field) => managementTenants[index][field],
+    }),
     async installPublicReaderRevisions() {
       const address = "10.43.0.19";
       const peer = { namespace: destinations, podLabels: { app: "public-reader" }, address };
@@ -911,6 +781,7 @@ print(json.dumps(payload))
       );
       envoyEnabled = phase === "optional";
     },
+    /** @param {Parameters<typeof verifyNetworkAccess>[0]} scenario */
     verify(scenario) {
       return verifyNetworkAccess(scenario, envoyEnabled);
     },

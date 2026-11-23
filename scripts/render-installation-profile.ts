@@ -1,4 +1,5 @@
 /// <reference lib="es2024.string" />
+import type { ChannelEgressOptions } from "../apps/controller/src/drivers/compute/kubernetes/channel-egress-policy.ts";
 import { oidcEnrollmentPolicy } from "../apps/controller/src/auth/oidc-enrollment.ts";
 import { createHash } from "node:crypto";
 import dns from "node:dns/promises";
@@ -12,7 +13,6 @@ import {
   isKubernetesNamespaceName,
   isKubernetesResourceName,
 } from "../apps/controller/src/drivers/compute/kubernetes/resource-name.ts";
-import { isCodexCatalogSource } from "../apps/controller/src/drivers/plugin/catalog-source.ts";
 import { modelEgressWarning } from "../apps/controller/src/drivers/compute/kubernetes/model-egress.ts";
 
 import {
@@ -79,6 +79,7 @@ interface ChatGptValues {
   providerCidr: string;
 }
 interface SecretValues {
+  bootstrap: { adminEmail: string; credentials: { secretName: string } };
   database: { caSecretName?: string; caMountPath?: string };
   repositoryCredentials: RepositoryValues;
   backend?: { chatgpt: ChatGptValues };
@@ -105,11 +106,9 @@ interface ProfileValues extends SecretValues {
   installation: { name: string };
   auth: ExternalSignInValues & { baseUrl: string };
   agentNativeAdmin: { enabled: boolean; domain: string; sessionMode?: string };
-  bootstrap: { adminEmail: string; password: { claimName: string } };
   database: { cidrs: unknown[]; caSecretName?: string; caKey?: string; caMountPath?: string };
   api: {
     clients: { namespace: string; podLabels: InputRecord }[];
-    channelDirectoryProxyUrl?: string;
     modelDiscoveryCidrs: unknown[];
     trustedProxy?: { preset: string; cidrs: unknown[]; clientAddressHeader?: string };
   };
@@ -128,7 +127,8 @@ interface ProfileValues extends SecretValues {
     scraperPodLabels?: InputRecord;
   };
   logging: { collector: { enabled: boolean; exporter?: CollectorExporter } };
-  gatewayProxy: { enabled: boolean; url?: string; allowedHosts?: unknown[] };
+  channelEgress?:
+    (ChannelEgressOptions & { enabled: true; gatewayClassName: string }) | { enabled: false };
   publicGithubRead?: { enabled: boolean; clusterIP: string; upstreamCidrs: unknown[] };
 }
 interface KubernetesDriver {
@@ -164,7 +164,7 @@ interface ComputeConfiguration {
     transportSecretPrefix: string;
     modelProvider?: { protocol: unknown; baseUrl: string; supportsStandaloneWebSearch?: boolean };
     codexSeccompProfile?: string;
-    channels?: { proxyUrl: string; managedProxy?: NetworkPeer & { hostname: string } };
+    channelEgress?: ChannelEgressOptions;
   };
 }
 interface RenderedInstallation {
@@ -201,7 +201,6 @@ interface StringRule {
 }
 interface RenderArguments {
   profile?: string;
-  profileFile?: string;
   input?: string;
   outDir?: string;
 }
@@ -245,8 +244,7 @@ const secretKeyRule = {
   description: "a Kubernetes Secret key of at most 253 characters",
 };
 // Every image field takes a reference Kubernetes can pull, pinned to a lowercase SHA-256
-// digest. controllerImage and repository.image reach the chart, and the controller image
-// also feeds prepare-bootstrap-volume; runtime.image reaches only
+// digest. controllerImage and repository.image reach the chart; runtime.image reaches only
 // KubernetesComputeDriver (installation.yaml images.gateway and images.agent). The chart,
 // Compute and the image tools apply the same imageReferenceProblem rule.
 const digestImage = /@sha256:[a-f0-9]{64}$/;
@@ -262,30 +260,8 @@ function pullableImageReference(value: string) {
 }
 // The chart and Node's URL parser both refuse an octet above 255 and a port above 65535.
 // The shape check alone still matches 192.0.2.999 and port 99999.
-function isLiteralIpv4ProxyUrl(value: string) {
-  const match =
-    /^https?:\/\/((?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}):([1-9][0-9]{0,4})$/.exec(
-      value,
-    );
-  if (!match) {
-    return false;
-  }
-  if (match[1]!.split(".").some((octet) => Number(octet) > 255)) {
-    return false;
-  }
-  const port = Number(match[2]);
-  return Number.isInteger(port) && port <= 65535;
-}
 // Compute and the API's Slack directory also refuse the unspecified address, which names
 // no proxy.
-function gatewayProxyUrl(value: string) {
-  if (!isLiteralIpv4ProxyUrl(value)) {
-    return false;
-  }
-  return /^https?:\/\/0\.0\.0\.0:/.test(value)
-    ? "must not use host 0.0.0.0, which names no proxy address."
-    : true;
-}
 const dnsHostname =
   /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 // Google hosted domains in the shape the API's domainPattern and the chart accept after
@@ -310,7 +286,7 @@ function fail(message: string): never {
 
 function usage() {
   return `Usage: node scripts/render-installation-profile.ts --profile openclaw|codex \\
-  --input <site-inputs.json> --out-dir <rendered-directory> [--profile-file <profile.json>]
+  --input <site-inputs.json> --out-dir <rendered-directory>
 
 The renderer writes values.yaml, installation.yaml, and preflight.json. Missing
 or invalid required inputs write preflight.json and exit nonzero.
@@ -330,8 +306,6 @@ function parseArgs(argv: string[]): RenderArguments {
     };
     if (arg === "--profile") {
       parsed.profile = next();
-    } else if (arg === "--profile-file") {
-      parsed.profileFile = next();
     } else if (arg === "--input") {
       parsed.input = next();
     } else if (arg === "--out-dir") {
@@ -371,64 +345,22 @@ async function readJson(path: string, label: string): Promise<unknown> {
   }
 }
 
-async function readProfile(name: string, profileFile?: string): Promise<Profile> {
-  const diagnostics: Errors = { errors: [] };
+async function readProfile(name: string): Promise<Profile> {
+  const diagnostics = { errors: [] };
   const profile = record(
-    await readJson(
-      profileFile === undefined ? resolve(profilesDir, `${name}.json`) : resolve(profileFile),
-      `profile ${name}`,
-    ),
+    await readJson(resolve(profilesDir, `${name}.json`), `profile ${name}`),
     `profile ${name}`,
     diagnostics,
   );
-  if (profile.name !== name) {
-    fail(`profile ${name} must declare matching name.`);
-  }
-  closed(
-    profile,
-    `profile ${name}`,
-    ["name", "description", "recommendedPreset", "agentHarness", "pluginSelection", "installation"],
-    diagnostics,
-  );
-  for (const key of ["description", "recommendedPreset", "agentHarness", "pluginSelection"]) {
-    asString(profile, [`profile ${name}`, key], diagnostics);
-  }
-  const installation = record(profile.installation, "profile.installation", diagnostics);
-  closed(installation, "profile.installation", ["drivers"], diagnostics);
-  const drivers = record(installation.drivers, "profile.installation.drivers", diagnostics);
-  closed(drivers, "profile.installation.drivers", ["plugin"], diagnostics);
   if (diagnostics.errors.length > 0) {
     fail(diagnostics.errors.join("\n"));
   }
-  if (!Array.isArray(drivers.plugin) || drivers.plugin.length === 0) {
-    fail("profile.installation.drivers.plugin must be a nonempty array.");
+  if (profile.name !== name) {
+    fail(`profile ${name} must declare matching name.`);
   }
-  for (const [index, selected] of drivers.plugin.entries()) {
-    const path = `profile.installation.drivers.plugin[${index}]`;
-    const plugin = record(selected, path, diagnostics);
-    closed(plugin, path, ["id", "configuration"], diagnostics);
-    if (plugin.id !== "occ-plugin" && plugin.id !== "codex-plugin") {
-      diagnostics.errors.push(`${path}.id must select occ-plugin or codex-plugin.`);
-    }
-    if (plugin.configuration === undefined) {
-      plugin.configuration = {};
-    } else {
-      record(plugin.configuration, `${path}.configuration`, diagnostics);
-    }
-    if (diagnostics.errors.length > 0) {
-      fail(diagnostics.errors.join("\n"));
-    }
-    const configuration = record(plugin.configuration, `${path}.configuration`, diagnostics);
-    if (
-      plugin.id === "codex-plugin" &&
-      !isCodexCatalogSource(
-        configuration.catalogSource === undefined ? "hosted" : configuration.catalogSource,
-      )
-    ) {
-      fail(`${path}.configuration.catalogSource must be hosted or openai-curated.`);
-    }
+  if (profile.name === "default") {
+    fail("default is not an installation profile.");
   }
-
   return profile as Profile;
 }
 
@@ -791,7 +723,7 @@ function validateDatabaseCaMount(values: SecretValues, diagnostics: Errors) {
   const reserved = new Set([
     "/etc/openclaw/installation",
     "/run/openclaw-worker",
-    "/var/lib/openclaw/bootstrap",
+    "/run/openclaw-bootstrap",
     "/etc/openclaw/gateway-api-key",
     "/etc/openclaw/gateway-ca",
   ]);
@@ -927,7 +859,7 @@ function labelSyntax(
   return labels;
 }
 
-// Kubernetes node selector labels: the chart and prepare-bootstrap-volume apply this rule to
+// Kubernetes node selector labels: the chart applies this rule to
 // controlPlane.nodeSelector, and Kubernetes applies it to every Pod's nodeSelector, so the
 // runtime selectors in Installation configuration follow it too. Kubernetes allows empty
 // label values, as in `node-role.kubernetes.io/infra: ""`.
@@ -1217,11 +1149,10 @@ function renderOidc(source: InputRecord, diagnostics: Errors) {
       "an https URL on port 443 with a DNS host name and no query or fragment, written without a port",
   });
   rendered.issuer = issuer;
-  const host = oidcEndpointHost(issuer, { issuer: true });
   for (const key of ["authorizationUrl", "tokenUrl", "jwksUrl"] as const) {
     rendered[key] = asString(source, [...path, key], diagnostics, {
-      validate: (value) => host === undefined || oidcEndpointHost(value) === host,
-      description: "an https URL on port 443 on the issuer's host, with no query or fragment",
+      validate: (value) => oidcEndpointHost(value) !== undefined,
+      description: "an https URL on port 443 with a DNS host name and no query or fragment",
     });
   }
   const tokenAuth = optionalString(source, [...path, "tokenAuth"], diagnostics, {
@@ -1396,21 +1327,11 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
   closed(
     input,
     "input",
-    [
-      "controlPlane",
-      "runtime",
-      "proxy",
-      "channels",
-      "codex",
-      "repository",
-      "publicGithubRead",
-      "presets",
-    ],
+    ["controlPlane", "runtime", "channels", "codex", "repository", "publicGithubRead", "presets"],
     diagnostics,
   );
   const controlPlane = section(input, "controlPlane", diagnostics);
   const runtime = section(input, "runtime", diagnostics);
-  const proxy = section(input, "proxy", diagnostics, false);
   const channels = section(input, "channels", diagnostics, false);
   const codex = section(input, "codex", diagnostics, false);
   const repository = section(input, "repository", diagnostics, false);
@@ -1433,10 +1354,11 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
       "controllerImage",
       "authBaseUrl",
       "adminEmail",
-      "bootstrapPasswordClaimName",
+      "bootstrapCredentialsSecretName",
       "apiClients",
       "databaseCidrs",
       "clusterCidrs",
+      "clusterPort",
       "dns",
       "gatewayClassName",
       "gatewayApiKeySecretName",
@@ -1472,16 +1394,7 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
     ],
     diagnostics,
   );
-  closed(proxy, "proxy", ["url", "bundled", "allowedHosts"], diagnostics);
-  for (const [retired, replacement] of [
-    ["runtimeProxyUrl", "proxy.url"],
-    ["managedSlackProxy", "proxy.bundled"],
-  ] as const) {
-    if (Object.hasOwn(channels, retired)) {
-      diagnostics.errors.push(`channels.${retired} was removed; use ${replacement}.`);
-    }
-  }
-  closed(channels, "channels", ["directoryProxyUrl", "experimentalEmbeddedChannels"], diagnostics);
+  closed(channels, "channels", ["managedEgress", "excludedCidrs"], diagnostics);
   closed(codex, "codex", ["managedServiceAccounts", "modelDiscoveryCidrs"], diagnostics);
   closed(
     repository,
@@ -1565,7 +1478,6 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
   return {
     controlPlane,
     runtime,
-    proxy,
     channels,
     codex,
     repository,
@@ -1635,6 +1547,7 @@ function dedicatedSecrets(
   ]);
   const repository = values.repositoryCredentials;
   const fields: (readonly [string, string | undefined, string?])[] = [
+    ["controlPlane.bootstrapCredentialsSecretName", values.bootstrap.credentials.secretName],
     ...(values.backend?.chatgpt?.enabled
       ? [
           [
@@ -1759,7 +1672,6 @@ function buildRendered(
   const {
     controlPlane,
     runtime,
-    proxy,
     channels,
     codex,
     repository,
@@ -1860,25 +1772,28 @@ function buildRendered(
     optionalString(controlPlane, ["controlPlane", "envoyNamespace"], diagnostics, namespaceRule) ??
     "envoy-gateway-system";
   const repositoryEnabled = asBoolean(repository, ["repository", "enabled"], diagnostics, false);
-  const bundledProxyEnabled = asBoolean(proxy, ["proxy", "bundled"], diagnostics);
-  const bundledProxyHost = `openclaw-enterprise-gateway-proxy.${namespace}.svc`;
-  const experimentalEmbeddedChannels = asBoolean(
+  const managedEgressEnabled = asBoolean(
     channels,
-    ["channels", "experimentalEmbeddedChannels"],
+    ["channels", "managedEgress"],
     diagnostics,
+    true,
   );
-  const embeddedChannelOptions =
-    channels.experimentalEmbeddedChannels === undefined ? {} : { experimentalEmbeddedChannels };
-  if (experimentalEmbeddedChannels) {
-    if (!bundledProxyEnabled && proxy.url === undefined) {
-      diagnostics.errors.push(
-        "channels.experimentalEmbeddedChannels requires proxy.url or proxy.bundled.",
-      );
-    }
-    diagnostics.warnings.push(
-      "Experimental embedded channels share channel and model credentials with Agent execution and are unsupported for production.",
-    );
-  }
+  const channelEgress: ChannelEgressOptions | undefined = managedEgressEnabled
+    ? {
+        gatewayName: "openclaw-channel-egress",
+        gatewayNamespace: namespace,
+        envoyNamespace,
+        serviceName: "openclaw-channel-egress",
+        listenerPortStart: 10001,
+        listenerPortEnd: 10062,
+        occListenerPort: 10000,
+        inspectionPort: 19004,
+        excludedCidrs: stringArray(channels, ["channels", "excludedCidrs"], diagnostics, {
+          validate: isCidr,
+          description: "a canonical installation network CIDR",
+        }) as string[],
+      }
+    : undefined;
   if (profile.name === "openclaw" && Object.keys(codex).length > 0) {
     diagnostics.errors.push("codex inputs are only consumed by the codex profile.");
   }
@@ -1892,42 +1807,6 @@ function buildRendered(
       "repository fields other than enabled are only consumed when repository.enabled is true.",
     );
   }
-  if (bundledProxyEnabled && proxy.url !== undefined) {
-    diagnostics.errors.push("proxy.url and proxy.bundled are mutually exclusive.");
-  }
-  if (!bundledProxyEnabled && proxy.allowedHosts !== undefined) {
-    diagnostics.errors.push("proxy.allowedHosts requires proxy.bundled.");
-  }
-  const allowedHosts =
-    proxy.allowedHosts === undefined
-      ? undefined
-      : stringArray(proxy, ["proxy", "allowedHosts"], diagnostics, {
-          nonempty: false,
-          validate: (host) =>
-            host === "*" ||
-            (host.length <= 253 &&
-              /^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
-                host,
-              )),
-          description: "a lowercase DNS name with optional *. prefix, or * for all hosts",
-        });
-  if (allowedHosts !== undefined && allowedHosts.length > 256) {
-    diagnostics.errors.push("proxy.allowedHosts allows at most 256 entries.");
-  }
-  const externalProxyUrl =
-    proxy.url === undefined
-      ? undefined
-      : asString(proxy, ["proxy", "url"], diagnostics, {
-          validate: gatewayProxyUrl,
-          description: "an HTTP(S) literal IPv4 endpoint with an explicit port",
-        });
-  const directoryProxyUrl =
-    channels.directoryProxyUrl === undefined
-      ? undefined
-      : asString(channels, ["channels", "directoryProxyUrl"], diagnostics, {
-          validate: gatewayProxyUrl,
-          description: "an HTTP(S) literal IPv4 endpoint with an explicit port",
-        });
   if (
     codex.managedServiceAccounts !== undefined &&
     Object.keys(managedServiceAccounts).length === 0
@@ -1941,6 +1820,13 @@ function buildRendered(
       "controlPlane.metrics requires both scraperNamespaceLabels and scraperPodLabels, or neither.",
     );
   }
+
+  const clusterPort = optionalPositiveInteger(
+    controlPlane,
+    ["controlPlane", "clusterPort"],
+    diagnostics,
+    { max: 65535 },
+  );
 
   // Same rule the controller applies to Installation observability.url at startup, including
   // its refusal of any @ before the host (http://@host).
@@ -2015,14 +1901,14 @@ function buildRendered(
         validate: administratorEmail,
         description: "a valid administrator email",
       }),
-      password: {
-        claimName: asString(
+      credentials: {
+        secretName: asString(
           controlPlane,
-          ["controlPlane", "bootstrapPasswordClaimName"],
+          ["controlPlane", "bootstrapCredentialsSecretName"],
           diagnostics,
           {
             validate: isKubernetesResourceName,
-            description: "a PVC name: a DNS subdomain of at most 253 characters",
+            description: "a precreated Secret name: a DNS subdomain of at most 253 characters",
           },
         ),
       },
@@ -2058,7 +1944,6 @@ function buildRendered(
     },
     api: {
       clients: clientSelectors(controlPlane, diagnostics),
-      ...(directoryProxyUrl === undefined ? {} : { channelDirectoryProxyUrl: directoryProxyUrl }),
       modelDiscoveryCidrs:
         profile.name === "codex" && codex.modelDiscoveryCidrs !== undefined
           ? stringArray(codex, ["codex", "modelDiscoveryCidrs"], diagnostics, {
@@ -2076,6 +1961,7 @@ function buildRendered(
         validate: (value) => isIpv4Cidr(value, 32),
         description: "an IPv4 /32 CIDR",
       }),
+      ...(clusterPort === undefined ? {} : { port: clusterPort }),
     },
     controlPlane: {
       ...(controlPlane.nodeSelector === undefined
@@ -2134,11 +2020,19 @@ function buildRendered(
     repositoryCredentials: {
       enabled: repositoryEnabled,
     },
-    gatewayProxy: {
-      enabled: bundledProxyEnabled,
-      ...(externalProxyUrl === undefined ? {} : { url: externalProxyUrl }),
-      ...(allowedHosts === undefined ? {} : { allowedHosts }),
-    },
+    ...(channelEgress === undefined
+      ? { channelEgress: { enabled: false } }
+      : {
+          channelEgress: {
+            ...channelEgress,
+            enabled: true,
+            gatewayClassName: asString(
+              controlPlane,
+              ["controlPlane", "gatewayClassName"],
+              diagnostics,
+            ),
+          },
+        }),
   };
 
   const installation: RenderedInstallation = {
@@ -2199,7 +2093,7 @@ function buildRendered(
               limits: { cpu: "4", memory: "6Gi" },
             },
             namespace: {
-              quota: { pods: "10" },
+              quota: { pods: "20" },
               containerDefaults: {
                 requests: { cpu: "100m", memory: "128Mi" },
                 limits: { cpu: "4", memory: "2Gi" },
@@ -2275,28 +2169,7 @@ function buildRendered(
                   ),
                 }
               : {}),
-            ...(bundledProxyEnabled
-              ? {
-                  proxy: {
-                    proxyUrl: `http://${bundledProxyHost}:3128`,
-                    ...embeddedChannelOptions,
-                    managedProxy: {
-                      hostname: bundledProxyHost,
-                      namespace,
-                      podLabels: {
-                        "app.kubernetes.io/name": "openclaw-enterprise",
-                        "app.kubernetes.io/instance": releaseName,
-                        "app.kubernetes.io/component": "gateway-proxy",
-                      },
-                      port: 3128,
-                    },
-                  },
-                }
-              : externalProxyUrl === undefined
-                ? {}
-                : {
-                    proxy: { proxyUrl: externalProxyUrl, ...embeddedChannelOptions },
-                  }),
+            ...(channelEgress === undefined ? {} : { channelEgress }),
           },
         },
       },
@@ -2512,23 +2385,16 @@ function buildRendered(
       );
     }
   }
-  if (
-    profile.installation.drivers.plugin.some(
-      (entry) =>
-        entry.id === "codex-plugin" &&
-        (entry.configuration?.catalogSource ?? "hosted") === "hosted",
-    )
-  ) {
-    diagnostics.prerequisites.push(
-      "Hosted plugin discovery requires a PAT supplied later through a Namespace Secret or the Console; the renderer does not create or verify that credential.",
-    );
-  }
   if (profile.name === "codex") {
     diagnostics.prerequisites.push(
       "Configured Codex seccomp profile installed and verified on every node selected by runtime.nodeSelector.",
-      "Codex runtime credentials configured per Agent; the renderer does not create or verify model credentials.",
+      "Hosted discovery and codex_pat runtime tokens stored later as Namespace Secrets or entered in the Console; the renderer does not create or verify those credentials.",
     );
-    if (Object.keys(managedServiceAccounts).length > 0) {
+    if (Object.keys(managedServiceAccounts).length === 0) {
+      diagnostics.warnings.push(
+        "Managed ChatGPT service-account issuance is not configured; Codex Agents must use an existing codex_pat token until backend provisioning is supplied and verified.",
+      );
+    } else {
       diagnostics.prerequisites.push(
         "ChatGPT service-account app connections configured outside OCE before Agents select a managed ServiceAccount as their codex_pat source.",
       );
@@ -2537,12 +2403,12 @@ function buildRendered(
       );
     }
   }
-  if (bundledProxyEnabled) {
+  if (managedEgressEnabled) {
     diagnostics.prerequisites.push(
-      "The bundled Gateway proxy permits only configured hostnames on TCP 443 and public IPv4 egress, excluding private and reserved ranges.",
+      "Enable Envoy Gateway EnvoyPatchPolicy support and qualify the dedicated channel egress fleet before activating channels.",
     );
     diagnostics.nextSteps.push(
-      `The bundled Gateway proxy is ${bundledProxyHost}:3128. Configure proxy.allowedHosts for the integrations you enable; Slack credentials remain Agent-owned.`,
+      `Channel Gateways receive their assigned Envoy listener; OCC uses openclaw-channel-egress.${envoyNamespace}.svc:10000.`,
     );
   }
   if (repositoryEnabled) {
@@ -2556,8 +2422,9 @@ function buildRendered(
 
   diagnostics.nextSteps.push(
     `Create or update the ${namespace}/occ-installation-startup Secret from installation.yaml.`,
+    `Precreate the ${namespace}/${values.bootstrap.credentials.secretName} Secret with admin-password and admin-service-key before installing Helm.`,
     `Run helm upgrade --install ${releaseName} deploy/helm/openclaw-enterprise --namespace ${namespace} --values values.yaml.`,
-    "Retrieve the bootstrap service key from the protected bootstrap PVC and verify authenticated OCC access.",
+    "Verify authenticated OCC access with the retained service key after initialization.",
   );
 
   const backendIds = new Set();
@@ -2687,20 +2554,16 @@ export async function renderInstallationProfile(args: RenderArguments) {
     preflight: resolve(outDir, "preflight.json"),
   };
   // Check file identity before cleanup, including symlink and case-insensitive aliases.
-  if (
-    [args.input, args.profileFile]
-      .filter((path): path is string => path !== undefined)
-      .some((input) => Object.values(output).some((path) => sameProfileFile(resolve(input), path)))
-  ) {
+  if (Object.values(output).some((path) => sameProfileFile(resolve(args.input!), path))) {
     fail(
-      "--input must not name a generated output file; --profile-file must not name one either; choose another input name or output directory.",
+      "--input must not name a generated output file; choose another input name or output directory.",
     );
   }
   // A failed rerender must not expose artifacts or a success report from a prior run.
   await Promise.all(Object.values(output).map((path) => rm(path, { force: true })));
   const diagnostics: Diagnostics = { errors: [], warnings: [], prerequisites: [], nextSteps: [] };
   const [profile, rawInput] = await Promise.all([
-    readProfile(args.profile!, args.profileFile),
+    readProfile(args.profile!),
     readJson(resolve(args.input), "input"),
   ]);
   const parsed = buildInput(rawInput, diagnostics);

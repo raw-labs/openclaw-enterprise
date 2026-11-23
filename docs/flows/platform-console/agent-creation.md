@@ -1,7 +1,7 @@
 ---
 created: 2026-10-20
-updated: 2026-11-15
-last_updated_session: authoring-run/804dcfff-1adf-4a8e-96ba-47e3b5e122ff
+updated: 2026-11-22
+last_updated_session: authoring-run/0af8b944-e54e-4170-939f-bc90ca8b2967
 ---
 
 # Console Agent creation
@@ -18,7 +18,7 @@ user-visible behavior.
 
 - `apps/controller/src/console/agents/create.mts:renderCreateAgent` renders the
   form (`renderAgentForm`) and submits it.
-- `apps/controller/src/console/agents/plugin-fields.mjs:createPluginFields` and
+- `apps/controller/src/console/agents/plugin-fields.mts:createPluginFields` and
   `agents/repositories.mts:createRepositoryFields` supply the plugin and repository fields.
 - A signed-in caller with Namespace Agent `create`; each write is authorized again.
 
@@ -65,6 +65,11 @@ field lists it disabled with its reason and never stages it; the Preset's **Use 
 list does the same, and **Use Preset** refuses it. A permission reread, a refused create or an
 inline Secret create reads the answer again. A failed read keeps the last answer, or marks
 none before any answer.
+
+`secret-picker.mts:bindSecret` waits for the permission answer. During a model Secret
+choice, `renderAgentForm` blocks submission. A provider or authentication method change
+calls `clearModelCredential`, which clears the choice and its hint. A late answer cannot
+restore that choice or replace a newer one. Accepting a choice marks the draft as edited.
 
 ### 2. Choose a model and starter Configuration
 
@@ -175,6 +180,17 @@ it sent, and the Agent name, Namespace and Configuration. Before granting creden
 reads that Agent and confirms its service principal matches the create response. A mismatch
 stops the grant; **Retry credential access** reads the saved Agent again without recreating it.
 An unrecognized success leaves the outcome unknown and blocks another create.
+On an ordinary Agent POST `403`, `create.mts:agentSaveAccessReason` compares
+the complete API denial with the request. It checks Agent create in this Namespace,
+Configuration read on the saved ID, and Configuration update for browser setup.
+It names Secret operate or ServiceAccount read for the selected Harness reference,
+or CredentialSource operate for a submitted source. An unnamed Secret refusal
+identifies the permission alone. Other denials stay generic. Members can ask an
+Installation administrator to check access. Administrators can review grants and
+IAM Restrictions. The alert keeps the request ID. Once access changes, a manual
+**Create Agent** retry in this draft reuses the Configuration.
+**Cancel** warns that the saved Configuration remains and a fresh draft can save
+another. An uncertain Agent write stays locked.
 For an uncertain Credential Source registration, **Check credential registration** reads
 the source for this request and confirms its type and Secret references before continuing.
 After a known registration refusal, empty checks retain the refusal and the saved Secret.
@@ -196,7 +212,7 @@ no IAM request and opens the saved draft: the member's
 After a refused Installation read, **Your access** shows whether Agent `create`
 is allowed, refused, or unchecked. When allowed,
 `create.mts:loadNamespaceCapabilities` reads `GET /namespaces/:namespaceId/agent-capabilities`.
-`packages/occ/src/index.ts:getNamespaceAgentCapabilities` checks
+`packages/occ/src/installation-capabilities.ts:getNamespaceAgentCapabilities` checks
 [Agent `create` on the requested collection](../../reference/authorization.md#authorization-decisions)
 before resolving that Namespace by ID. The API returns `403` on denial and `404`
 if an authorized request names a missing Namespace. The lookup needs no
@@ -222,8 +238,9 @@ Switching methods hides that feedback without changing the lookup or saved choic
 
 ## Debugging and Verification
 
-- `tests/browser/console-agents.test.ts`, `console-agent-presets.test.ts`, and
-  `console-agent-repositories.test.ts` exercise the form against the real controller.
+- `tests/browser/console-agents.test.ts`, `console-agent-presets.test.ts`,
+  `console-agent-repositories.test.ts`, and `console-create-agent-member.test.ts`
+  exercise the form against the real controller.
 - A refused write shows the API's reason and a request ID; inspect saved
   Configuration and Agent IDs before retrying.
 
@@ -239,7 +256,10 @@ Switching methods hides that feedback without changing the lookup or saved choic
 
 ## Changelog
 
-- 2026-11-15 09:16: Preserve authored native Codex settings after unfinished JSON and Harness round trips in the accompanying fix. (authoring-run/804dcfff-1adf-4a8e-96ba-47e3b5e122ff - d449d78c38d528a220e582ad38d383a978310f9a)
+- 2026-11-22 12:45:07 UTC: Trace matched Agent-save permission refusals, conditional same-draft retry, unknown outcomes, and the saved Configuration warning on Cancel. (authoring-run/0af8b944-e54e-4170-939f-bc90ca8b2967 - e46d3a6401a2b9040ac6001555baad26356c70a3)
+- 2026-11-22 10:40: Trace pending and canceled model Secret choices. (authoring-run/cb3a3926-c616-4777-9f78-5da17d6d53bc - 0706f806d51c60465533b087ae9d0db5c87bc896)
+- 2026-11-20 19:04: Refresh sources. (authoring-run/8a8bde8b-71de-4de5-80bf-e32f0e335c34 - 220f62d86ceb3dfc6f66dbee7c6f86cda50e5d05)
+- 2026-11-18 10:15: Preserve authored `plugins.allow`, `plugins.deny` and an explicitly disabled native Codex entry across Harness switches, including unfinished JSON recovery. (authoring-run/658e4f7a-f9c1-4bea-8723-f9dfe9053b2f - 27aa612d2bafd819c734942d59125084a6c658eb)
 
 - 2026-11-13 05:52: Trace Configuration Driver admission and cross-Namespace Secret binding checks before Agent creation saves resources. (authoring-run/09e9dfc6-0460-4492-905d-33d9fe7b60d4 - 4ecf71da20e0606cb4f78fc90551462af11b4981)
 
@@ -252,13 +272,8 @@ Switching methods hides that feedback without changing the lookup or saved choic
 - 2026-11-11 19:04: Keep ordinary Gateway model delivery independent of Git Proxy selection. (authoring-run/1e8e6ab1-7c1b-4d49-a362-2dc060e32bbb - aea0cb511)
 
 - 2026-11-10 13:36: Show a confirmed repository-only Credential Proxy requirement before provisioning. (authoring-run/f0decdaf-c71f-47f9-b2e5-c5bd6b1dfee1 - 07c2a00c82e8a10635533eb1a27b110b52b90f14)
-- 2026-11-08 09:34: Preserve authored plugin permissions and the disabled Codex entry while merging Namespace capability discovery. (authoring-run/f474f795-758c-4b42-8835-1bdcf14162fa - 7db5638975981ec1400f1a4ba52da77d5fd33dce)
-
 - 2026-11-05: A member reads the Namespace's Agent capabilities after a refused Installation read, registers a model Secret with a Credential Gateway, and opens the draft without an IAM request. (claude/session_01HzmRt1DGB79VEnEWHt7PRy)
 - 2026-11-05 18:37: Explain the Configuration number range refusal on Create. (authoring-run/d006a89e-c176-48cc-8710-16d38835bbb9 - 5fd3fde4911e1640c354d69bb09f6f3d72445a05)
-- 2026-11-05 13:00: Retain upstream malformed-policy guards while preserving authored allow/deny lists through Harness changes. (authoring-run/e403cb92-13a9-40b8-a636-6922c2747638 - 71d3a9d7a5385839159672c5152ee42848e9a46c)
-
-- 2026-11-05 08:55: Preserve Harness-switch permissions and use existing server admission, including disabled Codex entry acceptance. (authoring-run/878b2a70-223a-4813-9763-0f2a7051f8bd - 65dc3e90e)
 - 2026-11-04 22:06: Explain which Create Agent settings stay in place when an invalid plugin list blocks a Codex change. (authoring-run/386aa943-15cf-49cd-b53e-05831b4a7da0 - e109eba64ea0e81c02513f81f9c892a832dc1b69)
 - 2026-10-25: The per-Secret `operate` remedy names an exact-Secret grant; the Agents list gives Create Agent's next step when Agent create is denied. (findings 2507, 2508)
 - 2026-10-25: Refuse a typed model key, and disable the Preset's **Create new Secret**, where `operate` is denied on a readable Secret. (fix-2492, finding 2492)
@@ -271,7 +286,5 @@ Switching methods hides that feedback without changing the lookup or saved choic
 - 2026-10-25 00:55: Name "no Sandbox Driver selected" as the reason Dedicated OpenClaw is disabled when the Installation lists Embedded. (finding 2384)
 - 2026-10-25 00:30: Treat repository options with `meta.notConfigured` like the fixed-composition 503. (finding 2387)
 - 2026-10-24 19:00: Check the Agent name and initial workspace files with the API's rules before any write. (fix-2339-2341)
-- 2026-10-24 10:33: Preserve an explicit Codex disable through Harness switches and explain the required repair before creation. (authoring-run/01899543-402d-43ab-86e0-b54e3afdd9ad - e699c55f8)
 - 2026-10-22 10:56: Confirm creation responses before granting access or continuing provisioning. (console-create-delivery-20261022 - eef3442ff)
-- 2026-10-21 16:25: Preserve authored native plugin permissions across Harness selection and explain explicit repairs for conflicts refused before writes. (Codex/01a12fe8-d0c6-7df1-937d-364a1301566a - bac4fdd4f)
 - 2026-10-20 05:00: Split from the platform console flow's step 3. (docs-split-1020)

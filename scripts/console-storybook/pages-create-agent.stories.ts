@@ -12,6 +12,7 @@ export const FormNamespaceBecomesReady = story("createFormNamespaceBecomesReady"
 export const FormNamespaceFailed = story("createFormNamespaceFailed");
 export const FormNamespaceMissing = story("createFormNamespaceMissing");
 export const CreateForm = { ...story("createForm"), name: "OpenAI with Codex harness" };
+export const CreateModelSecretPending = story("createModelSecretPending");
 export const CreateNativeAdmin = story("createNativeAdmin");
 export const CreateMemberBrowserChat = story("createMemberBrowserChat");
 export const CreateNativeAdminSelected = story("createNativeAdminSelected");
@@ -24,6 +25,10 @@ export const CreateSecretOperateDenied = {
   ...story("createSecretOperateDenied"),
   name: "Secret operate not permitted",
 };
+export const CreateAgentSaveRefused = story("createAgentSaveRefused");
+export const CreateAgentSaveConfigurationReadRefused = story(
+  "createAgentSaveConfigurationReadRefused",
+);
 export const CreateRepositoryOnlyCredentialProxy = story("createRepositoryOnlyCredentialProxy");
 export const CreateRepositoryNotConfigured = {
   ...story("createRepositoryNotConfigured"),
@@ -204,11 +209,6 @@ export const RepositoryRecovery = {
   name: "Reselect repositories after rejection",
 };
 export const CreatePreset = { ...story("createPreset"), name: "Preset variables" };
-export const CreateCustomPresetStarter = {
-  ...story("createCustomPresetStarter"),
-  name: "Custom Preset quick-start",
-};
-export const CreatePresetNameTie = story("createPresetNameTie");
 export const CreateBoundCredentialPreset = {
   ...story("createBoundCredentialPreset"),
   name: "Preset with saved model credential",

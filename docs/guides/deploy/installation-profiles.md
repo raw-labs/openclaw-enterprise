@@ -15,15 +15,14 @@ rendering does not verify cluster readiness.
 
 Use `openclaw` for embedded OpenClaw Agents with the bundled OpenClaw
 PluginDriver. Operators select plugins manually or through the API. Embedded
-OpenClaw refuses external channels by default. The unsupported-production
-[embedded-channel trial](../integrations/embedded-channel-trial.md#enable-the-trusted-option)
-accepts trusted `channels.experimentalEmbeddedChannels: true` with a runtime proxy.
+OpenClaw cannot enable external Slack channels; the Standard OpenClaw preset
+must leave channels disabled.
 
-Use `codex` for dedicated Codex Agents with the bundled Codex PluginDriver. Its
-stock hosted catalog needs a PAT supplied later through a same-Namespace Secret
-or the Console. Runtime authentication is selected per Agent; see
-[Harness authentication](../../reference/agents.md#harness-authentication).
-The renderer does not create credentials or verify catalog discovery.
+Use `codex` for dedicated Codex Agents with the bundled Codex PluginDriver. By
+default, hosted plugin discovery and Codex runtime authentication both use a
+`codex_pat` token that you supply later: add a same-Namespace Secret or enter
+the PAT during Agent creation. The renderer does not create the token or make
+catalog discovery ready.
 
 Both profiles enable:
 
@@ -74,9 +73,16 @@ Seeding both Presets does not change the profile's PluginDriver. An Agent
 created from the other profile's Preset still needs a compatible driver,
 runtime, harness mode, credentials, and channel support.
 
-To add custom Presets or disable bundled seeding, follow
-[Configure Preset seeding](custom-installation-profiles.md#configure-preset-seeding).
-Disabling seeding preserves saved copies.
+To seed additional Presets, add `"presets": { "files": ["/app/deploy/presets/swe-preset.json"] }`
+to the input JSON and rerender. This example adds **SWE Agent** alongside the
+standard Presets. Both controller processes must be able to read the files at
+startup; the renderer validates the list but does not read container files. See
+[Preset initialization](../../reference/presets.md#installation-defaults) for path
+resolution and startup validation.
+
+Set `presets.includeDefaults` to `false` (default `true`) to seed only the
+listed files; saved Presets remain. To keep **Start with default Preset**, name
+your starter Preset `default-codex`.
 
 Repository support is optional. When enabled, the renderer wires the broker
 container, GitHub Backend, Repo Driver, and Compute peer. The repository registry
@@ -106,7 +112,7 @@ one `@` and a dotted domain.
     "controllerImage": "registry.example/openclaw-enterprise/controller@sha256:<64-hex>",
     "authBaseUrl": "https://console.example.internal",
     "adminEmail": "admin@example.invalid",
-    "bootstrapPasswordClaimName": "occ-bootstrap-admin-password",
+    "bootstrapCredentialsSecretName": "occ-bootstrap-credentials",
     "apiClients": [{ "namespace": "operator-tools", "podLabels": { "app": "operator" } }],
     "databaseCidrs": ["10.45.0.12/32"],
     "clusterCidrs": ["10.43.0.1/32"],
@@ -125,9 +131,14 @@ one `@` and a dotted domain.
     "gatewayNodeSelector": { "oce-role": "control" },
     "transportSecretPrefix": "openclaw-agent-transport"
   },
-  "proxy": { "bundled": true }
+  "channels": {
+    "managedEgress": true,
+    "excludedCidrs": ["10.42.0.0/16", "10.43.0.0/16", "192.0.2.10/32"]
+  }
 }
 ```
+
+Optional `controlPlane.clusterPort` sets the Kubernetes API egress port (default 443).
 
 `controlPlane.gatewayClassName`, `controlPlane.gatewayApiKeySecretName` and
 `controlPlane.databaseCa.secretName` must be Kubernetes resource names of at
@@ -194,10 +205,8 @@ With hosted `codex-plugin`, omitted `codex.modelDiscoveryCidrs` resolves
 `api.modelDiscoveryCidrs`. This grants only release API Pods TCP 443 to those
 IPv4 `/32` hosts.
 
-Only the `codex` family accepts `codex.modelDiscoveryCidrs`. Supplied lists skip
-DNS; `[]` requires external HTTPS policy for both hosts. An `openclaw` profile
-selecting hosted `codex-plugin` always requires DNS; it has no offline CIDR input.
-Curated discovery needs no DNS. DNS failure leaves both YAML files absent.
+Supplied lists stay unchanged without DNS queries; `[]` requires an external
+HTTPS policy for both hosts. DNS failure leaves both YAML files absent.
 
 Verify API Pod DNS/NAT destinations and **Load plugins** with an authorized PAT.
 Rerender and upgrade Helm after address changes; this initial snapshot does not
@@ -212,6 +221,8 @@ see [OIDC setup](oidc-sign-in.md). Both require an HTTPS Console origin and the
 existing `recoveryUserId`. Google disables native access; OIDC supports it. To use host-only exchange,
 set `controlPlane.agentNativeAdminSessionMode: "host-only-exchange"` and use
 same-site HTTPS Console and Agent domains.
+
+For Keycloak, start with the [production profile example](oidc-keycloak.md#render-the-production-profile).
 
 Use `controlPlane.oidc.enrollment` for the
 [enrollment policy](../../reference/authentication/team-enrollment.md), including
@@ -228,7 +239,7 @@ through a shared proxy address. A source-preserving load balancer needs no prese
 
 Client-ID and client-secret Secret keys must differ; an omitted key counts as
 the chart default (`client-id` or `client-secret`).
-As the chart requires, each credential Secret is dedicated: a sign-in
+Each credential Secret is dedicated: `bootstrapCredentialsSecretName`, a sign-in
 `secretName` (default `occ-google-login` or `occ-oidc-login`),
 `gatewayApiKeySecretName`, `databaseCa.secretName` (which may equal
 `repository.publicCaSecretName`), the ChatGPT admin Secret (with
@@ -292,9 +303,6 @@ node scripts/render-installation-profile.ts \
   --out-dir .build/profile-renders/codex
 ```
 
-For trusted PluginDriver overrides, follow
-[Customize installation profiles](custom-installation-profiles.md). Invalid profiles fail without fallback.
-
 On success, the output directory contains:
 
 - `values.yaml`: Helm values for `deploy/helm/openclaw-enterprise`, including
@@ -305,13 +313,13 @@ On success, the output directory contains:
 - `preflight.json`: rendered output paths, warnings, prerequisites, and next
   steps.
 
-Use a separate input and profile file. Symbolic or hard links to these outputs are also
+Use a separate input file. Symbolic or hard links to these outputs are also
 refused without changing existing files. An `input.json` can remain in the output directory.
 
 After these checks, the renderer clears the three outputs before reading input;
 other files stay. Invalid settings produce only `preflight.json` with `ok: false`
-and its path in `outputs`. Unreadable or malformed JSON, or an invalid selected
-profile, produces no report. Both failures exit nonzero and leave no YAML outputs.
+and its path in `outputs`. Unreadable or malformed JSON produces no report.
+Both failures exit nonzero and leave no YAML outputs.
 
 ## Use rendered files
 
@@ -322,7 +330,7 @@ copy it there with mode `0600` first, or render straight into the protected
 directory as the runbook's [profile branch](production-installation.md#recommended-generate-profile-configuration)
 does.
 Skip both configuration-generation branches and continue at the
-[shared bootstrap PVC and configuration checks](production-installation.md#shared-bootstrap-pvc-and-configuration-checks).
+[shared credential and configuration checks](production-installation.md#shared-bootstrap-pvc-and-configuration-checks).
 The runbook covers Secret creation, Helm installation, bootstrap key retrieval,
 and authenticated API verification.
 
@@ -334,7 +342,7 @@ writing deployment files. See the [rendering flow](../../flows/installation-prof
 
 `controlPlane.nodeSelector`, `runtime.nodeSelector` and `runtime.gatewayNodeSelector`
 require Kubernetes label keys and label values that are empty or a label name of
-at most 63 characters, matching Helm, bootstrap-volume preparation and Pod
+at most 63 characters, matching Helm and Pod
 admission.
 Preflight rejects invalid placement labels before writing deployment files.
 
@@ -360,13 +368,15 @@ the install as ready:
   `runtime.gatewayStorageClassName` for gateway state.
 - For Codex, the configured localhost seccomp profile installed and verified on
   every node selected by `runtime.nodeSelector`.
-- For Gateway outbound access, [select one bundled or external proxy](../integrations/gateway-proxy.md).
-  The same endpoint serves channel-directory clients. The bundled default permits
-  Slack; add the destinations required by other integrations to `proxy.allowedHosts`.
-  Rendering proxy wiring does not enable integrations or change channel topology limits.
-- For hosted `codex-plugin` discovery under either profile family, a PAT supplied
-  through a same-Namespace Secret or the Console. Curated discovery needs no
-  credential. Configure runtime credentials per Agent.
+- For Slack, [managed channel egress](../../reference/drivers/kubernetes-compute/channel-egress.md)
+  with EnvoyPatchPolicy support. `channels.managedEgress` defaults to true;
+  explicit false disables the fleet. `channels.excludedCidrs` produces matching
+  Helm and Compute settings. Supply
+  actual Pod, Service and node ranges, including public node addresses. Rendering
+  the fleet does not enable channel consumers. Slack Agents require dedicated
+  Codex execution; customer upstream proxies are not supported.
+- For Codex hosted plugin discovery and runtime authentication, a
+  same-Namespace `codex_pat` token Secret or a PAT entered during Agent creation.
   See [discovery egress](#hosted-discovery-egress).
 - For optional OCE-managed ChatGPT service-account runtime credentials, the
   admin Secret, workspace authority, and app connections described in

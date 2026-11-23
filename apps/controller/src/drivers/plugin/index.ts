@@ -1,4 +1,4 @@
-import { isCodexCatalogSource } from "./catalog-source.ts";
+import { describeManagedDeployment } from "./managed-deployment.ts";
 import { requireManagedCredentialRuntime } from "./managed-runtime.ts";
 import { type ErrorDetail } from "@openclaw-enterprise/contracts";
 import {
@@ -22,6 +22,7 @@ import {
   type PluginDiscoveryAuthentication,
   type PluginDriver,
   type PluginDesiredState,
+  type PluginDeploymentContract,
   type PluginApprovers,
   type PluginPolicyCapabilities,
   type PluginDriverContext,
@@ -37,6 +38,7 @@ import {
   ScopeViolationError,
 } from "@openclaw-enterprise/occ";
 import {
+  describeNativeOpenClawDeployment,
   hasAliasedSelections,
   openClawCatalogEntries,
   openClawManagedPluginIds,
@@ -277,7 +279,7 @@ function validateCodexConfiguration(configuration: unknown): {
     }
   }
   const catalogSource = value.catalogSource === undefined ? "hosted" : value.catalogSource;
-  if (!isCodexCatalogSource(catalogSource)) {
+  if (catalogSource !== "hosted" && catalogSource !== "openai-curated") {
     throw new PluginValidationError("catalogSource must be hosted or openai-curated.");
   }
   if (
@@ -403,7 +405,20 @@ function splitOpenClawSelections(selections: PluginDesiredState) {
 export class OCCPluginDriver extends BundledPluginDriverBase implements PluginDriver {
   readonly harnessId = "openclaw" as const;
   readonly discoveryCredential = "none" as const;
-  readonly credentials = managedPluginCredentials;
+  readonly credentials = managedPluginCredentials(this);
+
+  async describeDeployment(input: Parameters<PluginDeploymentContract["describeDeployment"]>[0]) {
+    if (input.plugin.catalog !== "driver") {
+      throw new ConfigurationHarnessError(
+        "OpenClaw deployment requires a Driver catalog selection.",
+      );
+    }
+    const install = managedInstalls.find(({ id }) => id === input.plugin.pluginId);
+    return install
+      ? describeManagedDeployment(install, input)
+      : describeNativeOpenClawDeployment(input);
+  }
+
   static readonly configurationSchema = EMPTY_CONFIGURATION_SCHEMA;
   readonly policyCapabilities: PluginPolicyCapabilities = deepFreeze({
     policyScopeByPlugin: Object.fromEntries(
@@ -422,10 +437,16 @@ export class OCCPluginDriver extends BundledPluginDriverBase implements PluginDr
       const policy = selections[pkg.id]!;
       if (
         typeof policy.enabled !== "boolean" ||
-        Object.keys(policy).some((key) => key !== "enabled" && key !== "driverPolicy")
+        Object.keys(policy).some(
+          (key) =>
+            key !== "enabled" && key !== "driverPolicy" && !(pkg.kind === "mcp" && key === "tools"),
+        ) ||
+        (pkg.kind === "mcp" && policy.tools !== undefined && policy.driverPolicy === undefined)
       ) {
         throw new ConfigurationHarnessError(
-          `The ${pkg.entry.name} package supports enablement and an optional credential slot.`,
+          pkg.kind === "mcp"
+            ? `The ${pkg.entry.name} package supports enablement, a credential slot, and per-tool human approval.`
+            : `The ${pkg.entry.name} package supports enablement and an optional credential slot.`,
         );
       }
     }

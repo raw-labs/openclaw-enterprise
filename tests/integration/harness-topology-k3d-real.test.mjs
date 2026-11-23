@@ -15,6 +15,7 @@ import {
   assertDeniedConnection,
   assertEmbeddedCreatesNoHarnessWorkspaceClaim,
   assertGatewayPodContinuity,
+  assertInterruptedGatewayTurnResumes,
   assertGatewayPrivateResources,
   assertNativeReferenceNegativeControl,
   assertPrivateStateInitContainer,
@@ -195,6 +196,7 @@ test(
     const { context } = topologyTeardown(testContext);
     const topology = await arrangeProductionTopology(context, "dedicated", undefined, {
       gatewayPassword: true,
+      nativeAdmin: { enabled: true },
     });
     assert.ok(topology.harnessPod, "dedicated production must start a real separate Codex Pod");
     assert.notEqual(topology.gatewayPod.metadata.uid, topology.harnessPod.metadata.uid);
@@ -283,6 +285,8 @@ test(
     );
     process.stderr.write("k3d dedicated: topology ready; running a real model turn.\n");
     await assertActualModelTurn(topology);
+    process.stderr.write("k3d dedicated: testing automatic interrupted-turn recovery.\n");
+    await assertInterruptedGatewayTurnResumes(context, topology);
     process.stderr.write("k3d dedicated: model turn passed; testing normal workspace flows.\n");
     await assertDedicatedAgentsInstructionsInFreshSession(topology);
     await context.test("native child returns its own exact answer", async () => {
@@ -442,41 +446,3 @@ test(
     await assertStartupFailureDeploymentStatusDurable(context, topology, { pluginsEnabled: true });
   },
 );
-
-for (const mode of ["embedded", "dedicated"]) {
-  test(
-    `production ${mode} channel-free Gateway preserves a real model turn with native proxy routing`,
-    {
-      skip: process.env.OCC_TEST_GATEWAY_PROXY_REAL !== "1",
-      timeout: 1_200_000,
-    },
-    async (context) => {
-      const proxyUrl = process.env.OCC_TEST_GATEWAY_PROXY_URL;
-      assert.ok(proxyUrl, "explicit proxy proof requires OCC_TEST_GATEWAY_PROXY_URL");
-      // This goes through the authenticated API, durable worker, real images, and
-      // selected IAM/Compute Drivers, without a channel creating proxy reachability.
-      const topology = await arrangeProductionTopology(context, mode, undefined, {
-        gatewayProxyUrl: proxyUrl,
-      });
-      const deployment = await resource(
-        "deployment",
-        `gateway-${hash(topology.agent.id)}`,
-        topology.gatewayPlacement,
-      );
-      const environment = deployment.spec.template.spec.containers[0].env;
-      assert.equal(environment.find(({ name }) => name === "HTTPS_PROXY")?.value, proxyUrl);
-      assert.equal(
-        environment.some(({ name }) => name.startsWith("SLACK_")),
-        false,
-      );
-      await resource(
-        "networkpolicy",
-        `allow-gateway-channels-${hash(topology.agent.id)}`,
-        topology.gatewayPlacement,
-      );
-      // Dedicated Codex must retain its exact internal transport even though OC's
-      // native routing now captures ordinary outbound WebSocket connections.
-      await assertActualModelTurn(topology);
-    },
-  );
-}

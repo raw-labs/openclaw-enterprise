@@ -1,21 +1,13 @@
-import { asRecord } from "../../packages/utils/src/objects.ts";
 import assert from "node:assert/strict";
 import {
   createKubernetesComputeDriver,
   kubernetesNamespaceName,
   type KubernetesComputeDriver,
-  type KubernetesComputeDriverOptions,
 } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
 import type { createKubernetesClientConfiguration } from "../../apps/controller/src/drivers/kubernetes/client.ts";
 import type { AgentRevision } from "../../packages/contracts/src/index.ts";
-import {
-  digest,
-  gatewayRouting,
-  options,
-  routedOptions,
-  routedRevision,
-  tenant,
-} from "../helpers/kubernetes-routed-scenarios.mjs";
+import { options, routedOptions } from "../helpers/kubernetes-routed-options.ts";
+import { digest, routedRevision, tenant } from "../helpers/kubernetes-routed-scenarios.mjs";
 import { agent as credentialAgent } from "./kubernetes-runtime-credentials-fixture.ts";
 
 type KubernetesSdk = Awaited<ReturnType<typeof createKubernetesClientConfiguration>>["sdk"];
@@ -45,7 +37,7 @@ type Deletion =
       [Kind in keyof NamespacedDelete]: [kind: Kind, request: NamespacedDelete[Kind]];
     }[keyof NamespacedDelete]
   | [
-      kind: "HTTPRoute" | "Service" | "SecurityPolicy" | "NetworkPolicy",
+      kind: "HTTPRoute" | "SecurityPolicy" | "NetworkPolicy",
       request: { spec: ObjectDelete[0]; body: ObjectDelete[6] },
     ];
 
@@ -96,10 +88,10 @@ function retirementFixture(
     }
   }
 
-  function namedResources(name = nodeName) {
+  function nodeResources() {
     const nodes = new Map<string, ObservedResource>();
     for (const resource of resources.values()) {
-      if (resource.metadata.namespace === namespace && resource.metadata.name === name) {
+      if (resource.metadata.namespace === namespace && resource.metadata.name === nodeName) {
         nodes.set(resource.kind, structuredClone(resource));
       }
     }
@@ -107,23 +99,9 @@ function retirementFixture(
   }
 
   function clearNodeResources() {
-    for (const resource of namedResources().values()) {
+    for (const resource of nodeResources().values()) {
       resources.delete(resourceKey(resource.kind, namespace, nodeName));
     }
-  }
-
-  function patchResource(body: KubernetesObject, kind = body.kind) {
-    assert.ok(kind && body.metadata?.name);
-    observe({
-      ...body,
-      kind,
-      metadata: {
-        ...body.metadata,
-        name: body.metadata.name,
-        uid: body.metadata.name === gatewayName ? "route-uid" : kind + "-node-uid",
-        resourceVersion: "1",
-      },
-    });
   }
 
   // Delete attempts are recorded independently of the observed snapshots. This
@@ -174,9 +152,6 @@ function retirementFixture(
         },
       },
       networking: {
-        async patchNamespacedNetworkPolicy({ body }: { body: KubernetesObject }) {
-          patchResource(body, "NetworkPolicy");
-        },
         readNamespacedNetworkPolicy: readNamespaced("NetworkPolicy"),
       },
       objects: {
@@ -189,12 +164,11 @@ function retirementFixture(
           assert.equal(metadata.namespace, namespace);
           assert.ok(kind === "HTTPRoute" || kind === "SecurityPolicy");
           if (kind === "SecurityPolicy") {
-            assert.ok([nodeName, gatewayName + "-msteams"].includes(metadata.name));
+            assert.equal(metadata.name, nodeName);
           } else {
             assert.ok(
               metadata.name === gatewayName ||
                 metadata.name === nodeName ||
-                metadata.name === gatewayName + "-msteams" ||
                 /^chat-[a-f0-9]{12}-rev-[a-f0-9]{12}$/.test(metadata.name),
             );
           }
@@ -219,17 +193,8 @@ function retirementFixture(
         async delete(...args: ObjectDelete) {
           const [spec, , , , , , body] = args;
           const { kind } = spec;
-          assert.ok(
-            kind === "HTTPRoute" ||
-              kind === "Service" ||
-              kind === "SecurityPolicy" ||
-              kind === "NetworkPolicy",
-          );
+          assert.ok(kind === "HTTPRoute" || kind === "SecurityPolicy" || kind === "NetworkPolicy");
           deletions.push([kind, { spec, body }]);
-          assert.ok(spec.metadata?.name);
-          if (spec.metadata.name.endsWith("-msteams")) {
-            resources.delete(resourceKey(kind, namespace, spec.metadata.name));
-          }
         },
       },
     }),
@@ -238,8 +203,7 @@ function retirementFixture(
   return {
     observe,
     reset,
-    nodeResources: () => namedResources(),
-    teamsResources: () => namedResources(gatewayName + "-msteams"),
+    nodeResources,
     clearNodeResources,
     deletions,
     setServiceDeleteFailure(value: boolean) {
@@ -251,12 +215,11 @@ function retirementFixture(
 export async function checkGatewayRetirement() {
   const driver = createKubernetesComputeDriver(
     routedOptions({
-      gatewayRouting: { ...gatewayRouting, channels: { hostname: "callbacks.example.test" } },
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
       },
-    }) as KubernetesComputeDriverOptions,
+    }),
   );
   const agentId = "agent-revision-storage";
   const ownership = { namespaceId: tenant.id, agentId };
@@ -412,7 +375,6 @@ export async function checkGatewayRetirement() {
           ...gateway.metadata.annotations,
           "openclaw.dev/agent-revision-id": revision.id,
           "openclaw.dev/agent-revision": String(revision.revision),
-          "openclaw.dev/msteams-webhook": "true",
         },
       },
     });
@@ -441,50 +403,10 @@ export async function checkGatewayRetirement() {
   // failed candidate must not acquire and then delete that Gateway's node route.
   observeGateway(active);
   await driver["reconcileGatewayRoute"](active, ownership, target);
-  const activeTeamsResources = fixture.teamsResources();
-  const callback = asRecord(fixture.teamsResources().get("HTTPRoute"));
-  const spec = asRecord(callback?.spec);
-  assert.ok(spec);
-  assert.deepEqual(spec.hostnames, ["callbacks.example.test"]);
-  const parents = spec.parentRefs;
-  const rules = spec.rules;
-  assert.ok(Array.isArray(parents) && Array.isArray(rules));
-  assert.equal(asRecord(parents[0])?.sectionName, "channels");
-  assert.equal(rules.length, 1);
-  const rule = asRecord(rules[0]);
-  assert.ok(rule);
-  assert.deepEqual(rule.matches, [
-    {
-      method: "POST",
-      path: {
-        type: "Exact",
-        value: `/namespaces/${tenant.id}/agents/${agentId}/channels/msteams`,
-      },
-    },
-  ]);
-  const filters = rule.filters;
-  assert.ok(Array.isArray(filters));
-  const rewrite = asRecord(asRecord(filters[0])?.urlRewrite);
-  assert.equal(asRecord(rewrite?.path)?.replaceFullPath, "/api/messages");
-  const headers = asRecord(asRecord(filters[1])?.requestHeaderModifier);
-  assert.ok(headers && Array.isArray(headers.remove) && Array.isArray(headers.set));
-  assert.equal(headers.remove.includes("authorization"), false);
-  for (const header of ["x-occ-identity", "x-api-key", "cookie", "x-openclaw-scopes"]) {
-    assert.ok(headers.remove.includes(header));
-  }
-  assert.equal(
-    headers.set.some((value) => asRecord(value)?.name === "x-occ-identity"),
-    false,
-  );
-  assert.equal(
-    asRecord(asRecord(fixture.teamsResources().get("SecurityPolicy"))?.spec)?.apiKeyAuth,
-    undefined,
-  );
   const activeNodeResources = fixture.nodeResources();
   assert.equal(activeNodeResources.size, 2);
   await driver["reconcileGatewayRoute"](candidate, ownership, target);
   assert.deepEqual(fixture.nodeResources(), activeNodeResources);
-  assert.deepEqual(fixture.teamsResources(), activeTeamsResources);
 
   // A serving Gateway predating node enrollment may have no node endpoint.
   // Preparing its successor must create one under the serving revision, or
@@ -492,7 +414,6 @@ export async function checkGatewayRetirement() {
   fixture.clearNodeResources();
   await driver["reconcileGatewayRoute"](candidate, ownership, target);
   assert.deepEqual(fixture.nodeResources(), activeNodeResources);
-  assert.deepEqual(fixture.teamsResources(), activeTeamsResources);
   await driver["removeRetiredGateway"](candidate, target);
   expectChatRetirement(candidate);
 
@@ -506,36 +427,6 @@ export async function checkGatewayRetirement() {
   }
   await driver["removeRetiredGateway"](active, target);
   expectChatRetirement(active);
-  for (const resource of fixture.teamsResources().values()) {
-    assert.equal(resource.metadata.annotations?.["openclaw.dev/agent-revision-id"], candidate.id);
-  }
-  fixture.observe({
-    ...gateway,
-    metadata: {
-      ...gateway.metadata,
-      annotations: {
-        ...gateway.metadata.annotations,
-        "openclaw.dev/agent-revision-id": candidate.id,
-        "openclaw.dev/agent-revision": String(candidate.revision),
-        "openclaw.dev/msteams-webhook": "false",
-      },
-    },
-  });
-  await driver["reconcileGatewayRoute"](candidate, ownership, target);
-  assert.equal(fixture.teamsResources().size, 0);
-  assert.deepEqual(
-    deletions.map(([kind, request]) => [
-      kind,
-      "spec" in request ? request.spec.metadata?.name : request.name,
-    ]),
-    [
-      ["HTTPRoute", gatewayName + "-msteams"],
-      ["Service", gatewayName + "-msteams"],
-      ["SecurityPolicy", gatewayName + "-msteams"],
-      ["NetworkPolicy", gatewayName + "-msteams"],
-    ],
-  );
-  deletions.length = 0;
   await driver["removeRetiredGateway"](candidate, target);
   assert.deepEqual(deletions.slice(0, 2), [
     [
@@ -593,9 +484,8 @@ export async function checkEmbeddedGatewayRetirement() {
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
-        proxy: { proxyUrl: "http://192.0.2.10:3128" },
       },
-    }) as KubernetesComputeDriverOptions,
+    }),
   );
   const revision: AgentRevision = routedRevision(driver, {
     id: "revision-embedded-deletion",
@@ -659,10 +549,7 @@ export async function checkEmbeddedGatewayRetirement() {
     revision,
     target,
   );
-  const policies: ObservedResource[] = [
-    ...agentPolicies.map(({ resource }) => resource),
-    driver["gatewayProxyNetworkPolicy"](revision, target),
-  ];
+  const policies: ObservedResource[] = [...agentPolicies.map(({ resource }) => resource)];
   for (const policy of policies) {
     save(policy);
   }

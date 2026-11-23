@@ -11,7 +11,7 @@
     "steps": [],
     "plannedInputs": [
       {
-        "operation": "Incorporate upstream and reconcile retained Installation profile and native first-deployment behavior, fork qualification and the alpha.22 ledger",
+        "operation": "Incorporate pinned upstream, retain the alpha.22 ledger, and adopt upstream explicit native browser opt-in in place of #12",
         "input": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f"
       },
       {
@@ -875,7 +875,14 @@
       "Native controller and runtime AMD64 and ARM64 actual startup and sandbox smokes; no publication",
       "Fresh install and restored alpha.22 upgrade using the published receipt prefix"
     ],
-    "status": "pending-final-head-qualification"
+    "status": "pending-final-head-qualification",
+    "migrationPrecheck": {
+      "status": "passed in the isolated working tree before stack composition",
+      "server": "PostgreSQL 18.6",
+      "source": "f4a0fd9f19659e076bda0d84d522eade8559318a",
+      "upstream": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "result": "Stock alpha.22 migrator installed 85 receipts. pg_dump/pg_restore to an independent database retained those receipts. Working-tree migrator recognized preRestartContinuation and completed at 95 receipts. Fresh migration also completed at 95. All SQL hashes and timestamps matched. Helm and final-head qualification pending."
+    }
   },
   "previousBatches": [
     {

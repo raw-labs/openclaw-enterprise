@@ -13,7 +13,7 @@ import type {
   SecretBindings,
   SecretMetadata,
 } from "../../packages/contracts/src/index.ts";
-import type { PlatformUnitOfWork } from "../../packages/occ/src/state/platform-state.ts";
+import type { PlatformUnitOfWork } from "../../packages/occ/src/ports/platform-unit-of-work.ts";
 
 import { apiErrorResponse } from "../helpers/api-error.mjs";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
@@ -46,7 +46,6 @@ import {
   CHANNEL_BINDING_CREDENTIALS_REMEDY,
   CONFIGURATION_EDITS_PENDING,
   DEPENDENCY_UNAVAILABLE,
-  DEPLOY_CLUSTER_RBAC_REFUSED,
   READ_UNAVAILABLE,
   namespaceListDenied,
   secretAccessConfirmed,
@@ -255,6 +254,8 @@ test("draft Agent offers deployment without a generated-credential step", async 
   fixture.policy.bindings.splice(0, fixture.policy.bindings.length, ...originalBindings);
 
   // A missing tenant RoleBinding refuses the credential check before admission (D396).
+  const DEPLOY_CLUSTER_RBAC_REFUSED =
+    "Deployment refused: the cluster denied the control plane access to this Agent's connection credentials. Ask an operator to grant the control plane the Kubernetes RoleBindings this Namespace needs, then deploy again.";
   const deployUrl = `${fixture.origin}/namespaces/${namespace.id}/agents/${agent.id}/deploy`;
   await page.route(deployUrl, (route) =>
     route.fulfill(
@@ -1590,53 +1591,6 @@ test("a channel Secret save refused for a missing binding says where to bind it"
     refusal: `Configuration setting channels.slack.signingSecret references SLACK_SIGNING_SECRET without a Configuration Secret binding: bind SLACK_SIGNING_SECRET in secretBindings to an environment-backed Secret, or remove the reference. ${CHANNEL_BINDING_CREDENTIALS_REMEDY}`,
   });
   await expectNoText(page, /Fix that setting in the Configuration JSON/);
-});
-
-test("Teams-enabled drafts require a bound app password before deploy", async (t) => {
-  const fixture = await createConsoleAppFixture(t, {
-    gatewayRouting: {
-      hostname: "gateway.example.test",
-      gatewayName: "gateway",
-      gatewayNamespace: "system",
-      envoyNamespace: "envoy",
-      channels: { hostname: "channels.example.test" },
-    },
-  });
-  await fixture.bootstrap();
-  const namespace = await createNamespace(fixture, "Teams credential gate");
-  const agent = await createAgent(
-    fixture,
-    namespace.id,
-    "Teams Credential Agent",
-    {
-      ...nativeValues("implicit-teams", {
-        harnessId: "codex",
-        channels: {
-          msteams: {
-            appId: "00000000-0000-4000-8000-000000000000",
-            tenantId: "11111111-1111-4111-8111-111111111111",
-            appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
-            requireMention: true,
-          },
-        },
-      }),
-      plugins: { allow: ["codex", "msteams"] },
-    },
-    { executionMode: "dedicated" },
-  );
-  const { page } = await newPage(t, fixture);
-  await login(page, fixture, detailUrl(fixture, namespace.id, agent.id, "draft", "credentials"));
-  await page.getByRole("button", { name: "Save authentication source" }).waitFor();
-  const password = page.getByLabel("Teams app password", { exact: true });
-  await password.waitFor();
-  assert.equal(await password.isDisabled(), false);
-  assert.equal(await password.inputValue(), "");
-  await page
-    .getByText("Choose a Secret for each channel credential to save.", { exact: true })
-    .waitFor();
-  assert.equal(await page.getByRole("button", { name: "Deploy new version" }).isDisabled(), true);
-  await expectNoText(page, /Slack app token|Slack bot token/);
-  assert.equal(await page.getByRole("button", { name: "Save channel Secrets" }).isDisabled(), true);
 });
 
 test("bound Slack credential fields show Secret references without reading values", async (t) => {

@@ -2,7 +2,7 @@
 
 This page details the Agent detail page of the [platform console](../console.md):
 tabs and drafts, deployment details, diagnostics, authentication, versions, and the
-Slack and Teams channel editors with their Secret pickers.
+Slack channel editor with its Secret picker.
 
 Agent tabs change only their panel; Back/Forward restores the selected tab.
 Unsaved JSON, plugin policies, workspace text, authentication, Slack drawers,
@@ -86,31 +86,26 @@ it or it was deleted, with the ID in the tooltip. **No Secret
 bound** means no binding. Values are never read, and metadata does not prove
 credential validity.
 
-AgentRevision snapshots cannot be edited, rolled back, or redeployed. **Open draft** and **Edit current Configuration** open the saved draft without
+AgentRevision snapshots cannot be edited, rolled back, or redeployed.
+**Draft credentials** and **Draft repositories** link to the saved draft when the Console
+confirms Configuration `read` and has no outstanding read error or remembered denial.
+**Open draft** and **Edit current Configuration** open the saved draft without
 changing the viewed snapshot; **Deploy new version** admits it as another
 immutable version. Admission, recorded activation, and `activeRevisionId` are
 separate facts, and startup evidence does not establish live gateway health; see the
 [deployment guide](../../guides/deploy/production-agents.md#configure-the-agent-runtime)
 and [deployment reference](../agents/deployment.md#versions-and-deployment).
 
-Channels edits saved Slack and Microsoft Teams drafts. Teams exposes app and
-tenant IDs, an app-password Secret, one team with selected channels, mentions,
-and separate personal-message access. Advanced shapes, including native group
-access based only on sender allowlists, disable the editor and remain
-inspectable in Configuration JSON. Operator-configured public callback routing
-and proxy egress are required before Teams deployment; see
-[Teams setup](../../guides/integrations/teams.md).
-Saving channel settings patches `values` and includes `secretBindings` for changed
-credentials. Existing plugin allowlists are
+Channels edits the saved Slack draft. Teams credentials and Bot Framework ingress
+require operator setup; Teams has no editor, its settings remain in Configuration
+JSON, and it blocks Console deployment. Saving Slack patches `values` and
+includes `secretBindings` only for changed tokens. Existing plugin allowlists are
 extended; omitted ones stay omitted. Channel allowlists remain native
 Configuration changes, and shared Configurations can affect other Agents' future
 deployments.
 
 Before saving, Agent and Configuration reads verify association and generation;
-concurrent changes can still race the PATCH. After a conflict, **Reload draft**
-reapplies edited fields over current settings. Slack and Teams access lists carry
-additions and removals, preserving another editor's revocations. Review the
-reapplied edits before saving. An
+concurrent changes can still race the PATCH. Refresh after a conflict. An
 unconfirmed PATCH may have succeeded and is never replayed automatically: it shows **Outcome unknown** and disables
 channel writes until Refresh loads saved state. **Disable Slack** changes only
 the draft, not access, execution, or saved versions.
