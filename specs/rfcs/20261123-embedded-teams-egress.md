@@ -20,9 +20,13 @@ from alpha.22, defaulting to false. With managed Envoy egress enabled, each
 embedded Agent can enable Teams through its own Configuration. This setting
 requires no Agent IDs. Other embedded channel combinations remain unsupported.
 
-Operators separately approve exact model and plugin hostnames in
+Operators separately approve model and plugin destinations in
 `runtime.channelEgress.embeddedHttpsHosts`. Omitting the list grants no additional
-destinations. Native Agent JSON cannot change either Installation setting.
+destinations. An exact hostname permits that endpoint. `*.example.com` also
+matches nested subdomains and excludes the apex. An explicit `*` permits
+CONNECT to public IPv4 destinations on port 443 through that revision's listener.
+Each selected upstream IP must pass the existing address exclusions. Client TLS
+validation remains end-to-end. Native Agent JSON cannot change either Installation setting.
 
 Use the existing Teams Driver for Secret validation and Teams destinations.
 Compute adds the approved runtime names on port 443 to each Teams-enabled
@@ -72,7 +76,7 @@ retain their current meanings.
 
 ## Simplifications
 
-The existing listener already enforces exact CONNECT authorities, restricts resolved
+The existing listener already checks CONNECT authorities, restricts resolved
 addresses and scopes network grants to a revision. Reusing it avoids a second
 proxy or a new credential-handling service. A shared destination list across
 all listeners would give unrelated workloads additional access.
@@ -80,7 +84,9 @@ all listeners would give unrelated workloads additional access.
 ## Acceptance Criteria
 
 1. Default admission refuses embedded Teams. Opting in lets two embedded Agents independently enable
-   Teams through their own configurations. Dedicated Teams retains its existing route and rules.
+   Teams through their own configurations. Verify exact, subdomain and public
+   HTTPS grants on their respective listeners, including denial of excluded
+   addresses. Dedicated Teams retains its existing route and rules.
 2. On a disposable enforcing cluster, verify a genuine signed personal-chat
    message and exact model reply before and after redeploy. Check direct public
    HTTPS, an unlisted destination and another Agent's listener are denied.
