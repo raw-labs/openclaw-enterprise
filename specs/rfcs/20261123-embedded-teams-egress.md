@@ -6,24 +6,26 @@ author: miguelbranco80
 
 # Evaluate embedded Teams with per-Agent Envoy egress
 
-An Installation operator wants one embedded OpenClaw Agent to receive a signed
-Teams message, run its model, and use an installed Connections plugin. The
+An Installation operator wants embedded OpenClaw Agents to enable Teams independently.
+The live trial will exercise Teams, a model reply and Connections on one Agent. The
 [embedded trial](https://github.com/raw-labs/openclaw-enterprise/pull/17)
 establishes the proposed credential boundary. The Gateway, model loop, plugins
 and tools can all read the Agent's projected credentials. An operator who
-enables the trial accepts that risk for the selected Agent.
+enables the trial accepts that risk for each embedded Agent that enables Teams.
 
 ## Proposed decision
 
-Extend Kubernetes Compute's managed channel egress configuration with an optional
-`embeddedTeams` selection. Select one Agent by its server-issued ID and list
-the exact public HTTPS hostnames the operator approves for its model and plugins.
-The operator can save a channel-disabled Agent first to obtain its ID. Omission
-retains dedicated-only channel admission. Reject other embedded channel combinations.
-Native Agent JSON cannot turn on the trial or add a destination.
+Keep the Installation-wide boolean `runtime.proxy.experimentalEmbeddedChannels`
+from alpha.22, defaulting to false. With managed Envoy egress enabled, each
+embedded Agent can enable Teams through its own Configuration. This setting
+requires no Agent IDs. Other embedded channel combinations remain unsupported.
+
+Operators separately approve exact model and plugin hostnames in
+`runtime.channelEgress.embeddedHttpsHosts`. Omitting the list grants no additional
+destinations. Native Agent JSON cannot change either Installation setting.
 
 Use the existing Teams Driver for Secret validation and Teams destinations.
-Compute adds the approved runtime names on port 443 only to the selected
+Compute adds the approved runtime names on port 443 to each Teams-enabled
 embedded revision's [Envoy binding](../../docs/reference/drivers/kubernetes-compute/channel-egress.md).
 The OCC directory listener and dedicated Gateway continue using their existing rules.
 An approved host grants the whole shared process access to that endpoint.
@@ -64,9 +66,8 @@ No changes.
 
 ### Driver contracts
 
-OCC passes the server-owned Agent ID to Compute's optional Harness authentication
-admission hook when available. Kubernetes Compute admission, configuration and reconciliation gain the scoped
-exception above. The Channel Driver interface and Teams attachment host settings
+Kubernetes Compute reads its trusted Installation configuration during admission
+and reconciliation. The existing Harness authentication hook suffices. The Channel Driver interface and Teams attachment host settings
 retain their current meanings.
 
 ## Simplifications
@@ -78,8 +79,8 @@ all listeners would give unrelated workloads additional access.
 
 ## Acceptance Criteria
 
-1. Default admission refuses embedded Teams. Opting in admits only the selected
-   Agent. Dedicated Teams retains its existing route and rules.
+1. Default admission refuses embedded Teams. Opting in lets two embedded Agents independently enable
+   Teams through their own configurations. Dedicated Teams retains its existing route and rules.
 2. On a disposable enforcing cluster, verify a genuine signed personal-chat
    message and exact model reply before and after redeploy. Check direct public
    HTTPS, an unlisted destination and another Agent's listener are denied.
