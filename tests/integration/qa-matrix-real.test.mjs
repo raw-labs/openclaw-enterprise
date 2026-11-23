@@ -104,7 +104,7 @@ test(
     const { createQaBrowser } = await import("../helpers/qa-browser.mjs");
     const { prepareQaRepository, verifyQaRepository, stopQaAgent } =
       await import("../helpers/qa-repository.ts");
-    const { verifyQaSlack } = await import("../helpers/qa-slack.mjs");
+    const { prepareQaChannelEgress, verifyQaSlack } = await import("../helpers/qa-slack.mjs");
     const { verifyQaTeamsRejection } = await import("../helpers/qa-teams.ts");
     const { assertGatewayModelTurn } = await import("../helpers/kubernetes-real.ts");
     const artifacts = process.env.OCC_TEST_QA_ARTIFACTS

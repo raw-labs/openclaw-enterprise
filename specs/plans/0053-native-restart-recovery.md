@@ -95,7 +95,7 @@ Harness-readiness bridge. No replacement recovery interface is planned.
    0081 or its checksum. Drop both columns, pair constraint, and update grants.
    Remove `restart_continuation` from every stored revision and allowed-key
    constraint. Use the migrator-owned transaction pattern from
-   [0060](../../migrations/0060_credential_proxy_admission.sql), restoring
+   [0063](../../migrations/0063_credential_proxy_admission.sql), restoring
    immutability after the rewrite. Update journal/catalog evidence and schema.
    Fresh and populated databases must converge, without dual-read formats or shims.
 4. **Leave upstream policy unchanged.** Keep all OCE scope projections removed,

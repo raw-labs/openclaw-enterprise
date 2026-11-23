@@ -224,27 +224,29 @@ function catalogAtMigrationCount(count, completedCount) {
   }
   /** @type {Record<number, import("./migration-history-preflight.ts").MigrationHistory>} */
   const historical = {
-      53: "preRuntimeRoles",
-      54: "preHeldAuthenticationSession",
-      55: "preGatewayOutbound",
-      56: "preEmbeddedChannelOutbound",
-      57: "preCredentialSourcePat",
-      58: "preComputeRevisionAdmission",
-      59: "preCanonicalHarnessAuth",
-      60: "preSandboxPolicies",
-      61: "preSandboxPolicyAdministrator",
-      62: "preCredentialProxy",
-      63: "preRepositoryCredentialAuthority",
-      64: "preCredentialDeliveryCustody",
-      65: "prePreparedAttemptSettlement",
-      66: "preGatewayManagedMode",
-      67: "preSelectedRepositorySet",
-      68: "preAgentDeployIntent",
-      69: "preAgentCredentialSourceLimit",
-      70: "preAgentPluginDriver",
-      71: "preInstallationGatewayProxy",
+    53: "preRuntimeRoles",
+    54: "preHeldAuthenticationSession",
+    55: "preGatewayOutbound",
+    56: "preEmbeddedChannelOutbound",
+    57: "preCredentialSourcePat",
+    58: "preComputeRevisionAdmission",
+    59: "preCanonicalHarnessAuth",
+    60: "preSandboxPolicies",
+    61: "preSandboxPolicyAdministrator",
+    62: "preCredentialProxy",
+    63: "preRepositoryCredentialAuthority",
+    64: "preCredentialDeliveryCustody",
+    65: "prePreparedAttemptSettlement",
+    66: "preGatewayManagedMode",
+    67: "preSelectedRepositorySet",
+    68: "preAgentDeployIntent",
+    69: "preAgentCredentialSourceLimit",
+    70: "preAgentPluginDriver",
+    71: "preInstallationGatewayProxy",
   };
-  return historical[count] ?? refuse("an incomplete or unsupported development history is installed");
+  return (
+    historical[count] ?? refuse("an incomplete or unsupported development history is installed")
+  );
 }
 
 /**

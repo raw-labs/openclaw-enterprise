@@ -8,9 +8,8 @@ last_verified: "2026-11-04"
 
 ## Overview
 
-Run database tests against disposable PostgreSQL databases. Use the migrator
-role for migrations and the less-privileged application role for tests. Missing
-URLs skip cases, so check the test results for skips.
+Use disposable PostgreSQL databases. Migrate as the migrator and test as the
+less-privileged application role. Missing URLs skip tests. Check results.
 
 <a id="revision-worker-tests" class="anchor-alias"></a>
 

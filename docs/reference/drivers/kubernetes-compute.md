@@ -14,7 +14,7 @@ kind: reference/driver/impl
 
 ## Overview
 
-This implementation follows the [ComputeDriver contract](compute.md).
+See the [ComputeDriver contract](compute.md).
 
 Kubernetes Compute provisions or adopts one namespace per tenant and creates each
 Agent’s gateway. Dedicated Gateways and Harnesses use separate Pods, identities

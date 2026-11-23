@@ -56,36 +56,25 @@ graph TD
 
 `scripts/render-installation-profile.ts:parseArgs`
 
-Direct Node execution runs the CLI. Importing the module exposes the renderer
-and its refusal type without running the command.
+Run the CLI directly or import the renderer and its refusal type. It accepts
+`--profile openclaw|codex`, `--input`, `--out-dir`, and optional `--profile-file`.
+Unknown flags fail before output. Site JSON supplies Helm release and Installation settings.
 
-`parseArgs` accepts `--profile`, `--input`, `--out-dir`, and optional `--profile-file`; other flags fail
-before output. Profiles are `openclaw` or `codex`, with no `default`. JSON supplies
-the release name and namespace for Helm and Installation settings.
-
-Before cleanup, the renderer compares the input and selected profile file identities with each of its
-three output files. It refuses a shared file, including directory aliases,
-symbolic links, and hard links, without deleting or replacing existing files.
-Choose another input filename or output directory.
-
-After this check, the renderer removes prior `values.yaml`,
-`installation.yaml`, and `preflight.json` before loading input. Unreadable or
-malformed JSON cannot leave stale deployment files or success reports; other
-files remain untouched.
+The renderer rejects inputs and profiles that alias an output, including through
+directory aliases, symlinks or hard links. Select a different input or output path.
+It then clears `values.yaml`, `installation.yaml` and `preflight.json` before
+reading JSON so invalid input cannot leave a stale success report.
 
 ### 2. Load profile and site input
 
 `scripts/render-installation-profile.ts:readProfile`
 
-`readProfile` loads the selected or bundled file and validates its closed schema,
-matching family and a nonempty array of bundled Plugin Drivers. Each entry uses
-an exact bundled ID and object configuration; invalid entries fail with their array
-index. Hosted discovery prerequisites apply when any selected Codex Driver uses
-the hosted catalog. The shared Codex catalog-source guard
-rejects invalid discovery modes before files are written; other options are startup-validated;
-[custom profile rules](../guides/deploy/custom-installation-profiles.md) define the inputs.
-Site JSON supplies infrastructure. Hosted `codex-plugin` needs a PAT; curated
-discovery does not. Runtime credentials remain per Agent.
+`readProfile` validates the selected or bundled profile's schema, family and
+nonempty Plugin Driver array. It reports the index of an invalid Driver ID or
+configuration object. The Codex catalog-source guard validates discovery modes
+before rendering. Startup validates other options. Hosted discovery requires a
+PAT, curated discovery needs none, and runtime credentials belong to each Agent.
+See [custom profile rules](../guides/deploy/custom-installation-profiles.md).
 
 ### 3. Validate every supplied input
 

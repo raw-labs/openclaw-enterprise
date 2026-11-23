@@ -164,7 +164,7 @@ Under `/namespaces/{namespaceId}/agents/{agentId}`, extend the existing [routes]
 
 | Entity                                                                                | Change                                       | Persistence semantics                                                   |
 | ------------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------- |
-| [`occ.sandbox_policies.document`](../../migrations/0058_sandbox_policies.sql)         | Extend the JSON validator and version guard. | Preserve absence, `[]` and nonempty lists across unrelated edits.       |
+| [`occ.sandbox_policies.document`](../../migrations/0061_sandbox_policies.sql)         | Extend the JSON validator and version guard. | Preserve absence, `[]` and nonempty lists across unrelated edits.       |
 | [`occ.agent_revisions.admitted_spec`](../../packages/occ/src/state/postgres-state.ts) | Snapshot the list in `sandbox_policy`.       | Immutable per revision. Refuse dispatch through an incompatible reader. |
 
 ### Driver contracts
