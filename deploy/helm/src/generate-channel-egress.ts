@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { teamsDirectoryDestinations } from "../../../apps/controller/src/drivers/channel/teams.ts";
 import { SlackChannelDriver } from "../../../apps/controller/src/drivers/channel/slack.ts";
 import {
   CHANNEL_EGRESS_EXCLUDED_IPV4_CIDRS,
@@ -9,7 +10,7 @@ import {
 } from "../../../apps/controller/src/drivers/compute/kubernetes/channel-egress-policy.ts";
 
 // Packaging consumes the same provider contract as deployment reconciliation.
-const destinations = new SlackChannelDriver().enableRouting();
+const destinations = [...new SlackChannelDriver().enableRouting(), ...teamsDirectoryDestinations()];
 const generation = createHash("sha256")
   .update(JSON.stringify(destinations))
   .digest("hex")
@@ -28,7 +29,7 @@ const options = {
 const document = {
   image: CHANNEL_EGRESS_IMAGE,
   excludedIpv4Cidrs: CHANNEL_EGRESS_EXCLUDED_IPV4_CIDRS,
-  occFilterChain: channelEgressFilterChain(`occ-${generation}`, destinations, options),
+  occFilterChain: channelEgressFilterChain(`occ-${generation}`, { destinations }, options),
   forwardCluster: CHANNEL_EGRESS_FORWARD_CLUSTER,
   inspectionCluster: {
     name: "channel-egress-inspection",

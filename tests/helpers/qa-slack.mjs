@@ -11,13 +11,16 @@ import { allMessages, assertSlackBotAuthor, verifySingleSlackDelivery } from "./
 import { parseGatewayObservation } from "./normal-agent-observation-receipts.ts";
 import { sessionEvidenceScript } from "./normal-agent-gateway-evidence.ts";
 
-export async function prepareQaSlack(f) {
+export async function prepareQaChannelEgress(f) {
   assert.equal(
     f.controlPlane,
     "kubernetes",
     "live channel egress proof requires the Helm-installed Kubernetes control plane",
   );
   const configuration = f.configuration.drivers.compute.configuration;
+  if (configuration.runtime.channelEgress !== undefined) {
+    return;
+  }
   const path = join(f.stateDirectory, "helm-values.json");
   const values = JSON.parse(await readFile(path, "utf8"));
   const { channelEgress } = await installManagedChannelEgressFixture({
@@ -65,7 +68,7 @@ export async function verifyQaSlack(f, agent) {
       true,
     );
   }
-  await prepareQaSlack(f);
+  await prepareQaChannelEgress(f);
   const base = `/namespaces/${agent.namespaceId}`;
   const configuration = await f.api("GET", `${base}/configurations/${agent.configurationId}`);
   const bindings = { ...configuration.secretBindings };

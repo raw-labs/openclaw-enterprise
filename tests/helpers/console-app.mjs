@@ -77,6 +77,8 @@ function computeDriver({
   repositoryCredentials = false,
   modelProvider,
   channelRuntime = false,
+  experimentalEmbeddedChannels,
+  channelDrivers,
   routed = true,
   discoverHarnessModels = async () => [],
   agentProvisioning = false,
@@ -101,6 +103,8 @@ function computeDriver({
     sandboxDriver,
     credentialGatewayDriver,
     channelRuntime,
+    experimentalEmbeddedChannels,
+    channelDrivers,
     routed,
   });
 
@@ -475,6 +479,8 @@ export async function createConsoleAppFixture(t, options = {}) {
       computeDriver({
         repositoryCredentials: options.repositoryCredentials === true,
         channelRuntime: options.channelRuntime === true,
+        experimentalEmbeddedChannels: options.experimentalEmbeddedChannels,
+        channelDrivers: options.channelDrivers,
         routed: options.routed !== false,
         discoverHarnessModels: options.discoverHarnessModels,
         agentProvisioning: options.agentProvisioning,
@@ -493,6 +499,8 @@ export async function createConsoleAppFixture(t, options = {}) {
       ? {}
       : { observabilityUrl: options.observabilityUrl }),
     ...(options.consoleTheme === undefined ? {} : { consoleTheme: options.consoleTheme }),
+    // Composition gives Compute and OCC the same provider-to-Driver set.
+    ...(options.channelDrivers === undefined ? {} : { channelDrivers: options.channelDrivers }),
     ...(options.nativeAdmin === undefined ? {} : { nativeAdmin: options.nativeAdmin }),
     ...(options.agentRuntimeLogs === undefined
       ? {}

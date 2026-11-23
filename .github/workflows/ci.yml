@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - codex/raw-integration-envoy-trial
   merge_group:
   workflow_dispatch:
 
@@ -24,6 +25,7 @@ concurrency:
 
 env:
   CI: "1"
+  CI_RUNNER_FILE_CONCURRENCY: ${{ vars.CI_RUNNER_FILE_CONCURRENCY }}
   NODE_VERSION: "24.22.1"
   # Metadata gates use the same patched runtime as the other CI lanes.
   GATE_NODE_VERSION: "24.22.1"
@@ -299,7 +301,7 @@ jobs:
     # Both run in every mode. Start beside CI Impact, audit the workflow and
     # suite first, then reuse this checkout, Node and runner for static checks.
     # The measured 3.2 GiB peak fits the 4-CPU / 15.2 GiB runner.
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -409,13 +411,16 @@ jobs:
     needs: impact
     if: ${{ (needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests') && needs.impact.outputs.has-matrix == 'true' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.lane == 'images-runtime-startup' && (vars.CI_SANDBOX_RUNNER || vars.CI_COMPAT_RUNNER) || vars.CI_LARGE_RUNNER || matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
         # Lane rows live in the CI Impact "Build lane matrix" step.
         include: ${{ fromJSON(needs.impact.outputs.matrix) }}
+    env:
+      # The host Chrome package provides the sandbox support these TLS tests require.
+      OCC_TEST_BROWSER_EXECUTABLE: ${{ (matrix.lane == 'postgres-auth' || startsWith(matrix.lane, 'checks-browser')) && '/usr/bin/google-chrome' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -454,7 +459,7 @@ jobs:
     needs: [impact, runtime-artifact]
     if: ${{ (needs.impact.outputs.mode == 'full' || needs.impact.outputs.mode == 'tests') && needs.impact.outputs.has-images == 'true' }}
     # Each CI Impact lane-table row names its runner.
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.lane == 'images-runtime-startup' && (vars.CI_SANDBOX_RUNNER || vars.CI_COMPAT_RUNNER) || vars.CI_LARGE_RUNNER || matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false

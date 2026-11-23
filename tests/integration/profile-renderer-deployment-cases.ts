@@ -8,7 +8,6 @@ import {
   helmSkip,
   loadYaml,
   helmTemplate,
-  syntheticCredentialUrl,
   render,
   renderCli,
   renderError,
@@ -18,6 +17,7 @@ import {
   escapeRegExp,
   assertFieldRefusals,
   propertyAt,
+  syntheticCredentialUrl,
 } from "./profile-renderer-fixture.ts";
 
 import { generatedGatewaySecrets } from "./profile-renderer-helm-cases.ts";
@@ -107,7 +107,11 @@ export function registerDeploymentCases(): void {
       "https://console.oce.example.internal#",
       "https://console.oce.example.internal/#",
       " https://console.oce.example.internal? ",
-      "https://admin@console.oce.example.internal",
+      syntheticCredentialUrl({
+        username: "admin",
+        password: "",
+        host: "console.oce.example.internal",
+      }),
       "ftp://console.oce.example.internal",
       "console.oce.example.internal",
       // Stricter than the API, like the chart: URL parsing repairs these into an origin.

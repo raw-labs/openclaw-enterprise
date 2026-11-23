@@ -6,8 +6,9 @@ import {
 } from "../../apps/controller/src/drivers/compute/kubernetes/index.ts";
 import type { createKubernetesClientConfiguration } from "../../apps/controller/src/drivers/kubernetes/client.ts";
 import type { AgentRevision } from "../../packages/contracts/src/index.ts";
-import { options, routedOptions } from "../helpers/kubernetes-routed-options.ts";
+import { gatewayRouting, options, routedOptions } from "../helpers/kubernetes-routed-options.ts";
 import { digest, routedRevision, tenant } from "../helpers/kubernetes-routed-scenarios.mjs";
+import { resourceRecord, resourceRecords } from "../helpers/kubernetes-rendered-resources.ts";
 import { agent as credentialAgent } from "./kubernetes-runtime-credentials-fixture.ts";
 
 type KubernetesSdk = Awaited<ReturnType<typeof createKubernetesClientConfiguration>>["sdk"];
@@ -88,10 +89,10 @@ function retirementFixture(
     }
   }
 
-  function nodeResources() {
+  function nodeResources(name = nodeName) {
     const nodes = new Map<string, ObservedResource>();
     for (const resource of resources.values()) {
-      if (resource.metadata.namespace === namespace && resource.metadata.name === nodeName) {
+      if (resource.metadata.namespace === namespace && resource.metadata.name === name) {
         nodes.set(resource.kind, structuredClone(resource));
       }
     }
@@ -164,11 +165,12 @@ function retirementFixture(
           assert.equal(metadata.namespace, namespace);
           assert.ok(kind === "HTTPRoute" || kind === "SecurityPolicy");
           if (kind === "SecurityPolicy") {
-            assert.equal(metadata.name, nodeName);
+            assert.ok([nodeName, gatewayName + "-msteams"].includes(metadata.name));
           } else {
             assert.ok(
               metadata.name === gatewayName ||
                 metadata.name === nodeName ||
+                metadata.name === gatewayName + "-msteams" ||
                 /^chat-[a-f0-9]{12}-rev-[a-f0-9]{12}$/.test(metadata.name),
             );
           }
@@ -195,6 +197,9 @@ function retirementFixture(
           const { kind } = spec;
           assert.ok(kind === "HTTPRoute" || kind === "SecurityPolicy" || kind === "NetworkPolicy");
           deletions.push([kind, { spec, body }]);
+          if (spec.metadata?.name?.endsWith("-msteams")) {
+            resources.delete(resourceKey(kind, namespace, spec.metadata.name));
+          }
         },
       },
     }),
@@ -215,6 +220,7 @@ function retirementFixture(
 export async function checkGatewayRetirement() {
   const driver = createKubernetesComputeDriver(
     routedOptions({
+      gatewayRouting: { ...gatewayRouting, channels: { hostname: "callbacks.example.test" } },
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
@@ -375,6 +381,7 @@ export async function checkGatewayRetirement() {
           ...gateway.metadata.annotations,
           "openclaw.dev/agent-revision-id": revision.id,
           "openclaw.dev/agent-revision": String(revision.revision),
+          "openclaw.dev/msteams-webhook": "true",
         },
       },
     });
@@ -399,14 +406,84 @@ export async function checkGatewayRetirement() {
     deletions.length = 0;
   }
 
+  // A dedicated candidate may be prepared while embedded Teams still serves.
+  // Its public callback must select only the current embedded revision.
+  fixture.observe({
+    ...gateway,
+    metadata: {
+      ...gateway.metadata,
+      annotations: {
+        ...gateway.metadata.annotations,
+        "openclaw.dev/agent-revision": String(active.revision),
+        "openclaw.dev/msteams-webhook": "true",
+        "openclaw.dev/embedded-msteams-webhook": "true",
+      },
+    },
+  });
+  await driver["reconcileGatewayRoute"](candidate, ownership, target);
+  const callbackName = gatewayName + "-msteams";
+  const embeddedResources = fixture.nodeResources(callbackName);
+  const backend = resourceRecord(embeddedResources.get("Service"), "embedded callback Service");
+  const selector = resourceRecord(
+    resourceRecord(backend.spec, "Service spec").selector,
+    "selector",
+  );
+  assert.equal(selector["openclaw.dev/revision"], active.id);
+  const embeddedRoute = resourceRecord(embeddedResources.get("HTTPRoute"), "embedded callback");
+  const embeddedRule = resourceRecords(
+    resourceRecord(embeddedRoute.spec, "route spec").rules,
+    "rules",
+  )[0];
+  assert.equal(
+    resourceRecords(embeddedRule?.backendRefs, "callback backend")[0]?.name,
+    callbackName,
+  );
+  fixture.reset(...survivingResources);
+
   // Preparation can run while the previous Gateway still serves requests. A
   // failed candidate must not acquire and then delete that Gateway's node route.
   observeGateway(active);
   await driver["reconcileGatewayRoute"](active, ownership, target);
+  const activeTeamsResources = fixture.nodeResources(gatewayName + "-msteams");
+  const callback = resourceRecord(activeTeamsResources.get("HTTPRoute"), "Teams callback");
+  const callbackSpec = resourceRecord(callback.spec, "callback spec");
+  assert.deepEqual(callbackSpec.hostnames, ["callbacks.example.test"]);
+  assert.equal(
+    resourceRecords(callbackSpec.parentRefs, "callback parents")[0]?.sectionName,
+    "channels",
+  );
+  const rules = resourceRecords(callbackSpec.rules, "callback rules");
+  assert.equal(rules.length, 1);
+  const rule = rules[0];
+  assert.ok(rule);
+  assert.deepEqual(rule.matches, [
+    {
+      method: "POST",
+      path: { type: "Exact", value: `/namespaces/${tenant.id}/agents/${agentId}/channels/msteams` },
+    },
+  ]);
+  const filters = resourceRecords(rule.filters, "callback filters");
+  assert.deepEqual(filters[0], {
+    type: "URLRewrite",
+    urlRewrite: { path: { type: "ReplaceFullPath", replaceFullPath: "/api/messages" } },
+  });
+  const headers = resourceRecord(filters[1]?.requestHeaderModifier, "callback headers");
+  assert.ok(Array.isArray(headers.remove));
+  assert.equal(headers.remove.includes("authorization"), false);
+  for (const header of ["x-occ-identity", "x-api-key", "cookie", "x-openclaw-scopes"]) {
+    assert.ok(headers.remove.includes(header));
+  }
+  assert.equal(
+    resourceRecords(headers.set, "set headers").some(({ name }) => name === "x-occ-identity"),
+    false,
+  );
+  const policy = resourceRecord(activeTeamsResources.get("SecurityPolicy"), "Teams policy");
+  assert.equal(resourceRecord(policy.spec, "Teams policy spec").apiKeyAuth, undefined);
   const activeNodeResources = fixture.nodeResources();
   assert.equal(activeNodeResources.size, 2);
   await driver["reconcileGatewayRoute"](candidate, ownership, target);
   assert.deepEqual(fixture.nodeResources(), activeNodeResources);
+  assert.deepEqual(fixture.nodeResources(gatewayName + "-msteams"), activeTeamsResources);
 
   // A serving Gateway predating node enrollment may have no node endpoint.
   // Preparing its successor must create one under the serving revision, or
@@ -414,6 +491,7 @@ export async function checkGatewayRetirement() {
   fixture.clearNodeResources();
   await driver["reconcileGatewayRoute"](candidate, ownership, target);
   assert.deepEqual(fixture.nodeResources(), activeNodeResources);
+  assert.deepEqual(fixture.nodeResources(gatewayName + "-msteams"), activeTeamsResources);
   await driver["removeRetiredGateway"](candidate, target);
   expectChatRetirement(candidate);
 
@@ -425,8 +503,37 @@ export async function checkGatewayRetirement() {
   for (const resource of candidateNodes.values()) {
     assert.equal(resource.metadata.annotations?.["openclaw.dev/agent-revision-id"], candidate.id);
   }
+  for (const resource of fixture.nodeResources(gatewayName + "-msteams").values()) {
+    assert.equal(resource.metadata.annotations?.["openclaw.dev/agent-revision-id"], candidate.id);
+  }
   await driver["removeRetiredGateway"](active, target);
   expectChatRetirement(active);
+  // Disabling Teams on the serving revision removes the callback before its auth override.
+  fixture.observe({
+    ...gateway,
+    metadata: {
+      ...gateway.metadata,
+      annotations: {
+        ...gateway.metadata.annotations,
+        "openclaw.dev/agent-revision-id": candidate.id,
+        "openclaw.dev/agent-revision": String(candidate.revision),
+        "openclaw.dev/msteams-webhook": "false",
+      },
+    },
+  });
+  await driver["reconcileGatewayRoute"](candidate, ownership, target);
+  assert.equal(fixture.nodeResources(gatewayName + "-msteams").size, 0);
+  assert.deepEqual(
+    deletions.map(([kind, request]) => {
+      assert.ok("spec" in request);
+      return [kind, request.spec.metadata?.name];
+    }),
+    [
+      ["HTTPRoute", gatewayName + "-msteams"],
+      ["SecurityPolicy", gatewayName + "-msteams"],
+    ],
+  );
+  deletions.length = 0;
   await driver["removeRetiredGateway"](candidate, target);
   assert.deepEqual(deletions.slice(0, 2), [
     [

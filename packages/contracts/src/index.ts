@@ -1645,6 +1645,7 @@ export type {
   ChannelDirectoryLookupInput,
   ChannelDirectoryResult,
   ChannelCredentialReader,
+  ChannelProviderDriver,
 } from "./drivers/channel/index.ts";
 export type {
   RepositoryWorkerRestartDisposition,

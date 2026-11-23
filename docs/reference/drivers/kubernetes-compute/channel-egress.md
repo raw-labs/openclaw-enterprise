@@ -8,8 +8,9 @@ supplied Installation files must include the matching runtime settings.
 OCC starts without the fleet; affected channel operations fail
 instead of using a direct internet connection.
 
-This route supports dedicated Gateways. It does not give the Harness channel
-access or combine the egress fleet with private workspace ingress.
+Dedicated Gateways use this route for their enabled channels. The
+[embedded Teams evaluation](#embedded-teams-evaluation) shares the listener
+with each participating Agent's native model and plugins.
 
 ## Configuration
 
@@ -57,6 +58,50 @@ ports. Ports 19000, 19001 and 19003 are reserved by Envoy. The 62-slot limit
 includes candidate revisions and incomplete cleanup. The packaged fleet has
 64 configured listeners, including OCC and inspection. Capacity exhaustion
 rejects activation; it does not combine destination sets or add another fleet.
+
+## Embedded Teams evaluation
+
+On a disposable single-cluster Installation, set the Kubernetes Compute option
+`runtime.proxy.experimentalEmbeddedChannels` to true. Each embedded OpenClaw
+Agent can then enable Teams through its own Configuration and Secret bindings.
+Each Teams-enabled revision receives its own listener. The default is false.
+
+Add these keys to the existing Compute runtime configuration:
+
+```yaml
+proxy:
+  experimentalEmbeddedChannels: true
+channelEgress:
+  # Keep the managed fleet settings and excludedCidrs shown above.
+  embeddedHttpsHosts:
+    - api.openai.com
+    - backend.composio.dev
+```
+
+Choose up to sixteen entries for TCP/443. An omitted or empty list adds no destinations
+to the Teams Driver's rules. The supplemental policy applies only to Teams-enabled
+embedded revisions. Dedicated and OCC listeners retain their provider rules.
+
+| Operator entry    | Permitted CONNECT target                                                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------- |
+| `api.example.com` | That hostname only.                                                                            |
+| `"*.example.com"` | Subdomains at any depth, such as `a.b.example.com`. Add `example.com` separately for the apex. |
+| `"*"`             | Any hostname or IPv4 literal whose selected upstream is a permitted public IPv4 address.       |
+
+Quote wildcard entries in YAML. Selecting `"*"` restores public HTTPS reachability
+for proxy-compatible clients in the shared workload. Each connection still uses the
+revision's listener, enforces its resolved-address exclusions and relies on the
+client to validate TLS. Arbitrary processes, direct sockets and other protocols
+do not gain equivalent network access. The [profile renderer](../../../guides/deploy/installation-profiles.md)
+accepts `channels.experimentalEmbeddedChannels` and `channels.embeddedHttpsHosts`
+alongside `channels.managedEgress`.
+
+Load the same settings into the API and worker. Configure each bot's credentials
+and callback for its own Agent as described in the [Teams guide](../../../guides/integrations/teams.md).
+On each enabled Agent, the model, plugins, tools and bot share a process and
+projected credentials. Setting the boolean to false prevents subsequent embedded
+Teams admission and activation. Stop each running trial Agent to withdraw its
+workload and release its listener.
 
 ## Enforcement
 
@@ -112,7 +157,11 @@ cleanup for retry. Cleanup for one revision cannot release another binding.
 
 OCC provider requests use the reserved listener and an API-only network grant.
 The generated Helm policy consumes the bundled Drivers' routing declarations.
-Slack tokens stay with their authorized consumers; Envoy receives none.
+The OCC listener permits Slack and Teams directory targets. Teams bot and
+storage destinations are declared for Gateways with Teams enabled. The Teams
+Channel Driver's `fileHosts` setting adds exact storage hosts; see
+[Teams attachment setup](../../../guides/integrations/teams.md#prepare-attachment-downloads).
+Provider credentials stay with their authorized consumers.
 
 ## Verification and troubleshooting
 
@@ -129,7 +178,6 @@ Slack tokens stay with their authorized consumers; Envoy receives none.
 Use the [Kubernetes tests](../../../testing/kubernetes.md) and
 [Slack proof](../../../testing/slack.md) for real enforcement and model execution.
 Per-Agent ports are temporary until verified Gateway workload identity supports
-authenticated shared listeners. Customer upstream proxies and Microsoft Teams
-are not implemented by this change.
+authenticated shared listeners. Customer upstream proxies remain outside this scope.
 
 See the [source-backed flow](../../../flows/channel-egress.md) for reconciliation.

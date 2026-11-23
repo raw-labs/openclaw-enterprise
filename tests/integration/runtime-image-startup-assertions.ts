@@ -36,7 +36,10 @@ export function assertGatewayModelLog(entries: readonly unknown[], modelReferenc
   );
 }
 
-export function assertBundledPluginLoaded(pluginList: unknown, pluginId: "codex" | "slack"): void {
+export function assertBundledPluginLoaded(
+  pluginList: unknown,
+  pluginId: "codex" | "slack" | "msteams",
+): void {
   assert.ok(isRecord(pluginList) && Array.isArray(pluginList.plugins));
   const plugins: unknown[] = pluginList.plugins;
   const plugin = plugins.find((entry) => isRecord(entry) && entry.id === pluginId);
@@ -52,7 +55,9 @@ export function assertBundledPluginLoaded(pluginList: unknown, pluginId: "codex"
     plugin.source,
     pluginId === "codex"
       ? /\/app\/node_modules\/openclaw\/dist\/extensions\/codex\/index\.js$/
-      : /\/app\/node_modules\/openclaw\/dist\/extensions\/slack\/index\.js$/,
+      : pluginId === "slack"
+        ? /\/app\/node_modules\/openclaw\/dist\/extensions\/slack\/index\.js$/
+        : /\/app\/node_modules\/openclaw\/dist\/extensions\/msteams\/index\.js$/,
   );
   assert.ok(isRecord(plugin.dependencyStatus));
   assert.equal(plugin.dependencyStatus.requiredInstalled, true);

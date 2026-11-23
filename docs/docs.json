@@ -525,6 +525,10 @@
                       {
                         "page": "reference/drivers/slack-channel",
                         "label": "Slack Directory"
+                      },
+                      {
+                        "page": "reference/drivers/teams-channel",
+                        "label": "Teams Directory"
                       }
                     ]
                   },
@@ -612,6 +616,10 @@
                   {
                     "page": "guides/integrations/slack",
                     "label": "Slack"
+                  },
+                  {
+                    "page": "guides/integrations/teams",
+                    "label": "Microsoft Teams"
                   }
                 ]
               }
@@ -674,6 +682,10 @@
                   {
                     "page": "guides/deploy/installation-profiles",
                     "label": "Profiles"
+                  },
+                  {
+                    "page": "guides/deploy/custom-installation-profiles",
+                    "label": "Custom Profiles"
                   },
                   {
                     "page": "guides/deploy/private-registry-images",
@@ -1044,6 +1056,7 @@
               "testing/native-agent-browser",
               "testing/populated-controller-return",
               "testing/slack",
+              "testing/teams",
               "testing/plugins",
               "testing/openshell",
               "testing/openshell-git-replacement",
@@ -1362,6 +1375,7 @@
               "flows/agent-plugins",
               "flows/agent-channel-directory",
               "flows/channel-egress",
+              "flows/agent-channel-ingress",
               "flows/agent-plugin-approvals",
               "flows/agent-provisioning",
               "flows/agent-native-admin",

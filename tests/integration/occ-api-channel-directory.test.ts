@@ -75,10 +75,9 @@ test("Channel directory accepts Slack's null terminal cursor without losing prio
     });
   });
   assert(fixture.controller, "bootstrap must create the controller");
-  fixture.controller.registerDriver(driver);
-  fixture.controller.selectDriver("channel", driver.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver }]);
   const path = `/namespaces/${namespace.id}/channel-directory/lookup`;
-  const body = { secretId: secretData.id, kind: "channels", query: "ann" };
+  const body = { provider: "slack", secretId: secretData.id, kind: "channels", query: "ann" };
   const found = await controller.request("POST", path, { body });
   assert.deepEqual(checkedInjectedBody(found, 200, ChannelDirectoryLookupResponse).data, {
     workspaceId: "TWORKSPACE",
@@ -126,7 +125,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   const { data: agentData } = checkedInjectedBody(agent, 201, AgentResponse);
 
   const path = `/namespaces/${namespace.id}/channel-directory/lookup`;
-  const body = { secretId: secretData.id, kind: "users", query: "mem" };
+  const body = { provider: "slack", secretId: secretData.id, kind: "users", query: "mem" };
   const unavailable = await controller.request("POST", path, { body });
   assert.equal(checkedInjectedBody(unavailable, 501, ErrorResponse).error.code, "NOT_IMPLEMENTED");
 
@@ -152,8 +151,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
     },
   };
   assert(fixture.controller, "bootstrap must create the controller");
-  fixture.controller.registerDriver(channelDriver);
-  fixture.controller.selectDriver("channel", channelDriver.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver: channelDriver }]);
   const expected = {
     workspaceId: "T123",
     workspaceName: "Example workspace",
@@ -168,7 +166,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.equal(JSON.stringify(created.body).includes(token), false);
   assert.equal(providerCalls, 1);
   const hydrated = await controller.request("POST", path, {
-    body: { secretId: secretData.id, kind: "users", ids: ["U123", "U999"] },
+    body: { provider: "slack", secretId: secretData.id, kind: "users", ids: ["U123", "U999"] },
   });
   assert.deepEqual(
     checkedInjectedBody(hydrated, 200, ChannelDirectoryLookupResponse).data,
@@ -194,7 +192,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   assert.deepEqual(longQueryError.details, [{ path: "/query", code: "TOO_LONG" }]);
   // A string array declared uniqueItems names the rule, not just an unsupported value.
   const repeatedIds = await controller.request("POST", path, {
-    body: { secretId: secretData.id, kind: "users", ids: ["U123", "U123"] },
+    body: { provider: "slack", secretId: secretData.id, kind: "users", ids: ["U123", "U123"] },
   });
   const repeatedIdsError = checkedInjectedBody(repeatedIds, 400, ErrorResponse).error;
   assert.equal(
@@ -205,6 +203,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
   // At most 20 IDs are hydrated in one request.
   const tooManyIds = await controller.request("POST", path, {
     body: {
+      provider: "slack",
       secretId: secretData.id,
       kind: "users",
       ids: Array.from({ length: 21 }, (_, index) => `U${index}`),
@@ -305,7 +304,7 @@ test("Channel directory lookup checks the exact edit target and Secret before an
 
   providerResult = { workspaceId: "T123", candidates: [], complete: false, nextCursor: "more" };
   const incompleteHydration = await controller.request("POST", path, {
-    body: { secretId: secretData.id, kind: "users", ids: ["U123"] },
+    body: { provider: "slack", secretId: secretData.id, kind: "users", ids: ["U123"] },
   });
   assert.equal(
     checkedInjectedBody(incompleteHydration, 503, ErrorResponse).error.code,

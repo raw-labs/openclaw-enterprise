@@ -403,8 +403,14 @@ export class PluginDiscoveryError extends Error {
 
 /** Safe channel-directory outcomes contain no upstream response or token. */
 export class ChannelDirectoryError extends Error {
+  /** `invalid_request`: the Driver refused caller input, such as provider context or a cursor. */
   readonly reason:
-    "credentials_rejected" | "missing_scope" | "rate_limited" | "invalid_response" | "unavailable";
+    | "invalid_request"
+    | "credentials_rejected"
+    | "missing_scope"
+    | "rate_limited"
+    | "invalid_response"
+    | "unavailable";
 
   constructor(reason: ChannelDirectoryError["reason"]) {
     super("Channel directory lookup failed.");

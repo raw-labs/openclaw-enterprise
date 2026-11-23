@@ -87,7 +87,7 @@ export function registerPostgresMigrationTransactionCommandCases({
     requiresHistoryPostgres,
     async (context) => {
       const db = await historyDatabase(context, await migrationHistoryFixture(), "separate", {
-        prefix: 73,
+        prefix: 77,
       });
       const verify = () => runHistoryCommand(db, "production", "--require-current");
       const predecessor = await historySnapshot(db);
@@ -112,7 +112,7 @@ export function registerPostgresMigrationTransactionCommandCases({
     requiresHistoryPostgres,
     async (context) => {
       const db = await historyDatabase(context, await migrationHistoryFixture(), "completed", {
-        prefix: 73,
+        prefix: 77,
       });
       // Observe attempted DDL, including CREATE IF NOT EXISTS on existing objects.
       // These database-local objects are outside the canonical application catalogs.

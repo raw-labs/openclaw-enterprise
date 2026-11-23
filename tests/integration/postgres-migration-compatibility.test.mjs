@@ -318,7 +318,8 @@ test(
     assert.deepEqual(next.slice(0, -1), previous);
     const { tag, when } = next.at(-1);
     const last = previous.at(-1);
-    assert.equal(Number(tag.slice(0, 4)), Number(last.tag.slice(0, 4)) + 1);
+    assert.equal(Number(tag.slice(0, 4)), last.idx + 1);
+    assert.ok(!previous.some((entry) => entry.tag === tag), "The full migration tag must be new");
     assert.ok(when > last.when, "Drizzle must see the next migration as pending");
   },
 );
@@ -1369,7 +1370,9 @@ async function canonicalData(db) {
   const result = { presets: [] };
   const migrationOwnedColumns = {
     account: ["authentication_version", "identity_only"],
+    iam_access_bindings: ["runtime_role"],
     agents: [
+      "gateway_outbound",
       "repository_bindings",
       "repository_access",
       "harness_auth_credential_source_id",
@@ -1426,7 +1429,7 @@ test(
     await assertEmptyInstallationHistory(empty, expected, { runHistoryCommand, historySnapshot });
 
     // Build the published predecessor with its original SQL and receipts.
-    const pending = await historyDatabase(context, fixture, "guarded_pending", { prefix: 81 });
+    const pending = await historyDatabase(context, fixture, "guarded_pending", { prefix: 86 });
     await pending.app.query(
       "INSERT INTO occ.installation(id,name,created_at) VALUES($1,'Migration fixture',now())",
       [expected],
@@ -1442,7 +1445,7 @@ test(
       assertCompletedHistory,
     });
 
-    const managed = await historyDatabase(context, fixture, "guarded_registration", { prefix: 85 });
+    const managed = await historyDatabase(context, fixture, "guarded_registration", { prefix: 90 });
     await assertPendingRegistrationGuard(managed, expected, {
       runHistoryCommand,
       historySnapshot,
@@ -1455,7 +1458,7 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    for (const prefix of [0, 81, 82]) {
+    for (const prefix of [0, 86, 87]) {
       await context.test(`fresh or populated prefix ${prefix}`, async (child) => {
         const db = await historyDatabase(child, fixture, "native_restart", { prefix });
         await assertNativeRestartUpgrade(db, prefix, {
@@ -1474,21 +1477,21 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    for (const [prefix, history] of await coveringNewestPrefix("pending SandboxPolicy", 76, [
-      [76, "preControlPlaneAudit"],
-      [77, "prePendingSandboxPolicyApplication"],
-      [78, "prePredecessorReplacement"],
-      [79, "preRevisionRuntimeInputs"],
-      [80, "preRestartContinuation"],
-      [81, "preAuthenticationStates"],
-      [82, "preNativeRestartRecovery"],
-      [83, "preRevisionEgressInstallations"],
-      [84, "preStaticTokenServiceSources"],
-      [85, "preTokenServiceSourceOwnership"],
-      [86, "preRepositoryNetworkPolicy"],
-      [87, "preStandaloneCredentialDeployment"],
-      [88, "preStaticConnectionTemplates"],
-      [89, "preNativeGitDelivery"],
+    for (const [prefix, history] of await coveringNewestPrefix("pending SandboxPolicy", 81, [
+      [81, "preControlPlaneAudit"],
+      [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
+      [85, "preRestartContinuation"],
+      [86, "preAuthenticationStates"],
+      [87, "preNativeRestartRecovery"],
+      [88, "preRevisionEgressInstallations"],
+      [89, "preStaticTokenServiceSources"],
+      [90, "preTokenServiceSourceOwnership"],
+      [91, "preRepositoryNetworkPolicy"],
+      [92, "preStandaloneCredentialDeployment"],
+      [93, "preStaticConnectionTemplates"],
+      [94, "preNativeGitDelivery"],
     ])) {
       await context.test(`populated canonical ${prefix}`, async (child) => {
         const db = await historyDatabase(child, fixture, "pending_policy", { prefix });
@@ -1581,7 +1584,7 @@ test(
         const upgradedCustody = {
           ...before,
           work:
-            prefix === 76
+            prefix === 81
               ? before.work.map((row) => ({ ...row, audit_attempt_id: null }))
               : before.work,
         };
@@ -1594,7 +1597,7 @@ test(
             .map(({ hash, created_at }) => [hash, Number(created_at)]),
           manifest.entries.slice(prefix).map(({ sha256, when }) => [sha256, when]),
         );
-        assert.equal(manifest.entries[77].tag, "0078_preserve_pending_sandbox_policy_application");
+        assert.equal(manifest.entries[82].tag, "0083_preserve_pending_sandbox_policy_application");
         assert.deepEqual(await custody(), upgradedCustody);
         assert.deepEqual(await binding(), beforeBinding);
         await assert.rejects(
@@ -1642,7 +1645,7 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "harness_history", { prefix: 71 });
+    const db = await historyDatabase(context, fixture, "harness_history", { prefix: 75 });
     const { namespace, agent, revision, current, settings } = await prepareRetainedHarnessRevisions(
       db,
       { seedCanonicalAgent, runHistoryMigration },
@@ -1675,7 +1678,7 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "egress_repository_policy", { prefix: 86 });
+    const db = await historyDatabase(context, fixture, "egress_repository_policy", { prefix: 91 });
     const namespace = `ns_${randomUUID()}`;
     const { agent, revision } = await seedCanonicalAgent(db, namespace, {
       computeAdmission: true,
@@ -1769,7 +1772,7 @@ test(
         [revision, true],
       ],
     );
-    assert.equal(before.receipts.length, 86);
+    assert.equal(before.receipts.length, 91);
     assert.deepEqual(await runHistoryCommand(db, "production", "--check"), {
       ok: true,
       history: "preRepositoryNetworkPolicy",
@@ -1881,7 +1884,7 @@ test(
       subtests.push(subtest);
     }
     // Gaps: 26, 60 and 61 have no named history; 27 is covered by the rollback case.
-    const histories = await coveringNewestPrefix("populated canonical", 62, [
+    const histories = await coveringNewestPrefix("populated canonical", 65, [
       [24, "prePresetsMain"],
       [25, "main"],
       [28, "repositoryRetention"],
@@ -1909,55 +1912,57 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [63, "preGatewayManagedMode"],
-      [64, "preSelectedRepositorySet"],
-      [65, "preAgentDeployIntent"],
-      [66, "preAgentCredentialSourceLimit"],
-      [67, "preAgentPluginDriver"],
-      [68, "preConnectionTemplates"],
-      [69, "preSavedConnections"],
-      [70, "preDefaultUsers"],
-      [71, "preHarnessOverrides"],
-      [72, "preAccountAdministrationPolicy"],
-      [73, "preFiniteRepositorySessionWithdrawal"],
-      [74, "preHumanAuthenticationResults"],
-      [75, "preNativeBrowserAccess"],
-      [76, "preControlPlaneAudit"],
-      [77, "prePendingSandboxPolicyApplication"],
-      [78, "prePredecessorReplacement"],
-      [79, "preRevisionRuntimeInputs"],
-      [80, "preRestartContinuation"],
-      [81, "preAuthenticationStates"],
-      [82, "preNativeRestartRecovery"],
-      [83, "preRevisionEgressInstallations"],
-      [84, "preStaticTokenServiceSources"],
-      [85, "preTokenServiceSourceOwnership"],
-      [86, "preRepositoryNetworkPolicy"],
-      [87, "preStandaloneCredentialDeployment"],
-      [88, "preStaticConnectionTemplates"],
-      [89, "preNativeGitDelivery"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [66, "preGatewayManagedMode"],
+      [67, "preSelectedRepositorySet"],
+      [68, "preAgentDeployIntent"],
+      [69, "preAgentCredentialSourceLimit"],
+      [70, "preAgentPluginDriver"],
+      [71, "preInstallationGatewayProxy"],
+      [72, "preConnectionTemplates"],
+      [73, "preSavedConnections"],
+      [74, "preDefaultUsers"],
+      [75, "preHarnessOverrides"],
+      [76, "preAccountAdministrationPolicy"],
+      [77, "preFiniteRepositorySessionWithdrawal"],
+      [78, "preHumanAuthenticationResults"],
+      [79, "preNativeBrowserAccess"],
+      [80, "preRuntimeRoleRetirement"],
+      [81, "preControlPlaneAudit"],
+      [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
+      [85, "preRestartContinuation"],
+      [86, "preAuthenticationStates"],
+      [87, "preNativeRestartRecovery"],
+      [88, "preRevisionEgressInstallations"],
+      [89, "preStaticTokenServiceSources"],
+      [90, "preTokenServiceSourceOwnership"],
+      [91, "preRepositoryNetworkPolicy"],
+      [92, "preStandaloneCredentialDeployment"],
+      [93, "preStaticConnectionTemplates"],
+      [94, "preNativeGitDelivery"],
     ]);
     for (const [prefix, history] of histories) {
       const subtest = context.test(`populated canonical ${history}`, async (child) => {
         const db = await historyDatabase(child, fixture, "main", { prefix });
         const namespaceId = await seedCanonicalData(db, {
           preset: prefix >= 25,
-          computeAdmission: prefix >= 55,
+          computeAdmission: prefix >= 59,
           // 0060 requires an execution admission on every revision written after it.
-          executionAdmission: prefix >= 62,
+          executionAdmission: prefix >= 63,
           // 0072 requires settings on new rows; earlier prefixes retain their historical shape.
-          harnessSettings: prefix >= 72,
+          harnessSettings: prefix >= 76,
         });
         const assertSourceOwners =
-          prefix === 59
+          prefix === 62
             ? await retainGatewaySourcesAcrossProxyAdmission(db.app, db.migrator, namespaceId)
             : undefined;
         const receipts = await historyReceipts(db.migrator);
@@ -2046,7 +2051,7 @@ test(
             ],
           );
         }
-        if (prefix === 59) {
+        if (prefix === 62) {
           const upgradedReceipts = await historyReceipts(db.migrator);
           const sessions = await db.app.query("SELECT count(*)::integer AS count FROM occ.session");
           child.diagnostic(
@@ -2068,7 +2073,7 @@ test(
           ).rows[0].allowed,
           true,
         );
-        if (prefix === 87 || history === "preNativeGitDelivery") {
+        if (prefix === 92 || history === "preNativeGitDelivery") {
           // An app-role writer can bypass OCC. A valid broader network allowance must still
           // cover every injected request, and standalone execution cannot add repository delivery.
           const original = (
@@ -2319,7 +2324,7 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "externalchatgpt", { prefix: 56 });
+    const db = await historyDatabase(context, fixture, "externalchatgpt", { prefix: 59 });
     const namespaceId = await seedCanonicalData(db);
     const sourceId = `cs_${randomUUID()}`;
     await db.app.query(
@@ -2460,8 +2465,8 @@ test(
   async (context) => {
     const fixture = await migrationHistoryFixture();
     const subtests = [];
-    // Prefixes 63 to 74 are not listed, so the guard starts at 75.
-    for (const [prefix, history] of await coveringNewestPrefix("Provider continuation", 75, [
+    // Prefixes 66 to 78 are not listed, so the guard starts at 79.
+    for (const [prefix, history] of await coveringNewestPrefix("Provider continuation", 79, [
       [32, "backendTerminology"],
       [33, "prePluginApprovers"],
       [34, "preBrokerReceipts"],
@@ -2483,29 +2488,30 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [75, "preNativeBrowserAccess"],
-      [76, "preControlPlaneAudit"],
-      [77, "prePendingSandboxPolicyApplication"],
-      [78, "prePredecessorReplacement"],
-      [79, "preRevisionRuntimeInputs"],
-      [80, "preRestartContinuation"],
-      [81, "preAuthenticationStates"],
-      [82, "preNativeRestartRecovery"],
-      [83, "preRevisionEgressInstallations"],
-      [84, "preStaticTokenServiceSources"],
-      [85, "preTokenServiceSourceOwnership"],
-      [86, "preRepositoryNetworkPolicy"],
-      [87, "preStandaloneCredentialDeployment"],
-      [88, "preStaticConnectionTemplates"],
-      [89, "preNativeGitDelivery"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [79, "preNativeBrowserAccess"],
+      [80, "preRuntimeRoleRetirement"],
+      [81, "preControlPlaneAudit"],
+      [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
+      [85, "preRestartContinuation"],
+      [86, "preAuthenticationStates"],
+      [87, "preNativeRestartRecovery"],
+      [88, "preRevisionEgressInstallations"],
+      [89, "preStaticTokenServiceSources"],
+      [90, "preTokenServiceSourceOwnership"],
+      [91, "preRepositoryNetworkPolicy"],
+      [92, "preStandaloneCredentialDeployment"],
+      [93, "preStaticConnectionTemplates"],
+      [94, "preNativeGitDelivery"],
     ])) {
       const subtest = context.test(history, async (child) => {
         const db = await historyDatabase(child, fixture, "providercontinuation");
@@ -2599,7 +2605,7 @@ test(
     await assertCredentialSchemaPrivileges(restored.app);
 
     // A database restored at 0084 may have subsequently taken stock 0085.
-    const prefix = await historyDatabase(context, fixture, "restored84", { prefix: 84 });
+    const prefix = await historyDatabase(context, fixture, "restored89", { prefix: 89 });
     await prefix.app.query(
       "INSERT INTO occ.iam_identities(id,kind,issuer,subject) VALUES ('restore-human','principal','restore-fixture','human')",
     );
@@ -2608,10 +2614,10 @@ test(
       fixture,
       await dumpHistoryArchive(fixture, prefix),
     );
-    await installCanonicalPrefix(upgraded, 85);
-    const at85 = await logicalRestoreSnapshot(upgraded);
-    assert.equal(at85.receipts.length, 85);
-    assert.equal(at85.identities.length, 1);
+    await installCanonicalPrefix(upgraded, 90);
+    const at90 = await logicalRestoreSnapshot(upgraded);
+    assert.equal(at90.receipts.length, 90);
+    assert.equal(at90.identities.length, 1);
     assert.deepEqual(await runHistoryCommand(upgraded, "production", "--require-current"), {
       ok: false,
       code: "MIGRATION_HISTORY_PENDING",
@@ -2622,10 +2628,10 @@ test(
     });
     const current = await logicalRestoreSnapshot(upgraded);
     context.diagnostic(
-      `Upgraded restored prefix 84 via 85: ${catalogDigest(await migrationCatalog(upgraded.migrator))}`,
+      `Upgraded restored prefix 89 via 90: ${catalogDigest(await migrationCatalog(upgraded.migrator))}`,
     );
     assert.deepEqual(current.receipts, native.receipts);
-    assert.deepEqual(current.identities, at85.identities);
+    assert.deepEqual(current.identities, at90.identities);
     for (const flag of ["--require-current", undefined]) {
       assert.deepEqual(await runHistoryCommand(upgraded, "production", flag), {
         ok: true,
@@ -2636,8 +2642,8 @@ test(
 
     // The production command must recognize archives from each predecessor.
     for (const [prefix, history] of [
-      [88, "preStaticConnectionTemplates"],
-      [89, "preNativeGitDelivery"],
+      [93, "preStaticConnectionTemplates"],
+      [94, "preNativeGitDelivery"],
     ]) {
       await context.test(history, async (child) => {
         const predecessor = await historyDatabase(child, fixture, "restored_predecessor", {
@@ -2708,7 +2714,7 @@ test(
     // A logical restore prints some constraints differently and an upgrade keeps that
     // spelling, so each new migration must qualify upgrading every accepted restore.
     const prefixes = [51];
-    for (let prefix = 63; prefix < entries.length; prefix += 1) {
+    for (let prefix = 66; prefix < entries.length; prefix += 1) {
       prefixes.push(prefix);
     }
     for (const prefix of prefixes) {
@@ -2749,8 +2755,8 @@ test(
   async (context) => {
     const fixture = await migrationHistoryFixture();
     const subtests = [];
-    // Prefixes 63 to 74 are not listed, so the guard starts at 75.
-    for (const [prefix, history] of await coveringNewestPrefix("rollback", 75, [
+    // Prefixes 66 to 78 are not listed, so the guard starts at 79.
+    for (const [prefix, history] of await coveringNewestPrefix("rollback", 79, [
       [0, "empty"],
       [24, "prePresetsMain"],
       [25, "main"],
@@ -2780,38 +2786,39 @@ test(
       [50, "preCredentialWithdrawalRequester"],
       [51, "preProvisioningDeploymentOutcome"],
       [52, "preComputePreparationFailureEvidence"],
-      [53, "preCredentialSourcePat"],
-      [54, "preComputeRevisionAdmission"],
-      [55, "preHeldAuthenticationSession"],
-      [56, "preCanonicalHarnessAuth"],
-      [57, "preSandboxPolicies"],
-      [58, "preSandboxPolicyAdministrator"],
-      [59, "preCredentialProxy"],
-      [62, "prePreparedAttemptSettlement"],
-      [75, "preNativeBrowserAccess"],
-      [76, "preControlPlaneAudit"],
-      [77, "prePendingSandboxPolicyApplication"],
-      [78, "prePredecessorReplacement"],
-      [79, "preRevisionRuntimeInputs"],
-      [80, "preRestartContinuation"],
-      [81, "preAuthenticationStates"],
-      [82, "preNativeRestartRecovery"],
-      [83, "preRevisionEgressInstallations"],
-      [84, "preStaticTokenServiceSources"],
-      [85, "preTokenServiceSourceOwnership"],
-      [86, "preRepositoryNetworkPolicy"],
-      [87, "preStandaloneCredentialDeployment"],
-      [88, "preStaticConnectionTemplates"],
-      [89, "preNativeGitDelivery"],
+      [57, "preCredentialSourcePat"],
+      [58, "preComputeRevisionAdmission"],
+      [54, "preHeldAuthenticationSession"],
+      [59, "preCanonicalHarnessAuth"],
+      [60, "preSandboxPolicies"],
+      [61, "preSandboxPolicyAdministrator"],
+      [62, "preCredentialProxy"],
+      [65, "prePreparedAttemptSettlement"],
+      [79, "preNativeBrowserAccess"],
+      [80, "preRuntimeRoleRetirement"],
+      [81, "preControlPlaneAudit"],
+      [82, "prePendingSandboxPolicyApplication"],
+      [83, "prePredecessorReplacement"],
+      [84, "preRevisionRuntimeInputs"],
+      [85, "preRestartContinuation"],
+      [86, "preAuthenticationStates"],
+      [87, "preNativeRestartRecovery"],
+      [88, "preRevisionEgressInstallations"],
+      [89, "preStaticTokenServiceSources"],
+      [90, "preTokenServiceSourceOwnership"],
+      [91, "preRepositoryNetworkPolicy"],
+      [92, "preStandaloneCredentialDeployment"],
+      [93, "preStaticConnectionTemplates"],
+      [94, "preNativeGitDelivery"],
     ])) {
       const subtest = context.test(`prefix ${prefix} transaction`, async (child) => {
         const db = await historyDatabase(child, fixture, "rollback", { prefix });
         if (prefix) {
           await seedCanonicalData(db, {
             preset: prefix >= 25,
-            computeAdmission: prefix >= 55,
-            executionAdmission: prefix >= 62,
-            harnessSettings: prefix >= 72,
+            computeAdmission: prefix >= 59,
+            executionAdmission: prefix >= 63,
+            harnessSettings: prefix >= 76,
           });
         }
         const before = await historySnapshot(db);
@@ -2830,26 +2837,27 @@ test(
           prefix === 0
             ? "CREATE TRIGGER"
             : [
-                [89, "CREATE FUNCTION"],
-                [88, "CREATE TRIGGER"],
-                [87, "ALTER TABLE"],
-                [86, "CREATE TRIGGER"],
-                [85, "ALTER TABLE"],
-                [84, "GRANT"],
+                [94, "CREATE FUNCTION"],
+                [93, "CREATE TRIGGER"],
+                [92, "ALTER TABLE"],
+                [91, "CREATE TRIGGER"],
+                [90, "ALTER TABLE"],
+                [89, "GRANT"],
+                [88, "GRANT"],
+                [87, "CREATE TRIGGER"],
+                [86, "GRANT"],
+                [84, "ALTER TABLE"],
                 [83, "GRANT"],
-                [82, "CREATE TRIGGER"],
-                [81, "GRANT"],
-                [79, "ALTER TABLE"],
-                [78, "GRANT"],
-                [77, "CREATE FUNCTION"],
-                [76, "CREATE INDEX"],
-                [75, "CREATE TRIGGER"],
-                [58, "GRANT"],
-                [57, "CREATE TABLE"],
-                [56, "CREATE FUNCTION"],
-                [55, "CREATE TRIGGER"],
-                [54, "ALTER TABLE"],
-                [53, "CREATE FUNCTION"],
+                [82, "CREATE FUNCTION"],
+                [81, "CREATE INDEX"],
+                [80, "ALTER TABLE"],
+                [79, "CREATE TRIGGER"],
+                [61, "GRANT"],
+                [60, "CREATE TABLE"],
+                [59, "CREATE FUNCTION"],
+                [54, "CREATE TRIGGER"],
+                [58, "ALTER TABLE"],
+                [57, "CREATE FUNCTION"],
                 [50, "GRANT"],
                 [41, "ALTER TABLE"],
                 [38, "CREATE FUNCTION"],
@@ -2863,25 +2871,25 @@ test(
         let failAt = "";
         if (prefix === 0) {
           failAt = "IF to_regclass('occ.token_service_instances') IS NULL THEN RETURN; END IF;";
-        } else if (prefix === 89) {
+        } else if (prefix === 94) {
           // Abort 0090 after replacing the execution check, while installing the session guard.
           failAt =
             "IF to_regprocedure('occ.repository_git_network_admission_is_valid(jsonb)') IS NULL THEN RETURN; END IF;";
-        } else if (prefix === 88) {
+        } else if (prefix === 93) {
           // Abort 0089 after it has created the static version table and its current-version FK.
           failAt =
             "IF to_regclass('occ.static_key_template_versions') IS NULL THEN RETURN; END IF;";
-        } else if (prefix === 87) {
+        } else if (prefix === 92) {
           // Abort 0088 after its new validator functions exist, before it replaces constraints.
           failAt =
             "IF to_regprocedure('occ.standalone_credential_deployment_is_valid(jsonb,text)') IS NULL THEN RETURN; END IF;";
-        } else if (prefix === 86) {
+        } else if (prefix === 91) {
           // Abort 0087 after it has installed the new reader-version constraint.
           failAt = `IF NOT EXISTS (
             SELECT 1 FROM pg_constraint WHERE conrelid='occ.agent_revisions'::regclass
             AND conname='agent_revisions_repository_policy_reader_version'
           ) THEN RETURN; END IF;`;
-        } else if (prefix >= 58) {
+        } else if (prefix >= 61) {
           failAt =
             "IF to_regclass('occ.credential_delivery_reductions') IS NULL THEN RETURN; END IF;";
         }
@@ -2937,24 +2945,24 @@ test(
   requiresHistoryPostgres,
   async (context) => {
     const fixture = await migrationHistoryFixture();
-    const db = await historyDatabase(context, fixture, "proxypreview", { prefix: 59 });
+    const db = await historyDatabase(context, fixture, "proxypreview", { prefix: 62 });
     const manifest = JSON.parse(
       await readFile(join(migrationsDirectory, "meta/_canonical-history.json"), "utf8"),
     );
     assert.deepEqual(
-      manifest.entries.slice(58, 63).map(({ tag }) => tag),
+      manifest.entries.slice(61, 66).map(({ tag }) => tag),
       [
-        "0059_administrator_sandbox_policy_grants",
-        "0060_credential_proxy_admission",
-        "0061_repository_credential_authority",
-        "0062_credential_delivery_custody",
-        "0063_prepared_attempt_settlement",
+        "0062_administrator_sandbox_policy_grants",
+        "0063_credential_proxy_admission",
+        "0064_repository_credential_authority",
+        "0065_credential_delivery_custody",
+        "0066_prepared_attempt_settlement",
       ],
     );
     await seedCanonicalData(db, { preset: true, computeAdmission: true });
     const before = await historySnapshot(db);
     const data = await canonicalData(db);
-    assert.equal(before.receipts.length, 59);
+    assert.equal(before.receipts.length, 62);
     assert.deepEqual(await runHistoryMigration(db, "production", "--check"), {
       ok: true,
       history: "preCredentialProxy",
@@ -2990,9 +2998,9 @@ test(
         [preview.slice(start, end), 1787000000060 + start],
       );
       const receipts = await historyReceipts(db.migrator);
-      assert.deepEqual(receipts.slice(0, 59), before.receipts);
+      assert.deepEqual(receipts.slice(0, 62), before.receipts);
       assert.deepEqual(
-        receipts.slice(59).map(({ hash, created_at }) => [hash, Number(created_at)]),
+        receipts.slice(62).map(({ hash, created_at }) => [hash, Number(created_at)]),
         preview.slice(0, end).map((hash, index) => [hash, 1787000000060 + index]),
       );
       await assertHistoryRefused(db, receiptRefusal);
@@ -3019,8 +3027,8 @@ test(
     const upgradedData = await canonicalData(db);
     assert.deepEqual(upgradedData, upgradedCanonicalData(data));
     assert.deepEqual(
-      completed.receipts.slice(59).map(({ hash, created_at }) => [hash, Number(created_at)]),
-      manifest.entries.slice(59).map(({ sha256, when }) => [sha256, when]),
+      completed.receipts.slice(62).map(({ hash, created_at }) => [hash, Number(created_at)]),
+      manifest.entries.slice(62).map(({ sha256, when }) => [sha256, when]),
     );
 
     // A valid first and last receipt cannot vouch for the interior 0061 receipt.
@@ -3073,7 +3081,7 @@ test(
       /catalog objects or effective grants differ for preCredentialProxy/,
     );
     assert.deepEqual(await canonicalData(db), upgradedData);
-    for (const receipt of completed.receipts.slice(59)) {
+    for (const receipt of completed.receipts.slice(62)) {
       await db.migrator.query(
         "INSERT INTO drizzle.__drizzle_migrations(id,hash,created_at) VALUES($1,$2,$3)",
         [receipt.id, receipt.hash, receipt.created_at],
@@ -3122,7 +3130,7 @@ test(
       ["catalog-object", 25, "CREATE TABLE occ.unexplained(id integer)"],
       [
         "draft-pull-privilege",
-        62,
+        65,
         "GRANT DELETE ON occ.prepared_repository_draft_pulls TO occ_app",
       ],
       ["ledger-grant", 25, "GRANT SELECT ON drizzle.__drizzle_migrations TO occ_app"],
@@ -3147,7 +3155,7 @@ test(
         await assertHistoryRefused(db);
       });
     }
-    for (const slot of [85, 86]) {
+    for (const slot of [90, 91]) {
       void context.test(
         `unpublished repository policy at occupied migration slot ${slot}`,
         async (child) => {
@@ -3156,7 +3164,7 @@ test(
             await readFile(join(migrationsDirectory, "meta/_journal.json"), "utf8"),
           );
           // Apply the exact policy SQL with the occupied timestamp, as the preview did.
-          const policy = journal.entries[86];
+          const policy = journal.entries[91];
           const stock = journal.entries[slot - 1];
           const entries = [
             ...journal.entries.slice(0, slot - 1),
@@ -3166,17 +3174,17 @@ test(
           const before = await historySnapshot(db);
           assert.equal(before.receipts.length, slot);
           assert.equal(Number(before.receipts.at(-1).created_at), stock.when);
-          assert.equal(before.receipts.at(-1).hash, manifest.entries[86].sha256);
+          assert.equal(before.receipts.at(-1).hash, manifest.entries[91].sha256);
           assert.notEqual(before.receipts.at(-1).hash, manifest.entries[slot - 1].sha256);
           await assertHistoryRefused(db, /applied receipts differ from canonical history/);
-          if (slot === 86) {
+          if (slot === 91) {
             // Both migrations applied, but in the opposite order. Even a matching
             // end schema cannot certify the sequence of writes on this installation.
             entries.push({ ...stock, idx: policy.idx, when: policy.when });
             await installCanonicalPrefix(db, entries.length, { entries });
             const swapped = await historyReceipts(db.migrator);
-            assert.equal(swapped.length, 87);
-            assert.equal(swapped.at(-1).hash, manifest.entries[85].sha256);
+            assert.equal(swapped.length, 92);
+            assert.equal(swapped.at(-1).hash, manifest.entries[90].sha256);
             await assertHistoryRefused(db, /applied receipts differ from canonical history/);
           }
         },
@@ -3191,7 +3199,7 @@ test(
     const nativePreviewHash = "19319a8b5bf7d714437a563b863f6ab3ead8a4ecefc3ed1d065a62cfe1d4e5e1";
     assert.equal(createHash("sha256").update(nativePreviewSql).digest("hex"), nativePreviewHash);
     const nativeDeliverySql = await readFile(
-      join(migrationsDirectory, "0090_native_git_delivery.sql"),
+      join(migrationsDirectory, "0095_native_git_delivery.sql"),
     );
     const nativeDeliveryHash = "d8dd9f9b4b1fde20f9f1bb3819558e27fc08aa8518cc4b71c27f25240bed4dcb";
     assert.equal(createHash("sha256").update(nativeDeliverySql).digest("hex"), nativeDeliveryHash);
@@ -3200,11 +3208,11 @@ test(
         prefix: manifest.entries.length,
       });
       const receipts = await historyReceipts(db.migrator);
-      const standalone = receipts[87];
-      const native = receipts[89];
+      const standalone = receipts[92];
+      const native = receipts[94];
       assert.deepEqual(
         [standalone, native].map(({ hash }) => hash),
-        [manifest.entries[87].sha256, nativeDeliveryHash],
+        [manifest.entries[92].sha256, nativeDeliveryHash],
       );
       // A correct final catalog cannot qualify receipts published in the wrong order.
       await db.migrator.query(
@@ -3216,13 +3224,13 @@ test(
       await assertHistoryRefused(db, /applied receipts differ from canonical history/);
     });
     for (const [prefix, label, tag] of [
-      [85, "premerge repository ACL and native Git receipts", "0087_native_git_delivery"],
+      [90, "premerge repository ACL and native Git receipts", "0087_native_git_delivery"],
       [
-        87,
+        92,
         "premerge native Git in standalone credential deployment slot",
         "0088_native_git_delivery",
       ],
-      [88, "premerge native Git in static connection templates slot", "0089_native_git_delivery"],
+      [93, "premerge native Git in static connection templates slot", "0089_native_git_delivery"],
     ]) {
       void context.test(label, async (child) => {
         const db = await historyDatabase(child, fixture, "oldnative", { prefix });
@@ -3237,14 +3245,14 @@ test(
         const expected = [];
         try {
           await mkdir(join(directory, "meta"));
-          if (prefix === 85) {
+          if (prefix === 90) {
             // This preview installed repository policy and native Git one slot earlier.
-            const { sha256, ...policy } = manifest.entries[86];
+            const { sha256, ...policy } = manifest.entries[91];
             const bytes = await readFile(join(migrationsDirectory, `${policy.tag}.sql`));
             assert.equal(createHash("sha256").update(bytes).digest("hex"), sha256);
             entries.push({
               ...policy,
-              idx: 86,
+              idx: 91,
               when: policy.when - 1,
               tag: "0086_repository_network_policy",
             });
@@ -3257,7 +3265,7 @@ test(
           // The abandoned 0089 used the same SQL now in 0090, at the timestamp
           // assigned to the static connection templates migration.
           const [sql, hash] =
-            prefix === 88
+            prefix === 93
               ? [nativeDeliverySql, nativeDeliveryHash]
               : [nativePreviewSql, nativePreviewHash];
           assert.notEqual(occupiedHash, hash);
@@ -3664,3 +3672,88 @@ if (
     },
   );
 }
+
+test(
+  "Retiring custom runtime roles preserves existing operation grants without escalating assignments",
+  requiresHistoryPostgres,
+  async (context) => {
+    const fixture = await migrationHistoryFixture();
+    const db = await historyDatabase(context, fixture, "retireroles", { prefix: 77 });
+    await seedCanonicalData(db, {
+      preset: true,
+      computeAdmission: true,
+      executionAdmission: true,
+      harnessSettings: true,
+    });
+    const { id: agent, namespace_id: namespace } = (
+      await db.app.query("SELECT id, namespace_id FROM occ.agents LIMIT 1")
+    ).rows[0];
+    await db.app.query(`INSERT INTO occ.iam_identities(id,kind,issuer,subject)
+      VALUES ('retire-human','principal','migration-fixture','retire-human')`);
+    await db.app.query(
+      `INSERT INTO occ.iam_roles(id,namespace_id,name,permissions)
+      VALUES ('retire-entry',$1,'Runtime entry',
+        '[{"action":"read","resourceKind":"agent"},{"action":"use","resourceKind":"agent"}]'),
+        ('retire-operator',$1,'Existing operator','[{"action":"operate","resourceKind":"agent"}]')`,
+      [namespace],
+    );
+    // A former native role assignment is not an upstream operate grant. Keep a
+    // separate legitimate grant to prove retirement neither removes nor invents it.
+    await db.app.query(
+      `INSERT INTO occ.iam_access_bindings
+      (id,namespace_id,identity_subject_id,role_id,resource_kind,resource_id,runtime_role)
+      VALUES ('retire-assignment',$1,'retire-human','retire-entry','agent',$2,'platform-administrator'),
+             ('retire-operation',$1,'retire-human','retire-operator','agent',$2,NULL)`,
+      [namespace, agent],
+    );
+    // The current sandbox-policy restriction must survive removal of only the retired use action.
+    await db.app.query(
+      `INSERT INTO occ.iam_restrictions(id,namespace_id,action,resource_kind,effect)
+      VALUES ('retire-use',$1,'use','agent','deny'), ('retire-denial',$1,'administer','agent','deny'),
+             ('retire-policy',$1,'manage_policy','agent','deny')`,
+      [namespace],
+    );
+    const before = await historyReceipts(db.migrator);
+    assert.deepEqual(await runHistoryMigration(db, "production"), {
+      ok: true,
+      history: "preFiniteRepositorySessionWithdrawal",
+    });
+    await assertCompletedHistory(db, before);
+    assert.deepEqual(
+      (
+        await db.app.query(
+          "SELECT id,role_id FROM occ.iam_access_bindings WHERE id LIKE 'retire-%' ORDER BY id",
+        )
+      ).rows,
+      [{ id: "retire-operation", role_id: "retire-operator" }],
+    );
+    assert.deepEqual(
+      (
+        await db.app.query(
+          "SELECT id,permissions FROM occ.iam_roles WHERE id LIKE 'retire-%' ORDER BY id",
+        )
+      ).rows,
+      [
+        { id: "retire-entry", permissions: [{ action: "read", resourceKind: "agent" }] },
+        { id: "retire-operator", permissions: [{ action: "operate", resourceKind: "agent" }] },
+      ],
+    );
+    assert.deepEqual(
+      (
+        await db.app.query(
+          "SELECT id,action FROM occ.iam_restrictions WHERE id LIKE 'retire-%' ORDER BY id",
+        )
+      ).rows,
+      [
+        { id: "retire-denial", action: "administer" },
+        { id: "retire-policy", action: "manage_policy" },
+      ],
+    );
+    const completed = await historySnapshot(db);
+    assert.deepEqual(await runHistoryMigration(db, "production"), {
+      ok: true,
+      history: "completed",
+    });
+    assert.deepEqual(await historySnapshot(db), completed);
+  },
+);

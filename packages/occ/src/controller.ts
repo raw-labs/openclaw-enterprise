@@ -105,6 +105,7 @@ import type {
   Preset,
   PresetSummary,
   PluginCatalogEntry,
+  ChannelProviderDriver,
   PluginCatalogPage,
   PluginDriver,
   ChannelDirectoryResult,
@@ -191,6 +192,10 @@ export class OpenClawController {
   /** Install one trusted catalog per Harness family. */
   installPluginDrivers(drivers: readonly PluginDriver[]): void {
     this.composition.drivers.installPluginDrivers(drivers);
+  }
+
+  installChannelDrivers(providers: readonly ChannelProviderDriver[]): void {
+    this.composition.drivers.installChannelDrivers(providers);
   }
 
   /** Register one configured owner, then select its exact capability views. */

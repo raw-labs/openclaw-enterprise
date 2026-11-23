@@ -3152,7 +3152,10 @@ test("a late permission answer turns a reader's Channels and Channel Secrets rea
     false,
   );
   await page.getByText(CHANNELS_READ_ONLY, { exact: true }).waitFor();
-  await page.getByText("Read-only with your access.", { exact: true }).waitFor();
+  // Each channel card, Slack and Microsoft Teams, says why its editor is unavailable.
+  const readOnlyCards = page.getByText("Read-only with your access.", { exact: true });
+  await readOnlyCards.first().waitFor();
+  assert.equal(await readOnlyCards.count(), 2);
   // A reader's card offers no editor's action; Deploy says why it is disabled.
   await page
     .getByRole("button", { name: "Set up credentials", exact: true })

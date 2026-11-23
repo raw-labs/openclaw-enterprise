@@ -12,7 +12,7 @@ images; individual Agents cannot choose implementations.
 1. Use bundled Kubernetes Compute and Kubernetes Secret for a new Installation
    or for [local Agent deployment](../../guides/quickstart.md). The
    [production Installation example](../../guides/deploy/production-installation.md#configure-the-installation)
-   shows a complete YAML document with the required OCC and Driver settings.
+   shows the required OCC and Driver settings.
    If you need embedded OpenClaw on existing Linux hosts with credentials
    supplied on those hosts, start with [SSH Compute](ssh-compute.md) instead.
 2. Select the required Configuration, IAM, Compute, and Secret implementations.
@@ -48,7 +48,7 @@ in either mode.
 | Capability                  | Shared contract                                                             | Selection boundary                                                                                                                                   |
 | --------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `configuration`             | [ConfigurationDriver](configuration.md)                                     | Required in Installation YAML; bundled Kubernetes or installed package.                                                                              |
-| `channel`                   | [ChannelDriver](channel.md)                                                 | Controller-selected bundled Slack directory Driver; no Installation YAML selector.                                                                   |
+| `channel`                   | [ChannelDriver](channel.md)                                                 | Optional bundled `slack-channel` and `teams-channel`; see [Channel Driver selection](channel.md#installation-selection).                             |
 | `iam`                       | [IAMDriver](iam.md)                                                         | Required in Installation YAML; bundled native IAM or installed package.                                                                              |
 | `compute`                   | [ComputeDriver](compute.md)                                                 | Required in Installation YAML; bundled Kubernetes, bundled SSH, or installed package.                                                                |
 | `secret`                    | [SecretDriver](secret.md)                                                   | Required in trusted Installation YAML, including SSH; bundled Kubernetes only.                                                                       |

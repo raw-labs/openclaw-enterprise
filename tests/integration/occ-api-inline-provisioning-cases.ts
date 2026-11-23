@@ -368,6 +368,10 @@ export async function verifyInlineConfigurationRefusals(state: InlineProvisionin
   await assertNoAgentsInNamespace(fixture, namespace.id);
   for (const [values, message] of [
     [
+      { ...model, env: { vars: { OPENCLAW_PROXY_ACTIVE: "1" } } },
+      "Configuration setting env.vars.OPENCLAW_PROXY_ACTIVE must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust.",
+    ],
+    [
       { ...model, channels: { discord: { enabled: true } } },
       unsupportedChannelRefusal("channels.discord"),
     ],
@@ -713,8 +717,7 @@ export async function runChannelReferenceRefusals(
     return new Response(JSON.stringify({ ok: true, bot_id: "B123", team_id: "T123" }));
   });
   assert(fixture.controller, "Bootstrap must create the controller.");
-  fixture.controller.registerDriver(channel);
-  fixture.controller.selectDriver("channel", channel.id);
+  fixture.controller.installChannelDrivers([{ provider: "slack", driver: channel }]);
   const form = (name: "otherText" | "inline" | "fallback" | "shorthand") =>
     referenceFormRefusal("channels.slack.botToken", name);
   const unbound = unboundReferenceRefusal("channels.slack.botToken", "SLACK_SPARE_TOKEN");

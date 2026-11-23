@@ -24,6 +24,7 @@ type PresetScenario = {
   presetModelKeyVariable?: boolean;
   noDefaultPreset?: boolean;
   nativePluginSettings?: OpenClawConfigurationDocument;
+  presetNameTie?: boolean;
 };
 
 // These fields are mutable draft projections, not an admitted Agent or a
@@ -274,6 +275,15 @@ export function createPresetFixtures(
           },
         ]),
   ];
+  if (scenario.presetNameTie) {
+    // The API sends lowercase first; the Console breaks the locale tie by exact name.
+    preset.name = "research assistant";
+    presets.push({
+      ...structuredClone(preset),
+      id: "pre_00000000-0000-4000-8000-000000000011",
+      name: "Research assistant",
+    });
+  }
   if (scenario.swePreset) {
     for (const [name, definition] of [
       ["standard-codex", standardCodexPreset],

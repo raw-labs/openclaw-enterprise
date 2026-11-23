@@ -1,5 +1,5 @@
 import { NETWORK_PROFILE_LABEL, ORDINARY_NETWORK_PROFILE } from "./resources/network.ts";
-import type { AgentRevision, NetworkDestinationRule } from "@openclaw-enterprise/contracts";
+import type { AgentRevision } from "@openclaw-enterprise/contracts";
 import { asRecord, readCappedBody, sha256Hex } from "@openclaw-enterprise/utils";
 import type { KubernetesObject, KubernetesObjectApi, V1ObjectMeta } from "@kubernetes/client-node";
 import { randomUUID } from "node:crypto";
@@ -13,8 +13,10 @@ import {
   CHANNEL_EGRESS_FORWARD_CLUSTER,
   channelEgressFilterChain,
   type ChannelEgressOptions,
+  type ChannelEgressPolicy,
 } from "./channel-egress-policy.ts";
 
+const DENY_ALL: ChannelEgressPolicy = { destinations: [] };
 const API = "gateway.envoyproxy.io/v1alpha1";
 const RECORD = "openclaw.dev/channel-egress-binding";
 const REVISION_LABEL = "openclaw.dev/revision";
@@ -74,7 +76,7 @@ export interface ChannelEgressBinding {
   readonly state: "reserved" | "active" | "revoking";
 }
 
-export interface PreparedChannelRouting extends ChannelRoutingRequirements {
+export interface PreparedChannelRouting extends ChannelRoutingRequirements, ChannelEgressPolicy {
   binding?: ChannelEgressBinding;
   proxyUrl?: string;
 }
@@ -536,7 +538,7 @@ export class KubernetesChannelEgress {
     port: number,
     fleetUid: string,
     binding: ChannelEgressBinding | undefined,
-    destinations: readonly NetworkDestinationRule[],
+    policy: ChannelEgressPolicy,
     previous?: Resource,
   ): Resource {
     const generation =
@@ -574,7 +576,7 @@ export class KubernetesChannelEgress {
               path: "/default_filter_chain",
               value: channelEgressFilterChain(
                 generation,
-                binding?.state === "active" ? destinations : [],
+                binding?.state === "active" ? policy : DENY_ALL,
                 this.options,
               ),
             },
@@ -626,7 +628,7 @@ export class KubernetesChannelEgress {
   private async reserve(
     revision: AgentRevision,
     namespace: string,
-    requirements: ChannelRoutingRequirements,
+    requirements: PreparedChannelRouting,
     fleetUid: string,
   ): Promise<ChannelEgressBinding> {
     const policyHash = sha256Hex(
@@ -634,7 +636,7 @@ export class KubernetesChannelEgress {
         drivers: requirements.drivers,
         // Include the complete effective policy so an implementation or mandatory
         // restriction change also gets a separate generation and serving binding.
-        filterChain: channelEgressFilterChain("policy", requirements.destinations, this.options),
+        filterChain: channelEgressFilterChain("policy", requirements, this.options),
       }),
       32,
     );
@@ -673,7 +675,7 @@ export class KubernetesChannelEgress {
           port,
           state: "reserved",
         };
-        const desired = this.policy(port, fleetUid, binding, [], previous);
+        const desired = this.policy(port, fleetUid, binding, DENY_ALL, previous);
         try {
           await this.request(
             (api) => (previous ? api.replace(desired) : api.create(desired)),
@@ -698,7 +700,7 @@ export class KubernetesChannelEgress {
   private async transition(
     binding: ChannelEgressBinding,
     state: ChannelEgressBinding["state"],
-    destinations: readonly NetworkDestinationRule[],
+    policy: ChannelEgressPolicy,
     fleetUid: string,
   ): Promise<ChannelEgressBinding> {
     const previous = await this.read(
@@ -713,7 +715,7 @@ export class KubernetesChannelEgress {
       throw new Error("Channel egress binding was revoked or reassigned.");
     }
     const next = { ...current, state };
-    const desired = this.policy(binding.port, fleetUid, next, destinations, previous);
+    const desired = this.policy(binding.port, fleetUid, next, policy, previous);
     if (!isDeepStrictEqual(previous.spec, desired.spec) || current.state !== state) {
       await this.request((api) => api.replace(desired), true);
     }
@@ -723,13 +725,13 @@ export class KubernetesChannelEgress {
   private async waitInstalled(
     binding: ChannelEgressBinding,
     fleetUid: string,
-    destinations: readonly NetworkDestinationRule[] = [],
+    policy: ChannelEgressPolicy = DENY_ALL,
   ): Promise<void> {
     const expected = binding.state === "active" ? binding.id : `${binding.id}-denied`;
     const expectedChain = canonicalEnvoy(
       channelEgressFilterChain(
         expected,
-        binding.state === "active" ? destinations : [],
+        binding.state === "active" ? policy : DENY_ALL,
         this.options,
       ),
     );
@@ -1113,8 +1115,8 @@ export class KubernetesChannelEgress {
     const { uid } = await this.fleet();
     let binding = await this.reserve(revision, namespace, routing, uid);
     await this.verifyPolicySet(binding);
-    binding = await this.transition(binding, "active", routing.destinations, uid);
-    await this.waitInstalled(binding, uid, routing.destinations);
+    binding = await this.transition(binding, "active", routing, uid);
+    await this.waitInstalled(binding, uid, routing);
     await this.reconcileGrants(binding);
     await this.verifyPolicySet(binding);
     routing.binding = binding;
@@ -1169,7 +1171,7 @@ export class KubernetesChannelEgress {
       ) {
         continue;
       }
-      const denied = await this.transition(binding, "revoking", [], uid);
+      const denied = await this.transition(binding, "revoking", DENY_ALL, uid);
       await this.waitInstalled(denied, uid);
       // Retain stable empty policies as fencing records. Deleting them would allow a
       // delayed create from an old worker to reopen a port after it was reassigned.
@@ -1187,7 +1189,7 @@ export class KubernetesChannelEgress {
       }
       this.verifySlot(current, binding.port, uid);
       await this.request(
-        (api) => api.replace(this.policy(binding.port, uid, undefined, [], current)),
+        (api) => api.replace(this.policy(binding.port, uid, undefined, DENY_ALL, current)),
         true,
       );
     }

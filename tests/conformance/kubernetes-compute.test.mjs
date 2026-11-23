@@ -1,4 +1,5 @@
-import { channelEgressOptions, slackChannelDrivers } from "../helpers/channel-egress.ts";
+import { createChannelProviders } from "../../apps/controller/src/drivers/channel/index.ts";
+import { channelEgressOptions } from "../helpers/channel-egress.ts";
 import { workspaceSetupFixture } from "../helpers/kubernetes-workspace-setup.ts";
 import {
   openShellPolicyOptions,
@@ -41,7 +42,6 @@ import { conformanceKubeconfig } from "../helpers/kubernetes-compute.ts";
 import {
   DEDICATED_OPENCLAW_SANDBOX_REQUIRED,
   EMBEDDED_API_KEY_REQUIRED,
-  unsupportedChannelRefusal,
   unboundReferenceRefusal,
   unreadableSlackTokenRefusal,
   unsubstitutedFallbackRefusal,
@@ -445,6 +445,13 @@ test(
   "workspace node identity is Agent-scoped and only Agent deletion removes it",
   checkAgentScopedWorkspaceNodeIdentity,
 );
+
+function teamsOptions(overrides = {}) {
+  return routedOptions({
+    ...overrides,
+    gatewayRouting: { ...gatewayRouting, channels: { hostname: "callbacks.example.test" } },
+  });
+}
 
 test(
   "retiring an upgraded revision removes its legacy node Secret and keeps the Agent node",
@@ -3202,6 +3209,22 @@ test("gateway browser routes preserve delegated authority while machine and node
     }
     assert.ok(headers.remove.includes("authorization"));
     assert.ok(headers.remove.includes("cookie"));
+    // The route sets the trusted identity and scope cap; removing the same headers would make
+    // that grant depend on proxy evaluation order.
+    assert.deepEqual(
+      headers.set.filter(({ name }) => headers.remove.includes(name)),
+      [],
+    );
+    // Client credential and identity claims never reach the tenant Gateway through chat.
+    for (const name of [
+      "x-api-key",
+      "tailscale-user-login",
+      "tailscale-user-name",
+      "tailscale-user-profile-pic",
+      "tailscale-funnel-request",
+    ]) {
+      assert.ok(headers.remove.includes(name), name);
+    }
     assert.deepEqual(rule.backendRefs, [
       { group: "", kind: "Service", name: service.metadata.name, port: 8080 },
     ]);
@@ -3580,7 +3603,7 @@ test(
 
 test("dedicated Codex projects the account-owned token through the common PAT login", () => {
   const driver = createKubernetesComputeDriver(
-    options({
+    teamsOptions({
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
@@ -3661,6 +3684,78 @@ test("dedicated Codex projects the account-owned token through the common PAT lo
   assert.equal(gatewayEnvironment.has("SLACK_APP_TOKEN"), false);
   assert.equal(gatewayEnvironment.has("SLACK_BOT_TOKEN"), false);
   assert.equal(gatewayEnvironment.has("MSTEAMS_APP_PASSWORD"), false);
+});
+
+test("Teams Gateways route only provider traffic through the process-wide channel proxy", () => {
+  const runtime = {
+    transportSecretPrefix: "transport",
+    gatewayStorageClassName: "local-path",
+    channelEgress: channelEgressOptions,
+  };
+  const ownership = { namespaceId: tenant.id, agentId: "agent-routed", revisionId: "revision-1" };
+  const namespace = { name: kubernetesNamespaceName(tenant.id), plane: "execution" };
+  const routing = (providers) => ({
+    providers,
+    drivers: [],
+    destinations: [],
+    proxyUrl: "http://channel-egress.envoy-gateway-system.svc:10001",
+    binding: {
+      id: "binding-1",
+      namespaceId: tenant.id,
+      namespace: namespace.name,
+      agentId: ownership.agentId,
+      revisionId: ownership.revisionId,
+      policyHash: "policy",
+      port: 10001,
+      state: "reserved",
+    },
+  });
+  const render = (driver, providers) =>
+    Object.fromEntries(
+      driver
+        .deployment({
+          name: "teams-gateway",
+          ownership,
+          namespace,
+          images: { runtime: "gateway:local", workspaceSetup: driver.options.images.gateway },
+          serviceAccountName: "teams-gateway",
+          role: "gateway",
+          environment: {},
+          loggingLevel: "info",
+          configuration: driver.gatewayConfiguration(routedRevision(driver), undefined, namespace),
+          enabledChannels: routing(providers),
+        })
+        .spec.template.spec.containers[0].env.map(({ name, value }) => [name, value]),
+    );
+  for (const executionCluster of [undefined, twoClusterOptions().executionCluster]) {
+    const driver = createKubernetesComputeDriver({
+      ...teamsOptions({ runtime }),
+      ...(executionCluster === undefined ? {} : { executionCluster }),
+    });
+    const env = render(driver, ["msteams"]);
+    // The Teams SDK follows Node's process-wide proxy, so Envoy sees every CONNECT it makes.
+    assert.equal(env.NODE_USE_ENV_PROXY, "1");
+    assert.equal(env.HTTPS_PROXY, routing([]).proxyUrl);
+    // Compute-assigned Harness and peer status routes are not channel destinations: through
+    // the Agent's listener, Envoy would refuse them and the Gateway could not reach its Harness.
+    const bypass = env.NO_PROXY.split(",");
+    const peers = ["APP_SERVER_URL", "OPENCLAW_PEER_PLUGIN_STATUS_URL"].filter(
+      (name) => env[name] !== undefined,
+    );
+    assert.deepEqual(
+      peers,
+      executionCluster === undefined
+        ? ["APP_SERVER_URL"]
+        : ["APP_SERVER_URL", "OPENCLAW_PEER_PLUGIN_STATUS_URL"],
+    );
+    for (const name of peers) {
+      assert.ok(bypass.includes(new URL(env[name]).hostname), name);
+    }
+    // Slack's SDK reads HTTPS_PROXY itself; its Gateway keeps Node's default direct routing.
+    const slack = render(driver, ["slack"]);
+    assert.equal(slack.NODE_USE_ENV_PROXY, undefined);
+    assert.equal(slack.NO_PROXY, undefined);
+  }
 });
 
 test(
@@ -4410,14 +4505,14 @@ test(
 
 test("native channel settings require readable Secret bindings", async () => {
   const driver = new KubernetesComputeDriver(
-    routedOptions({
+    teamsOptions({
       runtime: {
         transportSecretPrefix: "transport",
         gatewayStorageClassName: "local-path",
         channelEgress: channelEgressOptions,
       },
     }),
-    { nodeEnrollment: {}, channelDrivers: slackChannelDrivers },
+    { nodeEnrollment: {}, channelDrivers: createChannelProviders() },
   );
   const agentId = "agent-a";
   const revision = {
@@ -4458,6 +4553,49 @@ test("native channel settings require readable Secret bindings", async () => {
 
   // Real Gateway/Harness projection and revocation now run in the credentialed
   // Kubernetes workflow. These cases retain the distinct Secret parsing boundary.
+  // Installation callback routing must be refused at deploy admission, before
+  // a dedicated redeploy can stop its working predecessor. Draft save still works.
+  const callbackOptions = structuredClone(driver.options);
+  delete callbackOptions.gatewayRouting.channels;
+  const withoutCallback = new KubernetesComputeDriver(callbackOptions, {
+    nodeEnrollment: {},
+    channelDrivers: createChannelProviders(),
+  });
+  const teamsConfiguration = {
+    agents: { defaults: { model: "codex/gpt-5" } },
+    channels: { msteams: { enabled: true } },
+  };
+  assert.doesNotThrow(() =>
+    withoutCallback.validateHarnessAuth(
+      revision.harness,
+      revision.harnessAuth,
+      teamsConfiguration,
+      null,
+    ),
+  );
+  assert.throws(
+    () =>
+      withoutCallback.validateHarnessAuth(
+        revision.harness,
+        revision.harnessAuth,
+        teamsConfiguration,
+        secretBindings,
+      ),
+    /dedicated public channel callback listener/,
+  );
+
+  for (const msteams of [
+    { enabled: true },
+    { webhook: {} },
+    { webhook: { path: "/api/messages" } },
+  ]) {
+    driver.validateHarnessAuth(
+      revision.harness,
+      revision.harnessAuth,
+      { ...teamsConfiguration, channels: { msteams } },
+      secretBindings,
+    );
+  }
   await assert.rejects(
     driver.prepareRevision({
       ...revision,
@@ -4472,7 +4610,10 @@ test("native channel settings require readable Secret bindings", async () => {
         diagnostics: { otel: { logs: false } },
       },
     }),
-    { message: unsupportedChannelRefusal("channels.discord") },
+    {
+      message:
+        "Configuration setting channels.discord is not a supported channel: use slack or msteams, or set its enabled to false.",
+    },
   );
 
   const slackToken = (botToken) => ({
@@ -4663,6 +4804,19 @@ test("native channel settings require readable Secret bindings", async () => {
   for (const name of ["$OPS", "${x}", "${OPS_NAME:-ops}"]) {
     driver.validateHarnessAuth(revision.harness, revision.harnessAuth, slackAccount({ name }), {});
   }
+
+  await assert.rejects(
+    driver.prepareRevision({
+      ...revision,
+      configuration: {
+        agents: { defaults: { model: "codex/gpt-5" } },
+        channels: { msteams: { enabled: true, webhook: { path: "/custom-callback" } } },
+        logging: { level: "info", consoleLevel: "info", consoleStyle: "json" },
+        diagnostics: { otel: { logs: false } },
+      },
+    }),
+    /must be \/api\/messages/,
+  );
 });
 
 test(

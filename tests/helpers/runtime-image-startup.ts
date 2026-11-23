@@ -86,7 +86,7 @@ export async function temporaryGatewayConfiguration(
   return path;
 }
 
-type RuntimeImageConfigurationOptions = { enableSlack?: boolean };
+type RuntimeImageConfigurationOptions = { enableSlack?: boolean; enableTeams?: boolean };
 type HarnessConfiguration = ReturnType<typeof createHarnessConfiguration>;
 type SlackOptions = { enabled: boolean };
 type SmokeConfiguration = Omit<HarnessConfiguration, "plugins"> & {
@@ -94,17 +94,48 @@ type SmokeConfiguration = Omit<HarnessConfiguration, "plugins"> & {
     allow: string[];
     entries: Partial<NonNullable<HarnessConfiguration["plugins"]>["entries"]> & {
       slack?: SlackOptions;
+      msteams?: SlackOptions;
     };
   };
-  channels?: { slack?: SlackOptions };
+  channels?: {
+    slack?: SlackOptions;
+    msteams?: {
+      enabled: boolean;
+      appId: string;
+      tenantId: string;
+      appPassword: { source: "env"; provider: string; id: string };
+      legacyWebhook: boolean;
+      dmPolicy: string;
+      groupPolicy: string;
+    };
+  };
 };
 
 export function createRuntimeImageConfiguration(
   harnessId: string,
   providerModel: string,
-  { enableSlack }: RuntimeImageConfigurationOptions = {},
+  { enableSlack, enableTeams }: RuntimeImageConfigurationOptions = {},
 ): SmokeConfiguration {
   const configuration: SmokeConfiguration = createHarnessConfiguration(harnessId, providerModel);
+  if (enableTeams === true) {
+    configuration.plugins = {
+      ...configuration.plugins,
+      allow: [...new Set([...(configuration.plugins?.allow ?? []), "msteams"])],
+      entries: { ...configuration.plugins?.entries, msteams: { enabled: true } },
+    };
+    configuration.channels = {
+      ...configuration.channels,
+      msteams: {
+        enabled: true,
+        appId: "11111111-1111-4111-8111-111111111111",
+        tenantId: "22222222-2222-4222-8222-222222222222",
+        appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+        legacyWebhook: false,
+        dmPolicy: "disabled",
+        groupPolicy: "disabled",
+      },
+    };
+  }
   if (enableSlack !== true) {
     return configuration;
   }
@@ -312,6 +343,7 @@ async function ciPreparedCodexSeccompProfile(ciStatePath: string | undefined) {
 // running unconfined or skipping. Local runs without CI keep Docker's default
 // seccomp profile.
 type ReviewedCodexSeccompOptions = {
+  appArmorProfile?: string | undefined;
   profile?: string | undefined;
   ciStatePath?: string | undefined;
   ci?: string | undefined;
@@ -320,11 +352,20 @@ type ReviewedCodexSeccompOptions = {
 
 export async function reviewedCodexSeccompSecurityOptions({
   profile = process.env.OCC_TEST_CODEX_SECCOMP_PROFILE,
+  appArmorProfile = process.env.OCC_TEST_CODEX_APPARMOR_PROFILE ?? "",
   ciStatePath = process.env.OPENCLAW_ENTERPRISE_CI_STATE,
   ci = process.env.CI,
   codexVersion = "0.164.0",
 }: ReviewedCodexSeccompOptions = {}): Promise<string[]> {
   const securityOptions = ["--security-opt", "no-new-privileges"];
+  if (appArmorProfile !== "") {
+    assert.equal(
+      appArmorProfile,
+      "oce-ci-codex-bwrap",
+      "OCC_TEST_CODEX_APPARMOR_PROFILE must select the named CI Codex profile.",
+    );
+    securityOptions.push("--security-opt", `apparmor=${appArmorProfile}`);
+  }
   if (profile === undefined || profile.length === 0) {
     const inCi = ci !== undefined && ci !== "" && ci !== "false" && ci !== "0";
     if (

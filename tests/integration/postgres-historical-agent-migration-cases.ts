@@ -996,7 +996,7 @@ export async function assertGuardedInstallationUpgrade(
   const data = await canonicalData(pending);
   const before = await historySnapshot(pending);
   assertHistorySnapshot(before);
-  assert.equal(before.receipts.length, 81);
+  assert.equal(before.receipts.length, 86);
   for (const flag of guardedCommands) {
     assert.deepEqual(
       await runHistoryCommand(

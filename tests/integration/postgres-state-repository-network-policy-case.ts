@@ -1001,8 +1001,7 @@ export async function verifyChannelPolicyHandoff(
       await revocation;
     });
   };
-  controller.registerDriver(channel);
-  controller.selectDriver("channel", channel.id);
+  controller.installChannelDrivers([{ provider: "slack", driver: channel }]);
   Object.assign(sandboxDriver, { admitRepositoryNetworkPolicy: () => ({}) });
   Object.assign(computeDriver, {
     validateProtectedRepositoryNetworkPolicy: async () => {
@@ -1084,8 +1083,7 @@ export async function verifyDeploymentAuthorityAfterWait(
           channelCalls += 1;
         });
       };
-      controller.registerDriver(channel);
-      controller.selectDriver("channel", channel.id);
+      controller.installChannelDrivers([{ provider: "slack", driver: channel }]);
     }
     Object.assign(computeDriver, {
       validateProtectedRepositoryNetworkPolicy: async () => {
