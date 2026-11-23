@@ -8,7 +8,23 @@
   },
   "batch": {
     "startingIntegration": "f4a0fd9f19659e076bda0d84d522eade8559318a",
-    "steps": [],
+    "steps": [
+      {
+        "operation": "Incorporate pinned upstream, retain the alpha.22 ledger, and adopt upstream explicit native browser opt-in in place of #12",
+        "input": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+        "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3"
+      },
+      {
+        "operation": "Replace #2, #17 and #36 with one merge of #40, including #39",
+        "input": "9308b9caed8c520be3eb6371bbc1fdfffc7c3c74",
+        "pullRequest": 40,
+        "includes": {
+          "pullRequest": 39,
+          "commit": "851e1292b52b607384603aae27d8a1f01b08cd6b"
+        },
+        "commit": "ee52dfdba970f115e2f24d821953c4fde6e714f9"
+      }
+    ],
     "plannedInputs": [
       {
         "operation": "Incorporate pinned upstream, retain the alpha.22 ledger, and adopt upstream explicit native browser opt-in in place of #12",
@@ -31,19 +47,6 @@
   },
   "features": [
     {
-      "number": 2,
-      "title": "Microsoft Teams channels",
-      "author": "miguelbranco80",
-      "headRef": "codex/teams-support",
-      "commit": "b979ce713e20b2b3d150319b6c114b086f886edf",
-      "status": "included",
-      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
-      "headRepository": "raw-labs/openclaw-enterprise",
-      "baseRef": "main",
-      "draft": false,
-      "forkState": "open"
-    },
-    {
       "number": 11,
       "title": "Installation profiles and Preset starters",
       "author": "miguelbranco80",
@@ -54,58 +57,32 @@
       "headRepository": "raw-labs/openclaw-enterprise",
       "baseRef": "codex/installation-customization-base",
       "draft": false,
-      "forkState": "open"
+      "forkState": "open",
+      "retentionReason": "The historical selection supplies --profile-file and the default Preset starter. Upstream #2253 supplies Installation Preset seeding. No new #11 input was merged."
     },
     {
-      "number": 12,
-      "title": "First-deployment native administration",
+      "number": 39,
+      "title": "Impl: Microsoft Teams channels with managed Envoy egress",
       "author": "miguelbranco80",
-      "headRef": "codex/native-admin-first-deploy",
-      "commit": "37fac70dfb784351544189ad07909588b327ef47",
+      "headRef": "codex/teams-envoy",
+      "commit": "851e1292b52b607384603aae27d8a1f01b08cd6b",
       "status": "included",
-      "comparisonBase": "fbfc834267fddf9094a8f92f7f61b1d775f7dae9",
+      "comparisonBase": "e88dc5883143e5fe39cffb0199ae5c0bac147cb7",
       "headRepository": "raw-labs/openclaw-enterprise",
-      "baseRef": "codex/native-admin-first-deploy-base",
-      "draft": false,
-      "forkState": "closed",
-      "retentionReason": "Closed unmerged; upstream has creation-time browser opt-in but not deployment-time preparation of UI-enabled reusable Configurations. Preserve the allocated Agent deployment-copy transform without restoring custom runtime roles."
-    },
-    {
-      "number": 15,
-      "title": "Native plugin permission preservation",
-      "author": "miguelbranco80",
-      "headRef": "codex/console-native-plugin-allowlist",
-      "commit": "27aa612d2bafd819c734942d59125084a6c658eb",
-      "status": "included",
-      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
-      "headRepository": "raw-labs/openclaw-enterprise",
-      "baseRef": "codex/native-plugin-upstream-base",
-      "draft": false,
-      "forkState": "open"
-    },
-    {
-      "number": 17,
-      "title": "Temporary embedded channel evaluation",
-      "author": "miguelbranco80",
-      "headRef": "codex/eval-embedded-channels",
-      "commit": "71fdc26515c7eb5b921fae9b043ec5cfb97403f0",
-      "status": "included",
-      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
-      "headRepository": "raw-labs/openclaw-enterprise",
-      "baseRef": "codex/eval-upstream-a7aa9219f",
+      "baseRef": "codex/teams-envoy-base",
       "draft": true,
       "forkState": "open"
     },
     {
-      "number": 36,
-      "title": "One bundled or external Gateway outbound proxy",
+      "number": 40,
+      "title": "Trial embedded Teams with per-Agent Envoy egress",
       "author": "miguelbranco80",
-      "headRef": "openclaw/delta-claw",
-      "commit": "92fa7b32bc06a0784ddc4d08302bfa5f69f8b6e3",
+      "headRef": "codex/embedded-teams-envoy",
+      "commit": "9308b9caed8c520be3eb6371bbc1fdfffc7c3c74",
       "status": "included",
-      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
+      "comparisonBase": "851e1292b52b607384603aae27d8a1f01b08cd6b",
       "headRepository": "raw-labs/openclaw-enterprise",
-      "baseRef": "main",
+      "baseRef": "codex/teams-envoy",
       "draft": true,
       "forkState": "open"
     }
@@ -156,6 +133,28 @@
       "upstreamPullRequest": 5136,
       "upstreamCommit": "5cf15141c6e52d387bd8e2a83cc39542291bf916",
       "reason": "User explicitly selected upstream operator chat instead of custom per-person native roles. This is a deliberate narrower replacement, not full feature equivalence: exact Agent operate opens scoped chat; administer opens the administrative UI. Remove old runtime assignments without upgrading them to operate/administer; preserve independent grants."
+    },
+    {
+      "number": 12,
+      "title": "First-deployment native administration",
+      "author": "miguelbranco80",
+      "forkState": "closed",
+      "status": "absorbed-upstream",
+      "priorSelectedCommit": "37fac70dfb784351544189ad07909588b327ef47",
+      "upstreamPullRequest": 3878,
+      "upstreamCommit": "60010bf7fda4a5920799316a2f9b6d021df711bc",
+      "reason": "Adopt the upstream explicit native-browser opt-in and per-person authorization. Alpha.22 automatic first-deployment preparation is retired. See the upgrade note in the downstream integration guide."
+    },
+    {
+      "number": 15,
+      "title": "Native plugin permission preservation",
+      "author": "miguelbranco80",
+      "forkState": "open",
+      "status": "absorbed-upstream",
+      "priorSelectedCommit": "27aa612d2bafd819c734942d59125084a6c658eb",
+      "upstreamPullRequest": 2258,
+      "upstreamCommit": "bc63cd34a910d7027ff9224580e088935845f8b7",
+      "reason": "Upstream preserves native plugin permissions in the console configuration editor."
     }
   ],
   "excluded": [
@@ -270,94 +269,47 @@
   ],
   "compatibility": [
     {
-      "id": "typed-native-preparation-and-chat",
-      "pullRequests": [
-        1,
-        12
-      ],
-      "commits": [
-        "dcc352296fea748cea088acf2f3de7df978595c9"
-      ],
+      "id": "published-alpha22-ledger",
+      "pullRequests": [18, 36],
+      "commits": ["faa68c79c38dcdfd64c85739e94bd0559d7051a3"],
       "paths": [
-        "packages/contracts/src/drivers/compute/index.ts",
-        "packages/occ/src/index.ts",
-        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "migrations/meta/_canonical-history.json",
+        "scripts/integration/check-selection.mjs"
+      ],
+      "notes": "Keep all 85 alpha.22 receipts. Append ten unchanged upstream migrations at fork ordinals 0086 through 0095."
+    },
+    {
+      "id": "teams-channel-composition",
+      "pullRequests": [39, 40],
+      "commits": ["ee52dfdba970f115e2f24d821953c4fde6e714f9"],
+      "paths": [
+        "packages/occ/src/driver-registry.ts",
+        "packages/occ/src/deployment-channels.ts",
         "apps/controller/src/composition/production.ts",
-        "apps/controller/src/composition/development-postgres.ts",
-        "docs/flows/agent-native-admin.md",
-        "tests/integration/postgres-agent-provisioning-harness-cases.ts",
-        "tests/integration/postgres-agent-provisioning-fixture.ts"
+        "apps/controller/src/drivers/compute/kubernetes/index.ts"
       ],
-      "notes": "Retain the deployment-copy native origin transform after upstream Gateway security defaults; preserve saved Configuration immutability and upstream operator/admin endpoint scope split. Real PostgreSQL guided provisioning covers the regular queue/worker path."
+      "notes": "Register each Channel Driver in upstream composition. Keep Teams Secrets, callback handling, the direct-egress guard and per-revision listeners on their current owners."
     },
     {
-      "id": "shared-proxy-and-channel-composition",
-      "pullRequests": [
-        2,
-        11,
-        15,
-        17,
-        36
-      ],
-      "commits": [
-        "dcc352296fea748cea088acf2f3de7df978595c9"
-      ],
+      "id": "installation-profiles",
+      "pullRequests": [11],
+      "commits": ["ee52dfdba970f115e2f24d821953c4fde6e714f9"],
       "paths": [
-        "apps/controller/src/gateway-proxy.ts",
-        "apps/controller/src/drivers/compute/kubernetes/index.ts",
-        "scripts/render-installation-profile.ts",
-        "deploy/helm/openclaw-enterprise/templates/deployments.yaml",
-        "tests/conformance/gateway-proxy-tunnel.test.ts",
-        "tests/conformance/kubernetes-gateway-retirement-case.ts",
-        "tests/integration/profile-renderer-helm-cases.ts"
+        "docs/guides/deploy/custom-installation-profiles.md",
+        "tests/integration/profile-renderer-output-files-cases.ts"
       ],
-      "notes": "Use runtime.proxy for the shared proxy and embedded opt-in. Preserve Teams public-IPv4 pinning/deadlines, callback resource ownership/deletion, generic explicit host policy, trusted chat scopes, current profile outputs, Preset behavior and native plugin policies."
+      "notes": "Retain explicit custom profiles alongside upstream rendering and Preset seeding."
     },
     {
-      "id": "immutable-ledger-and-fork-qualification",
-      "pullRequests": [
-        1,
-        18,
-        36
-      ],
-      "commits": [
-        "dcc352296fea748cea088acf2f3de7df978595c9"
-      ],
+      "id": "fork-qualification",
+      "pullRequests": [39, 40],
+      "commits": ["ee52dfdba970f115e2f24d821953c4fde6e714f9"],
       "paths": [
-        "scripts/migration-history.mjs",
-        "tests/integration/postgres-migration-compatibility.test.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/container-check.yml",
         ".github/workflows/codeql.yml",
-        "scripts/ci/container-release/native-smoke.ts",
-        "tests/integration/container-release.test.ts"
+        ".github/workflows/container-check.yml"
       ],
-      "notes": "Preserve all 81 published SQL/journal/canonical entries. Append two byte-identical upstream migrations. Retain fork runners, integration triggers and sealed OCI archive import with Docker CLI, without publishing images or weakening runtime/sandbox proof."
-    },
-    {
-      "id": "current-runtime-and-browser-fixtures",
-      "pullRequests": [
-        2,
-        11,
-        15,
-        17,
-        36
-      ],
-      "commits": [
-        "dcc352296fea748cea088acf2f3de7df978595c9"
-      ],
-      "paths": [
-        "tests/fixtures/teams-attachment-download.ts",
-        "tests/fixtures/runtime-gateway-proxy.ts",
-        "tests/integration/runtime-image-startup.test.ts",
-        "tests/helpers/console-fixture-transport.ts",
-        "tests/helpers/console-app.mjs",
-        "tests/helpers/teams-directory.ts",
-        ".github/actions/run-ci-lane/action.yml",
-        "compose.kubernetes.yaml",
-        "compose.native-admin.yaml"
-      ],
-      "notes": "Port qualified proxy/Teams image fixtures to typed owners; keep certificate readability and scoped synthetic-public test transport. Explicit loopback fixture agents avoid host proxy interception. Install WebKit in its owning CI browser lane and retain failure-summary step identity. Keep worker native settings Kubernetes-only."
+      "notes": "Exercise the trial ref using the existing fork workflows. Native artifacts are retained by Actions for one day."
     }
   ],
   "publishedMigrationPrefix": {
@@ -388,28 +340,21 @@
     {
       "path": "migrations/0057_embedded_channel_outbound.sql",
       "commit": "3ecc6dec0d6e04645fbd9a4450c39425b676fde2",
-      "pullRequests": [
-        17,
-        18
-      ],
+      "pullRequests": [17, 18],
       "sha256": "c3b47c6e8496b6bbdaafe6e9fe4bbf5a89ff5fa4155afc679da872ea37a2248a",
       "reason": "Allow embedded channelsOnly revision snapshots while retaining dedicated-only additional outbound authority. Existing source migration bytes and integration identities remain unchanged."
     },
     {
       "path": "migrations/0072_installation_gateway_proxy.sql",
       "commit": "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
-      "pullRequests": [
-        36
-      ],
+      "pullRequests": [36],
       "sha256": "c2234ccaab335e36b5bdccd3d32e25168a18f9f205120af98de7715230f075c7",
       "reason": "Forward retirement of Agent outbound selection and snapshots. No published migration is rewritten."
     },
     {
       "path": "migrations/0081_retire_custom_runtime_roles.sql",
       "commit": "9776468292b730fb3d0a3d6910d56606d0b2c34f",
-      "pullRequests": [
-        1
-      ],
+      "pullRequests": [1],
       "sha256": "a4ee21806910fccf314839a9ccf6dc1909c858cdd8e3a369978564e561126635",
       "reason": "This batch retirement removes obsolete runtime assignments/use permissions without escalation; preserves independent operate/administer grants and current manage_policy restrictions. Corrected before batch qualification; the starting 77-entry published ledger is unchanged."
     }
@@ -692,6 +637,96 @@
       "sha256": "3957c54b4daa32c608905c225811c465fe5d8f926675b2bd08a202507747e3ab",
       "commit": "cc0e5d2627490a72e0689bd21cf91b9839bf315d",
       "reason": "Append exact upstream SQL after the immutable 83-entry published integration prefix."
+    },
+    {
+      "source": "migrations/0081_restart_continuation.sql",
+      "integrated": "migrations/0086_restart_continuation.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "58478352e5d45836ab2ae3a25a5b6327bb12a8caa16b4106b22c2b45194def86",
+      "sha256": "58478352e5d45836ab2ae3a25a5b6327bb12a8caa16b4106b22c2b45194def86",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0082_authentication_states.sql",
+      "integrated": "migrations/0087_authentication_states.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "59e90f20b8c414c285cf23d63b94a756d1b00a462676d56544758e4bdfca6c09",
+      "sha256": "59e90f20b8c414c285cf23d63b94a756d1b00a462676d56544758e4bdfca6c09",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0083_native_restart_recovery.sql",
+      "integrated": "migrations/0088_native_restart_recovery.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "27e861992ec56c20840335d6fc65d52050a17eb38cf6beb91ba2ad5bc0955ca5",
+      "sha256": "27e861992ec56c20840335d6fc65d52050a17eb38cf6beb91ba2ad5bc0955ca5",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0084_revision_egress_installations.sql",
+      "integrated": "migrations/0089_revision_egress_installations.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "b59c64d118c0f6a4f6d12af6c3b78166f64e8677ff9659842a4f2507d66fe44f",
+      "sha256": "b59c64d118c0f6a4f6d12af6c3b78166f64e8677ff9659842a4f2507d66fe44f",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0085_static_token_service_sources.sql",
+      "integrated": "migrations/0090_static_token_service_sources.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "864f62240041297afe02c8847732860b037823fe7b511cb46f12e031e9c25b62",
+      "sha256": "864f62240041297afe02c8847732860b037823fe7b511cb46f12e031e9c25b62",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0086_token_service_source_ownership.sql",
+      "integrated": "migrations/0091_token_service_source_ownership.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "339f0125ccf416748271fcc126510499b6d4845c0844c829ac181fbdcd54f86f",
+      "sha256": "339f0125ccf416748271fcc126510499b6d4845c0844c829ac181fbdcd54f86f",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0087_repository_network_policy.sql",
+      "integrated": "migrations/0092_repository_network_policy.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "52658cb136ca38859c1fd990d591539e4688b8bf4dfab8e213dc2893efef97f4",
+      "sha256": "52658cb136ca38859c1fd990d591539e4688b8bf4dfab8e213dc2893efef97f4",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0088_standalone_credential_deployment.sql",
+      "integrated": "migrations/0093_standalone_credential_deployment.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "35de75ecbcca20089aa03df77ad57050767343d7126bd8a5cac078c9d912b34c",
+      "sha256": "35de75ecbcca20089aa03df77ad57050767343d7126bd8a5cac078c9d912b34c",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0089_static_connection_templates.sql",
+      "integrated": "migrations/0094_static_connection_templates.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "e4e1d6c173fb12e28720db6ab6b1979eb9c40360524ee0dc1f4cdcfd50a77e5d",
+      "sha256": "e4e1d6c173fb12e28720db6ab6b1979eb9c40360524ee0dc1f4cdcfd50a77e5d",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
+    },
+    {
+      "source": "migrations/0090_native_git_delivery.sql",
+      "integrated": "migrations/0095_native_git_delivery.sql",
+      "sourceCommit": "707c2bf58e9e30c3d42bc24fe458a32871ccf29f",
+      "sourceSha256": "d8dd9f9b4b1fde20f9f1bb3819558e27fc08aa8518cc4b71c27f25240bed4dcb",
+      "sha256": "d8dd9f9b4b1fde20f9f1bb3819558e27fc08aa8518cc4b71c27f25240bed4dcb",
+      "commit": "faa68c79c38dcdfd64c85739e94bd0559d7051a3",
+      "reason": "Append exact upstream SQL after the 85 alpha.22 receipts."
     }
   ],
   "migrationReconciliations": [
@@ -725,6 +760,51 @@
       "forkState": "open",
       "replacedBy": 36,
       "reason": "User directed replacement of per-Agent/revision Gateway outbound with one operator-selected native Gateway proxy. Historical migrations retain provenance, not active behavior."
+    },
+    {
+      "number": 2,
+      "title": "Microsoft Teams channels",
+      "author": "miguelbranco80",
+      "headRef": "codex/teams-support",
+      "commit": "b979ce713e20b2b3d150319b6c114b086f886edf",
+      "status": "replaced",
+      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "main",
+      "draft": false,
+      "forkState": "open",
+      "replacedBy": 39,
+      "reason": "The Teams Driver and callback now use revision-specific Envoy egress."
+    },
+    {
+      "number": 17,
+      "title": "Temporary embedded channel evaluation",
+      "author": "miguelbranco80",
+      "headRef": "codex/eval-embedded-channels",
+      "commit": "71fdc26515c7eb5b921fae9b043ec5cfb97403f0",
+      "status": "replaced",
+      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "codex/eval-upstream-a7aa9219f",
+      "draft": true,
+      "forkState": "open",
+      "replacedBy": 40,
+      "reason": "The Installation-wide embedded trial opt-in now selects per-revision Envoy routing."
+    },
+    {
+      "number": 36,
+      "title": "One bundled or external Gateway outbound proxy",
+      "author": "miguelbranco80",
+      "headRef": "openclaw/delta-claw",
+      "commit": "92fa7b32bc06a0784ddc4d08302bfa5f69f8b6e3",
+      "status": "replaced",
+      "comparisonBase": "ed40c45c553d5a8e72a25bc9de5a28bda791b9f2",
+      "headRepository": "raw-labs/openclaw-enterprise",
+      "baseRef": "main",
+      "draft": true,
+      "forkState": "open",
+      "replacedBy": 40,
+      "reason": "Teams-enabled embedded revisions use their own Envoy listener and operator-selected HTTPS hosts. The old shared Gateway proxy is retired. Its published database receipts remain intact."
     }
   ],
   "historicalReconstruction": {
@@ -1347,14 +1427,8 @@
   "historicalCompatibility": [
     {
       "id": "native-role-first-admission",
-      "pullRequests": [
-        1,
-        12,
-        16
-      ],
-      "commits": [
-        "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"
-      ],
+      "pullRequests": [1, 12, 16],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
       "paths": [
         "apps/controller/src/http/iam.ts",
         "tests/integration/native-admin-access.test.mjs",
@@ -1364,14 +1438,8 @@
     },
     {
       "id": "slack-teams-shared-gateway-proxy",
-      "pullRequests": [
-        2,
-        17,
-        36
-      ],
-      "commits": [
-        "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e"
-      ],
+      "pullRequests": [2, 17, 36],
+      "commits": ["82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e"],
       "paths": [
         "apps/controller/src/drivers/channel/index.ts",
         "apps/controller/src/drivers/compute/kubernetes/index.ts",
@@ -1381,11 +1449,7 @@
     },
     {
       "id": "embedded-profile-admission",
-      "pullRequests": [
-        11,
-        17,
-        36
-      ],
+      "pullRequests": [11, 17, 36],
       "commits": [
         "82d57f06915f0e7cdf0d0e734e86b49d3f3e2c5e",
         "3de37f3bfeb5499ecfb26faabdff6de7a4464096"
@@ -1399,12 +1463,7 @@
     },
     {
       "id": "published-persistence-ledger",
-      "pullRequests": [
-        1,
-        16,
-        17,
-        18
-      ],
+      "pullRequests": [1, 16, 17, 18],
       "commits": [
         "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818",
         "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0"
@@ -1418,33 +1477,15 @@
     },
     {
       "id": "teams-console-plugin-admission",
-      "pullRequests": [
-        2,
-        15
-      ],
-      "commits": [
-        "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"
-      ],
-      "paths": [
-        "tests/helpers/console-app.mjs"
-      ],
+      "pullRequests": [2, 15],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "paths": ["tests/helpers/console-app.mjs"],
       "notes": "Keep current Teams conflict recovery and directory coverage under real plugin permission, Secret binding and callback runtime admission."
     },
     {
       "id": "integration-ci-and-current-docs",
-      "pullRequests": [
-        1,
-        2,
-        11,
-        12,
-        13,
-        15,
-        17,
-        18
-      ],
-      "commits": [
-        "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"
-      ],
+      "pullRequests": [1, 2, 11, 12, 13, 15, 17, 18],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
       "paths": [
         ".github/workflows/ci.yml",
         ".github/workflows/codeql.yml",
@@ -1455,14 +1496,8 @@
     },
     {
       "id": "refreshed-fixtures-and-fork-sandbox-runners",
-      "pullRequests": [
-        2,
-        17,
-        18
-      ],
-      "commits": [
-        "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"
-      ],
+      "pullRequests": [2, 17, 18],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
       "paths": [
         ".github/workflows/ci.yml",
         ".github/workflows/full-integration.yml",
@@ -1477,21 +1512,14 @@
     {
       "id": "native-image-ci-sandbox-setup",
       "pullRequests": [],
-      "commits": [
-        "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"
-      ],
-      "paths": [
-        ".github/workflows/container-check.yml",
-        "docs/testing/ci.md"
-      ],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
+      "paths": [".github/workflows/container-check.yml", "docs/testing/ci.md"],
       "notes": "Nonpublishing native AMD64 runtime uses the configured compatibility runner; ARM64 stays native. Reuse the existing reviewed CI AppArmor profile setup/cleanup for both runtime jobs. Pin OS-packaged local OCI import tooling on Ubuntu22/24; preserve source/config digest checks, native architecture, all sandbox and startup tests, and separate publication gates. No product, recipe, source pin, migration or repository variable changed."
     },
     {
       "id": "native-oci-import-docker-api",
       "pullRequests": [],
-      "commits": [
-        "b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"
-      ],
+      "commits": ["b8ce3e5d72ecfa159d892e83d4fe2ede6708c818"],
       "paths": [
         "scripts/ci/container-release.mjs",
         "docs/testing/ci.md",
@@ -1501,16 +1529,7 @@
     },
     {
       "id": "upstream-deployment-grants-and-refreshed-contracts",
-      "pullRequests": [
-        1,
-        2,
-        11,
-        12,
-        13,
-        15,
-        17,
-        36
-      ],
+      "pullRequests": [1, 2, 11, 12, 13, 15, 17, 36],
       "commits": [
         "a49c3daa0dd9ad0d4e5928ee7a2a9457aa462ef0",
         "15aa414d9b14cb51a361a2d96ca5c1087ff720d1"
@@ -1526,13 +1545,8 @@
     },
     {
       "id": "current-upstream-chat-and-native-preparation",
-      "pullRequests": [
-        1,
-        12
-      ],
-      "commits": [
-        "534ac074ab6fc255a120354060ab6baf8e60fcbd"
-      ],
+      "pullRequests": [1, 12],
+      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
       "paths": [
         "apps/controller/src/drivers/compute/kubernetes/index.ts",
         "packages/occ/src/index.ts",
@@ -1544,16 +1558,8 @@
     },
     {
       "id": "generic-proxy-teams-embedded-profiles",
-      "pullRequests": [
-        2,
-        11,
-        15,
-        17,
-        36
-      ],
-      "commits": [
-        "534ac074ab6fc255a120354060ab6baf8e60fcbd"
-      ],
+      "pullRequests": [2, 11, 15, 17, 36],
+      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
       "paths": [
         "apps/controller/src/gateway-proxy.mjs",
         "apps/controller/src/drivers/compute/kubernetes/index.ts",
@@ -1565,14 +1571,8 @@
     },
     {
       "id": "published-persistence-and-native-ci",
-      "pullRequests": [
-        1,
-        18,
-        36
-      ],
-      "commits": [
-        "534ac074ab6fc255a120354060ab6baf8e60fcbd"
-      ],
+      "pullRequests": [1, 18, 36],
+      "commits": ["534ac074ab6fc255a120354060ab6baf8e60fcbd"],
       "paths": [
         "scripts/migration-history.mjs",
         "tests/integration/postgres-migration-compatibility.test.mjs",
@@ -1584,14 +1584,8 @@
     },
     {
       "id": "gateway-defaults-deployment-hook-ordering",
-      "pullRequests": [
-        12,
-        17,
-        36
-      ],
-      "commits": [
-        "ff398b552f412e879f9b6a8ef64f553db9f7edf1"
-      ],
+      "pullRequests": [12, 17, 36],
+      "commits": ["ff398b552f412e879f9b6a8ef64f553db9f7edf1"],
       "paths": [
         "packages/occ/src/index.ts",
         "tests/integration/postgres-agent-provisioning.test.mjs",
@@ -1603,13 +1597,8 @@
     },
     {
       "id": "channel-browser-and-compose-worker-reconciliation",
-      "pullRequests": [
-        2,
-        12
-      ],
-      "commits": [
-        "0bd09e4f18a6b40969d27b87123e1ae6c8e844c6"
-      ],
+      "pullRequests": [2, 12],
+      "commits": ["0bd09e4f18a6b40969d27b87123e1ae6c8e844c6"],
       "paths": [
         ".github/actions/run-ci-lane/action.yml",
         "compose.kubernetes.yaml",
@@ -1625,12 +1614,8 @@
     },
     {
       "id": "ci-webkit-summary-and-precreation-cancellation",
-      "pullRequests": [
-        2
-      ],
-      "commits": [
-        "1a63d1989739dcc83e51a9e1ba315f3830a79b55"
-      ],
+      "pullRequests": [2],
+      "commits": ["1a63d1989739dcc83e51a9e1ba315f3830a79b55"],
       "paths": [
         ".github/actions/run-ci-lane/action.yml",
         "tests/helpers/ci-prepare-fixture-command.mjs"
@@ -1639,12 +1624,8 @@
     },
     {
       "id": "retirement-preserves-current-policy-authority",
-      "pullRequests": [
-        1
-      ],
-      "commits": [
-        "9776468292b730fb3d0a3d6910d56606d0b2c34f"
-      ],
+      "pullRequests": [1],
+      "commits": ["9776468292b730fb3d0a3d6910d56606d0b2c34f"],
       "paths": [
         "migrations/0081_retire_custom_runtime_roles.sql",
         "migrations/meta/_canonical-history.json",
@@ -1654,13 +1635,8 @@
     },
     {
       "id": "runtime-proxy-fixtures-use-current-transport",
-      "pullRequests": [
-        2,
-        36
-      ],
-      "commits": [
-        "e9b025ca1ff711ea8d0aa617c43fbd1cf2e1f003"
-      ],
+      "pullRequests": [2, 36],
+      "commits": ["e9b025ca1ff711ea8d0aa617c43fbd1cf2e1f003"],
       "paths": [
         "tests/fixtures/runtime-gateway-proxy.mjs",
         "tests/fixtures/teams-attachment-download.mjs",
@@ -1671,15 +1647,76 @@
     {
       "id": "native-smoke-import-current-docker-cli",
       "pullRequests": [],
-      "commits": [
-        "5a1c1c8356947529c6286a592dcde06858b3b40f"
-      ],
+      "commits": ["5a1c1c8356947529c6286a592dcde06858b3b40f"],
       "paths": [
         "scripts/ci/container-release.mjs",
         "tests/integration/container-release.test.mjs",
         "docs/flows/container-publication.md"
       ],
       "notes": "Use Skopeo Docker-archive conversion and the installed Docker CLI instead of the old direct-daemon client. Preserve converted/loaded config identity, ordered layer verification, native architecture, sandbox/startup/version probes and platform receipt gates. No runtime recipe, source pin, security boundary or publication authorization changed."
+    },
+    {
+      "id": "typed-native-preparation-and-chat",
+      "pullRequests": [1, 12],
+      "commits": ["dcc352296fea748cea088acf2f3de7df978595c9"],
+      "paths": [
+        "packages/contracts/src/drivers/compute/index.ts",
+        "packages/occ/src/index.ts",
+        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "apps/controller/src/composition/production.ts",
+        "apps/controller/src/composition/development-postgres.ts",
+        "docs/flows/agent-native-admin.md",
+        "tests/integration/postgres-agent-provisioning-harness-cases.ts",
+        "tests/integration/postgres-agent-provisioning-fixture.ts"
+      ],
+      "notes": "Retain the deployment-copy native origin transform after upstream Gateway security defaults; preserve saved Configuration immutability and upstream operator/admin endpoint scope split. Real PostgreSQL guided provisioning covers the regular queue/worker path."
+    },
+    {
+      "id": "shared-proxy-and-channel-composition",
+      "pullRequests": [2, 11, 15, 17, 36],
+      "commits": ["dcc352296fea748cea088acf2f3de7df978595c9"],
+      "paths": [
+        "apps/controller/src/gateway-proxy.ts",
+        "apps/controller/src/drivers/compute/kubernetes/index.ts",
+        "scripts/render-installation-profile.ts",
+        "deploy/helm/openclaw-enterprise/templates/deployments.yaml",
+        "tests/conformance/gateway-proxy-tunnel.test.ts",
+        "tests/conformance/kubernetes-gateway-retirement-case.ts",
+        "tests/integration/profile-renderer-helm-cases.ts"
+      ],
+      "notes": "Use runtime.proxy for the shared proxy and embedded opt-in. Preserve Teams public-IPv4 pinning/deadlines, callback resource ownership/deletion, generic explicit host policy, trusted chat scopes, current profile outputs, Preset behavior and native plugin policies."
+    },
+    {
+      "id": "immutable-ledger-and-fork-qualification",
+      "pullRequests": [1, 18, 36],
+      "commits": ["dcc352296fea748cea088acf2f3de7df978595c9"],
+      "paths": [
+        "scripts/migration-history.mjs",
+        "tests/integration/postgres-migration-compatibility.test.mjs",
+        ".github/workflows/ci.yml",
+        ".github/workflows/container-check.yml",
+        ".github/workflows/codeql.yml",
+        "scripts/ci/container-release/native-smoke.ts",
+        "tests/integration/container-release.test.ts"
+      ],
+      "notes": "Preserve all 81 published SQL/journal/canonical entries. Append two byte-identical upstream migrations. Retain fork runners, integration triggers and sealed OCI archive import with Docker CLI, without publishing images or weakening runtime/sandbox proof."
+    },
+    {
+      "id": "current-runtime-and-browser-fixtures",
+      "pullRequests": [2, 11, 15, 17, 36],
+      "commits": ["dcc352296fea748cea088acf2f3de7df978595c9"],
+      "paths": [
+        "tests/fixtures/teams-attachment-download.ts",
+        "tests/fixtures/runtime-gateway-proxy.ts",
+        "tests/integration/runtime-image-startup.test.ts",
+        "tests/helpers/console-fixture-transport.ts",
+        "tests/helpers/console-app.mjs",
+        "tests/helpers/teams-directory.ts",
+        ".github/actions/run-ci-lane/action.yml",
+        "compose.kubernetes.yaml",
+        "compose.native-admin.yaml"
+      ],
+      "notes": "Port qualified proxy/Teams image fixtures to typed owners; keep certificate readability and scoped synthetic-public test transport. Explicit loopback fixture agents avoid host proxy interception. Install WebKit in its owning CI browser lane and retain failure-summary step identity. Keep worker native settings Kubernetes-only."
     }
   ],
   "previousReconstructions": [

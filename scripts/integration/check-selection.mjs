@@ -13,7 +13,7 @@ const ancestor = (value) => {
 
 assert.equal(selection.version, 1);
 assert.equal(selection.repository, "raw-labs/openclaw-enterprise");
-assert.equal(selection.integrationBranch, "codex/raw-integration");
+assert.equal(selection.integrationBranch, "codex/raw-integration-envoy-trial");
 ancestor(selection.upstream.commit);
 ancestor(selection.batch.startingIntegration);
 let previous = selection.batch.startingIntegration;
@@ -76,7 +76,15 @@ for (const feature of selection.retiredFeatures ?? []) {
   assert.equal(feature.status, "replaced");
   assert.equal(feature.author, "miguelbranco80");
   ancestor(feature.commit);
-  assert.ok(selected.has(feature.replacedBy));
+  const history = new Set([feature.number]);
+  let replacement = feature.replacedBy;
+  while (!selected.has(replacement)) {
+    assert.ok(!history.has(replacement), "Cyclic replacement history");
+    history.add(replacement);
+    const next = selection.retiredFeatures.find(({ number }) => number === replacement);
+    assert.ok(next, `Missing replacement for PR #${replacement}`);
+    replacement = next.replacedBy;
+  }
   assert.ok(feature.reason);
   known.add(feature.number);
 }
