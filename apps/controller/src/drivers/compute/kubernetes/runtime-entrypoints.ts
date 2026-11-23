@@ -2364,7 +2364,13 @@ function probeExitFailure({ error, status, signal }) {
 // retries briefly, then the event reports only the error code as cleanupError
 // and the probe result stands: a failed cleanup must not lose it (finding 2610).
 // Generated code stays compact: the Gateway program is near the exec limit.
-const OPENCLAW_AUTH_PROBE_HELPERS = String.raw`
+function openClawAuthProbeHelpers(channelProxy = false): string {
+  // Probe children start with a clean environment. Forward only the proxy
+  // settings installed for this Gateway by Compute.
+  const proxyEnvironment = channelProxy
+    ? "HTTPS_PROXY: process.env.HTTPS_PROXY, NO_PROXY: process.env.NO_PROXY, NODE_USE_ENV_PROXY: '1', OPENCLAW_PROXY_ACTIVE: '1', "
+    : "";
+  return String.raw`
 ${AUTH_PROBE_FAILURE_HELPER}
 function probeOpenClawAuthenticationFailure() {
   const fs = require("node:fs");
@@ -2437,7 +2443,7 @@ function credentialRejectedUpfront(provider, fragment, key, stage) {
   const { status, stdout } = require("node:child_process").spawnSync(process.execPath, ["-e",
     'fetch(process.env.U,{method:"POST",headers:JSON.parse(process.env.H),body:"{}",signal:AbortSignal.timeout(8000)}).then(async(r)=>{if(r.status!==401)process.exit(0);const n=[...r.headers.keys()],p=(r.headers.has("x-request-id")&&n.some((k)=>/^(x-)?openai-/.test(k)))||(r.headers.has("request-id")&&r.headers.has("x-should-retry")),o=r.headers.has("x-openshell-policy"),s=o?(p?30:20):p?10:0;let t,e,b="";try{t=await r.text()}catch{}if(typeof t==="string")if(!t.trim())b="empty";else try{const j=JSON.parse(t);b="json-no-error";if(j?.error&&typeof j.error==="object"&&!Array.isArray(j.error)){e=j.error;b=e.code==null?"json-error-no-code":"json-error-code"}}catch{b="non-json"}const c=e?.code,m=typeof e?.message==="string"?e.message:"",k=(x,l)=>x==null?"":JSON.parse(l).includes(x)?x:"other";try{require("node:fs").writeSync(1,JSON.stringify([b,k(c,process.env.C),k(e?.type,process.env.T)]))}catch{}process.exit(s+(c==="invalid_api_key"||/invalid x-api-key/i.test(m)?4:/didn.t provide an api key|no api key provided|x-api-key header is required|missing bearer or basic authentication/i.test(m)?5:c==="insufficient_permissions"||/insufficient permissions|missing scopes/i.test(m)?6:3))},()=>process.exit(0))',
   ], {
-    env: { U: base + path, H: JSON.stringify({ ...headers, "content-type": "application/json" }), C: JSON.stringify(UPFRONT_ERROR_CODES), T: JSON.stringify(UPFRONT_ERROR_TYPES), NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS, SSL_CERT_FILE: process.env.SSL_CERT_FILE },
+    env: { ${proxyEnvironment}U: base + path, H: JSON.stringify({ ...headers, "content-type": "application/json" }), C: JSON.stringify(UPFRONT_ERROR_CODES), T: JSON.stringify(UPFRONT_ERROR_TYPES), NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS, SSL_CERT_FILE: process.env.SSL_CERT_FILE },
     stdio: ["ignore", "pipe", "ignore"], encoding: "utf8", maxBuffer: 1024, timeout: 10000, killSignal: "SIGKILL",
   });
   if (!Number.isInteger(status)) return false;
@@ -2514,7 +2520,7 @@ function runOpenClawAuthenticationProbe(fs, capMs, cleanup) {
         PATH: process.env.PATH,
         HOME: directory,
         TMPDIR: directory,
-        OPENCLAW_STATE_DIR: directory + "/state",
+        ${proxyEnvironment}OPENCLAW_STATE_DIR: directory + "/state",
         OPENCLAW_CONFIG_PATH: configPath,
         NODE_COMPILE_CACHE: process.env.NODE_COMPILE_CACHE,
         NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS,
@@ -2553,6 +2559,7 @@ function runOpenClawAuthenticationProbe(fs, capMs, cleanup) {
   }
 }
 `;
+}
 
 const WORKSPACE_ASSET_HELPERS = String.raw`
 const { cpSync, existsSync, lstatSync, readdirSync, symlinkSync } = require("node:fs");
@@ -2606,7 +2613,7 @@ function publishAgentPluginSkillPath() {
 
 export const GATEWAY_RUNTIME_ENTRYPOINT = gatewayRuntimeEntrypoint(false);
 
-export function gatewayRuntimeEntrypoint(managedMode: boolean): string {
+export function gatewayRuntimeEntrypoint(managedMode: boolean, channelProxy = false): string {
   return String.raw`
 const { accessSync, constants: fsConstants, mkdirSync, rmSync } = require("node:fs");
 const { dirname, join } = require("node:path");
@@ -2671,7 +2678,7 @@ ${PLUGIN_RUNTIME_HELPERS}
 ${MANAGED_INSTALL_HELPERS}
 ${GATEWAY_TOOL_POLICY_RUNTIME}
 ${WORKSPACE_ASSET_HELPERS}
-${OPENCLAW_AUTH_PROBE_HELPERS}
+${openClawAuthProbeHelpers(channelProxy)}
 ${startupPhaseHelper("gateway")}
 ${openClawStateMigrationHelper("Gateway", "restart the Pod", { releaseExitedState: true })}
 ${OPENCLAW_CONFIG_ISSUE_HELPER}
@@ -5756,7 +5763,7 @@ ${EXITED_OPENCLAW_STATE_RELEASE}
 // Codex Harness does, so the revision fails with that code instead of waiting for a
 // node that never connects.
 ${SUPERVISOR_HELD_FAILURE_HELPER}
-${OPENCLAW_AUTH_PROBE_HELPERS}
+${openClawAuthProbeHelpers()}
 
 const inferenceConfig = process.env.OPENCLAW_NATIVE_INFERENCE_CONFIG;
 const state = process.env.OPENCLAW_NODE_STATE_DIR;

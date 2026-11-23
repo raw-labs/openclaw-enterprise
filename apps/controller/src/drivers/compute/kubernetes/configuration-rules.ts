@@ -211,20 +211,27 @@ export function requireCodexPlugin(
 }
 
 /**
- * Enabled channels need a dedicated Agent workload and an Installation channel runtime
+ * Enabled channels need an eligible workload and an Installation channel runtime
  * (`runtime.channelEgress`: isolated credentials and managed per-Agent routing). `providers` lists the
  * enabled channel providers, in Configuration order.
  */
 export function requireChannelTopology(
   providers: readonly string[],
-  topology: { readonly embedded: boolean; readonly channelRuntime: boolean },
+  topology: {
+    readonly embedded: boolean;
+    readonly channelRuntime: boolean;
+    readonly embeddedTeams?: boolean;
+  },
   createError: SettingError,
 ): void {
   const [provider] = providers;
   if (provider === undefined) {
     return;
   }
-  if (topology.embedded) {
+  if (
+    topology.embedded &&
+    !(topology.embeddedTeams && provider === "msteams" && providers.length === 1)
+  ) {
     throw createError(
       `channels.${provider}`,
       "is enabled, but channels require a dedicated Agent workload",

@@ -1,3 +1,4 @@
+import { TeamsChannelDriver } from "../../apps/controller/src/drivers/channel/teams.ts";
 import { createChannelTestCompute as createKubernetesComputeDriver } from "../helpers/channel-egress.ts";
 import { channelEgressOptions, slackChannelDrivers } from "../helpers/channel-egress.ts";
 import { asRecord } from "../../packages/utils/src/index.ts";
@@ -443,6 +444,53 @@ function checkChannelAdmission(unrouted: KubernetesComputeDriver) {
   assert.throws(
     () => unrouted.validateHarnessAuth(embedded, apiKeyAuth, { ...openClawBase, ...slack }, null),
     embeddedChannelsRefusal,
+  );
+  const embeddedTeams = new KubernetesComputeDriver(
+    routedOptions({
+      runtime: {
+        ...gatewayRuntime,
+        channelEgress: {
+          ...channelEgressOptions,
+          embeddedTeams: { agentId: "trial-agent", httpsHosts: ["model.example.com"] },
+        },
+      },
+    }),
+    {
+      channelDrivers: [
+        ...slackChannelDrivers,
+        { provider: "msteams", driver: new TeamsChannelDriver() },
+      ],
+    },
+  );
+  const teams = { ...openClawBase, channels: { msteams: { enabled: true } } };
+  embeddedTeams.validateHarnessAuth(embedded, apiKeyAuth, teams, null, undefined, "trial-agent");
+  // Neither a different Agent nor a second enabled channel inherits the exception.
+  assert.throws(
+    () =>
+      embeddedTeams.validateHarnessAuth(
+        embedded,
+        apiKeyAuth,
+        teams,
+        null,
+        undefined,
+        "other-agent",
+      ),
+    /dedicated Agent workload/,
+  );
+  assert.throws(
+    () =>
+      embeddedTeams.validateHarnessAuth(
+        embedded,
+        apiKeyAuth,
+        {
+          ...teams,
+          channels: { ...teams.channels, ...slack.channels },
+        },
+        null,
+        undefined,
+        "trial-agent",
+      ),
+    /dedicated Agent workload/,
   );
   // A disabled channel, and channel defaults, need neither.
   for (const channels of [{ slack: { enabled: false } }, { defaults: { groupPolicy: "open" } }]) {

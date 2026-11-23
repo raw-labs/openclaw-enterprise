@@ -312,6 +312,15 @@ export function checkExactModelAndHarnessRoutes() {
   const gatewayLabels = templateLabels(profileNetworkWorkload(driver, dedicated, "gateway"));
   const embeddedLabels = templateLabels(profileNetworkWorkload(driver, embedded, "gateway"));
   assert.equal(selectorMatches(podSelector(embeddedRuntime), embeddedLabels), true);
+  // During cutover the same Agent can still have a listener-bound Gateway. A
+  // direct model grant for its ordinary replacement must never select that Pod.
+  assert.equal(
+    selectorMatches(podSelector(embeddedRuntime), {
+      ...embeddedLabels,
+      "openclaw.dev/channel-egress-binding": "serving-binding",
+    }),
+    false,
+  );
   for (const [selector, labels] of [
     [podSelector(gateway), gatewayLabels],
     [firstPeerSelector(gateway, "egress"), agentLabels],

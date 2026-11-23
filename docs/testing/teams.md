@@ -67,6 +67,18 @@ runs in Chromium and WebKit. It checks mouse selection, selected chips and exact
 IDs, pagination, keyboard activation, dismissal, and saving/reopening through the
 Configuration API with a local Microsoft protocol fixture.
 
+For the embedded trial, run the signed-message check with an authorized test
+bot and a disposable Installation that selects the Agent. Record the Gateway Pod
+UID, revision and listener port. Send a nonce in the bot's personal chat, verify
+the exact model reply, and repeat with a fresh nonce after redeploy. From the
+Gateway, verify that direct public HTTPS, an unlisted CONNECT and the other
+Agent's listener fail. Keep bot credentials and message contents out of artifacts.
+
+For the Connections follow-up, enable the packaged plugin on the same Agent
+and approve its exact Composio endpoint. Run an authorized read-only operation,
+verify a Teams reply, and repeat the read after redeploy without reauthorizing.
+Record the operation outcome and whether the existing grant survived.
+
 Before accepting production support, use a disposable real Teams bot and tenant
 with the [operator setup](../guides/integrations/teams.md). Verify a permitted
 personal message, a channel mention and threaded reply, denied senders, a

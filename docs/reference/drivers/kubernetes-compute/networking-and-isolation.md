@@ -106,9 +106,9 @@ Codex separately requires HTTPS interception, it retains platform and startup
 roots upstream and supplies child tools with its managed CA bundle. Preserve
 inherited `GIT_SSL_CAINFO`; TLS verification remains enabled in both paths.
 
-Model access uses TCP/443 egress to any address outside `10.0.0.0/8`,
-`100.64.0.0/10`, `172.16.0.0/12`, `192.168.0.0/16` and `169.254.0.0/16`; a
-restricted model proxy is not yet available. Confirm that your API server
+Ordinary model access uses TCP/443 egress to any address outside `10.0.0.0/8`,
+`100.64.0.0/10`, `172.16.0.0/12`, `192.168.0.0/16` and `169.254.0.0/16`. The [embedded Teams trial](channel-egress.md#embedded-teams-evaluation)
+excludes its bound Gateway from this grant and sends model HTTPS through Envoy. Confirm that your API server
 endpoint, Pod and Service CIDRs, and metadata endpoint fall inside them. A
 dedicated Agent has one authentication-only egress policy, pinned to its latest
 prepared Agent revision ID. Stop leaves it and the Agent's runtime and plugin-status

@@ -1,7 +1,7 @@
 ---
 created: "2026-10-06"
-updated: "2026-11-21"
-last_updated_session: "authoring-run/a12fb922-8253-47eb-99b7-937292ecd93a"
+updated: "2026-11-23"
+last_updated_session: "authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57"
 ---
 
 # Agent channel callback flow
@@ -21,7 +21,7 @@ Slack Socket Mode uses an outbound connection and does not enter this flow.
 - Deployment reconciliation: `apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileGatewayRoute`.
 - Public request: POST `/namespaces/<namespace-id>/agents/<agent-id>/channels/msteams`.
 - Native handler: pinned OpenClaw `extensions/msteams/src/monitor.ts:monitorMSTeamsProvider`.
-- Prerequisites: Dedicated runtime, admitted Secret bindings, managed channel egress,
+- Prerequisites: A Dedicated Agent or the Installation-selected embedded Teams Agent, admitted Secret bindings, managed channel egress,
   separate channel hostname/listener, and an installed Microsoft bot app.
 
 ## Flow
@@ -63,7 +63,8 @@ do not make the OAuth request.
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:enabledChannels`
 uses `configuration-rules.ts:enabledChannelProviders` and `requireChannelTopology`
-to require a Dedicated workload and managed egress. `requireTeamsCallback`
+to require managed egress and an eligible workload. Embedded Teams checks the
+server-owned Agent ID against the Installation selection. `requireTeamsCallback`
 checks the callback listener and native Teams settings during admission and
 preparation. An omitted webhook path defaults to `/api/messages`. Custom paths,
 legacy webhook listeners and sovereign clouds fail admission before the worker
@@ -76,7 +77,8 @@ proxy environment overrides. After the worker verifies the revision's Envoy
 binding, `deployment` sets `HTTPS_PROXY` and, for Teams, `NODE_USE_ENV_PROXY=1`
 on the Gateway, because the Teams SDK follows only Node's process-wide proxy.
 `NO_PROXY` names loopback and the exact hosts of the Compute-assigned Harness
-and peer status URLs, so Envoy carries only provider traffic.
+and peer status URLs. The selected embedded Gateway also bypasses the proxy for
+its authorized repository broker and uses it for public model and plugin HTTPS.
 `OPENCLAW_PROXY_ACTIVE=1` delegates guarded-fetch address selection to Envoy
 while native media and credential checks stay in place.
 
@@ -84,7 +86,8 @@ while native media and credential checks stay in place.
 
 `apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileGatewayRoute` reads the serving Deployment's revision annotations.
 `reconcileTeamsRoute` uses its Teams marker rather than a candidate's settings.
-It creates an exact POST HTTPRoute on the **channels** listener, rewriting only
+For an embedded Gateway it selects the observed revision through a callback
+Service once the Gateway Service is active. It creates an exact POST HTTPRoute on the **channels** listener, rewriting only
 that path to `/api/messages`. A route-specific SecurityPolicy replaces inherited
 OCE API-key authentication. `gatewayRouteHeaderFilter("channel")` preserves the
 Microsoft Authorization header and removes OCE identity, scopes, cookies, and
@@ -142,6 +145,8 @@ by the serving revision.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-23 13:05: Trace embedded callback selection. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - acf695ee1d)
 
 - 2026-11-21 10:29: Document Microsoft Teams credential refusal before deployment. (authoring-run/a12fb922-8253-47eb-99b7-937292ecd93a - 0fe994ad187a0b59dc0107279d24284697776d1d)
 

@@ -6,8 +6,9 @@ must identify the same dedicated Envoy Gateway, Service and ports. The default
 is disabled. OCC starts without the fleet; affected channel operations fail
 instead of using a direct internet connection.
 
-This route supports dedicated Gateways. It does not give the Harness channel
-access or combine the egress fleet with private workspace ingress.
+Dedicated Gateways use this route for their enabled channels. The
+[embedded Teams evaluation](#embedded-teams-evaluation) shares the listener
+with the selected Agent's native model and plugins.
 
 ## Configuration
 
@@ -52,6 +53,33 @@ ports. Ports 19000, 19001 and 19003 are reserved by Envoy. The 62-slot limit
 includes candidate revisions and incomplete cleanup. The packaged fleet has
 64 configured listeners, including OCC and inspection. Capacity exhaustion
 rejects activation; it does not combine destination sets or add another fleet.
+
+## Embedded Teams evaluation
+
+For a disposable single-cluster Installation, the operator can add the following
+selection under `runtime.channelEgress` in the Kubernetes Compute configuration.
+Create an embedded OpenClaw Agent with channels disabled to obtain its ID first.
+
+```yaml
+embeddedTeams:
+  agentId: agt_replace_with_existing_id
+  httpsHosts:
+    - api.openai.com
+```
+
+Load the same settings into the API and worker. Configure the selected Agent's
+Teams channel and Secret bindings through the Configuration API, then deploy.
+The [Teams prerequisites](../../../guides/integrations/teams.md) still apply.
+Add each approved plugin endpoint explicitly before deploying a plugin that needs
+it. For Connections with its default Composio endpoint, that host is
+`backend.composio.dev`. Host entries grant the shared workload HTTPS access on
+port 443. They accept exact DNS names only.
+
+The model, plugins, tools and bot share the same process and projected credentials.
+Omitting the selection keeps embedded channels disabled. Other Agents cannot use
+this exception. Removing it prevents subsequent admission and activation. Stop
+the trial Agent to withdraw its running workload and release the listener. Live
+embedded Teams and Connections delivery still require qualification.
 
 ## Enforcement
 

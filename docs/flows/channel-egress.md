@@ -1,7 +1,7 @@
 ---
 created: 2026-11-19
-updated: 2026-11-19
-last_updated_session: authoring-run/64d7828e-4701-4e9c-8c92-0b3617945c7a
+updated: "2026-11-23"
+last_updated_session: "authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57"
 ---
 
 # Channel egress flow
@@ -31,7 +31,10 @@ must be installed. See [controller work](controller-worker.md).
 ```mermaid
 graph TD
   A["Worker reads saved Agent revision"] --> B["Resolve current Channel Drivers"]
-  B --> C{"Rules supported and fleet available?"}
+  B --> M{"Selected embedded Teams Agent?"}
+  M -->|yes| H["Add operator-approved HTTPS hosts"]
+  M -->|no| C{"Rules supported and fleet available?"}
+  H --> C
   C -->|no| X["Fail activation without direct fallback"]
   C -->|yes| D["Reserve a port using resourceVersion"]
   D --> E["Install the binding's Envoy policy"]
@@ -55,6 +58,11 @@ The shared validator rejects malformed rules and normalizes DNS names and ports.
 Compute rejects unqualified IPv6 rules. Each attempt retains the resulting
 requirements; a retry derives them again. Destination policies are not a
 separate PostgreSQL snapshot.
+
+`KubernetesComputeDriver.enabledChannels` also checks embedded placement against
+the trusted Installation selection and the revision's Agent ID. Only the selected
+embedded Teams revision adds the operator's exact HTTPS hosts to its requirements.
+The policy hash covers this complete destination set.
 
 ### 2. Reserve and configure a listener
 
@@ -84,7 +92,11 @@ source and Envoy ingress grants, then checks the complete additive policy sets.
 `apps/controller/src/drivers/compute/kubernetes/index.ts:KubernetesComputeDriver.deployment`
 
 Only the Gateway receives the assigned proxy URL and binding label. Harness
-transport remains direct and its model credential placement is unchanged.
+transport stays direct in dedicated mode. The embedded model policy excludes
+every Pod with the channel binding label, including while a replacement revision
+starts. The selected Gateway and its model probe children use the assigned
+listener. Embedded callback reconciliation selects the observed revision through
+a separate Service. Compute opens the callback only after the Gateway Service selects a serving workload.
 
 ### 4. Revoke before reuse
 
@@ -132,6 +144,8 @@ and remaining acceptance evidence.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-11-23 13:00: Trace the embedded Teams selection and model path. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - acf695ee1d)
 
 - 2026-11-19 05:02: Require Envoy drain acknowledgement and stopped source workloads before port reuse. (authoring-run/64d7828e-4701-4e9c-8c92-0b3617945c7a - fc683cdfe9b73215d0503cdfaf7917f54be7f17e)
 

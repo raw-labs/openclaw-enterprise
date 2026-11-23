@@ -3,6 +3,7 @@ import { normalizeNetworkDestinationRules } from "@openclaw-enterprise/contracts
 import { match } from "ts-pattern";
 
 export interface ChannelEgressOptions {
+  readonly embeddedTeams?: { readonly agentId: string; readonly httpsHosts: readonly string[] };
   readonly gatewayName: string;
   readonly gatewayNamespace: string;
   readonly envoyNamespace: string;
@@ -67,6 +68,21 @@ export const channelEgressConfigurationSchema: JSONSchema = {
     "excludedCidrs",
   ],
   properties: {
+    embeddedTeams: {
+      type: "object",
+      additionalProperties: false,
+      required: ["agentId", "httpsHosts"],
+      properties: {
+        agentId: { type: "string", minLength: 1, maxLength: 128 },
+        httpsHosts: {
+          type: "array",
+          minItems: 1,
+          maxItems: 16,
+          uniqueItems: true,
+          items: { type: "string", minLength: 1, maxLength: 253 },
+        },
+      },
+    },
     gatewayName: { type: "string", minLength: 1 },
     gatewayNamespace: { type: "string", minLength: 1 },
     envoyNamespace: { type: "string", minLength: 1 },
@@ -79,6 +95,18 @@ export const channelEgressConfigurationSchema: JSONSchema = {
   },
 };
 
+/** Supplemental HTTPS endpoints apply only to the selected embedded Gateway. */
+export function embeddedTeamsDestinations(
+  hosts: readonly string[],
+): readonly NetworkDestinationRule[] {
+  return normalizeNetworkDestinationRules(
+    [...hosts].sort().map((name) => ({
+      destination: { kind: "dns", name, match: "exact" },
+      ports: [443],
+    })),
+  );
+}
+
 export function validateChannelEgressOptions(options: ChannelEgressOptions): void {
   for (const name of [
     options.gatewayName,
@@ -89,6 +117,23 @@ export function validateChannelEgressOptions(options: ChannelEgressOptions): voi
     if (name.length > 63 || !/^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(name)) {
       throw new Error("Channel egress requires exact Kubernetes resource names.");
     }
+  }
+  if (options.embeddedTeams !== undefined) {
+    const { agentId, httpsHosts } = options.embeddedTeams;
+    if (
+      !agentId.trim() ||
+      !Array.isArray(httpsHosts) ||
+      !httpsHosts.length ||
+      httpsHosts.length > 16 ||
+      httpsHosts.some(
+        (host) => typeof host !== "string" || !host.includes(".") || host !== host.toLowerCase(),
+      )
+    ) {
+      throw new Error(
+        "Embedded Teams requires an Agent ID and one to sixteen exact lowercase HTTPS hostnames.",
+      );
+    }
+    embeddedTeamsDestinations(httpsHosts);
   }
   const ports = [
     options.listenerPortStart,

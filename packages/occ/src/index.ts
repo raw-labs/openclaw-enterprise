@@ -12217,6 +12217,7 @@ export class OpenClawController {
         state,
         resolveHarness,
         {
+          id: agentId,
           executionMode,
           harnessAuth: () => this.savedHarnessAuthSnapshot(state, namespace.id, harnessAuth),
           repositoryBindings,
@@ -12678,6 +12679,7 @@ export class OpenClawController {
         state,
         resolveHarness,
         {
+          id: agent.id,
           executionMode: input.executionMode ?? agent.executionMode,
           harnessAuth: () =>
             this.savedHarnessAuthSnapshot(
@@ -13580,6 +13582,7 @@ export class OpenClawController {
         admittedConfiguration,
         configuration.secretBindings,
         credentialSourceType,
+        lockedAgent.id,
       );
       // Every preparation attempt would refuse such a gateway setting and the deployment would
       // fail as an unavailable dependency, so refuse it here with the 409 provisioning answers.
@@ -15743,6 +15746,7 @@ export class OpenClawController {
           configuration,
           plan.configuration.secretBindings,
           credentialSourceType,
+          agent?.id,
         );
       } catch (error) {
         // As in deployment, a Driver that names unsupported Configuration content the caller
@@ -18168,6 +18172,7 @@ export class OpenClawController {
     state: PlatformReadView,
     resolveHarness: HarnessResolver | undefined,
     agent: {
+      readonly id?: string;
       readonly executionMode: HarnessExecutionMode;
       /** The admission snapshot of the Agent's binding, if save can build one. */
       readonly harnessAuth: () => Promise<HarnessAuthSnapshot | undefined>;
@@ -18215,7 +18220,7 @@ export class OpenClawController {
     // to, so deployment refuses that pair and save does not.
     const auth = selectsModel(configuration.values) ? await agent.harnessAuth() : undefined;
     if (auth !== undefined && compute.validateHarnessAuth !== undefined) {
-      validateAgentHarnessAuth(compute, harness, auth, values, null);
+      validateAgentHarnessAuth(compute, harness, auth, values, null, undefined, agent.id);
     }
     if (
       agent.repositoryBindings !== undefined &&

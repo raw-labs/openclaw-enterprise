@@ -10,7 +10,7 @@ export async function verifyQaTeamsRejection(
   agent: Awaited<ReturnType<typeof createQaAgent>>,
 ) {
   assert.equal(fixture.controlPlane, "kubernetes");
-  assert.equal(agent.preset, "Codex");
+
   const base = `/namespaces/${agent.namespaceId}`;
   const agentPath = `${base}/agents/${agent.id}`;
   const configurationPath = `${base}/configurations/${agent.configurationId}`;
@@ -45,6 +45,17 @@ export async function verifyQaTeamsRejection(
       MSTEAMS_APP_PASSWORD: { source: secret.ref, delivery: { type: "env" } },
     },
   });
+  if (agent.preset === "OpenClaw") {
+    // Saving the Agent calls Compute admission without contacting Microsoft.
+    // The operator must select this exact server-owned ID before it can use Teams.
+    const save = () => fixture.api("PATCH", agentPath, { configurationId: agent.configurationId });
+    await assert.rejects(save(), /HTTP 400/);
+    const installation = structuredClone(fixture.configuration);
+    const egress = installation.drivers.compute.configuration.runtime.channelEgress;
+    egress.embeddedTeams = { agentId: agent.id, httpsHosts: ["api.openai.com"] };
+    await fixture.saveInstallation(installation);
+    await save();
+  }
   // The Helm update can finish before Envoy serves the reserved OCC listener.
   await waitFor("Microsoft OAuth to reject the Teams credential through Envoy", async () => {
     let unavailable = false;
@@ -59,7 +70,7 @@ export async function verifyQaTeamsRejection(
   const current = await fixture.api("GET", agentPath);
   assert.equal(current.activeRevisionId, previous.activeRevisionId);
   assert.equal((await fixture.pod(agent, "gateway")).metadata.uid, gateway.metadata.uid);
-  await fixture.record("Codex-teams-credential-rejection", {
+  await fixture.record(`${agent.preset}-teams-credential-rejection`, {
     agentId: agent.id,
     activeRevisionId: current.activeRevisionId,
     gatewayPodUid: gateway.metadata.uid,

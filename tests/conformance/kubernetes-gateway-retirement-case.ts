@@ -406,6 +406,40 @@ export async function checkGatewayRetirement() {
     deletions.length = 0;
   }
 
+  // A dedicated candidate may be prepared while embedded Teams still serves.
+  // Its public callback must select only the current embedded revision.
+  fixture.observe({
+    ...gateway,
+    metadata: {
+      ...gateway.metadata,
+      annotations: {
+        ...gateway.metadata.annotations,
+        "openclaw.dev/agent-revision": String(active.revision),
+        "openclaw.dev/msteams-webhook": "true",
+        "openclaw.dev/embedded-msteams-webhook": "true",
+      },
+    },
+  });
+  await driver["reconcileGatewayRoute"](candidate, ownership, target);
+  const callbackName = gatewayName + "-msteams";
+  const embeddedResources = fixture.nodeResources(callbackName);
+  const backend = resourceRecord(embeddedResources.get("Service"), "embedded callback Service");
+  const selector = resourceRecord(
+    resourceRecord(backend.spec, "Service spec").selector,
+    "selector",
+  );
+  assert.equal(selector["openclaw.dev/revision"], active.id);
+  const embeddedRoute = resourceRecord(embeddedResources.get("HTTPRoute"), "embedded callback");
+  const embeddedRule = resourceRecords(
+    resourceRecord(embeddedRoute.spec, "route spec").rules,
+    "rules",
+  )[0];
+  assert.equal(
+    resourceRecords(embeddedRule?.backendRefs, "callback backend")[0]?.name,
+    callbackName,
+  );
+  fixture.reset(...survivingResources);
+
   // Preparation can run while the previous Gateway still serves requests. A
   // failed candidate must not acquire and then delete that Gateway's node route.
   observeGateway(active);

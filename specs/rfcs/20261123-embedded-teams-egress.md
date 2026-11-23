@@ -1,6 +1,6 @@
 ---
 status: Proposed
-implementation_status: Not implemented
+implementation_status: Partially implemented
 author: miguelbranco80
 ---
 
@@ -64,7 +64,8 @@ No changes.
 
 ### Driver contracts
 
-Kubernetes Compute admission, configuration and reconciliation gain the scoped
+OCC passes the server-owned Agent ID to Compute's optional Harness authentication
+admission hook when available. Kubernetes Compute admission, configuration and reconciliation gain the scoped
 exception above. The Channel Driver interface and Teams attachment host settings
 retain their current meanings.
 
