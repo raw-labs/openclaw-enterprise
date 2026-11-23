@@ -93,7 +93,7 @@ test(
     // Close the old process before migrations/startup. Keep the same application
     // database and Configuration filesystem through all three controller processes.
     if (migrationUrl !== undefined) {
-      await run(process.execPath, ["scripts/migrate-production.mjs"], {
+      await run(process.execPath, ["scripts/migrate-production.ts"], {
         cwd: repository,
         env: { ...environment, OCC_MIGRATION_DATABASE_URL: migrationUrl },
         timeout: 20000,

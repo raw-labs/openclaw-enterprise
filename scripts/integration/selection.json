@@ -979,10 +979,24 @@
         "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45203775934",
         "status": "PostgreSQL Migrations and Console Browser passed. Remaining failures included the ordinary deployment validator snapshot, legacy CI fixture inputs, fork runner selection assertions, Preset bootstrap credential lookup, and the non-root synthetic Teams media fixture. See the linked jobs for the complete outcomes.",
         "database": "Fresh and restored alpha.22 databases finished at 95 receipts. The 85 published receipts and all final hashes and timestamps matched."
+      },
+      {
+        "commit": "e701d9bd450cb65686dc1a73720d5f6c6d0fcd79",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45206318082",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45206318393",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45206356705",
+        "status": "Superseded while checks were running to repair the optional cross-revision Preset test’s migration entry point. Exact job outcomes remain in these run receipts."
       }
     ],
     "historicalRestoreVerification": "Nine additional PostgreSQL 18.6 dump/restore catalogs were measured from stock fork SQL. Only 16 or 18 constraint definitions per prefix changed text. Each pair reparsed identically, all other catalog fields matched, and the stock migrator then completed all nine upgrades. No historical receipt, SQL, catalog check, or privilege check changed.",
-    "correctionVerification": "126 Console/OCC API tests, 22 Linux preparation tests, targeted QA and runner selection tests, and the synthetic guarded Teams attachment test passed locally. The Preset preservation test passed across three production-composition processes on a disposable database. Interactive Teams and Connections remain a separate trial."
+    "correctionVerification": "126 Console/OCC API tests, 22 Linux preparation tests, targeted QA and runner selection tests, and the synthetic guarded Teams attachment test passed locally. The Preset preservation test passed across three production-composition processes on a disposable database. Interactive Teams and Connections remain a separate trial.",
+    "populatedRestoreVerification": {
+      "before": "f4a0fd9f19659e076bda0d84d522eade8559318a",
+      "candidateController": "e701d9bd450cb65686dc1a73720d5f6c6d0fcd79",
+      "sourceControllerPlatformDigest": "sha256:e8ac92d8f7c6b5d50f8808381cd5a0f544f22d1edff27ae6e04584858fbd16fd",
+      "result": "The published alpha.22 controller image migrated a disposable PostgreSQL 18.6 database to 85 receipts. Using the released dependency graph, the alpha.22 controller accepted authenticated writes of an edited Preset, a custom Preset and a Configuration. pg_dump/pg_restore copied them to an independent database. The candidate migrated it to 95 receipts. Authenticated reads matched the original records after upgrade and again after restarting with default Preset seeding disabled. A separate fresh database produced the same 95 receipt hashes and timestamps."
+    },
+    "limits": "The stock Helm channel transition targets the upstream Slack proxy. Automatic conversion of alpha.22 shared Gateway proxy settings is unverified. Signed Teams and the authorized Connections read remain for the separate disposable bundle trial."
   },
   "previousBatches": [
     {
