@@ -70,7 +70,10 @@ interface DeploymentChannelUse {
 interface DeploymentChannelDependencies {
   readonly transactions: Pick<ControllerTransactions, "read" | "hasContext" | "transact">;
   readonly authority: Pick<ControllerAuthority, "authorize" | "holdAuthority">;
-  readonly drivers: Pick<DriverRegistry, "installedChannelDrivers" | "selection">;
+  readonly drivers: Pick<
+    DriverRegistry,
+    "hasInstalledChannelDrivers" | "installedChannelDrivers" | "selection"
+  >;
   readonly configurationDriver: () => ConfigurationDriver;
   readonly requireBundledChannelBindings: (
     values: OpenClawConfigurationDocument,
@@ -294,7 +297,7 @@ export function createDeploymentChannelChecks(dependencies: DeploymentChannelDep
     principalId: string,
     input: DeployAgentInput,
   ): Promise<PreparedDeploymentChannels | undefined> {
-    if (dependencies.drivers.installedChannelDrivers().length === 0) {
+    if (!dependencies.drivers.hasInstalledChannelDrivers()) {
       return undefined;
     }
     await dependencies.authority.authorize(principalId, "deploy", {

@@ -67,7 +67,9 @@ const requireDependency = createRequire(join(repository, "apps/controller/packag
 const pg: typeof import("pg") = requireDependency("pg");
 const databaseUrl = process.env.OCC_TEST_DATABASE_URL;
 const authSecret = process.env.OCC_AUTH_SECRET;
-assert.ok(databaseUrl && authSecret);
+const passwordFile =
+  process.env.OCC_BOOTSTRAP_ADMIN_PASSWORD_INPUT_FILE ?? process.env.OCC_BOOTSTRAP_PASSWORD_FILE;
+assert.ok(databaseUrl && authSecret && passwordFile);
 const authBaseURL = "https://console.oce.localhost";
 const configuration: unknown = JSON.parse(await readFile(join(directory, "startup.json"), "utf8"));
 assert.ok(Check(Type.Record(Type.String(), Type.Unknown()), configuration));
@@ -140,7 +142,7 @@ try {
     origin: authBaseURL,
     email: "preset-upgrade@example.test",
     rememberMe: undefined,
-    password: (await readFile(join(directory, "initial-admin-password"), "utf8")).trim(),
+    password: (await readFile(passwordFile, "utf8")).trim(),
   });
   async function request<S extends TSchema>(
     schema: S,

@@ -151,6 +151,10 @@ export class DriverRegistry {
     this.channelRegistrations = entries;
   }
 
+  hasInstalledChannelDrivers(): boolean {
+    return this.channelRegistrations.length > 0;
+  }
+
   installedChannelDrivers(): readonly ChannelDriver[] {
     return this.channelRegistrations.map((entry) => {
       if (!unchangedDriver(entry)) {

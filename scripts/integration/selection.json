@@ -969,11 +969,20 @@
         "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45201865011",
         "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45201864536",
         "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45201885792",
-        "status": "Source qualification failed. Browser lanes lost the selected Chrome executable and the migration lane rejected logical restores of fork prefixes 66–70 and 73–76. All four native jobs and CodeQL have separate results on this SHA.",
+        "status": "Source CI failed in the browser, migration, platform, conformance and runtime startup lanes. Fresh-install First Agent Smoke passed. See the exact run for each outcome.",
         "database": "Fresh and restored alpha.22 installations completed at 95 receipts. All 95 hashes and timestamps matched, including the 85 alpha.22 receipts."
+      },
+      {
+        "commit": "2746c587614d9f192f046cf268c125d4f053c5f7",
+        "source": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45203720968",
+        "codeql": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45203721087",
+        "nativeImages": "https://github.com/raw-labs/openclaw-enterprise/actions/runs/45203775934",
+        "status": "PostgreSQL Migrations and Console Browser passed. Remaining failures included the ordinary deployment validator snapshot, legacy CI fixture inputs, fork runner selection assertions, Preset bootstrap credential lookup, and the non-root synthetic Teams media fixture. See the linked jobs for the complete outcomes.",
+        "database": "Fresh and restored alpha.22 databases finished at 95 receipts. The 85 published receipts and all final hashes and timestamps matched."
       }
     ],
-    "historicalRestoreVerification": "Nine additional PostgreSQL 18.6 dump/restore catalogs were measured from stock fork SQL. Only 16 or 18 constraint definitions per prefix changed text. Each pair reparsed identically, all other catalog fields matched, and the stock migrator then completed all nine upgrades. No historical receipt, SQL, catalog check, or privilege check changed."
+    "historicalRestoreVerification": "Nine additional PostgreSQL 18.6 dump/restore catalogs were measured from stock fork SQL. Only 16 or 18 constraint definitions per prefix changed text. Each pair reparsed identically, all other catalog fields matched, and the stock migrator then completed all nine upgrades. No historical receipt, SQL, catalog check, or privilege check changed.",
+    "correctionVerification": "126 Console/OCC API tests, 22 Linux preparation tests, targeted QA and runner selection tests, and the synthetic guarded Teams attachment test passed locally. The Preset preservation test passed across three production-composition processes on a disposable database. Interactive Teams and Connections remain a separate trial."
   },
   "previousBatches": [
     {

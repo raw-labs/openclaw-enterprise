@@ -2012,24 +2012,29 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
   // qualifies two CPUs.
   const jobs = loadYaml(".github/workflows/full-integration-execution.yml").jobs;
   const job = present(jobs["pr-safe-same-sha"]);
-  const runnerFor = (target: WorkflowJob, lane: string) => {
+  const runnerFor = (target: WorkflowJob, lane: string, vars: Record<string, string> = {}) => {
     const runner = present(target["runs-on"]);
     return runner.startsWith("${{")
       ? evaluateInContext(runner.replace(/^\$\{\{\s*|\s*\}\}$/g, ""), {
           matrix: { lane },
+          vars,
           startsWith: (value: string, prefix: string) => value.startsWith(prefix),
         })
       : runner;
   };
   const ciRunners = new Map(laneTable().map((row) => [row.lane, row.runner]));
-  const lanes = fullLaneRows(read("scripts/ci/full-integration-lanes.json")).map(
-    (entry) => entry.lane,
-  );
+  const lanes = [
+    ...fullLaneRows(read("scripts/ci/full-integration-lanes.json")),
+    ...array(present(jobs["image-lanes-same-sha"]).strategy.matrix.include).map(record),
+  ].map((entry) => text(entry.lane));
   const pinned = lanes.filter(
     (lane) =>
-      lane === "postgres-auth" || lane.startsWith("k3d-fixture-") || lane === "k3d-observability",
+      lane === "postgres-auth" ||
+      lane === "images-runtime-startup" ||
+      lane.startsWith("k3d-fixture-") ||
+      lane === "k3d-observability",
   );
-  for (const lane of ["postgres-auth", "k3d-observability"]) {
+  for (const lane of ["postgres-auth", "images-runtime-startup", "k3d-observability"]) {
     assert.ok(pinned.includes(lane), lane);
   }
   for (const lane of pinned) {
@@ -2047,6 +2052,47 @@ test("full-integration preserves qualified runners for kernel, sandbox, and imag
   for (const { lane } of array(images.strategy.matrix.include).map(record)) {
     assert.equal(runnerFor(images, text(lane)), ciRunners.get(text(lane)), text(lane));
   }
+  const ciJobs = loadYaml(".github/workflows/ci.yml").jobs;
+  const ciExpressionFor = (lane: string) =>
+    present(
+      present(ciJobs[lane.startsWith("images-") ? "image-lanes" : "pr-safe"])["runs-on"],
+    ).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
+  // Selecting an installed runner must also carry into same-source qualification;
+  // otherwise the PR passes on one kernel while qualification queues on another.
+  for (const lane of pinned) {
+    const vars = { CI_LARGE_RUNNER: "configured-large-runner" };
+    const expected = "configured-large-runner";
+    assert.equal(runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars), expected);
+    assert.equal(
+      runInNewContext(ciExpressionFor(lane), {
+        vars,
+        matrix: { lane, runner: ciRunners.get(lane) },
+      }),
+      runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars),
+    );
+  }
+  const lane = "images-runtime-startup";
+  const compatible = {
+    CI_LARGE_RUNNER: "configured-large-runner",
+    CI_COMPAT_RUNNER: "compat-runner",
+  };
+  assert.equal(runnerFor(images, lane, compatible), "compat-runner");
+  assert.equal(
+    runInNewContext(ciExpressionFor(lane), {
+      vars: compatible,
+      matrix: { lane, runner: ciRunners.get(lane) },
+    }),
+    "compat-runner",
+  );
+  const vars = { ...compatible, CI_SANDBOX_RUNNER: "sandbox-runner" };
+  assert.equal(
+    runnerFor(lane === "images-runtime-startup" ? images : job, lane, vars),
+    "sandbox-runner",
+  );
+  assert.equal(
+    runInNewContext(ciExpressionFor(lane), { vars, matrix: { lane, runner: ciRunners.get(lane) } }),
+    "sandbox-runner",
+  );
 });
 
 test("Suite Audit and Static Checks runs the audit and every check the lanes skip", () => {

@@ -47,8 +47,8 @@ function qaRow(
 }
 const fullQa = [
   qaRow("compose", "Codex", "console-secrets,agent-audit,http-chat", false),
-  qaRow("kubernetes", "Codex", "console-secrets,http-chat", false),
-  qaRow("kubernetes", "OpenClaw", "http-chat", true),
+  qaRow("kubernetes", "Codex", "console-secrets,http-chat,teams", false),
+  qaRow("kubernetes", "OpenClaw", "http-chat,teams", true),
   qaRow("compose", "OpenClaw", "http-chat", true),
 ];
 
@@ -174,7 +174,7 @@ export function registerAdvisoryCases(repo: string) {
       [local, "ubuntu-22.04", undefined, "dev-up-k3d", file, "local-installation-" + shard],
       [
         qa,
-        "blacksmith-8vcpu-ubuntu-2404",
+        "${{ vars.CI_LARGE_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}",
         prEnv,
         "qa-matrix",
         "tests/integration/qa-matrix-real.test.mjs",

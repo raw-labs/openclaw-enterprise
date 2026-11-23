@@ -4,12 +4,9 @@ import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import {
-  privateBootstrapDirectory,
-  productionBootstrapEnvironment,
-} from "../helpers/bootstrap-installation.mjs";
+import { privateBootstrapDirectory } from "../helpers/bootstrap-installation.mjs";
 import { createInstallationDriverConfiguration } from "../helpers/installation-driver-configuration.ts";
 
 const run = promisify(execFile);
@@ -46,6 +43,13 @@ test(
       const revision = await run("git", ["rev-parse", "HEAD"], { cwd: before });
       t.diagnostic(`Before controller revision: ${revision.stdout.trim()}`);
     }
+    // The before controller owns bootstrap: alpha.22 writes the password, while
+    // newer controllers consume a provisioned password file.
+    const {
+      productionBootstrapEnvironment,
+    }: typeof import("../helpers/bootstrap-installation.mjs") = await import(
+      pathToFileURL(join(before, "tests/helpers/bootstrap-installation.mjs")).href
+    );
     const environment = productionBootstrapEnvironment({
       databaseUrl: databaseUrl!,
       directory,

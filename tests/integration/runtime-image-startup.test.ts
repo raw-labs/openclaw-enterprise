@@ -1,6 +1,6 @@
 import { verifyEmbeddedHttpsPolicy } from "./runtime-image-embedded-https-case.ts";
 import { execute, runDocker } from "../helpers/runtime-image-docker.ts";
-import { rm } from "node:fs/promises";
+import { chmod, mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { temporaryDirectory } from "../fixtures/repository-credentials/process.ts";
@@ -201,6 +201,15 @@ test(
       run: execute,
     });
     await rm(join(directory, "ca-key.pem"));
+    // Mount only the test leaf and public certificates for the image's non-root user.
+    // The host parent stays private, including during the permission change.
+    const mount = join(directory, "mount");
+    await mkdir(mount);
+    await chmod(mount, 0o755);
+    for (const file of ["ca.pem", "cert.pem", "key.pem"]) {
+      await rename(join(directory, file), join(mount, file));
+      await chmod(join(mount, file), 0o644);
+    }
     const repository = fileURLToPath(new URL("../../", import.meta.url));
     const result = await runDocker([
       "run",
@@ -217,7 +226,7 @@ test(
       "--mount",
       `type=bind,source=${repository},target=/checkout,readonly`,
       "--mount",
-      `type=bind,source=${directory},target=/certificates,readonly`,
+      `type=bind,source=${mount},target=/certificates,readonly`,
       "--env",
       "NODE_EXTRA_CA_CERTS=/certificates/ca.pem",
       "--env",
