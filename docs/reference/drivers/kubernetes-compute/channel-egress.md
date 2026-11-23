@@ -73,11 +73,21 @@ channelEgress:
     - backend.composio.dev
 ```
 
-Approve only the model and plugin endpoints needed for this Installation.
-`embeddedHttpsHosts` accepts up to sixteen exact lowercase DNS names on port 443.
-An omitted or empty list adds no destinations to the Teams Driver's rules.
-The supplemental hosts apply to every embedded Teams listener. Dedicated Agents
-and OCC retain their provider rules. The [profile renderer](../../../guides/deploy/installation-profiles.md)
+Choose up to sixteen entries for TCP/443. An omitted or empty list adds no destinations
+to the Teams Driver's rules. The supplemental policy applies only to Teams-enabled
+embedded revisions. Dedicated and OCC listeners retain their provider rules.
+
+| Operator entry    | Permitted CONNECT target                                                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------- |
+| `api.example.com` | That hostname only.                                                                            |
+| `"*.example.com"` | Subdomains at any depth, such as `a.b.example.com`. Add `example.com` separately for the apex. |
+| `"*"`             | Any hostname or IPv4 literal whose selected upstream is a permitted public IPv4 address.       |
+
+Quote wildcard entries in YAML. Selecting `"*"` restores public HTTPS reachability
+for proxy-compatible clients in the shared workload. Each connection still uses the
+revision's listener, enforces its resolved-address exclusions and relies on the
+client to validate TLS. Arbitrary processes, direct sockets and other protocols
+do not gain equivalent network access. The [profile renderer](../../../guides/deploy/installation-profiles.md)
 accepts `channels.experimentalEmbeddedChannels` and `channels.embeddedHttpsHosts`
 alongside `channels.managedEgress`.
 

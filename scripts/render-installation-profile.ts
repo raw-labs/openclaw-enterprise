@@ -1,4 +1,5 @@
 /// <reference lib="es2024.string" />
+import { isEmbeddedHttpsHost } from "../apps/controller/src/drivers/compute/kubernetes/embedded-https-host.ts";
 import type { ChannelEgressOptions } from "../apps/controller/src/drivers/compute/kubernetes/channel-egress-policy.ts";
 import { oidcEnrollmentPolicy } from "../apps/controller/src/auth/oidc-enrollment.ts";
 import { createHash } from "node:crypto";
@@ -1793,9 +1794,8 @@ function buildRendered(
       ? undefined
       : (stringArray(channels, ["channels", "embeddedHttpsHosts"], diagnostics, {
           nonempty: false,
-          validate: (host) =>
-            host.length <= 253 && dnsHostname.test(host) && !/^[0-9.]+$/.test(host),
-          description: "an exact lowercase DNS hostname",
+          validate: isEmbeddedHttpsHost,
+          description: "a lowercase DNS hostname, *.domain pattern or *",
         }) as string[]);
   if (
     embeddedHttpsHosts &&

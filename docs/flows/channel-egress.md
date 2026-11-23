@@ -62,7 +62,10 @@ separate PostgreSQL snapshot.
 `KubernetesComputeDriver.enabledChannels` also checks embedded placement against
 the trusted Installation boolean. Each revision enabling embedded Teams adds the
 operator's supplemental HTTPS hosts to that revision's routing requirements.
-The policy hash covers this complete destination set.
+Compute translates a leading `*.` into the existing subdomain rule. A standalone
+`*` adds a CONNECT authority matcher for port 443 to this listener. Both matchers
+pass through the same selected-upstream IP check. The policy hash covers the
+complete filter chain, including the explicit public HTTPS grant.
 
 ### 2. Reserve and configure a listener
 
@@ -144,6 +147,8 @@ and remaining acceptance evidence.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-11-23 14:36: Trace embedded wildcard policy compilation and the upstream address check. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - 1701a86a6a)
 
 - 2026-11-23 13:53: Trace independent embedded Teams admission and destination approval. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - aee16e14c7)
 

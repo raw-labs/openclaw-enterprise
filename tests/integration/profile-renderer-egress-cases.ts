@@ -22,7 +22,7 @@ export function registerEgressCases(): void {
   test("profile emits the embedded channel opt-in separately from Envoy destinations", async () => {
     const input = baseInput();
     input.channels.experimentalEmbeddedChannels = true;
-    input.channels.embeddedHttpsHosts = ["model.example.test", "backend.composio.dev"];
+    input.channels.embeddedHttpsHosts = ["model.example.test", "*.example.test", "*"];
     const rendered = await render("openclaw", input);
     assert.equal(rendered.summary.ok, true, rendered.preflight.errors.join("\n"));
     const runtime = objectAt(computeConfiguration(rendered.installation), "runtime");
@@ -35,8 +35,8 @@ export function registerEgressCases(): void {
       propertyAt(loadYaml(rendered.values), "channelEgress", "embeddedHttpsHosts"),
       undefined,
     );
-    input.channels.embeddedHttpsHosts = ["*.example.test"];
-    await assertPreflightFailure("openclaw", input, /exact lowercase DNS hostname/);
+    input.channels.embeddedHttpsHosts = ["*example.test"];
+    await assertPreflightFailure("openclaw", input, /lowercase DNS hostname/);
     delete input.channels.embeddedHttpsHosts;
     input.channels.managedEgress = false;
     await assertPreflightFailure("openclaw", input, /require channels.managedEgress/);
@@ -119,6 +119,7 @@ export function registerEgressCases(): void {
     assert.equal(egress.occListenerPort, 10000);
     assert.match(output.values, /channelEgress:/);
     for (const change of [
+      { embeddedHttpsHosts: ["api.*.example.test"] },
       { listenerPortEnd: 10063 },
       { occListenerPort: 10001 },
       { inspectionPort: 10000 },

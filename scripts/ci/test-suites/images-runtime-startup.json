@@ -39,6 +39,7 @@
     {
       "path": "tests/integration/runtime-image-startup.test.ts",
       "expectedTests": [
+        "embedded Teams HTTPS wildcards preserve resolved IP checks and listener isolation",
         "runtime image applies the repository profile to a native thread shell turn",
         "runtime image shares the reviewed Codex version between the plugin and Dedicated command",
         "runtime image gateway ignores inherited OPENCLAW_LOG_LEVEL in favor of native configuration",

@@ -7,7 +7,7 @@ import {
 } from "./channel-egress.ts";
 import {
   channelEgressConfigurationSchema,
-  embeddedTeamsDestinations,
+  embeddedTeamsPolicy,
   requireSupportedChannelDestinations,
   validateChannelEgressOptions,
   type ChannelEgressOptions,
@@ -15937,12 +15937,12 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     }
     const requirements = resolveChannelRouting(providers, this.channelDrivers);
     const hosts = this.options.runtime?.channelEgress?.embeddedHttpsHosts;
-    const destinations =
+    const policy =
       revision.harness.mode === "embedded" && hosts !== undefined
-        ? [...requirements.destinations, ...embeddedTeamsDestinations(hosts)]
-        : requirements.destinations;
-    requireSupportedChannelDestinations(destinations);
-    return { ...requirements, destinations };
+        ? embeddedTeamsPolicy(requirements.destinations, hosts)
+        : { destinations: requirements.destinations };
+    requireSupportedChannelDestinations(policy.destinations);
+    return { ...requirements, ...policy };
   }
 
   private requireTeamsCallback(

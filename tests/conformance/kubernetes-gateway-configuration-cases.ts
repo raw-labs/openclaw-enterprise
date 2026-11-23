@@ -466,15 +466,9 @@ function checkChannelAdmission(unrouted: KubernetesComputeDriver) {
     );
   const teams = { ...openClawBase, channels: { msteams: { enabled: true } } };
   const embeddedTeams = teamsDriver(true);
-  // Approving a model hostname alone must never admit an embedded channel.
+  // Even broad HTTPS approval cannot enable an embedded channel on its own.
   assert.throws(
-    () =>
-      teamsDriver(false, ["model.example.test"]).validateHarnessAuth(
-        embedded,
-        apiKeyAuth,
-        teams,
-        null,
-      ),
+    () => teamsDriver(false, ["*"]).validateHarnessAuth(embedded, apiKeyAuth, teams, null),
     /dedicated Agent workload/,
   );
   // Supplemental model/plugin destinations belong only to embedded Teams listeners.
@@ -487,6 +481,14 @@ function checkChannelAdmission(unrouted: KubernetesComputeDriver) {
     ...dedicatedRules,
     { destination: { kind: "dns", name: "model.example.test", match: "exact" }, ports: [443] },
   ]);
+  const rollout = teamsDriver(true, ["*"]);
+  assert.equal(rollout["enabledChannels"](current)?.allowPublicHttps, true);
+  assert.equal(
+    rollout["enabledChannels"]({ ...current, harness: codex })?.allowPublicHttps,
+    undefined,
+  );
+  assert.equal(rollout["enabledChannels"]({ ...current, configuration: openClawBase }), undefined);
+  assert.equal(embeddedTeams["enabledChannels"](current)?.allowPublicHttps, undefined);
   // The flag itself needs no supplemental HTTPS destinations.
   embeddedTeams.validateHarnessAuth(embedded, apiKeyAuth, teams, null);
   assert.throws(
