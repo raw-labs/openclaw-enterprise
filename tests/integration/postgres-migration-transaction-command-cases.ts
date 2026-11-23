@@ -263,11 +263,11 @@ export function registerPostgresMigrationTransactionCommandCases({
       context,
       fixture,
       `cancel_${lock}`,
-      ddl ? { prefix: 88 } : undefined,
+      ddl ? { prefix: 93 } : undefined,
     );
     const before = ddl ? await historySnapshot(db) : undefined;
     if (ddl) {
-      // Migration 0089 must wait to alter this table after starting its transaction.
+      // Migration 0094 must wait to alter this table after starting its transaction.
       await db.app.query("BEGIN READ ONLY");
       await db.app.query("SELECT 1 FROM occ.connection_templates LIMIT 1");
     } else {

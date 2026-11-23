@@ -956,6 +956,33 @@
       "b367e7b0b77bd184d68c73622e3c3e5b2f2e9d0880a6cf8a4d029455ebf25da8",
       "cc35e1acb37766072e89bf2dbd68d6dbee1bd6bb0b24253fe56da0161b98eed9",
       "f5f1b9ab0cf632c9cbe2c60eeccde43173a7867509ed3d4815093c552fe53e72"
+    ],
+    "80488b4467020cb226ae44bf9cd27c12cb819d86dd310b0e58496a671fcc423d": [
+      "3cd8794ab2a32f0935cf862f589230408ba162752010c03e9fd5b2c197e737a5"
+    ],
+    "9877988f8bcd1f5112ad637b6674bd36c31bc815de55f0e6d2fbbac9344d261d": [
+      "f3e6eb6255f04d3ecc548934ecdb849d5ef9c09e143e47892be9e4a4ea6d622e"
+    ],
+    "702d71fd350d70b9135f3a7232c638f78640a1cbdc6dbf563b978d44382189b1": [
+      "9b2c4160e612cfdacaa9ab28951a6eea06af67f2765bff9d21be49dca2fd12d5"
+    ],
+    "ef93e71de1f6c50730a403e24ea037c9f730ba339703305add1a52e93a5ad2dc": [
+      "ef05f158996ffac4f2983a43989157ff97d8047e38a63c72c97f112a005fd707"
+    ],
+    "24db64540d6831729f5ba4756aa7eb83b462fc580fffa63a25a9c31711c03b6c": [
+      "84366aecf01f53306801ca8eb047fe2a87c56f0cf9f43b2165669c41ec1cda7c"
+    ],
+    "06a312be715ea1c781f0d618e6b6a30d1422a46937144eec99f4d4bd13fcc468": [
+      "40b15d85e8674b6717a87c9829d6e3c43454d9f0543091f5cd912fa43e2dbff6"
+    ],
+    "2be551a670203d7a2ecd8c7ad87d4bc702d3d7598092b19c415d9d60ffcf2043": [
+      "9dbc0d99169e870d6f770d8804c82dedb23b32e0e6dfa67487f9ebc619fb5745"
+    ],
+    "6cf9137a55b230d4e3a3e70d39148ee5e9a866af4598f2984f670b3140e91c6e": [
+      "e423913e27202a2d9f5b3ada5e454a73ad3ceab012bb8eb95253bc3c270f0cc2"
+    ],
+    "7a0e6c3179908d0e6b232098480265588b21775a6f43c47b668c765bb86d4180": [
+      "4bff1a8cf7bd477975fccf2da51de5512592129c7683a8c245ce28dcf1acabd3"
     ]
   },
   "catalogs": {
@@ -1041,7 +1068,8 @@
   "catalogEvidence": {
     "postgres": "18.6",
     "drizzleOrm": "0.45.4",
-    "method": "Historical catalogs retain their recorded qualification. The completed catalog and logical restore were measured on PostgreSQL 18.6 after stock Drizzle execution with occ_migrator and effective occ_app privileges.; integrated 0084/0085 and logical restores measured locally on PostgreSQL 18.6"
+    "method": "Historical catalogs retain their recorded qualification. The completed catalog and logical restore were measured on PostgreSQL 18.6 after stock Drizzle execution with occ_migrator and effective occ_app privileges.; integrated 0084/0085 and logical restores measured locally on PostgreSQL 18.6",
+    "restoredForkPrefixes": "On PostgreSQL 18.6, stock Drizzle and pg_dump/pg_restore measured prefixes 66–70 and 73–76. Only constraint text differed. Each pair reparsed to the same PostgreSQL constraint definition. Catalog rows, privileges and validation flags otherwise matched."
   },
   "compatibleLineages": {
     "providerCompleted": {
