@@ -31,7 +31,7 @@ must be installed. See [controller work](controller-worker.md).
 ```mermaid
 graph TD
   A["Worker reads saved Agent revision"] --> B["Resolve current Channel Drivers"]
-  B --> M{"Selected embedded Teams Agent?"}
+  B --> M{"Embedded Teams enabled under the Installation opt-in?"}
   M -->|yes| H["Add operator-approved HTTPS hosts"]
   M -->|no| C{"Rules supported and fleet available?"}
   H --> C
@@ -60,8 +60,8 @@ requirements; a retry derives them again. Destination policies are not a
 separate PostgreSQL snapshot.
 
 `KubernetesComputeDriver.enabledChannels` also checks embedded placement against
-the trusted Installation selection and the revision's Agent ID. Only the selected
-embedded Teams revision adds the operator's exact HTTPS hosts to its requirements.
+the trusted Installation boolean. Each revision enabling embedded Teams adds the
+operator's supplemental HTTPS hosts to that revision's routing requirements.
 The policy hash covers this complete destination set.
 
 ### 2. Reserve and configure a listener
@@ -144,6 +144,8 @@ and remaining acceptance evidence.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-11-23 13:53: Trace independent embedded Teams admission and destination approval. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - aee16e14c7)
 
 - 2026-11-23 13:00: Trace the embedded Teams selection and model path. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - acf695ee1d)
 

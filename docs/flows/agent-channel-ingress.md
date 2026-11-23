@@ -21,7 +21,7 @@ Slack Socket Mode uses an outbound connection and does not enter this flow.
 - Deployment reconciliation: `apps/controller/src/drivers/compute/kubernetes/index.ts:reconcileGatewayRoute`.
 - Public request: POST `/namespaces/<namespace-id>/agents/<agent-id>/channels/msteams`.
 - Native handler: pinned OpenClaw `extensions/msteams/src/monitor.ts:monitorMSTeamsProvider`.
-- Prerequisites: A Dedicated Agent or the Installation-selected embedded Teams Agent, admitted Secret bindings, managed channel egress,
+- Prerequisites: A Dedicated Agent or an embedded Teams Agent in an opted-in Installation, admitted Secret bindings, managed channel egress,
   separate channel hostname/listener, and an installed Microsoft bot app.
 
 ## Flow
@@ -64,7 +64,7 @@ do not make the OAuth request.
 `apps/controller/src/drivers/compute/kubernetes/index.ts:enabledChannels`
 uses `configuration-rules.ts:enabledChannelProviders` and `requireChannelTopology`
 to require managed egress and an eligible workload. Embedded Teams checks the
-server-owned Agent ID against the Installation selection. `requireTeamsCallback`
+Installation-wide boolean and the channel configuration on this revision. `requireTeamsCallback`
 checks the callback listener and native Teams settings during admission and
 preparation. An omitted webhook path defaults to `/api/messages`. Custom paths,
 legacy webhook listeners and sovereign clouds fail admission before the worker
@@ -145,6 +145,8 @@ by the serving revision.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-23 13:53: Check the Installation-wide opt-in during Teams admission. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - aee16e14c7)
 
 - 2026-11-23 13:05: Trace embedded callback selection. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - acf695ee1d)
 

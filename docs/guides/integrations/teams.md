@@ -5,7 +5,7 @@ that bundles `msteams`. The console supports one selected Team, channel and memb
 IDs, channel sender restrictions, mentions, and separate personal-message
 policies. The native Teams plugin handles messages and replies.
 
-A disposable Installation can also select an existing embedded OpenClaw Agent
+A disposable Installation can allow embedded OpenClaw Agents to enable Teams independently
 through the [embedded Teams evaluation](../../reference/drivers/kubernetes-compute/channel-egress.md#embedded-teams-evaluation).
 Use the Configuration API for that trial. The Console channel editor requires Dedicated execution.
 

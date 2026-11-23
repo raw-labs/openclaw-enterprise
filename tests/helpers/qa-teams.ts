@@ -47,12 +47,13 @@ export async function verifyQaTeamsRejection(
   });
   if (agent.preset === "OpenClaw") {
     // Saving the Agent calls Compute admission without contacting Microsoft.
-    // The operator must select this exact server-owned ID before it can use Teams.
+    // The Installation opt-in admits the Agent's own Teams Configuration.
     const save = () => fixture.api("PATCH", agentPath, { configurationId: agent.configurationId });
     await assert.rejects(save(), /HTTP 400/);
     const installation = structuredClone(fixture.configuration);
-    const egress = installation.drivers.compute.configuration.runtime.channelEgress;
-    egress.embeddedTeams = { agentId: agent.id, httpsHosts: ["api.openai.com"] };
+    const runtime = installation.drivers.compute.configuration.runtime;
+    runtime.proxy = { experimentalEmbeddedChannels: true };
+    runtime.channelEgress.embeddedHttpsHosts = ["api.openai.com"];
     await fixture.saveInstallation(installation);
     await save();
   }

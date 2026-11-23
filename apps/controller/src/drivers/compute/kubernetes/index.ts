@@ -631,6 +631,7 @@ export interface KubernetesComputeDriverOptions {
     readonly codexSeccompProfile?: string;
     /** Installation-owned OpenAI-compatible provider shared by supported Harnesses. */
     readonly modelProvider?: ModelProviderConfiguration;
+    readonly proxy?: { readonly experimentalEmbeddedChannels?: boolean };
     readonly channelEgress?: ChannelEgressOptions;
   };
   readonly gatewayRouting?: KubernetesGatewayRoutingOptions;
@@ -3539,6 +3540,11 @@ export class KubernetesComputeDriver implements ComputeDriver {
               supportsStandaloneWebSearch: { type: "boolean" },
             },
           },
+          proxy: {
+            type: "object",
+            additionalProperties: false,
+            properties: { experimentalEmbeddedChannels: { type: "boolean", default: false } },
+          },
           channelEgress: channelEgressConfigurationSchema,
         },
       },
@@ -3991,6 +3997,26 @@ export class KubernetesComputeDriver implements ComputeDriver {
         }
         if (options.runtime.codexSeccompProfile !== undefined) {
           validateCodexSeccompProfile(options.runtime.codexSeccompProfile);
+        }
+        if (options.runtime.proxy !== undefined) {
+          const proxy = asRecord(options.runtime.proxy);
+          if (
+            !proxy ||
+            Object.keys(proxy).some((key) => key !== "experimentalEmbeddedChannels") ||
+            (proxy.experimentalEmbeddedChannels !== undefined &&
+              typeof proxy.experimentalEmbeddedChannels !== "boolean")
+          ) {
+            throw configurationConstraintFailure(
+              "Expected a proxy object with an optional experimentalEmbeddedChannels boolean.",
+              "/runtime/proxy",
+            );
+          }
+          if (proxy.experimentalEmbeddedChannels && !channelEgress) {
+            throw configurationConstraintFailure(
+              "Embedded channels require managed channel egress.",
+              "/runtime/proxy/experimentalEmbeddedChannels",
+            );
+          }
         }
         if (channelEgress !== undefined) {
           if (
@@ -4658,7 +4684,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
     configuration: OpenClawConfigurationDocument,
     secretBindings?: SecretBindings | null,
     credentialSourceType?: CredentialSourceType,
-    agentId?: string,
   ): void {
     if (
       harness.mode === "dedicated" &&
@@ -4676,7 +4701,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
       configuration,
       secretBindings,
       credentialSourceType,
-      agentId,
     );
     // The Agent's execution mode decides placement, so Agent save (null bindings) refuses it too
     // (finding 2376).
@@ -4732,7 +4756,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
     configuration: OpenClawConfigurationDocument,
     secretBindings?: SecretBindings | null,
     credentialSourceType?: CredentialSourceType,
-    agentId?: string,
   ): void {
     // Agent save passes null bindings and checks only what depends on the Agent. What the
     // Installation provides (a Sandbox Driver for dedicated OpenClaw, the channel runtime) waits
@@ -4910,9 +4933,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
       providers,
       {
         embedded: harness.mode === "embedded",
-        embeddedTeams:
-          agentId !== undefined &&
-          this.options.runtime?.channelEgress?.embeddedTeams?.agentId === agentId,
+        embeddedTeams: this.options.runtime?.proxy?.experimentalEmbeddedChannels === true,
         channelRuntime: agentSave || this.options.runtime?.channelEgress !== undefined,
       },
       callerSettingError,
@@ -6754,7 +6775,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
         admittedRevision.configuration,
         revision.secretBindings,
         await this.admittedCredentialSourceType(revision),
-        revision.agentId,
       ),
     );
     const channels = this.enabledChannels(admittedRevision);
@@ -8002,7 +8022,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
       admittedRevision.configuration,
       revision.secretBindings,
       await this.admittedCredentialSourceType(revision),
-      revision.agentId,
     );
     const channels = this.enabledChannels(admittedRevision);
     const { name: namespace } = await this.resolveNamespace(revision.namespaceId);
@@ -15907,8 +15926,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       providers,
       {
         embedded: revision.harness.mode === "embedded",
-        embeddedTeams:
-          this.options.runtime?.channelEgress?.embeddedTeams?.agentId === revision.agentId,
+        embeddedTeams: this.options.runtime?.proxy?.experimentalEmbeddedChannels === true,
         channelRuntime: this.channelEgress !== undefined,
       },
       preparationSettingError,
@@ -15918,10 +15936,10 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       return undefined;
     }
     const requirements = resolveChannelRouting(providers, this.channelDrivers);
-    const trial = this.options.runtime?.channelEgress?.embeddedTeams;
+    const hosts = this.options.runtime?.channelEgress?.embeddedHttpsHosts;
     const destinations =
-      revision.harness.mode === "embedded" && trial?.agentId === revision.agentId
-        ? [...requirements.destinations, ...embeddedTeamsDestinations(trial.httpsHosts)]
+      revision.harness.mode === "embedded" && hosts !== undefined
+        ? [...requirements.destinations, ...embeddedTeamsDestinations(hosts)]
         : requirements.destinations;
     requireSupportedChannelDestinations(destinations);
     return { ...requirements, destinations };
@@ -16463,7 +16481,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           egress: [...modelEgress, ...repositoryEgress],
         }),
         ...(repositoryEgress.length > 0 &&
-        this.options.runtime?.channelEgress?.embeddedTeams?.agentId === revision.agentId
+        enabledChannelEntries(revision.configuration).includes("msteams")
           ? [
               policy("allow-embedded-repository", {
                 podSelector: {

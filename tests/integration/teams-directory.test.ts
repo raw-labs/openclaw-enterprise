@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { ChannelDirectoryLookupResponse } from "../../packages/contracts/src/api/resources.ts";
@@ -60,6 +61,65 @@ test("Teams rejects an invalid bot password before the Agent deploys", async (t)
   assert.equal(form.get("scope"), "https://api.botframework.com/.default");
   assert.equal(form.get("client_secret"), "bad-test-password");
   assert.equal((await fixture.request("GET", `${path}/revisions`)).body.data.length, 0);
+});
+
+test("two embedded Agents independently save Teams configurations under one Installation opt-in", async (t) => {
+  const fixture = await createConsoleAppFixture(t, {
+    computeImplementation: "kubernetes-local",
+    channelRuntime: true,
+    experimentalEmbeddedChannels: true,
+    channelDrivers: createChannelProviders(),
+  });
+  await fixture.bootstrap();
+  const namespace = await fixture.createNamespace("Embedded Teams", { ready: true });
+  const values = {
+    agents: {
+      defaults: {
+        model: "openai/gpt-4.1",
+        models: { "openai/gpt-4.1": { agentRuntime: { id: "openclaw" } } },
+      },
+    },
+    channels: {
+      msteams: {
+        enabled: true,
+        appId: teamsDirectoryContext.appId,
+        appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+      },
+    },
+  };
+  // Both ordinary Agent creates use the same Installation and distinct Configuration and Secret resources.
+  const agents = [];
+  for (const name of ["First Teams Agent", "Second Teams Agent"]) {
+    const password = await fixture.createSecret(
+      namespace.id,
+      name + " password",
+      "synthetic-password",
+    );
+    agents.push(
+      await fixture.createAgent(
+        namespace.id,
+        name,
+        { ...values, channels: { msteams: { ...values.channels.msteams, appId: randomUUID() } } },
+        {
+          executionMode: "embedded",
+          secretBindings: {
+            MSTEAMS_APP_PASSWORD: { source: password.ref, delivery: { type: "env" } },
+          },
+        },
+      ),
+    );
+  }
+  const [first, second] = agents;
+  assert.ok(first && second);
+  assert.notEqual(first.id, second.id);
+  const configurations = `/namespaces/${namespace.id}/configurations`;
+  const disabled = await fixture.request("PATCH", `${configurations}/${first.configurationId}`, {
+    body: { values: { ...values, channels: { msteams: { enabled: false } } } },
+  });
+  assert.equal(disabled.status, 200, JSON.stringify(disabled.body));
+  const independent = await fixture.request("GET", `${configurations}/${second.configurationId}`);
+  assert.equal(independent.status, 200);
+  assert.equal(independent.body.data.values.channels.msteams.enabled, true);
 });
 
 test("Agent-scoped Teams lookup uses the authorized password and Team roster, then saves native access IDs", async (t) => {

@@ -1,19 +1,17 @@
 ---
 created: 2026-09-28
-updated: 2026-11-19
-last_updated_session: authoring-run/64d7828e-4701-4e9c-8c92-0b3617945c7a
+updated: "2026-11-23"
+last_updated_session: "authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57"
 ---
 
 # Installation Profile Rendering Flow
 
 ## Overview
 
-An operator passes a profile, JSON inputs, and output directory to
-`scripts/render-installation-profile.ts`. The renderer validates inputs, resolves omitted
-hosted Codex destinations, and writes paired Helm values, Installation YAML, and
-preflight. This flow ends at those files. Operators still prepare the cluster
-and Secrets, apply Helm, and configure hosted/runtime tokens, optional ChatGPT
-service accounts, the repository registry, and Slack consumers.
+The renderer validates the operator's profile and JSON inputs, resolves omitted hosted
+Codex destinations, and writes Helm values, Installation YAML and preflight results.
+The operator prepares the cluster and Secrets, applies Helm and configures credentials
+and consumers.
 
 ## Entry Points
 
@@ -188,6 +186,8 @@ preflight also refuses a zone ID, which the API accepts.
 
 When `channels.managedEgress` is true, the renderer writes matching
 `channelEgress` Helm values and `runtime.channelEgress` Compute configuration.
+The renderer writes the optional embedded-channel boolean to `runtime.proxy` and
+supplemental HTTPS hosts to `runtime.channelEgress` in Compute only.
 The operator supplies installation address exclusions. OCC derives its reserved
 listener from that configuration; Compute assigns each enabled Agent its own
 listener. See [channel egress](channel-egress.md).
@@ -324,6 +324,8 @@ activation, and repository registry creation need separate evidence.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-23 13:53: Render embedded Teams admission and supplemental HTTPS hosts into Compute. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - aee16e14c7)
 
 - 2026-11-19 05:13: Replace the shared channel proxy setting with managed channel egress inputs. (authoring-run/64d7828e-4701-4e9c-8c92-0b3617945c7a - fc683cdfe9b73215d0503cdfaf7917f54be7f17e)
 

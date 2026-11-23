@@ -14,6 +14,7 @@ interface TestKubernetesComputeDriverOptions {
   repositoryCredentials?: boolean | undefined;
   gatewayRuntime?: boolean | undefined;
   channelRuntime?: boolean | undefined;
+  experimentalEmbeddedChannels?: boolean;
   routed?: boolean | undefined;
   privateStatus?: boolean | undefined;
   authentication?: KubernetesComputeDriverOptions["authentication"] | undefined;
@@ -48,6 +49,7 @@ export function createTestKubernetesComputeDriver(
     gatewayRuntime = false,
     // An Installation with runtime.channelEgress: isolated channel credentials and a reviewed proxy.
     channelRuntime = false,
+    experimentalEmbeddedChannels,
     channelDrivers = slackChannelDrivers,
     // false: runtime storage without gateway routing or node enrollment, which dedicated Agents
     // cannot use (provisioning and deployment admission refuse them).
@@ -122,6 +124,9 @@ export function createTestKubernetesComputeDriver(
               ...(modelProvider === undefined ? {} : { modelProvider }),
               gatewayStorageClassName: "local-path",
               ...(placed ? { gatewayNodeSelector: { "oce-role": "control" } } : {}),
+              ...(experimentalEmbeddedChannels === undefined
+                ? {}
+                : { proxy: { experimentalEmbeddedChannels } }),
               ...(channelRuntime ? { channelEgress: channelEgressOptions } : {}),
             },
           }

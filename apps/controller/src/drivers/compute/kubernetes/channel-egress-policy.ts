@@ -3,7 +3,7 @@ import { normalizeNetworkDestinationRules } from "@openclaw-enterprise/contracts
 import { match } from "ts-pattern";
 
 export interface ChannelEgressOptions {
-  readonly embeddedTeams?: { readonly agentId: string; readonly httpsHosts: readonly string[] };
+  readonly embeddedHttpsHosts?: readonly string[];
   readonly gatewayName: string;
   readonly gatewayNamespace: string;
   readonly envoyNamespace: string;
@@ -68,20 +68,11 @@ export const channelEgressConfigurationSchema: JSONSchema = {
     "excludedCidrs",
   ],
   properties: {
-    embeddedTeams: {
-      type: "object",
-      additionalProperties: false,
-      required: ["agentId", "httpsHosts"],
-      properties: {
-        agentId: { type: "string", minLength: 1, maxLength: 128 },
-        httpsHosts: {
-          type: "array",
-          minItems: 1,
-          maxItems: 16,
-          uniqueItems: true,
-          items: { type: "string", minLength: 1, maxLength: 253 },
-        },
-      },
+    embeddedHttpsHosts: {
+      type: "array",
+      maxItems: 16,
+      uniqueItems: true,
+      items: { type: "string", minLength: 1, maxLength: 253 },
     },
     gatewayName: { type: "string", minLength: 1 },
     gatewayNamespace: { type: "string", minLength: 1 },
@@ -95,7 +86,7 @@ export const channelEgressConfigurationSchema: JSONSchema = {
   },
 };
 
-/** Supplemental HTTPS endpoints apply only to the selected embedded Gateway. */
+/** Supplemental HTTPS endpoints apply only to embedded Gateways with Teams enabled. */
 export function embeddedTeamsDestinations(
   hosts: readonly string[],
 ): readonly NetworkDestinationRule[] {
@@ -118,22 +109,25 @@ export function validateChannelEgressOptions(options: ChannelEgressOptions): voi
       throw new Error("Channel egress requires exact Kubernetes resource names.");
     }
   }
-  if (options.embeddedTeams !== undefined) {
-    const { agentId, httpsHosts } = options.embeddedTeams;
+  if (options.embeddedHttpsHosts !== undefined) {
+    const hosts = options.embeddedHttpsHosts;
     if (
-      !agentId.trim() ||
-      !Array.isArray(httpsHosts) ||
-      !httpsHosts.length ||
-      httpsHosts.length > 16 ||
-      httpsHosts.some(
-        (host) => typeof host !== "string" || !host.includes(".") || host !== host.toLowerCase(),
+      !Array.isArray(hosts) ||
+      hosts.length > 16 ||
+      new Set(hosts).size !== hosts.length ||
+      hosts.some(
+        (host) =>
+          typeof host !== "string" ||
+          host.length > 253 ||
+          !host.includes(".") ||
+          host !== host.toLowerCase(),
       )
     ) {
       throw new Error(
-        "Embedded Teams requires an Agent ID and one to sixteen exact lowercase HTTPS hostnames.",
+        "Embedded HTTPS hosts must be a list of up to sixteen distinct exact lowercase hostnames.",
       );
     }
-    embeddedTeamsDestinations(httpsHosts);
+    embeddedTeamsDestinations(hosts);
   }
   const ports = [
     options.listenerPortStart,

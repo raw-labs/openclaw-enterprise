@@ -319,8 +319,6 @@ export interface ComputeDriver extends Driver {
     secretBindings?: SecretBindings | null,
     /** Catalog entry for a `credential_source` binding; absent for every other method. */
     credentialSourceType?: CredentialSourceType,
-    /** Server-owned Agent identity, when one has been allocated. */
-    agentId?: string,
   ): void;
   /** Validate and normalize the Driver-owned deployment request without side effects. */
   normalizeHarnessOverrides?(

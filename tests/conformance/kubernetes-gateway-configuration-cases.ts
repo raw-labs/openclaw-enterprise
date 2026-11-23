@@ -38,6 +38,8 @@ import {
 } from "../helpers/refusal-credential-diagnostics.ts";
 import {
   tenant,
+  gatewayRouting,
+  routedRevision,
   apiKeyAuth as routedApiKeyAuth,
   options,
   routedOptions,
@@ -445,38 +447,48 @@ function checkChannelAdmission(unrouted: KubernetesComputeDriver) {
     () => unrouted.validateHarnessAuth(embedded, apiKeyAuth, { ...openClawBase, ...slack }, null),
     embeddedChannelsRefusal,
   );
-  const embeddedTeams = new KubernetesComputeDriver(
-    routedOptions({
-      runtime: {
-        ...gatewayRuntime,
-        channelEgress: {
-          ...channelEgressOptions,
-          embeddedTeams: { agentId: "trial-agent", httpsHosts: ["model.example.com"] },
+  const teamsDriver = (enabled: boolean, embeddedHttpsHosts: string[] = []) =>
+    new KubernetesComputeDriver(
+      routedOptions({
+        gatewayRouting: { ...gatewayRouting, channels: { hostname: "callbacks.example.test" } },
+        runtime: {
+          ...gatewayRuntime,
+          ...(enabled ? { proxy: { experimentalEmbeddedChannels: true } } : {}),
+          channelEgress: { ...channelEgressOptions, embeddedHttpsHosts },
         },
+      }),
+      {
+        channelDrivers: [
+          ...slackChannelDrivers,
+          { provider: "msteams", driver: new TeamsChannelDriver() },
+        ],
       },
-    }),
-    {
-      channelDrivers: [
-        ...slackChannelDrivers,
-        { provider: "msteams", driver: new TeamsChannelDriver() },
-      ],
-    },
-  );
+    );
   const teams = { ...openClawBase, channels: { msteams: { enabled: true } } };
-  embeddedTeams.validateHarnessAuth(embedded, apiKeyAuth, teams, null, undefined, "trial-agent");
-  // Neither a different Agent nor a second enabled channel inherits the exception.
+  const embeddedTeams = teamsDriver(true);
+  // Approving a model hostname alone must never admit an embedded channel.
   assert.throws(
     () =>
-      embeddedTeams.validateHarnessAuth(
+      teamsDriver(false, ["model.example.test"]).validateHarnessAuth(
         embedded,
         apiKeyAuth,
         teams,
         null,
-        undefined,
-        "other-agent",
       ),
     /dedicated Agent workload/,
   );
+  // Supplemental model/plugin destinations belong only to embedded Teams listeners.
+  const qualified = teamsDriver(true, ["model.example.test"]);
+  const current = routedRevision(qualified, { configuration: teams, harness: embedded });
+  const dedicatedRules = qualified["enabledChannels"]({ ...current, harness: codex })?.destinations;
+  assert.ok(dedicatedRules);
+  assert.deepEqual(embeddedTeams["enabledChannels"](current)?.destinations, dedicatedRules);
+  assert.deepEqual(qualified["enabledChannels"](current)?.destinations, [
+    ...dedicatedRules,
+    { destination: { kind: "dns", name: "model.example.test", match: "exact" }, ports: [443] },
+  ]);
+  // The flag itself needs no supplemental HTTPS destinations.
+  embeddedTeams.validateHarnessAuth(embedded, apiKeyAuth, teams, null);
   assert.throws(
     () =>
       embeddedTeams.validateHarnessAuth(
@@ -487,8 +499,6 @@ function checkChannelAdmission(unrouted: KubernetesComputeDriver) {
           channels: { ...teams.channels, ...slack.channels },
         },
         null,
-        undefined,
-        "trial-agent",
       ),
     /dedicated Agent workload/,
   );

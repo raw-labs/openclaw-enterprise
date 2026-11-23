@@ -68,7 +68,7 @@ IDs, pagination, keyboard activation, dismissal, and saving/reopening through th
 Configuration API with a local Microsoft protocol fixture.
 
 For the embedded trial, run the signed-message check with an authorized test
-bot and a disposable Installation that selects the Agent. Record the Gateway Pod
+bot and one embedded Agent in a disposable Installation with the opt-in enabled. Record the Gateway Pod
 UID, revision and listener port. Send a nonce in the bot's personal chat, verify
 the exact model reply, and repeat with a fresh nonce after redeploy. From the
 Gateway, verify that direct public HTTPS, an unlisted CONNECT and the other

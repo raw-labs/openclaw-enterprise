@@ -8,7 +8,7 @@ instead of using a direct internet connection.
 
 Dedicated Gateways use this route for their enabled channels. The
 [embedded Teams evaluation](#embedded-teams-evaluation) shares the listener
-with the selected Agent's native model and plugins.
+with each participating Agent's native model and plugins.
 
 ## Configuration
 
@@ -56,30 +56,37 @@ rejects activation; it does not combine destination sets or add another fleet.
 
 ## Embedded Teams evaluation
 
-For a disposable single-cluster Installation, the operator can add the following
-selection under `runtime.channelEgress` in the Kubernetes Compute configuration.
-Create an embedded OpenClaw Agent with channels disabled to obtain its ID first.
+On a disposable single-cluster Installation, set the Kubernetes Compute option
+`runtime.proxy.experimentalEmbeddedChannels` to true. Each embedded OpenClaw
+Agent can then enable Teams through its own Configuration and Secret bindings.
+Each Teams-enabled revision receives its own listener. The default is false.
+
+Add these keys to the existing Compute runtime configuration:
 
 ```yaml
-embeddedTeams:
-  agentId: agt_replace_with_existing_id
-  httpsHosts:
+proxy:
+  experimentalEmbeddedChannels: true
+channelEgress:
+  # Keep the managed fleet settings and excludedCidrs shown above.
+  embeddedHttpsHosts:
     - api.openai.com
+    - backend.composio.dev
 ```
 
-Load the same settings into the API and worker. Configure the selected Agent's
-Teams channel and Secret bindings through the Configuration API, then deploy.
-The [Teams prerequisites](../../../guides/integrations/teams.md) still apply.
-Add each approved plugin endpoint explicitly before deploying a plugin that needs
-it. For Connections with its default Composio endpoint, that host is
-`backend.composio.dev`. Host entries grant the shared workload HTTPS access on
-port 443. They accept exact DNS names only.
+Approve only the model and plugin endpoints needed for this Installation.
+`embeddedHttpsHosts` accepts up to sixteen exact lowercase DNS names on port 443.
+An omitted or empty list adds no destinations to the Teams Driver's rules.
+The supplemental hosts apply to every embedded Teams listener. Dedicated Agents
+and OCC retain their provider rules. The [profile renderer](../../../guides/deploy/installation-profiles.md)
+accepts `channels.experimentalEmbeddedChannels` and `channels.embeddedHttpsHosts`
+alongside `channels.managedEgress`.
 
-The model, plugins, tools and bot share the same process and projected credentials.
-Omitting the selection keeps embedded channels disabled. Other Agents cannot use
-this exception. Removing it prevents subsequent admission and activation. Stop
-the trial Agent to withdraw its running workload and release the listener. Live
-embedded Teams and Connections delivery still require qualification.
+Load the same settings into the API and worker. Configure each bot's credentials
+and callback for its own Agent as described in the [Teams guide](../../../guides/integrations/teams.md).
+On each enabled Agent, the model, plugins, tools and bot share a process and
+projected credentials. Setting the boolean to false prevents subsequent embedded
+Teams admission and activation. Stop each running trial Agent to withdraw its
+workload and release its listener.
 
 ## Enforcement
 

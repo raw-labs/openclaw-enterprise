@@ -163,6 +163,7 @@ interface ComputeConfiguration {
     transportSecretPrefix: string;
     modelProvider?: { protocol: unknown; baseUrl: string; supportsStandaloneWebSearch?: boolean };
     codexSeccompProfile?: string;
+    proxy?: { experimentalEmbeddedChannels: boolean };
     channelEgress?: ChannelEgressOptions;
   };
 }
@@ -1393,7 +1394,12 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
     ],
     diagnostics,
   );
-  closed(channels, "channels", ["managedEgress", "excludedCidrs"], diagnostics);
+  closed(
+    channels,
+    "channels",
+    ["managedEgress", "excludedCidrs", "experimentalEmbeddedChannels", "embeddedHttpsHosts"],
+    diagnostics,
+  );
   closed(codex, "codex", ["managedServiceAccounts", "modelDiscoveryCidrs"], diagnostics);
   closed(
     repository,
@@ -1777,6 +1783,37 @@ function buildRendered(
     diagnostics,
     false,
   );
+  const experimentalEmbeddedChannels = asBoolean(
+    channels,
+    ["channels", "experimentalEmbeddedChannels"],
+    diagnostics,
+  );
+  const embeddedHttpsHosts =
+    channels.embeddedHttpsHosts === undefined
+      ? undefined
+      : (stringArray(channels, ["channels", "embeddedHttpsHosts"], diagnostics, {
+          nonempty: false,
+          validate: (host) =>
+            host.length <= 253 && dnsHostname.test(host) && !/^[0-9.]+$/.test(host),
+          description: "an exact lowercase DNS hostname",
+        }) as string[]);
+  if (
+    embeddedHttpsHosts &&
+    (embeddedHttpsHosts.length > 16 ||
+      new Set(embeddedHttpsHosts).size !== embeddedHttpsHosts.length)
+  ) {
+    diagnostics.errors.push(
+      "channels.embeddedHttpsHosts accepts up to sixteen distinct hostnames.",
+    );
+  }
+  if (!managedEgressEnabled && (experimentalEmbeddedChannels || embeddedHttpsHosts !== undefined)) {
+    diagnostics.errors.push("Embedded channel settings require channels.managedEgress.");
+  }
+  if (experimentalEmbeddedChannels) {
+    diagnostics.warnings.push(
+      "Embedded Teams shares each enabled Agent's model and channel credentials with its plugins and tools.",
+    );
+  }
   const channelEgress: ChannelEgressOptions | undefined = managedEgressEnabled
     ? {
         gatewayName: "openclaw-channel-egress",
@@ -2168,7 +2205,17 @@ function buildRendered(
                   ),
                 }
               : {}),
-            ...(channelEgress === undefined ? {} : { channelEgress }),
+            ...(channels.experimentalEmbeddedChannels === undefined
+              ? {}
+              : { proxy: { experimentalEmbeddedChannels } }),
+            ...(channelEgress === undefined
+              ? {}
+              : {
+                  channelEgress: {
+                    ...channelEgress,
+                    ...(embeddedHttpsHosts === undefined ? {} : { embeddedHttpsHosts }),
+                  },
+                }),
           },
         },
       },

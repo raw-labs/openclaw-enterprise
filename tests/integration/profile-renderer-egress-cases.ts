@@ -19,6 +19,29 @@ import {
 } from "./profile-renderer-fixture.ts";
 
 export function registerEgressCases(): void {
+  test("profile emits the embedded channel opt-in separately from Envoy destinations", async () => {
+    const input = baseInput();
+    input.channels.experimentalEmbeddedChannels = true;
+    input.channels.embeddedHttpsHosts = ["model.example.test", "backend.composio.dev"];
+    const rendered = await render("openclaw", input);
+    assert.equal(rendered.summary.ok, true, rendered.preflight.errors.join("\n"));
+    const runtime = objectAt(computeConfiguration(rendered.installation), "runtime");
+    assert.equal(propertyAt(runtime, "proxy", "experimentalEmbeddedChannels"), true);
+    assert.deepEqual(
+      propertyAt(runtime, "channelEgress", "embeddedHttpsHosts"),
+      input.channels.embeddedHttpsHosts,
+    );
+    assert.equal(
+      propertyAt(loadYaml(rendered.values), "channelEgress", "embeddedHttpsHosts"),
+      undefined,
+    );
+    input.channels.embeddedHttpsHosts = ["*.example.test"];
+    await assertPreflightFailure("openclaw", input, /exact lowercase DNS hostname/);
+    delete input.channels.embeddedHttpsHosts;
+    input.channels.managedEgress = false;
+    await assertPreflightFailure("openclaw", input, /require channels.managedEgress/);
+  });
+
   test("preflight rejects CIDR prefixes with a leading zero", async () => {
     const controlPlane = baseInput().controlPlane;
     await assertPreflightFailure(
