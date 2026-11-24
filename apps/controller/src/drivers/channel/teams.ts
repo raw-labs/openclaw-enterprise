@@ -298,7 +298,14 @@ export class TeamsChannelDriver implements ChannelDriver {
     const boundedSignal = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
       : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-    const token = await this.accessToken(tenantId!, appId!, input.token, GRAPH, boundedSignal);
+    // The native Teams plugin trims the password, as the deploy check does.
+    const token = await this.accessToken(
+      tenantId!,
+      appId!,
+      input.token.trim(),
+      GRAPH,
+      boundedSignal,
+    );
     const options = {
       signal: boundedSignal,
       headers: { authorization: `Bearer ${token}` },
@@ -398,7 +405,9 @@ export class TeamsChannelDriver implements ChannelDriver {
       }
     }
     if (ids !== undefined) {
-      throw new ChannelDirectoryError("unavailable");
+      // Saved-ID names are best effort: an ID outside the Team, or beyond the pages read,
+      // stays an exact ID without a name.
+      return { workspaceId, candidates: [...candidates.values()], complete: true };
     }
     if (candidates.size > 100) {
       // A provider batch cannot be partially consumed without losing matches on continuation.

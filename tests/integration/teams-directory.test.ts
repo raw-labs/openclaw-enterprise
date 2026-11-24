@@ -68,10 +68,12 @@ test("Agent-scoped Teams lookup uses the authorized password and Team roster, th
   const fixture = await createConsoleAppFixture(t, { channelDrivers: providers });
   await fixture.bootstrap();
   const namespace = await fixture.createNamespace("Teams lookup", { ready: true });
+  // A Secret created from a file often ends in a newline. The native Teams plugin trims the
+  // password, and so do the deploy check and the lookup.
   const password = await fixture.createSecret(
     namespace.id,
     "Teams app password",
-    "synthetic-teams-app-password",
+    "synthetic-teams-app-password\n",
   );
   const agent = await fixture.createAgent(namespace.id, "Teams Agent");
   const path = `/namespaces/${namespace.id}/channel-directory/lookup`;
@@ -243,6 +245,24 @@ test("Teams lookup bounds pagination, rejects foreign continuations, and reports
     "Teams directory lookup",
   ).data;
   assert.deepEqual(continuedData.candidates, [{ id: teamsMemberId, name: "Alex Chen" }]);
+  // Saved IDs can name people outside the Team. When the bounded pages do not find an ID, the
+  // lookup still answers: that ID stays an exact ID without a name, not a directory failure.
+  const { query: _query, ...hydrationBody } = body;
+  const outsider = "77777777-7777-4777-8777-777777777777";
+  const hydrated = await fixture.request("POST", path, {
+    body: { ...hydrationBody, ids: [outsider] },
+  });
+  const hydratedData = fixture.fixtureResponse(
+    hydrated,
+    200,
+    ChannelDirectoryLookupResponse,
+    "Teams saved-ID lookup",
+  ).data;
+  assert.deepEqual(hydratedData, {
+    workspaceId: hydratedData.workspaceId,
+    candidates: [],
+    complete: true,
+  });
   // Graph can return more channels than one API result page; continuation must lose none.
   const roster = Array.from({ length: 120 }, (_, index) => ({
     id: `19:channel-${index}@thread.tacv2`,

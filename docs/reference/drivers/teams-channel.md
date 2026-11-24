@@ -24,7 +24,10 @@ before the Secret read. The Driver refuses a cursor from another app, tenant,
 Team, kind or query the same way, before any Microsoft request. `teamId` is the Entra group ID used by
 Graph; returned `workspaceId` is the native Team ID used for bot routing.
 `kind` selects `channels` or `users`. Searches match names, IDs and available
-member email addresses. Hydration resolves up to twenty selected IDs.
+member email addresses. Hydration resolves up to twenty selected IDs from the
+same bounded pages; an ID that those pages do not contain, such as a person
+outside the Team, stays an exact ID without a name. Lookups and the deploy check
+trim the app password, as the native Teams plugin does.
 
 ## Authentication and authorization
 
