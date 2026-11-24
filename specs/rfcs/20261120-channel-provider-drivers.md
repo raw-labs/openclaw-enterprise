@@ -9,7 +9,7 @@ author: miguelbranco80
 - **ID:** RFC-20261120-channel-provider-drivers
 - **Created:** 2026-11-20
 - **Last updated:** 2026-11-24
-- **RFC PR:** pending
+- **RFC PR:** [raw-labs/openclaw-enterprise#42](https://github.com/raw-labs/openclaw-enterprise/pull/42)
 - **Implementation plan:** to follow with the implementation
 - **Related:** [RFC-20261118-channel-egress](20261118-channel-egress.md),
   [Teams channels RFC](https://github.com/raw-labs/openclaw-enterprise/pull/29),
