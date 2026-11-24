@@ -178,7 +178,11 @@ adds its exact ID to the editable ID list; names and search text are not saved.
 Result buttons and Load more retain search focus on pointer-down, so Safari does
 not hide them on blur before their click handlers run. Keyboard activation,
 Escape and focus leaving the field retain their existing behavior.
-The existing channel transaction persists separate channel and personal rules.
+The existing channel transaction persists channel and personal rules. Native
+Teams applies `allowFrom` to channel senders while `groupAllowFrom` is absent,
+so the editor shows that inherited list, follows personal-list edits, and leaves
+`groupAllowFrom` unset until the user changes channel people or the channel
+access choice.
 It also saves the optional SharePoint site ID in native
 `channels.msteams.sharePointSiteId`; clearing the field removes that key. The
 editor describes outgoing storage and native organization-scoped channel links.

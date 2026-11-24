@@ -2416,6 +2416,84 @@ for (const [name, access] of [
   });
 }
 
+test("Teams editor shows channel access inherited from personal access and keeps it inherited on unrelated edits", async (t) => {
+  const { fixture, namespace } = await readyNamespace(
+    t,
+    "Teams inherited channel access",
+    createChannelProviders(),
+  );
+  const team = "19:team@thread.tacv2";
+  const channelId = "19:general@thread.tacv2";
+  const user = (digit: string) =>
+    `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`;
+  // No groupAllowFrom: native Teams admits the allowFrom senders in these channels too.
+  const teams = {
+    enabled: true,
+    appId: teamsDirectoryContext.appId,
+    tenantId: teamsDirectoryContext.tenantId,
+    appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+    dmPolicy: "allowlist",
+    allowFrom: [user("1")],
+    groupPolicy: "allowlist",
+    requireMention: true,
+    teams: { [team]: { channels: { [channelId]: { requireMention: true } } } },
+  };
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Inherited Teams Agent",
+    nativeValues("teams-inherited", { harnessId: "codex", channels: { msteams: teams } }),
+    { executionMode: "dedicated" },
+  );
+  const path = `/namespaces/${namespace.id}/configurations/${agent.configurationId}`;
+  const { page } = await newPage(t, fixture);
+  await openDraft(page, fixture, agent, "Inherited Teams Agent");
+  const openEditor = async () => {
+    await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+    await dialog.waitFor();
+    return dialog;
+  };
+  const save = async (dialog: Awaited<ReturnType<typeof openEditor>>) => {
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        response.url().endsWith(`/configurations/${agent.configurationId}`),
+    );
+    await dialog.getByRole("button", { name: "Save configuration", exact: true }).click();
+    assert.equal((await saved).status(), 200);
+    return (await fixture.request("GET", path)).data.values.channels.msteams;
+  };
+
+  // The editor shows who can actually post in the channels, not an empty list.
+  let dialog = await openEditor();
+  assert.equal(await dialog.locator("#msteams-group-users").inputValue(), user("1"));
+  assert.equal(await dialog.locator("#msteams-channel-access").inputValue(), "selected");
+  await dialog.locator("#msteams-channel-access-inherited").waitFor();
+  // Editing the personal list changes the inherited channel list with it.
+  await dialog.locator("#msteams-dm-users").fill([user("1"), user("2")].join(", "));
+  assert.equal(
+    await dialog.locator("#msteams-group-users").inputValue(),
+    [user("1"), user("2")].join(", "),
+  );
+  // An unrelated edit saves without writing a separate channel list.
+  const siteId =
+    "example.sharepoint.com,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666";
+  await dialog.getByLabel("SharePoint site ID", { exact: true }).fill(siteId);
+  let saved = await save(dialog);
+  assert.equal(saved.sharePointSiteId, siteId);
+  assert.deepEqual(saved.allowFrom, [user("1"), user("2")]);
+  assert.equal(Object.hasOwn(saved, "groupAllowFrom"), false);
+
+  // Changing the channel people sets channel access separately from then on.
+  dialog = await openEditor();
+  await dialog.locator("#msteams-group-users").fill(user("2"));
+  assert.equal(await dialog.locator("#msteams-channel-access-inherited").isHidden(), true);
+  await dialog.locator("#msteams-dm-users").fill(user("1"));
+  saved = await save(dialog);
+  assert.deepEqual(saved.groupAllowFrom, [user("2")]);
+  assert.deepEqual(saved.allowFrom, [user("1")]);
+});
+
 test("Teams editor persists separate personal and channel access with an authorized password Secret binding", async (t) => {
   const { fixture, namespace } = await readyNamespace(
     t,

@@ -9,6 +9,7 @@ type SlackConfig = Extract<ReturnType<typeof slack.support>, { supported: true }
 type ConfigurationScenario = {
   teams?: boolean;
   teamsConfiguration?: OpenClawConfigurationDocument;
+  teamsInheritedChannelAccess?: boolean;
   harnessId?: string;
   gatewayPassword?: boolean;
   gatewayPasswordProviderless?: boolean;
@@ -196,7 +197,7 @@ export function configurationValues(scenario: ConfigurationScenario): FixtureCon
     };
   }
   if (scenario.teams) {
-    values.channels.msteams = {
+    const { groupAllowFrom, ...teamsDefaults } = {
       enabled: true,
       appId: "11111111-1111-4111-8111-111111111111",
       tenantId: "22222222-2222-4222-8222-222222222222",
@@ -212,6 +213,9 @@ export function configurationValues(scenario: ConfigurationScenario): FixtureCon
       },
       ...(scenario.teamsConfiguration ?? {}),
     };
+    values.channels.msteams = scenario.teamsInheritedChannelAccess
+      ? teamsDefaults
+      : { ...teamsDefaults, groupAllowFrom };
   }
   return values satisfies OpenClawConfigurationDocument;
 }
