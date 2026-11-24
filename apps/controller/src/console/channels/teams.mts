@@ -36,8 +36,8 @@ type TeamsConfig = ChannelValues & {
   webhook?: { path?: string };
 };
 const teamReferences = new WeakMap<HTMLFormElement, () => string | undefined>();
-/** True while channel senders still inherit native `allowFrom` (no `groupAllowFrom`). */
-const inheritedChannelAccess = new WeakMap<HTMLFormElement, () => boolean>();
+/** Whether channel access still inherits native `allowFrom` (no `groupAllowFrom` to save). */
+const inheritedAccess = new WeakMap<HTMLFormElement, () => boolean>();
 const DM_POLICIES = ["disabled", "allowlist", "open", "pairing"];
 
 function support(values: ChannelValues): ChannelSupport<TeamsConfig> {
@@ -109,6 +109,15 @@ function select(id: string, options: readonly (readonly [string, string])[], val
       element("option", { value: key, ...(key === value ? { selected: "" } : {}) }, label),
     ),
   );
+}
+
+/** The native `allowFrom` that a personal-message policy and its people produce. */
+function personalAccess(policy: string, people: string): string[] {
+  return policy === "open" ? ["*"] : uniqueList(people.split(","));
+}
+
+function sameUsers(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id) => right.includes(id));
 }
 
 function appendFields(body: HTMLFormElement, config: TeamsConfig, context: ChannelDrawerContext) {
@@ -202,52 +211,71 @@ function appendFields(body: HTMLFormElement, config: TeamsConfig, context: Chann
     DM_POLICIES.map((policy) => [policy, policy.charAt(0).toUpperCase() + policy.slice(1)]),
     config.dmPolicy ?? "pairing",
   );
-  // Native Teams applies `allowFrom` to channel senders while `groupAllowFrom` is
-  // absent. Show that list and keep the key unset until channel access changes.
+  // Native Teams applies `allowFrom` to channel senders while `groupAllowFrom` is absent.
+  // Channel access stays inherited until the user changes it and while it equals that list.
   const groupInput = groupField.querySelector<HTMLInputElement>("#msteams-group-users")!;
   const personalInput = personalField.querySelector<HTMLInputElement>("#msteams-dm-users")!;
-  let inheritsChannelAccess = config.groupAllowFrom === undefined;
-  inheritedChannelAccess.set(body, () => inheritsChannelAccess);
+  const inheritable = config.groupAllowFrom === undefined;
+  const channelUsers = () =>
+    channelAccess.value === "everyone" ? ["*"] : uniqueList(groupInput.value.split(","));
+  // The list that channel access inherits; it starts as the saved native list.
+  let inherited = [...(config.allowFrom ?? [])];
+  let explicit = !inheritable;
+  // Typing and picker choices bubble; a draft restore replays values without bubbling.
+  const markExplicit = (event: Event) => {
+    if (event.bubbles) {
+      explicit = true;
+    }
+  };
+  const following = () => inheritable && !explicit && sameUsers(channelUsers(), inherited);
+  inheritedAccess.set(body, following);
   const inheritedHint = element(
     "p",
     { className: "hint", id: "msteams-channel-access-inherited" },
     "Uses the personal-message list. Change these people or this choice to set channel access separately.",
   );
-  inheritedHint.hidden = !inheritsChannelAccess;
-  const separateChannelAccess = () => {
-    inheritsChannelAccess = false;
-    inheritedHint.hidden = true;
-  };
-  // Registered before `updateAccess`, so an explicit choice is never overwritten.
-  channelAccess.addEventListener("change", separateChannelAccess);
-  groupInput.addEventListener("input", separateChannelAccess);
-  const showInheritedAccess = () => {
-    if (!inheritsChannelAccess) {
-      return;
+  const keptHint = element(
+    "p",
+    { className: "hint", id: "msteams-channel-access-kept", role: "status" },
+    "Channel access is now set separately: opening personal messages does not open these channels.",
+  );
+  keptHint.hidden = true;
+  const followPersonalAccess = () => {
+    const follows = following();
+    const next = personalAccess(dmPolicy.value, personalInput.value);
+    if (follows && next.includes("*") && !inherited.includes("*")) {
+      // Opening personal messages must not silently open the channels too.
+      keptHint.hidden = false;
+    } else if (follows) {
+      channelAccess.value = next.includes("*") ? "everyone" : "selected";
+      groupInput.value = next.filter((id) => id !== "*").join(", ");
+      groupField.refreshNames();
     }
-    // The same list that save writes to `allowFrom`.
-    const users = dmPolicy.value === "open" ? ["*"] : uniqueList(personalInput.value.split(","));
-    channelAccess.value = users.includes("*") ? "everyone" : "selected";
-    groupInput.value = users.filter((id) => id !== "*").join(", ");
-    groupField.refreshNames();
+    inherited = next;
   };
   const updateAccess = () => {
-    showInheritedAccess();
+    inheritedHint.hidden = !following();
+    if (!inheritedHint.hidden) {
+      keptHint.hidden = true;
+    }
     groupField.hidden = channelAccess.value === "everyone";
-    groupField.querySelector<HTMLInputElement>("#msteams-group-users")!.disabled =
-      groupField.hidden;
+    groupInput.disabled = groupField.hidden;
     personalField.hidden = dmPolicy.value !== "allowlist" && dmPolicy.value !== "pairing";
-    personalField.querySelector<HTMLInputElement>("#msteams-dm-users")!.disabled =
-      personalField.hidden;
+    personalInput.disabled = personalField.hidden;
     refresh();
   };
+  const followAndUpdate = () => {
+    followPersonalAccess();
+    updateAccess();
+  };
+  // Registered first, so `updateAccess` sees the explicit choice.
+  channelAccess.addEventListener("change", markExplicit);
+  groupInput.addEventListener("input", markExplicit);
   channelAccess.addEventListener("change", updateAccess);
-  dmPolicy.addEventListener("change", updateAccess);
-  personalInput.addEventListener("input", updateAccess);
-  // The first render keeps the saved inherited list, including a wildcard.
-  inheritsChannelAccess = false;
+  groupInput.addEventListener("input", updateAccess);
+  dmPolicy.addEventListener("change", followAndUpdate);
+  personalInput.addEventListener("input", followAndUpdate);
   updateAccess();
-  inheritsChannelAccess = config.groupAllowFrom === undefined;
   const binding = TEAMS_SECRET_BINDINGS[0]!;
   const picker = createSecretReferenceField({
     context,
@@ -299,6 +327,7 @@ function appendFields(body: HTMLFormElement, config: TeamsConfig, context: Chann
     field("Who can use the agent in these channels?", channelAccess),
     groupField,
     inheritedHint,
+    keptHint,
     checkbox(
       "msteams-require-mention",
       "Require a mention",
@@ -434,22 +463,24 @@ export const teams = {
       body.querySelector<HTMLInputElement>("#msteams-channels-enabled")!.checked && ids.length
         ? "allowlist"
         : "disabled";
-    if (inheritedChannelAccess.get(body)?.() === true) {
-      delete config.groupAllowFrom;
-    } else {
-      config.groupAllowFrom =
-        body.querySelector<HTMLInputElement>("#msteams-channel-access")!.value === "everyone"
-          ? ["*"]
-          : uniqueList(
-              body.querySelector<HTMLInputElement>("#msteams-group-users")!.value.split(","),
-            );
-    }
+    const channelUsers =
+      body.querySelector<HTMLInputElement>("#msteams-channel-access")!.value === "everyone"
+        ? ["*"]
+        : uniqueList(
+            body.querySelector<HTMLInputElement>("#msteams-group-users")!.value.split(","),
+          );
     config.requireMention = mention;
     config.dmPolicy = body.querySelector<HTMLInputElement>("#msteams-dm-policy")!.value;
-    config.allowFrom =
-      config.dmPolicy === "open"
-        ? ["*"]
-        : uniqueList(body.querySelector<HTMLInputElement>("#msteams-dm-users")!.value.split(","));
+    config.allowFrom = personalAccess(
+      config.dmPolicy,
+      body.querySelector<HTMLInputElement>("#msteams-dm-users")!.value,
+    );
+    // Inherited channel access keeps following the personal list after save.
+    if (inheritedAccess.get(body)?.() === true) {
+      delete config.groupAllowFrom;
+    } else {
+      config.groupAllowFrom = channelUsers;
+    }
     return withProvider(values, "msteams", config);
   },
   updatedSecretBindings(context) {

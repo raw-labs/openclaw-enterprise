@@ -180,9 +180,13 @@ not hide them on blur before their click handlers run. Keyboard activation,
 Escape and focus leaving the field retain their existing behavior.
 The existing channel transaction persists channel and personal rules. Native
 Teams applies `allowFrom` to channel senders while `groupAllowFrom` is absent,
-so the editor shows that inherited list, follows personal-list edits, and leaves
-`groupAllowFrom` unset until the user changes channel people or the channel
-access choice.
+so the editor shows that inherited list and follows personal-list edits. Channel
+access stays inherited until the user changes channel people or the access
+choice, and while it equals the personal list; save then leaves
+`groupAllowFrom` unset. A draft restore replays field values without bubbling
+events, so it is not a user change. Choosing the Open personal-message policy
+does not open inherited channels: channel access keeps its people and becomes a
+separate setting, which the editor states.
 It also saves the optional SharePoint site ID in native
 `channels.msteams.sharePointSiteId`; clearing the field removes that key. The
 editor describes outgoing storage and native organization-scoped channel links.

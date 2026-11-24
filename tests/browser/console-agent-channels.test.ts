@@ -2447,6 +2447,9 @@ test("Teams editor shows channel access inherited from personal access and keeps
   const path = `/namespaces/${namespace.id}/configurations/${agent.configurationId}`;
   const { page } = await newPage(t, fixture);
   await openDraft(page, fixture, agent, "Inherited Teams Agent");
+  // A same-document history entry, so Back and Forward can retain and restore the drawer draft.
+  await page.getByRole("tab", { name: "Configuration", exact: true }).click();
+  await page.getByRole("tab", { name: "Channels", exact: true }).click();
   const openEditor = async () => {
     await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
@@ -2479,10 +2482,47 @@ test("Teams editor shows channel access inherited from personal access and keeps
   const siteId =
     "example.sharepoint.com,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666";
   await dialog.getByLabel("SharePoint site ID", { exact: true }).fill(siteId);
+  // Leaving and returning restores the draft by replaying each field; that replay is not a
+  // channel access change.
+  await page.goBack();
+  await page.getByRole("button", { name: "Edit Configuration" }).waitFor();
+  await page.goForward();
+  await dialog.waitFor();
+  assert.equal(await dialog.getByLabel("SharePoint site ID", { exact: true }).inputValue(), siteId);
+  await dialog.locator("#msteams-channel-access-inherited").waitFor();
   let saved = await save(dialog);
   assert.equal(saved.sharePointSiteId, siteId);
   assert.deepEqual(saved.allowFrom, [user("1"), user("2")]);
   assert.equal(Object.hasOwn(saved, "groupAllowFrom"), false);
+
+  // Opening personal messages to everyone does not open the inherited channels too: channel
+  // access keeps its people and becomes a separate setting.
+  dialog = await openEditor();
+  await dialog.locator("#msteams-dm-policy").selectOption("open");
+  await dialog.locator("#msteams-channel-access-kept").waitFor();
+  assert.equal(await dialog.locator("#msteams-channel-access").inputValue(), "selected");
+  assert.equal(
+    await dialog.locator("#msteams-group-users").inputValue(),
+    [user("1"), user("2")].join(", "),
+  );
+  saved = await save(dialog);
+  assert.deepEqual(saved.allowFrom, ["*"]);
+  assert.deepEqual(saved.groupAllowFrom, [user("1"), user("2")]);
+  // Back to the previous native state for the explicit-change case below.
+  const reset = await fixture.request("PATCH", path, {
+    body: {
+      values: {
+        ...(await fixture.request("GET", path)).data.values,
+        channels: {
+          msteams: { ...teams, allowFrom: [user("1"), user("2")], sharePointSiteId: siteId },
+        },
+      },
+    },
+  });
+  assert.equal(reset.status, 200, JSON.stringify(reset.body));
+  assert.equal(Object.hasOwn(reset.data.values.channels.msteams, "groupAllowFrom"), false);
+  await page.reload();
+  await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).waitFor();
 
   // Changing the channel people sets channel access separately from then on.
   dialog = await openEditor();
