@@ -201,6 +201,9 @@ runs:
       id: install-browser
       if: inputs.lane == 'dev-up-k3d' || (inputs.lane == 'openshell' || inputs['suite-view'] == 'full-integration') || inputs.lane == 'qa-matrix' || startsWith(inputs.lane, 'checks-browser') || inputs.lane == 'gateway-routing' || inputs.lane == 'k3d-observability-demo' || inputs.lane == 'postgres-auth' || inputs.lane == 'keycloak-oidc'
       shell: bash
+      env:
+        # Lanes that run WebKit browser cases also install WebKit.
+        CI_PLAYWRIGHT_WEBKIT: ${{ inputs.lane == 'checks-browser-2' && '1' || '' }}
       run: bash scripts/ci/setup-tools.sh browser
     - name: Set up Go toolchain
       id: setup-go
