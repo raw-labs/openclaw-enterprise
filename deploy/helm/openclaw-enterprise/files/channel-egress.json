@@ -18,13 +18,13 @@
     "240.0.0.0/4"
   ],
   "occFilterChain": {
-    "name": "occ-82ef31b40d7d07b145365f45",
+    "name": "occ-c4d06f6dd43f41535bd47a01",
     "filters": [
       {
         "name": "envoy.filters.network.http_connection_manager",
         "typed_config": {
           "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
-          "stat_prefix": "occ-82ef31b40d7d07b145365f45",
+          "stat_prefix": "occ-c4d06f6dd43f41535bd47a01",
           "stream_idle_timeout": "0s",
           "upgrade_configs": [
             {
@@ -32,10 +32,10 @@
             }
           ],
           "route_config": {
-            "name": "occ-82ef31b40d7d07b145365f45",
+            "name": "occ-c4d06f6dd43f41535bd47a01",
             "virtual_hosts": [
               {
-                "name": "occ-82ef31b40d7d07b145365f45",
+                "name": "occ-c4d06f6dd43f41535bd47a01",
                 "domains": [
                   "*"
                 ],
@@ -217,6 +217,54 @@
                                               "string_match": {
                                                 "safe_regex": {
                                                   "regex": "(?i:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+slack-msgs\\.com):(?:443)"
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "and_rules": {
+                                        "rules": [
+                                          {
+                                            "header": {
+                                              "name": ":method",
+                                              "string_match": {
+                                                "exact": "CONNECT"
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "header": {
+                                              "name": ":authority",
+                                              "string_match": {
+                                                "safe_regex": {
+                                                  "regex": "(?i:login\\.microsoftonline\\.com):(?:443)"
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "and_rules": {
+                                        "rules": [
+                                          {
+                                            "header": {
+                                              "name": ":method",
+                                              "string_match": {
+                                                "exact": "CONNECT"
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "header": {
+                                              "name": ":authority",
+                                              "string_match": {
+                                                "safe_regex": {
+                                                  "regex": "(?i:graph\\.microsoft\\.com):(?:443)"
                                                 }
                                               }
                                             }
@@ -405,6 +453,54 @@
                                                     "string_match": {
                                                       "safe_regex": {
                                                         "regex": "(?i:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+slack-msgs\\.com):(?:443)"
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          },
+                                          {
+                                            "and_rules": {
+                                              "rules": [
+                                                {
+                                                  "header": {
+                                                    "name": ":method",
+                                                    "string_match": {
+                                                      "exact": "CONNECT"
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "header": {
+                                                    "name": ":authority",
+                                                    "string_match": {
+                                                      "safe_regex": {
+                                                        "regex": "(?i:login\\.microsoftonline\\.com):(?:443)"
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          },
+                                          {
+                                            "and_rules": {
+                                              "rules": [
+                                                {
+                                                  "header": {
+                                                    "name": ":method",
+                                                    "string_match": {
+                                                      "exact": "CONNECT"
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "header": {
+                                                    "name": ":authority",
+                                                    "string_match": {
+                                                      "safe_regex": {
+                                                        "regex": "(?i:graph\\.microsoft\\.com):(?:443)"
                                                       }
                                                     }
                                                   }

@@ -201,18 +201,21 @@ type MutableRouting = {
   gatewayNamespace: KubernetesGatewayRoutingOptions["gatewayNamespace"];
   envoyNamespace: KubernetesGatewayRoutingOptions["envoyNamespace"];
   hostname?: KubernetesGatewayRoutingOptions["hostname"];
+  channels?: KubernetesGatewayRoutingOptions["channels"];
 };
 type Mismatch =
   | ["gatewayName" | "gatewayNamespace" | "envoyNamespace", string]
-  | ["hostname", string | undefined];
+  | ["hostname", string | undefined]
+  | ["channels", { readonly hostname: string } | undefined];
 
 export async function gatewayRoutingCase(
   t: TestContext,
   runCheck: RunCheck,
   gatewayValues: ChartValues,
 ) {
-  for (const variant of ["default", "custom-automatic", "custom-hostname"]) {
-    const custom = variant !== "default";
+  for (const variant of ["default", "custom-automatic", "custom-hostname", "channel-callbacks"]) {
+    const custom = variant === "custom-automatic" || variant === "custom-hostname";
+    const callbacks = variant === "channel-callbacks" ? "teams.callbacks.example" : undefined;
     const hostname = variant === "custom-hostname" ? "agents.internal.example" : undefined;
     const namespace = custom ? "team-control" : "openclaw-system";
     const gatewayName = custom ? "private-agents" : "oce-agent-gateways";
@@ -229,6 +232,14 @@ export async function gatewayRoutingCase(
                 }
               : {}),
             ...(hostname === undefined ? {} : { "gatewayRouting.hostname": hostname }),
+            ...(callbacks === undefined
+              ? {}
+              : {
+                  "gatewayRouting.channels.enabled": "true",
+                  "gatewayRouting.channels.hostname": callbacks,
+                  "gatewayRouting.channels.tlsSecretName": "teams-callback-tls",
+                  "gatewayRouting.channels.ingressPeers[0].ipBlock.cidr": "0.0.0.0/0",
+                }),
           },
           { isUpgrade: true, namespace },
         )
@@ -252,6 +263,7 @@ export async function gatewayRoutingCase(
       gatewayNamespace: namespace,
       envoyNamespace,
       ...(hostname === undefined ? {} : { hostname }),
+      ...(callbacks === undefined ? {} : { channels: { hostname: callbacks } }),
     };
     const compute = { ...base.drivers.compute.configuration, network, gatewayRouting: routing };
     const configuration = {
@@ -283,13 +295,24 @@ export async function gatewayRoutingCase(
       ["envoyNamespace", "other-namespace"],
       ["hostname", "other.example"],
       ...(hostname === undefined ? [] : [["hostname", undefined] satisfies Mismatch]),
+      // Teams callback routes attach to the chart's channel listener by name. A Compute
+      // hostname the chart does not serve, or a listener it does not render, drops callbacks.
+      ["channels", { hostname: "other.example" }],
+      ...(callbacks === undefined ? [] : [["channels", undefined] satisfies Mismatch]),
     ];
     for (const [field, value] of mismatches) {
       const different = structuredClone(configuration);
+      const differentRouting = different.drivers.compute.configuration.gatewayRouting;
       if (field === "hostname") {
-        different.drivers.compute.configuration.gatewayRouting.hostname = value;
+        differentRouting.hostname = value;
+      } else if (field === "channels") {
+        if (value === undefined) {
+          delete differentRouting.channels;
+        } else {
+          differentRouting.channels = value;
+        }
       } else {
-        different.drivers.compute.configuration.gatewayRouting[field] = value;
+        differentRouting[field] = value;
       }
       const refused = await runCheck(t, different, {}, () => environment);
       assert.equal(refused.status, 1, `${field}: ${refused.stderr}`);

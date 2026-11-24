@@ -68,6 +68,7 @@ for Codex.
 | `git-write`                      | No                   | OpenClaw, Codex | Clone, edit, commit, push to the run's granted branch, dispose credentials.                                                                                                      |
 | `git-push-denied`                | No                   | Codex           | Reject a push to any other branch and dispose credentials.                                                                                                                       |
 | `slack`                          | No                   | Codex           | Threaded reply and new root message.                                                                                                                                             |
+| `teams`                          | Yes (Kubernetes)     | Codex           | Microsoft OAuth refuses an invalid Teams draft through managed Envoy egress. The prior revision and Gateway Pod stay active. [Live Teams procedure](../teams.md).                |
 | `channel-egress-upgrade`         | No                   | Codex           | [One-off channel upgrade](../slack.md#one-off-channel-upgrade-proof).                                                                                                            |
 | `openshell-linear-read`          | No                   | Codex           | Opt-in shipped OpenShell setup, Linear installation and verified native read.                                                                                                    |
 | `codex-search-config`            | No                   | Codex           | API-key Agent user configuration with omitted, false and true capability declarations; persistence after supported stop/deploy.                                                  |
@@ -350,9 +351,8 @@ OCC_TEST_QA_MATRIX=1 node --env-file="$TEST_ENV_FILE" \
 
 ## Results and limits
 
-Check that the selected tests and cleanup passed for the tested commit. The
-selection summary records the run, attempt, and SHA. For focused PR runs, compare
-the result's `sourceSha` with the recorded merge SHA and its base and head commits.
+Require passing tests and cleanup. Match `sourceSha` to the recorded run and
+attempt. For focused PR runs, also check the merge SHA and its parents.
 
 For focused Keycloak, require both manifest cases and their cleanup to pass.
 For OpenClaw, inspect `matrix.json`: one `kubernetes/OpenClaw` cell with only
@@ -367,15 +367,12 @@ verification incomplete. Preserve the job link and attempt-specific results.
 | Native Agent browser                                | `qa-advisory-oidc-agent-chat-gateway-routing`; [browser media and review procedure](../native-agent-browser.md#collect-ci-browser-evidence) |
 | Local installation tests                            | `qa-advisory-local-installation-<test-file-basename>-dev-up-k3d`                                                                            |
 
-Startup failures report elapsed time, the 1,100,000 ms limit, and the observed
-exit code or signal. `timed out` identifies deadline expiry. A later `SIGPIPE`
-can follow teardown closing output pipes. Failure detail is redacted and
-command arguments and protected output stay private.
+Startup failures report elapsed time, the 1,100,000 ms limit, and the exit code
+or signal. `timed out` signals expiry. Teardown can cause a later `SIGPIPE`.
+Command arguments and protected output stay private.
 
-The `startup timings` message names a JSON file with up to 64 recognized CLI
-timings and the number of older records omitted. Each timing gives the stage,
-elapsed milliseconds, and failure status of a finished command. Durations can
-overlap. Protected output, unrecognized records, and other stdout stay private.
+`startup timings` names a JSON file with up to 64 CLI stage timings, their
+failure status, and the count of older records omitted. Durations can overlap.
 
 Artifacts expire after seven days. Each OpenShell job reports `scope: focused`
 because it runs one file; complete advisory OpenShell coverage requires every

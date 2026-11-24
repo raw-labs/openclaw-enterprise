@@ -129,6 +129,9 @@ export function registerBuildKitCases() {
       OCC_TEST_SLACK_SENDER_BOT_TOKEN: "synthetic-sender",
       SLACK_APP_TOKEN: "synthetic-app",
       SLACK_BOT_TOKEN: "synthetic-bot",
+      OCC_TEST_TEAMS_APP_ID: "11111111-1111-4111-8111-111111111111",
+      OCC_TEST_TEAMS_TENANT_ID: "22222222-2222-4222-8222-222222222222",
+      OCC_TEST_TEAMS_APP_PASSWORD_FILE: "synthetic-teams-password-file",
     }));
   test("production-tui prepares checkout images with read-only BuildKit caches", (t) =>
     assertReadOnlyBuildKitCache(t, "production-tui", {

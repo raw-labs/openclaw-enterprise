@@ -36,6 +36,12 @@ model turns across revision cutover plus Slack delivery. PostgreSQL uses the
 repository's pinned fixture image unless `OCC_TEST_PRODUCTION_POSTGRES_IMAGE`
 selects another qualified immutable reference.
 
+The Helm case also checks Teams-only, Slack-only, and combined provider egress.
+Supply `OCC_TEST_TEAMS_APP_ID` and `OCC_TEST_TEAMS_TENANT_ID` for a dedicated test
+bot and point `OCC_TEST_TEAMS_APP_PASSWORD_FILE` at its private password file.
+The case uses Microsoft OAuth during deployment. It does not change a Teams
+endpoint or send a Teams message.
+
 Before provisioning the Slack-enabled topology or posting, the test uses the Gateway bot's `conversations.info` response to identify the exact public or private channel. The response must explicitly report `false` for both `is_im` and `is_mpim`, including for legacy private channels. The Gateway bot's paginated `conversations.members` response must include both bot users. The distinct sender must independently read channel history. The sender does not need channel-read scope.
 
 Put these settings in the private environment file:

@@ -280,6 +280,46 @@ test(
   },
 );
 
+test("Teams callbacks opt into a separate TLS listener and scoped ingress", tooling, async () => {
+  const callbacks = {
+    ...gatewayRoutingValues,
+    "gatewayRouting.channels.enabled": "true",
+    "gatewayRouting.channels.hostname": "callbacks.example.test",
+    "gatewayRouting.channels.tlsSecretName": "teams-public-tls",
+    "gatewayRouting.channels.ingressPeers[0].ipBlock.cidr": "198.51.100.0/24",
+  };
+  // Actual Helm output proves chart composition, not public TLS or CNI enforcement.
+  const objects = await resources((await render(callbacks)).stdout);
+  const gateway = objects.find(({ kind }) => kind === "Gateway");
+  const listener = gateway.spec.listeners.find(({ name }) => name === "channels");
+  assert.equal(listener.hostname, "callbacks.example.test");
+  assert.equal(listener.port, 8444);
+  assert.equal(listener.protocol, "HTTPS");
+  assert.equal(listener.tls.certificateRefs[0].name, "teams-public-tls");
+  assert.equal(listener.allowedRoutes.namespaces.from, "Selector");
+  const ingress = objects
+    .filter(({ kind }) => kind === "NetworkPolicy")
+    .flatMap(({ spec }) => spec.ingress ?? [])
+    .find(({ ports }) => ports?.some(({ port }) => port === 8444));
+  assert.deepEqual(ingress.from, [{ ipBlock: { cidr: "198.51.100.0/24" } }]);
+  for (const override of [
+    { "gatewayRouting.enabled": "false" },
+    { "gatewayRouting.hostname": "callbacks.example.test" },
+    { "gatewayRouting.channels.tlsSecretName": "" },
+    { "gatewayRouting.channels.listenerPort": "10443" },
+    { "gatewayRouting.channels.ingressPeers": "null" },
+  ]) {
+    await assert.rejects(render({ ...callbacks, ...override }), /channel/);
+  }
+  const disabled = await resources((await render(gatewayRoutingValues)).stdout);
+  assert.equal(
+    disabled
+      .find(({ kind }) => kind === "Gateway")
+      .spec.listeners.some(({ name }) => name === "channels"),
+    false,
+  );
+});
+
 registerSandboxIngressCase(sandboxValues);
 
 // Evaluate the selector-only, numeric-port ingress rules rendered by this chart.
@@ -2037,6 +2077,22 @@ test(
     assert.equal(new Set(gateway.spec.listeners.map(({ port }) => port)).size, 64);
     const service = findResource(objects, "Service", "openclaw-channel-egress");
     assert.ok(service.spec.ports.every(({ port, targetPort }) => port === targetPort));
+    // The API's shared listener can reach OAuth and Graph, but has no bot
+    // connector or storage grant. Those targets belong to installed Agent bindings.
+    const occPatch = findResource(objects, "EnvoyPatchPolicy", "openclaw-channel-egress-base");
+    const listener = occPatch.spec.jsonPatches.find(({ name }) => name.endsWith("/occ"));
+    const [rbac] = listener.operation.value.filters[0].typed_config.http_filters;
+    const [permission] = rbac.typed_config.rules.policies.destinations.permissions;
+    const authorities = permission.and_rules.rules[0].or_rules.rules.map(
+      (rule) => rule.and_rules.rules[1].header.string_match.safe_regex.regex,
+    );
+    assert.deepEqual(
+      authorities.filter((regex) => /microsoft|botframework|trafficmanager|sharepoint/.test(regex)),
+      [
+        String.raw`(?i:login\.microsoftonline\.com):(?:443)`,
+        String.raw`(?i:graph\.microsoft\.com):(?:443)`,
+      ],
+    );
     const fleet = findResource(objects, "NetworkPolicy", "openclaw-channel-egress-fleet");
     assert.deepEqual(
       fleet.spec.ingress.map(({ ports }) => ports[0].port).sort((a, b) => a - b),

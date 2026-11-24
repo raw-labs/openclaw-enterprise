@@ -154,7 +154,11 @@ cleanup for retry. Cleanup for one revision cannot release another binding.
 
 OCC provider requests use the reserved listener and an API-only network grant.
 The generated Helm policy consumes the bundled Drivers' routing declarations.
-Slack tokens stay with their authorized consumers; Envoy receives none.
+The OCC listener permits Slack and Teams directory targets. Teams bot and
+storage destinations are declared for Gateways with Teams enabled. The Teams
+Channel Driver's `fileHosts` setting adds exact storage hosts; see
+[Teams attachment setup](../../../guides/integrations/teams.md#prepare-attachment-downloads).
+Provider credentials stay with their authorized consumers.
 
 ## Verification and troubleshooting
 
@@ -172,6 +176,6 @@ Slack tokens stay with their authorized consumers; Envoy receives none.
 Use the [Kubernetes tests](../../../testing/kubernetes.md) and
 [Slack proof](../../../testing/slack.md) for real enforcement and model execution.
 Per-Agent ports are temporary until verified Gateway workload identity supports
-authenticated shared listeners. Microsoft Teams is not implemented.
+authenticated shared listeners. Microsoft Teams uses the same per-Agent listeners.
 
 See the [source-backed flow](../../../flows/channel-egress.md) for reconciliation.

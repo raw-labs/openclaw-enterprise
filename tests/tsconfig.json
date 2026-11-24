@@ -29,6 +29,9 @@
     "resolveJsonModule": true
   },
   "include": [
+    "helpers/teams-directory.ts",
+    "integration/teams-directory.test.ts",
+    "fixtures/teams-attachment-download.ts",
     "integration/ci-prepare-advisory-cases.ts",
     "integration/docker-compute-compose-cases.ts",
     "integration/credential-source-endpoint-cases.ts",

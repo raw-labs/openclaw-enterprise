@@ -263,7 +263,7 @@ async function writeDependencyInputs(root: string, output: string): Promise<void
     [
       join(root, "scripts/lib/docker-plugin-selection.mjs"),
       join(root, "extensions"),
-      "codex,slack",
+      "codex,slack,msteams",
       "--required-bundled",
       join(root, "package.json"),
     ],
@@ -412,7 +412,7 @@ async function packageRuntime(root: string, output: string, manifestPath: string
         packageManager,
         platform: process.platform,
         architecture: process.arch,
-        plugins: ["codex", "slack"],
+        plugins: ["codex", "slack", "msteams"],
       },
       null,
       2,

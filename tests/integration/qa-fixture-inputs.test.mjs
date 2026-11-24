@@ -285,6 +285,7 @@ test("QA selection keeps prerequisite credentials and reports omitted coverage",
     "git-write",
     "git-push-denied",
     "slack",
+    "teams",
   ]);
   assert.throws(() => validateQaInputs(selected, {}), /OPENAI_KEY_FILE is required/);
   assert.throws(

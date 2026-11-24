@@ -381,7 +381,9 @@ export async function routeModelProvider(
     modelAddress,
     platformNamespace: stack.state.platformNamespace,
     serverFile: "oce-first-agent-smoke.server",
-    additionalHosts: slackStandIn ? ["slack.com", "wss-primary.slack.com"] : [],
+    additionalHosts: slackStandIn
+      ? ["slack.com", "wss-primary.slack.com", "login.microsoftonline.com"]
+      : [],
   });
 }
 
