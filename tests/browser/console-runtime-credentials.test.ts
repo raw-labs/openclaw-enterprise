@@ -923,6 +923,16 @@ async function ungrantedBoundSecret(
     await list.locator(".badge").allTextContents(),
     badges.map((badge) => badge.replace(" · Agent access not confirmed", "")),
   );
+  if (slackValues?.enabled === false) {
+    // With every channel off the keys are listed only: once the grant is made, no Save remains.
+    assert.equal(
+      await page
+        .locator("section.channel-secrets")
+        .getByRole("button", { name: "Save channel Secrets" })
+        .count(),
+      0,
+    );
+  }
   assert.deepEqual(await secretGrants(fixture, requests, namespace.id, agent), [
     boundSecret(secrets, ungranted).id,
   ]);
