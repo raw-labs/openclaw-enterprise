@@ -45,6 +45,10 @@ In the Installation's selected Compute Driver configuration, set
 in Helm and the Installation. The Teams Driver admits the exact Public cloud
 messaging and authentication hosts over TCP 443.
 
+If you later remove this routing from Helm and the Installation, deploys of new
+Teams versions are refused. The next redeploy of an Agent that still serves
+Teams deletes its callback route, so Microsoft can no longer reach it.
+
 ## Configure and deploy the Agent
 
 1. Open the Dedicated Agent's **Channels** tab and select **Configure Microsoft

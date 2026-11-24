@@ -15924,7 +15924,12 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     const name = `${this.gatewayRouteName(revision.agentId)}-msteams`;
     const routing = this.options.gatewayRouting!;
     // The serving Deployment, rather than a candidate's configuration, owns this callback.
-    if (gateway.metadata.annotations?.["openclaw.dev/msteams-webhook"] !== "true") {
+    // Without channel routing no callback can be served, so a stale one is removed instead
+    // of blocking every redeploy; admission refuses new Teams revisions in that state.
+    if (
+      gateway.metadata.annotations?.["openclaw.dev/msteams-webhook"] !== "true" ||
+      routing.channels === undefined
+    ) {
       for (const kind of ["HTTPRoute", "SecurityPolicy"] as const) {
         const existing = await this.getOwned(kind, name, namespace, ownership);
         const existingRevision = existing?.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION];
@@ -15940,9 +15945,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       }
       return;
     }
-    if (routing.channels === undefined) {
-      throw new ConfigurationFailure("Microsoft Teams requires channel callback routing.");
-    }
+    const channels = routing.channels;
     const route = this.manifest(GATEWAY_API_VERSION, "HTTPRoute", name, ownership, namespace);
     const metadata = {
       ...route.metadata,
@@ -15983,7 +15986,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         ...route,
         metadata,
         spec: {
-          hostnames: [routing.channels.hostname],
+          hostnames: [channels.hostname],
           parentRefs: [
             {
               group: "gateway.networking.k8s.io",
