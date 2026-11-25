@@ -2,8 +2,10 @@ import type { ChannelProviderDriver, DriverImplementation } from "@openclaw-ente
 import { match } from "ts-pattern";
 
 import { SlackChannelDriver } from "./slack.ts";
+import { TeamsChannelDriver, type TeamsChannelConfiguration } from "./teams.ts";
+import { channelRequest, type ChannelRequest } from "./transport.ts";
 
-export type BundledChannelDriverId = "slack-channel";
+export type BundledChannelDriverId = "slack-channel" | "teams-channel";
 
 /** Bundled `drivers.channel` selections and the provider each one serves. */
 export const BUNDLED_CHANNEL_DRIVERS: Readonly<
@@ -21,6 +23,11 @@ export const BUNDLED_CHANNEL_DRIVERS: Readonly<
     implementation: "occ/slack-channel",
     definition: SlackChannelDriver,
   },
+  "teams-channel": {
+    provider: "msteams",
+    implementation: "occ/teams-channel",
+    definition: TeamsChannelDriver as DriverImplementation,
+  },
 });
 
 export function isBundledChannelDriverId(value: unknown): value is BundledChannelDriverId {
@@ -34,11 +41,10 @@ export interface ChannelDriverSelection {
 }
 
 /** Omitting `drivers.channel` installs every bundled Channel Driver with default settings. */
-export const DEFAULT_CHANNEL_DRIVER_SELECTIONS: readonly ChannelDriverSelection[] = Object.freeze(
-  (Object.keys(BUNDLED_CHANNEL_DRIVERS) as BundledChannelDriverId[]).map((id) =>
-    Object.freeze({ id, configuration: {} }),
-  ),
-);
+export const DEFAULT_CHANNEL_DRIVER_SELECTIONS: readonly ChannelDriverSelection[] = Object.freeze([
+  { id: "slack-channel", configuration: {} },
+  { id: "teams-channel", configuration: {} },
+]);
 
 /** The OCC provider listener shared by every bundled Channel Driver. */
 export interface ChannelProviderTransport {
@@ -46,6 +52,8 @@ export interface ChannelProviderTransport {
   readonly managedProxyHosts?: readonly string[];
   /** Production refuses provider requests when the managed OCC listener is absent. */
   readonly expectProxy?: boolean;
+  /** HTTP seam at the Microsoft boundary for protocol fixtures. */
+  readonly teamsRequest?: ChannelRequest;
 }
 
 /** Build the provider-to-Driver set that trusted composition gives to OCC and Compute. */
@@ -53,8 +61,9 @@ export function createChannelProviders(
   selections: readonly ChannelDriverSelection[] = DEFAULT_CHANNEL_DRIVER_SELECTIONS,
   transport: ChannelProviderTransport = {},
 ): readonly ChannelProviderDriver[] {
+  const proxyMissing = transport.expectProxy === true && transport.proxyUrl === undefined;
   return Object.freeze(
-    selections.map(({ id }) =>
+    selections.map(({ id, configuration }) =>
       Object.freeze({
         provider: BUNDLED_CHANNEL_DRIVERS[id].provider,
         driver: match(id)
@@ -66,6 +75,18 @@ export function createChannelProviders(
                   ? {}
                   : { managedProxyHosts: transport.managedProxyHosts }),
                 expectProxy: transport.expectProxy === true,
+              }),
+          )
+          .with(
+            "teams-channel",
+            () =>
+              new TeamsChannelDriver(configuration as TeamsChannelConfiguration, {
+                request: channelRequest(transport.teamsRequest, transport.proxyUrl, {
+                  ...(transport.managedProxyHosts === undefined
+                    ? {}
+                    : { managedProxyHosts: transport.managedProxyHosts }),
+                }),
+                proxyMissing,
               }),
           )
           .exhaustive(),

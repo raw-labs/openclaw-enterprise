@@ -7,6 +7,9 @@ import type { slack } from "../../../apps/controller/src/console/channels/slack.
 type SlackConfig = Extract<ReturnType<typeof slack.support>, { supported: true }>["config"];
 
 type ConfigurationScenario = {
+  teams?: boolean;
+  teamsConfiguration?: OpenClawConfigurationDocument;
+  teamsInheritedChannelAccess?: boolean;
   harnessId?: string;
   gatewayPassword?: boolean;
   gatewayPasswordProviderless?: boolean;
@@ -50,7 +53,7 @@ type FixtureConfiguration = {
       sandbox?: OpenClawConfigurationDocument;
     };
   };
-  channels: { slack?: OpenClawConfigurationDocument };
+  channels: { slack?: OpenClawConfigurationDocument; msteams?: OpenClawConfigurationDocument };
   secrets?: OpenClawConfigurationDocument;
   plugins?: OpenClawConfigurationDocument;
   models?: OpenClawConfigurationDocument;
@@ -192,6 +195,27 @@ export function configurationValues(scenario: ConfigurationScenario): FixtureCon
         scenario.slackAllowFrom ?? (scenario.slackPolicy === "open" ? ["*"] : ["UDEMO123"]),
       channels: slackChannels(scenario),
     };
+  }
+  if (scenario.teams) {
+    const { groupAllowFrom, ...teamsDefaults } = {
+      enabled: true,
+      appId: "11111111-1111-4111-8111-111111111111",
+      tenantId: "22222222-2222-4222-8222-222222222222",
+      appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+      dmPolicy: "disabled",
+      groupPolicy: "allowlist",
+      groupAllowFrom: ["*"],
+      requireMention: true,
+      teams: {
+        "19:demo@thread.tacv2": {
+          channels: { "19:demo@thread.tacv2": { requireMention: true } },
+        },
+      },
+      ...(scenario.teamsConfiguration ?? {}),
+    };
+    values.channels.msteams = scenario.teamsInheritedChannelAccess
+      ? teamsDefaults
+      : { ...teamsDefaults, groupAllowFrom };
   }
   return values satisfies OpenClawConfigurationDocument;
 }

@@ -267,6 +267,7 @@ import {
   enabledChannelProviders,
   OPENCLAW_GATEWAY_PASSWORD,
   requireChannelTopology,
+  requireChannelProxyEnvironment,
   requireCodexPlugin,
   refuseInvalidTrustedProxyIdentities,
   refuseKubernetesPluginEntryKeyVariants,
@@ -443,6 +444,9 @@ export interface KubernetesGatewayRoutingOptions {
   readonly gatewayNamespace: string;
   readonly envoyNamespace: string;
   readonly envoyHttpsTargetPort?: number;
+  readonly channels?: {
+    readonly hostname: string;
+  };
   readonly sandbox?: {
     readonly domain: string;
     readonly publicPort?: number;
@@ -3674,6 +3678,12 @@ export class KubernetesComputeDriver implements ComputeDriver {
           gatewayNamespace: { type: "string" },
           envoyNamespace: { type: "string" },
           envoyHttpsTargetPort: { type: "integer", minimum: 1, maximum: 65535 },
+          channels: {
+            type: "object",
+            required: ["hostname"],
+            additionalProperties: false,
+            properties: { hostname: { type: "string" } },
+          },
           sandbox: {
             type: "object",
             required: ["domain"],
@@ -4264,6 +4274,32 @@ export class KubernetesComputeDriver implements ComputeDriver {
           "/gatewayRouting/endpointPort",
         );
         validateGatewayRoutingTarget(routing, "Gateway routing");
+        if (routing.channels !== undefined) {
+          validateDnsHostname(
+            required(
+              routing.channels.hostname,
+              "Channel callback hostname",
+              "/gatewayRouting/channels/hostname",
+            ),
+            "Channel callback hostname",
+            "/gatewayRouting/channels/hostname",
+          );
+          const privateHostname =
+            routing.hostname ||
+            `occ-gateway-${sha256Hex(`${routing.gatewayNamespace}/${routing.gatewayName}`, 12)}.${routing.envoyNamespace}.svc`;
+          if (routing.channels.hostname === privateHostname) {
+            throw configurationConstraintFailure(
+              "Channel callbacks require a hostname separate from gateway administration.",
+              "/gatewayRouting/channels/hostname",
+            );
+          }
+          if (options.runtime === undefined) {
+            throw configurationConstraintFailure(
+              "Channel callback routing requires a native Gateway runtime.",
+              "/gatewayRouting/channels",
+            );
+          }
+        }
         if (routing.sandbox !== undefined) {
           validateSandboxDomain(
             required(routing.sandbox.domain, "Sandbox domain", "/gatewayRouting/sandbox/domain"),
@@ -5172,12 +5208,13 @@ export class KubernetesComputeDriver implements ComputeDriver {
     }
     // Not a Configuration save rule: it depends on the Agent's execution mode and on the
     // Installation's channel runtime (runtime.channelEgress), which an operator may add later.
+    const providers = enabledChannelProviders(
+      configuration,
+      this.channelDrivers.map(({ provider }) => provider),
+      callerSettingError,
+    );
     requireChannelTopology(
-      enabledChannelProviders(
-        configuration,
-        this.channelDrivers.map(({ provider }) => provider),
-        callerSettingError,
-      ),
+      providers,
       {
         embedded: harness.mode === "embedded",
         channelRuntime: agentSave || this.options.runtime?.channelEgress !== undefined,
@@ -5185,11 +5222,6 @@ export class KubernetesComputeDriver implements ComputeDriver {
       callerSettingError,
     );
     if (!agentSave && stage === "admission") {
-      const providers = enabledChannelProviders(
-        configuration,
-        this.channelDrivers.map(({ provider }) => provider),
-        callerSettingError,
-      );
       if (providers.length > 0) {
         try {
           requireSupportedChannelDestinations(
@@ -5209,6 +5241,10 @@ export class KubernetesComputeDriver implements ComputeDriver {
     this.requirePluginSecretInputs(configuration, topology, secretBindings);
     requireProviderApiKeys(configuration, openclaw, authentication);
     if (!agentSave) {
+      if (stage === "admission") {
+        // Refuse Installation channel requirements before a redeploy stops predecessors.
+        this.requireTeamsCallback(configuration, providers, callerSettingError);
+      }
       this.validateChannelSecretBindings(configuration, secretBindings);
     }
   }
@@ -5285,6 +5321,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
       this.channelDrivers.map(({ provider }) => provider),
       callerSettingError,
     );
+    requireChannelProxyEnvironment(configuration, callerSettingError);
     requireHarnessCredentialBinding(configuration, callerSettingError, options);
     // Every OpenClaw topology applies the tool policy, embedded too (findings 2688, 2689), and the
     // plugin entry key rule (finding 3077). Preparation and activation skip them: an active
@@ -10071,7 +10108,7 @@ export class KubernetesComputeDriver implements ComputeDriver {
     revisionId: string,
   ): Promise<void> {
     // Remove the endpoint before deleting its route-specific authentication policy.
-    for (const suffix of ["node", "sandbox"]) {
+    for (const suffix of ["node", "sandbox", "msteams"]) {
       const name = `${gatewayName}-${suffix}`;
       await this.deleteGatewayRoutingResource("HTTPRoute", name, ownership, namespace, revisionId);
       await this.deleteGatewayRoutingResource(
@@ -14807,7 +14844,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
   }
 
   private gatewayRouteHeaderFilter(
-    access: "operator" | "chat" | "browser" | "node" | "node-transfer",
+    access: "operator" | "chat" | "browser" | "node" | "node-transfer" | "channel",
   ): KubernetesRecord {
     return {
       type: "RequestHeaderModifier",
@@ -14829,21 +14866,29 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           },
         ],
         remove: [
-          ...(access === "node-transfer" ? [] : ["authorization"]),
+          ...(access === "node-transfer" || access === "channel" ? [] : ["authorization"]),
           "cookie",
           "forwarded",
           "x-forwarded-for",
           ...(access === "browser" ? [] : [BROWSER_DELEGATION_HEADER]),
-          ...(access === "node" || access === "node-transfer"
+          // Chat and channel callbacks, like node routes, forward no client credential or
+          // Tailscale identity claim to the tenant Gateway.
+          ...(access === "node" ||
+          access === "node-transfer" ||
+          access === "chat" ||
+          access === "channel"
             ? [
-                TRUSTED_PROXY_SCOPES_HEADER,
-                "x-occ-identity",
                 "x-api-key",
                 "tailscale-user-login",
                 "tailscale-user-name",
                 "tailscale-user-profile-pic",
                 "tailscale-funnel-request",
               ]
+            : []),
+          // Chat sets its own trusted identity and scope cap above; removing them would make
+          // that grant depend on proxy evaluation order.
+          ...(access === "node" || access === "node-transfer" || access === "channel"
+            ? [TRUSTED_PROXY_SCOPES_HEADER, TRUSTED_PROXY_HEADER]
             : []),
         ],
       },
@@ -15230,6 +15275,15 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
     if (!Number.isSafeInteger(gatewayRevision) || gatewayRevision < 1) {
       throw new OwnershipFailure("The serving Gateway has an invalid revision.");
     }
+    await this.reconcileTeamsRoute(
+      revision,
+      ownership,
+      namespace,
+      service,
+      gateway,
+      gatewayRevisionId,
+      gatewayRevision,
+    );
     for (const access of ["node", "sandbox"] as const) {
       const publicRoute = this.gatewayRoute(revision, ownership, namespace, service, access);
       if (publicRoute === undefined) {
@@ -15270,6 +15324,120 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       await this.reconcile(policy, ownership, namespace);
       await this.reconcile(publicRoute, ownership, namespace);
     }
+  }
+
+  private async reconcileTeamsRoute(
+    revision: AgentRevision,
+    ownership: Ownership,
+    namespace: KubernetesNamespaceAddress,
+    service: ManagedKubernetesObject<"Service">,
+    gateway: ManagedKubernetesObject<"Deployment">,
+    gatewayRevisionId: string,
+    gatewayRevision: number,
+  ): Promise<void> {
+    const name = `${this.gatewayRouteName(revision.agentId)}-msteams`;
+    const routing = this.options.gatewayRouting!;
+    // The serving Deployment, rather than a candidate's configuration, owns this callback.
+    // Without channel routing no callback can be served, so a stale one is removed instead
+    // of blocking every redeploy; admission refuses new Teams revisions in that state.
+    if (
+      gateway.metadata.annotations?.["openclaw.dev/msteams-webhook"] !== "true" ||
+      routing.channels === undefined
+    ) {
+      for (const kind of ["HTTPRoute", "SecurityPolicy"] as const) {
+        const existing = await this.getOwned(kind, name, namespace, ownership);
+        const existingRevision = existing?.metadata.annotations?.[AGENT_REVISION_ID_ANNOTATION];
+        if (existingRevision !== undefined) {
+          await this.deleteGatewayRoutingResource(
+            kind,
+            name,
+            ownership,
+            namespace,
+            existingRevision,
+          );
+        }
+      }
+      return;
+    }
+    const channels = routing.channels;
+    const route = this.manifest(GATEWAY_API_VERSION, "HTTPRoute", name, ownership, namespace);
+    const metadata = {
+      ...route.metadata,
+      annotations: {
+        ...route.metadata.annotations,
+        [AGENT_REVISION_ID_ANNOTATION]: gatewayRevisionId,
+        [AGENT_REVISION_ANNOTATION]: String(gatewayRevision),
+      },
+      ...(service.metadata.uid === undefined
+        ? {}
+        : {
+            ownerReferences: [
+              {
+                apiVersion: "v1",
+                kind: "Service",
+                name: service.metadata.name,
+                uid: service.metadata.uid,
+                controller: false,
+                blockOwnerDeletion: false,
+              },
+            ],
+          }),
+    };
+    // The native Teams SDK validates Microsoft's JWT. This override removes the
+    // inherited OCE API-key policy only from the exact POST callback route.
+    await this.reconcile(
+      {
+        apiVersion: GATEWAY_SECURITY_POLICY_API_VERSION,
+        kind: "SecurityPolicy",
+        metadata,
+        spec: { targetRefs: [{ group: "gateway.networking.k8s.io", kind: "HTTPRoute", name }] },
+      },
+      ownership,
+      namespace,
+    );
+    await this.reconcile(
+      {
+        ...route,
+        metadata,
+        spec: {
+          hostnames: [channels.hostname],
+          parentRefs: [
+            {
+              group: "gateway.networking.k8s.io",
+              kind: "Gateway",
+              namespace: routing.gatewayNamespace,
+              name: routing.gatewayName,
+              sectionName: "channels",
+            },
+          ],
+          rules: [
+            {
+              matches: [
+                {
+                  method: "POST",
+                  path: {
+                    type: "Exact",
+                    value: `${this.gatewayRoutePath(revision)}/channels/msteams`,
+                  },
+                },
+              ],
+              filters: [
+                {
+                  type: "URLRewrite",
+                  urlRewrite: {
+                    path: { type: "ReplaceFullPath", replaceFullPath: "/api/messages" },
+                  },
+                },
+                this.gatewayRouteHeaderFilter("channel"),
+              ],
+              backendRefs: [this.gatewayRouteBackendRef(service.metadata.name)],
+            },
+          ],
+        },
+      },
+      ownership,
+      namespace,
+    );
   }
 
   /** Admits public preview traffic to the serving Gateway's sandbox listener.
@@ -16484,12 +16652,43 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       },
       preparationSettingError,
     );
+    this.requireTeamsCallback(revision.configuration, providers, preparationSettingError);
     if (providers.length === 0) {
       return undefined;
     }
     const requirements = resolveChannelRouting(providers, this.channelDrivers);
     requireSupportedChannelDestinations(requirements.destinations);
     return { ...requirements };
+  }
+
+  private requireTeamsCallback(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+    providers: readonly string[],
+    createError: typeof callerSettingError | typeof preparationSettingError,
+  ): void {
+    if (!providers.includes("msteams")) {
+      return;
+    }
+    const teams = asRecord(asRecord(configuration.channels)?.msteams);
+    const webhook = asRecord(teams?.webhook);
+    if (
+      teams?.webhook !== undefined &&
+      (webhook === undefined || (webhook.path !== undefined && webhook.path !== "/api/messages"))
+    ) {
+      throw createError("channels.msteams.webhook.path", "must be /api/messages");
+    }
+    if (teams?.legacyWebhook !== undefined && teams.legacyWebhook !== false) {
+      throw createError("channels.msteams.legacyWebhook", "must be false");
+    }
+    if (teams?.cloud !== undefined && teams.cloud !== "Public") {
+      throw createError("channels.msteams.cloud", "must be Public");
+    }
+    if (this.options.gatewayRouting?.channels === undefined) {
+      throw createError(
+        "channels.msteams",
+        "requires a dedicated public channel callback listener",
+      );
+    }
   }
 
   // A Gateway's environment sets a name a Secret binding could set only from a binding or from
@@ -17768,6 +17967,9 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             ...configuration.annotations,
             [AGENT_REVISION_ANNOTATION]: String(configuration.revision),
             [AGENT_REVISION_ID_ANNOTATION]: configuration.revisionId,
+            "openclaw.dev/msteams-webhook": String(
+              enabledChannels?.providers.includes("msteams") === true,
+            ),
           }
         : {};
     const revisionLabels =
@@ -18244,6 +18446,14 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         );
       }
       if (role === "gateway") {
+        // Compute-assigned peers that a process-wide channel proxy must never carry. NO_PROXY
+        // only selects a direct connection; default-deny NetworkPolicy still admits just the
+        // granted Harness and peer routes, so a bypassed name reaches nothing else.
+        const internalHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+        if (dedicated && this.options.executionCluster !== undefined) {
+          // OPENCLAW_PEER_PLUGIN_STATUS_URL below uses the execution cluster's Harness route.
+          internalHosts.add(this.options.executionCluster.harnessRouting.hostname);
+        }
         if (embedded) {
           variables.push({
             name: "HOME",
@@ -18251,15 +18461,14 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           });
         } else if (configuration?.nativeWorkerProfile === undefined) {
           // TODO(workload-transport-mtls): Replace per-Agent capability-token ws:// with mTLS.
-          variables.push({
-            name: "APP_SERVER_URL",
-            value:
-              providerUrl !== undefined
-                ? providerUrl.toString()
-                : this.options.executionCluster === undefined
-                  ? `ws://agent-${suffix}.${required(configuration?.harnessNamespace?.name, "Harness namespace")}.svc:${AGENT_TRANSPORT_PORT}`
-                  : `wss://${this.options.executionCluster.harnessRouting.hostname}${this.harnessRoutePath(ownership)}`,
-          });
+          const appServerUrl =
+            providerUrl !== undefined
+              ? providerUrl.toString()
+              : this.options.executionCluster === undefined
+                ? `ws://agent-${suffix}.${required(configuration?.harnessNamespace?.name, "Harness namespace")}.svc:${AGENT_TRANSPORT_PORT}`
+                : `wss://${this.options.executionCluster.harnessRouting.hostname}${this.harnessRoutePath(ownership)}`;
+          internalHosts.add(new URL(appServerUrl).hostname);
+          variables.push({ name: "APP_SERVER_URL", value: appServerUrl });
           if (providerEndpoint?.codexPermissionProfile !== undefined) {
             variables.push({
               name: "OPENCLAW_CODEX_PROVIDER_PERMISSION_PROFILE",
@@ -18293,6 +18502,17 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
             );
           }
           variables.push({ name: "HTTPS_PROXY", value: enabledChannels.proxyUrl });
+          if (enabledChannels.providers.includes("msteams")) {
+            // The Teams SDK honors only Node's process-wide proxy. Envoy then admits only declared
+            // CONNECT targets, including redirects, and checks their final address unless the
+            // Agent selects an upstream proxy, which owns that check. Harness and peer routes
+            // bypass it.
+            variables.push(
+              { name: "NODE_USE_ENV_PROXY", value: "1" },
+              { name: "NO_PROXY", value: [...internalHosts].join(",") },
+              { name: "OPENCLAW_PROXY_ACTIVE", value: "1" },
+            );
+          }
         }
       }
     }

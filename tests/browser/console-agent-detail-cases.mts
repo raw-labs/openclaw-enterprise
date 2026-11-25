@@ -3584,7 +3584,8 @@ export function registerSharingCredentialsAndChannelsCases(
     await page.getByRole("button", { name: "Open draft", exact: true }).last().click();
     await page.getByRole("tab", { name: "Channels", exact: true }).click();
     await page.getByText("No Secret bound", { exact: true }).first().waitFor();
-    assert.equal(await page.getByText("No Secret bound", { exact: true }).count(), 2);
+    // The draft binds neither Slack token nor the Teams app password.
+    assert.equal(await page.getByText("No Secret bound", { exact: true }).count(), 3);
     await page.getByRole("tab", { name: "Configuration", exact: true }).click();
     await page.getByRole("link", { name: "Draft model", exact: true }).waitFor();
   });

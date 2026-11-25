@@ -4,6 +4,7 @@ import { caAndLeaf, type OpenSslRunner } from "./certificates.ts";
 interface ModelProbeCertificateOptions {
   directory: string;
   caName: string;
+  dnsNames?: string[];
   run?: OpenSslRunner | undefined;
   slackStandIn?: boolean;
 }
@@ -14,6 +15,7 @@ export async function createModelProbeCertificates({
   directory,
   caName,
   run,
+  dnsNames = ["api.openai.com"],
   slackStandIn = false,
 }: ModelProbeCertificateOptions): Promise<void> {
   const caKeyPem: unknown = sharedRsaPrivateKeyPem("model-probe-ca");
@@ -23,10 +25,13 @@ export async function createModelProbeCertificates({
   }
   await caAndLeaf(directory, {
     caName,
-    commonName: "api.openai.com",
-    subjectAltName: slackStandIn
-      ? "DNS:api.openai.com,DNS:slack.com,DNS:wss-primary.slack.com"
-      : "DNS:api.openai.com",
+    commonName: dnsNames[0],
+    subjectAltName: [
+      ...dnsNames,
+      ...(slackStandIn ? ["slack.com", "wss-primary.slack.com", "login.microsoftonline.com"] : []),
+    ]
+      .map((name) => `DNS:${name}`)
+      .join(","),
     caKeyPem,
     leafKeyPem,
     run,

@@ -393,10 +393,40 @@ function slackRequest(request, response) {
   return true;
 }
 
+// Microsoft OAuth for Teams credential validation: only smoke app passwords are accepted.
+function microsoftRequest(request, response) {
+  if (!slackStandIn || request.headers.host?.split(":")[0] !== "login.microsoftonline.com") {
+    return false;
+  }
+  let body = "";
+  request.setEncoding("utf8");
+  request.on("data", (chunk) => {
+    body += chunk;
+  });
+  request.on("end", () => {
+    const form = new URLSearchParams(body);
+    const accepted =
+      request.method === "POST" &&
+      /^\/[^/]+\/oauth2\/v2\.0\/token$/.test(new URL(request.url, "https://x").pathname) &&
+      form.get("grant_type") === "client_credentials" &&
+      (form.get("client_secret") ?? "").startsWith("smoke-teams-");
+    emit({ event: "teams-oauth", ok: accepted, peer: request.socket.remoteAddress });
+    response.writeHead(accepted ? 200 : 401, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify(
+        accepted
+          ? { token_type: "Bearer", expires_in: 3600, access_token: "smoke-teams-access-token" }
+          : { error: "invalid_client" },
+      ),
+    );
+  });
+  return true;
+}
+
 const server = createServer(
   { key: readFileSync("/fixture/key.pem"), cert: readFileSync("/fixture/cert.pem") },
   (request, response) => {
-    if (slackRequest(request, response)) {
+    if (slackRequest(request, response) || microsoftRequest(request, response)) {
       return;
     }
     const caller = callerLabel(request);

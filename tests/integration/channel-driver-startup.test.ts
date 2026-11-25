@@ -27,30 +27,65 @@ async function load(t: TestContext, channel?: unknown) {
   return loaded;
 }
 
+const hosts = (rules: ReturnType<typeof resolveChannelRouting>["destinations"]) =>
+  rules.flatMap(({ destination }) => (destination.kind === "dns" ? [destination.name] : []));
+
+const unknownField = (error: Error & { error?: { details?: readonly { code: string }[] } }) =>
+  error.error?.details?.some(({ code }) => code === "UNKNOWN_FIELD") === true;
+
 test("Installation startup installs every bundled Channel Driver when drivers.channel is omitted", async (t) => {
   const loaded = await load(t);
   assert.deepEqual(
     loaded.channelDrivers?.map(({ provider, driver }) => [provider, driver.id]),
-    [["slack", "slack-channel"]],
+    [
+      ["slack", "slack-channel"],
+      ["msteams", "teams-channel"],
+    ],
   );
   // Startup inspection reports the resolved default selections like any other Driver.
   assert.deepEqual(
     loaded.installation.drivers.channel.map(({ id, configuration }) => [id, configuration]),
-    [["slack-channel", {}]],
+    [
+      ["slack-channel", {}],
+      ["teams-channel", {}],
+    ],
   );
-  // Compute admission resolves enabled providers through this same set.
-  assert.equal(
-    resolveChannelRouting(["slack"], loaded.channelDrivers ?? []).drivers[0]?.id,
-    "slack-channel",
+  // Without configured storage hosts, Teams Gateways reach only Microsoft service endpoints.
+  assert.ok(
+    !hosts(resolveChannelRouting(["msteams"], loaded.channelDrivers ?? []).destinations).some(
+      (name) => name.endsWith(".sharepoint.com"),
+    ),
   );
 });
 
-test("drivers.channel selects the installed providers", async (t) => {
-  const loaded = await load(t, []);
-  assert.deepEqual(loaded.channelDrivers, []);
+test("drivers.channel selects the installed providers and owns Teams storage hosts", async (t) => {
+  const loaded = await load(t, [
+    { id: "teams-channel", configuration: { fileHosts: ["tenant.sharepoint.com"] } },
+  ]);
+  assert.ok(loaded.channelDrivers);
+  assert.deepEqual(
+    loaded.channelDrivers.map(({ provider }) => provider),
+    ["msteams"],
+  );
+  assert.deepEqual(loaded.installation.drivers.channel[0]?.configuration, {
+    fileHosts: ["tenant.sharepoint.com"],
+  });
+  // Compute admission resolves enabled providers through this same set.
+  assert.ok(
+    hosts(resolveChannelRouting(["msteams"], loaded.channelDrivers).destinations).some(
+      (host) => host === "tenant.sharepoint.com",
+    ),
+  );
   // Slack is not selected, so an Agent that enables it cannot be admitted.
   assert.throws(
     () => resolveChannelRouting(["slack"], loaded.channelDrivers ?? []),
+    /exactly one installed Channel Driver/,
+  );
+  // An empty list installs no Channel Driver at all.
+  const none = await load(t, []);
+  assert.deepEqual(none.channelDrivers, []);
+  assert.throws(
+    () => resolveChannelRouting(["msteams"], none.channelDrivers ?? []),
     /exactly one installed Channel Driver/,
   );
 });
@@ -59,7 +94,7 @@ test("drivers.channel rejects unknown, duplicate and malformed selections at sta
   await assert.rejects(load(t, { id: "slack-channel" }), /drivers\.channel must be an array/);
   await assert.rejects(
     load(t, [{ id: "discord-channel", configuration: {} }]),
-    /drivers\.channel\[0\]\.id must select a bundled Channel Driver: slack-channel/,
+    /drivers\.channel\[0\]\.id must select a bundled Channel Driver: slack-channel, teams-channel/,
   );
   await assert.rejects(
     load(t, [
@@ -68,12 +103,22 @@ test("drivers.channel rejects unknown, duplicate and malformed selections at sta
     ]),
     /duplicates another Channel Driver/,
   );
-  // Closed schema: the Slack Driver accepts no settings.
+  // Closed schemas: Teams storage hosts are a Teams setting, never a Slack one.
   await assert.rejects(
-    load(t, [{ id: "slack-channel", configuration: { fileHosts: ["files.slack.com"] } }]),
-    (error: Error & { error?: { details?: readonly { code: string }[] } }) =>
-      error.error?.details?.some(({ code }) => code === "UNKNOWN_FIELD") === true,
+    load(t, [{ id: "slack-channel", configuration: { fileHosts: ["tenant.sharepoint.com"] } }]),
+    unknownField,
   );
+  for (const selection of [
+    { id: "teams-channel", configuration: { fileHosts: ["tenant.example.com"] } },
+    { id: "teams-channel", configuration: { fileHosts: ["*.sharepoint.com"] } },
+    { id: "teams-channel", configuration: { fileHosts: ["Tenant.sharepoint.com"] } },
+  ]) {
+    await assert.rejects(
+      load(t, [selection]),
+      { name: "ConfigurationValidationError" },
+      JSON.stringify(selection),
+    );
+  }
 });
 
 test("Agent configuration save refuses Slack when drivers.channel installs no Slack Driver", async (t) => {

@@ -62,6 +62,12 @@ type GatewayRoutingValues = {
   remoteNodeCidrs?: readonly string[];
   tenantGatewayPort?: number;
   envoyHttpsTargetPort?: number;
+  channels?: {
+    enabled: boolean;
+    hostname: string;
+    tlsSecretName: string;
+    ingressPeers: readonly V1NetworkPolicyPeer[];
+  };
   sandbox?: {
     enabled?: boolean;
     domain?: string;

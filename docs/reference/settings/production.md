@@ -86,9 +86,11 @@ define the hostname contract and each setting's role.
 
 With chart-managed routing, Helm sets `OCC_CHART_GATEWAY_ROUTING` for the API,
 worker, and upgrade configuration check. It contains the chart's Gateway name,
-release namespace, Envoy namespace, and effective and automatic hostnames.
+release namespace, Envoy namespace, effective and automatic hostnames, and the
+channel callback hostname, or an empty value when the channel listener is off.
 When the bundled Kubernetes Compute Driver selects `gatewayRouting`, startup
-requires its resource identity and effective hostname to match; otherwise it
+requires its resource identity, effective hostname and `channels.hostname` to
+match; otherwise it
 reports `CHART_LISTENER_MISMATCH` before serving or replacing the API. This is
 a chart-owned consistency check, not an operator input. Correct the Installation
 and Helm values together; see [production installation](../../guides/deploy/production-installation.md).

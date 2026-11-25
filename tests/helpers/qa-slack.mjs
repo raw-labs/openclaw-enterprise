@@ -17,17 +17,28 @@ import { createControlledChannelProxy } from "./channel-upstream-proxy.ts";
 import { parseGatewayObservation } from "./normal-agent-observation-receipts.ts";
 import { sessionEvidenceScript } from "./normal-agent-gateway-evidence.ts";
 
-export async function prepareQaSlack(f, proxy) {
+/** Install managed channel egress once; a given proxy must be one of its upstream endpoints. */
+export async function prepareQaChannelEgress(f, proxy) {
   assert.equal(
     f.controlPlane,
     "kubernetes",
     "live channel egress proof requires the Helm-installed Kubernetes control plane",
   );
   const configuration = f.configuration.drivers.compute.configuration;
+  const installed = configuration.runtime.channelEgress;
+  if (
+    installed !== undefined &&
+    (proxy === undefined ||
+      (installed.upstreamProxies ?? []).some((endpoint) => endpoint.url === proxy.url))
+  ) {
+    return;
+  }
   const path = join(f.stateDirectory, "helm-values.json");
   const values = JSON.parse(await readFile(path, "utf8"));
   const { channelEgress } = await installManagedChannelEgressFixture({
-    upstreamProxies: [{ url: proxy.url, addresses: [`${proxy.address}/32`] }],
+    ...(proxy === undefined
+      ? {}
+      : { upstreamProxies: [{ url: proxy.url, addresses: [`${proxy.address}/32`] }] }),
     namespace: f.state.platformNamespace,
     controllerImage: values.images.controller,
     workspaceGateway: {
@@ -74,7 +85,7 @@ export async function verifyQaSlack(f, agent) {
     senderIdentity,
   });
   const proxy = await createControlledChannelProxy(f.resources, { cluster: f.state.cluster });
-  await prepareQaSlack(f, proxy);
+  await prepareQaChannelEgress(f, proxy);
   const base = `/namespaces/${agent.namespaceId}`;
   const configuration = await f.api("GET", `${base}/configurations/${agent.configurationId}`);
   const bindings = { ...configuration.secretBindings };

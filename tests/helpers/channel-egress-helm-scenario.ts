@@ -29,6 +29,7 @@ import { productionTuiProxyCommand, productionTuiProxyData } from "./production-
 import { createProductionTuiRequest, ProductionTuiRequestError } from "./production-tui-request.ts";
 import { createUpgradeResponseProxy } from "./channel-upgrade-response-proxy.ts";
 import { availablePort } from "./available-port.ts";
+import { protectedText } from "./qa-secrets.ts";
 
 function object(value: unknown): Record<string, unknown> {
   const result = asRecord(value);
@@ -81,6 +82,20 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
   for (const value of Object.values(slack)) {
     assert.ok(value);
   }
+  // The fresh install deploys Teams; OCC validates its bot credentials before deployment.
+  const teams = upgrade
+    ? undefined
+    : {
+        appId: process.env.OCC_TEST_TEAMS_APP_ID,
+        tenantId: process.env.OCC_TEST_TEAMS_TENANT_ID,
+        password: await protectedText(
+          process.env.OCC_TEST_TEAMS_APP_PASSWORD_FILE,
+          "Teams test bot password",
+        ),
+      };
+  for (const id of teams === undefined ? [] : [teams.appId, teams.tenantId]) {
+    assert.match(id ?? "", /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
+  }
   const targetIdentity = await slackApi("auth.test", slack.botToken);
   const senderIdentity = await slackApi("auth.test", slack.senderBotToken);
   assert.equal(targetIdentity.team_id, senderIdentity.team_id);
@@ -103,6 +118,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     slack.appToken,
     slack.botToken,
     slack.senderBotToken,
+    ...(teams === undefined ? [] : [teams.password]),
   ];
   const secret = () => {
     const value = randomBytes(32).toString("hex");
@@ -215,11 +231,24 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     .update(`${namespace}/${gatewayName}`)
     .digest("hex")
     .slice(0, 12);
+  // The upgrade lane starts from a controller that predates Teams; only the fresh install
+  // exercises the Teams callback listener and Driver selection.
+  const channels = upgrade
+    ? undefined
+    : {
+        enabled: true,
+        hostname: "teams.oce.localhost",
+        tlsSecretName: "teams-callback-tls",
+        ingressPeers: [
+          { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": namespace } } },
+        ],
+      };
   const routing = {
     gatewayName,
     gatewayNamespace: namespace,
     envoyNamespace,
     hostname: `occ-gateway-${routeHash}.${envoyNamespace}.svc`,
+    ...(channels === undefined ? {} : { channels: { hostname: channels.hostname } }),
   };
   const egress = {
     gatewayName: `channel-egress-${suffix}`,
@@ -253,6 +282,17 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     },
   });
   configuration.drivers.compute.configuration.resources.gateway.limits.memory = "4Gi";
+  // Use a public storage endpoint so the allowed probe can complete verified TLS.
+  const teamsFileHost = "api.onedrive.com";
+  if (channels !== undefined) {
+    // The Teams Driver owns its storage hosts; only Teams Gateway listeners receive them.
+    Object.assign(configuration.drivers, {
+      channel: [
+        { id: "slack-channel", configuration: {} },
+        { id: "teams-channel", configuration: { fileHosts: [teamsFileHost] } },
+      ],
+    });
+  }
   if (upgrade) {
     Object.assign(configuration.drivers.compute.configuration.runtime, {
       channels: {
@@ -277,6 +317,37 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     metadata: { name: "private-gateway-key", namespace },
     stringData: { occ: apiKey },
   });
+  if (channels !== undefined) {
+    const callbackKey = join(directory, "teams.key");
+    const callbackCert = join(directory, "teams.crt");
+    await run("openssl", [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      `/CN=${channels.hostname}`,
+      "-keyout",
+      callbackKey,
+      "-out",
+      callbackCert,
+    ]);
+    await kubectl(
+      "create",
+      "secret",
+      "tls",
+      channels.tlsSecretName,
+      "-n",
+      namespace,
+      "--key",
+      callbackKey,
+      "--cert",
+      callbackCert,
+    );
+  }
   const httpsPort = await availablePort();
   const authBaseURL = `https://console.oce.localhost:${httpsPort}`;
   const controlPlane = await installProductionHelmControlPlane({
@@ -308,6 +379,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       gatewayClassName: gatewayClass,
       envoyNamespace,
       apiKeySecretName: "private-gateway-key",
+      ...(channels === undefined ? {} : { channels }),
     },
     run,
     kubernetes: kube,
@@ -635,6 +707,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
   const verifyDirectory = async () => {
     await waitFor("OCC provider directory access", async () => {
       const result = await request("POST", `/namespaces/${namespaceId}/channel-directory/lookup`, {
+        provider: "slack",
         agentId,
         secretId: bot.id,
         kind: "channels",
@@ -649,6 +722,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       return array(found.candidates).some((candidate) => candidate.id === slack.channelId);
     });
     const users = await api("POST", `/namespaces/${namespaceId}/channel-directory/lookup`, {
+      provider: "slack",
       agentId,
       secretId: bot.id,
       kind: "users",
@@ -1052,6 +1126,11 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       status: 200,
       tlsVerified: true,
     });
+    // Teams Driver settings never widen a Slack-only Agent's listener.
+    assert.equal(
+      (await probeChannelConnect(tenant, gatewayName, proxy, teamsFileHost)).status,
+      403,
+    );
     assert.notEqual(
       (
         await probeChannelConnect(
@@ -1154,11 +1233,198 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       202,
     );
   }
-  assert.equal((await request("DELETE", agentPath)).status, 202);
-  await waitFor(
-    "normal Agent deletion",
-    async () => (await request("GET", agentPath)).status === 404,
-  );
+  const deleteSlackAgent = async () => {
+    assert.equal((await request("DELETE", agentPath)).status, 202);
+    await waitFor(
+      "normal Slack Agent deletion",
+      async () => (await request("GET", agentPath)).status === 404,
+    );
+  };
+  let teamsAgentId: string | undefined;
+  if (teams === undefined) {
+    await deleteSlackAgent();
+  } else {
+    // Keep both Gateways serving so the test can attempt to borrow each listener.
+    const teamsPassword = await saveSecret("teams-app-password", teams.password);
+    const teamsChannel = {
+      enabled: true,
+      appId: teams.appId,
+      tenantId: teams.tenantId,
+      appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+      dmPolicy: "disabled",
+      groupPolicy: "disabled",
+    };
+    const teamsBindings = {
+      MSTEAMS_APP_PASSWORD: { source: teamsPassword.ref, delivery: { type: "env" } },
+    };
+    const teamsConfiguration = await api(
+      "POST",
+      `/namespaces/${namespaceId}/configurations`,
+      {
+        kind: "agent",
+        values: { ...values, channels: { msteams: teamsChannel } },
+        secretBindings: teamsBindings,
+      },
+      201,
+    );
+    const teamsAgent = await api(
+      "POST",
+      `/namespaces/${namespaceId}/agents`,
+      {
+        name: `teams-${suffix}`,
+        configurationId: teamsConfiguration.id,
+        executionMode: "dedicated",
+        harnessAuth: { method: "api_key", source: model.ref },
+      },
+      201,
+    );
+    teamsAgentId = string(teamsAgent.id);
+    const teamsPath = `/namespaces/${namespaceId}/agents/${teamsAgentId}`;
+    await api("POST", `${teamsPath}/runtime-credentials`, {});
+    const teamsRevision = await api("POST", `${teamsPath}/deploy`, undefined, 202);
+    await waitFor(
+      "the Teams revision to finish activation",
+      async () => {
+        const deployment = await api("GET", `${teamsPath}/deployments/${string(teamsRevision.id)}`);
+        assert.notEqual(deployment.status, "failed", JSON.stringify(deployment.error));
+        return deployment.status === "succeeded";
+      },
+      480_000,
+    );
+    const teamsPods = await resources(
+      "pods",
+      tenant,
+      "-l",
+      `openclaw.dev/agent=${string(teamsAgent.id)},openclaw.dev/revision=${string(teamsRevision.id)}`,
+    );
+    const teamsGateway = teamsPods
+      ?.map(object)
+      .find(
+        (pod) => object(object(pod.metadata).labels)["openclaw.dev/workload-role"] === "gateway",
+      );
+    assert.ok(teamsGateway);
+    const teamsEnv = array(array(object(teamsGateway.spec).containers)[0]!.env);
+    const teamsProxy = string(teamsEnv.find((entry) => entry.name === "HTTPS_PROXY")?.value);
+    const teamsPod = string(object(teamsGateway.metadata).name);
+    assert.equal(teamsEnv.find((entry) => entry.name === "OPENCLAW_PROXY_ACTIVE")?.value, "1");
+    // The Harness route bypasses the process-wide proxy; Envoy would refuse it.
+    const harnessHost = new URL(
+      string(teamsEnv.find((entry) => entry.name === "APP_SERVER_URL")?.value),
+    ).hostname;
+    assert.ok(
+      string(teamsEnv.find((entry) => entry.name === "NO_PROXY")?.value)
+        .split(",")
+        .includes(harnessHost),
+    );
+    assert.deepEqual(
+      await probeChannelConnect(tenant, teamsPod, teamsProxy, "graph.microsoft.com"),
+      {
+        status: 200,
+        tlsVerified: true,
+      },
+    );
+    // The same host refused to the Slack-only Gateway must work through the Teams listener.
+    assert.deepEqual(await probeChannelConnect(tenant, teamsPod, teamsProxy, teamsFileHost), {
+      status: 200,
+      tlsVerified: true,
+    });
+    // Reachable public providers and unlisted storage targets cannot use this binding.
+    for (const host of ["slack.com", "neighbor.onedrive.com"]) {
+      assert.equal((await probeChannelConnect(tenant, teamsPod, teamsProxy, host)).status, 403);
+    }
+    assert.ok(gatewayPod);
+    const slackPod = string(object(gatewayPod.metadata).name);
+    const slackProxy = string(
+      array(array(object(gatewayPod.spec).containers)[0]!.env).find(
+        (entry) => entry.name === "HTTPS_PROXY",
+      )?.value,
+    );
+    for (const [pod, otherProxy, host] of [
+      [slackPod, teamsProxy, teamsFileHost],
+      [teamsPod, slackProxy, "slack.com"],
+    ] as const) {
+      assert.notEqual(
+        (await probeChannelConnect(tenant, pod, otherProxy, host)).status,
+        200,
+        "a Gateway cannot use another Agent's listener",
+      );
+    }
+    const teamsHarness = teamsPods
+      ?.map(object)
+      .find((pod) => object(object(pod.metadata).labels)["openclaw.dev/workload-role"] === "agent");
+    assert.ok(teamsHarness);
+    assert.notEqual(
+      (
+        await probeChannelConnect(
+          tenant,
+          string(object(teamsHarness.metadata).name),
+          teamsProxy,
+          teamsFileHost,
+        )
+      ).status,
+      200,
+      "the dedicated Harness cannot use the Teams Gateway's listener",
+    );
+    // Stop the first Socket Mode consumer before deploying the combined provider configuration.
+    await deleteSlackAgent();
+    await api(
+      "PATCH",
+      `/namespaces/${namespaceId}/configurations/${string(teamsConfiguration.id)}`,
+      {
+        values: { ...values, channels: { ...object(values.channels), msteams: teamsChannel } },
+        secretBindings: {
+          ...teamsBindings,
+          SLACK_APP_TOKEN: { source: app.ref, delivery: { type: "env" } },
+          SLACK_BOT_TOKEN: { source: bot.ref, delivery: { type: "env" } },
+        },
+      },
+    );
+    const combined = await api("POST", `${teamsPath}/deploy`, undefined, 202);
+    await waitFor(
+      "the combined channel revision to finish activation",
+      async () => {
+        const deployment = await api("GET", `${teamsPath}/deployments/${string(combined.id)}`);
+        assert.notEqual(deployment.status, "failed", JSON.stringify(deployment.error));
+        return deployment.status === "succeeded";
+      },
+      480_000,
+    );
+    const combinedPods = await resources(
+      "pods",
+      tenant,
+      "-l",
+      `openclaw.dev/agent=${teamsAgentId},openclaw.dev/revision=${string(combined.id)}`,
+    );
+    const combinedGateway = combinedPods
+      ?.map(object)
+      .find(
+        (pod) => object(object(pod.metadata).labels)["openclaw.dev/workload-role"] === "gateway",
+      );
+    assert.ok(combinedGateway);
+    const combinedPod = string(object(combinedGateway.metadata).name);
+    const combinedProxy = string(
+      array(array(object(combinedGateway.spec).containers)[0]!.env).find(
+        (entry) => entry.name === "HTTPS_PROXY",
+      )?.value,
+    );
+    for (const host of ["slack.com", "graph.microsoft.com", teamsFileHost]) {
+      assert.deepEqual(
+        await probeChannelConnect(tenant, combinedPod, combinedProxy, host),
+        { status: 200, tlsVerified: true },
+        host,
+      );
+    }
+    assert.equal(
+      (await probeChannelConnect(tenant, combinedPod, combinedProxy, "neighbor.onedrive.com"))
+        .status,
+      403,
+    );
+    assert.equal((await request("DELETE", teamsPath)).status, 202);
+    await waitFor(
+      "normal Teams Agent deletion",
+      async () => (await request("GET", teamsPath)).status === 404,
+    );
+  }
   const slots = array(
     object(JSON.parse(await kubectl("get", "envoypatchpolicies", "-n", namespace, "-o", "json")))
       .items,
@@ -1168,7 +1434,11 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       const value = asRecord(object(slot.metadata).annotations)?.[
         "openclaw.dev/channel-egress-binding"
       ];
-      return typeof value === "string" && value !== "idle" && value.includes(agentId);
+      return (
+        typeof value === "string" &&
+        value !== "idle" &&
+        (value.includes(agentId) || (teamsAgentId !== undefined && value.includes(teamsAgentId)))
+      );
     }),
   );
   t.diagnostic(

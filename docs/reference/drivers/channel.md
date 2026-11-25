@@ -76,11 +76,16 @@ drivers:
   channel:
     - id: slack-channel
       configuration: {}
+    - id: teams-channel
+      configuration:
+        fileHosts:
+          - tenant.sharepoint.com
 ```
 
-| ID              | Provider | Configuration |
-| --------------- | -------- | ------------- |
-| `slack-channel` | `slack`  | None.         |
+| ID              | Provider  | Configuration                                                                                          |
+| --------------- | --------- | ------------------------------------------------------------------------------------------------------ |
+| `slack-channel` | `slack`   | None.                                                                                                  |
+| `teams-channel` | `msteams` | Optional [`fileHosts`](../../guides/integrations/teams.md#prepare-attachment-downloads); default `[]`. |
 
 If you omit `drivers.channel`, startup installs every bundled Driver with
 default configuration. If you supply the list, startup installs only the listed
@@ -129,6 +134,8 @@ A successful lookup does not prove the bot can post to a channel.
 
 ## Implementations
 
+- [Bundled Teams Channel Driver](teams-channel.md) reads a selected Team's
+  standard channels and member roster with resource-specific consent.
 - [Bundled Slack Channel Driver](slack-channel.md) uses a Slack bot token for
   user and channel directory reads.
 

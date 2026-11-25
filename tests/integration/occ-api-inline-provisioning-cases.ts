@@ -368,6 +368,10 @@ export async function verifyInlineConfigurationRefusals(state: InlineProvisionin
   await assertNoAgentsInNamespace(fixture, namespace.id);
   for (const [values, message] of [
     [
+      { ...model, env: { vars: { OPENCLAW_PROXY_ACTIVE: "1" } } },
+      "Configuration setting env.vars.OPENCLAW_PROXY_ACTIVE must not be set: Kubernetes Compute owns channel proxy transport and guarded-fetch trust.",
+    ],
+    [
       { ...model, channels: { discord: { enabled: true } } },
       unsupportedChannelRefusal("channels.discord"),
     ],

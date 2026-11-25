@@ -163,12 +163,24 @@ async function proxyServer(
 }
 
 interface Installation {
-  drivers: { compute: { configuration: { runtime: { channelEgress: Record<string, unknown> } } } };
+  drivers: {
+    compute: {
+      configuration: {
+        runtime: { channelEgress: Record<string, unknown> };
+        gatewayRouting?: Record<string, unknown>;
+      };
+    };
+  };
 }
 interface Values {
   channelEgress: Record<string, unknown>;
+  gatewayRouting?: Record<string, unknown>;
   controlPlane?: Record<string, unknown>;
 }
+
+// Teams needs a public callback listener before an Agent can enable it. Nothing calls it here.
+const TEAMS_CALLBACK_HOSTNAME = "teams-callbacks.oce.localhost";
+const TEAMS_CALLBACK_TLS_SECRET = "smoke-teams-callback-tls";
 
 async function kubectlPatch(stack: SmokeStack, args: string[], patch: unknown) {
   const path = join(stack.directory, `channel-proxy-patch-${randomUUID()}.json`);
@@ -184,6 +196,7 @@ async function configureInstallation(
   stack: SmokeStack,
   proxies: ControlledProxy[],
   ca: string,
+  callback: { key: string; cert: string },
   smokeStep: SmokeStep,
 ) {
   const valuesPath = join(stack.directory, "helm-values.json");
@@ -214,6 +227,31 @@ async function configureInstallation(
   }));
   Object.assign(egress, { upstreamProxies, proxyTrust: trust });
   Object.assign(values.channelEgress, { upstreamProxies, proxyTrust: trust });
+  // Helm and Compute must name the same channel listener hostname, or startup refuses it.
+  const routing = installation.drivers.compute.configuration.gatewayRouting;
+  assert.ok(routing && values.gatewayRouting, "Local Setup did not install Gateway routing");
+  await kubectl(stack, ["apply", "-f", "-"], {
+    input: JSON.stringify({
+      apiVersion: "v1",
+      kind: "Secret",
+      metadata: { name: TEAMS_CALLBACK_TLS_SECRET, namespace: stack.state.platformNamespace },
+      type: "kubernetes.io/tls",
+      stringData: { "tls.key": callback.key, "tls.crt": callback.cert },
+    }),
+  });
+  routing.channels = { hostname: TEAMS_CALLBACK_HOSTNAME };
+  values.gatewayRouting.channels = {
+    enabled: true,
+    hostname: TEAMS_CALLBACK_HOSTNAME,
+    tlsSecretName: TEAMS_CALLBACK_TLS_SECRET,
+    ingressPeers: [
+      {
+        namespaceSelector: {
+          matchLabels: { "kubernetes.io/metadata.name": stack.state.platformNamespace },
+        },
+      },
+    ],
+  };
   const data = JSON.stringify(installation);
   await writeFile(installationPath, data, { mode: 0o600 });
   await kubectlPatch(
@@ -539,6 +577,65 @@ async function enableSlack(
   return { credential, botSecretId, harnessPolicy };
 }
 
+// Combine Slack and Teams on one Agent. OCC validates the smoke app password against the
+// stand-in Microsoft OAuth endpoint; the Gateway's own Microsoft traffic needs no success.
+async function enableTeams(stack: SmokeStack, admission: CodexAdmission) {
+  const base = `/namespaces/${stack.namespaceId}`;
+  const configuration = (await stack.api(
+    "GET",
+    `${base}/configurations/${admission.configurationId}`,
+  )) as { values: unknown; secretBindings?: Record<string, unknown> };
+  const password = await grantSecret(
+    stack,
+    admission,
+    `smoke-teams-${randomUUID()}`,
+    "teams-password",
+  );
+  const values = asRecord(configuration.values);
+  const plugins = asRecord(values?.plugins);
+  const entries = asRecord(plugins?.entries);
+  const channels = asRecord(values?.channels);
+  assert.ok(values && plugins && entries && channels, "Slack Configuration has no channels");
+  plugins.allow = [...new Set([...(Array.isArray(plugins.allow) ? plugins.allow : []), "msteams"])];
+  entries.msteams = { enabled: true };
+  channels.msteams = {
+    enabled: true,
+    appId: randomUUID(),
+    tenantId: randomUUID(),
+    appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+    dmPolicy: "disabled",
+  };
+  await stack.api("PATCH", `${base}/configurations/${admission.configurationId}`, {
+    values,
+    secretBindings: {
+      ...configuration.secretBindings,
+      MSTEAMS_APP_PASSWORD: {
+        source: { kind: "secret", namespaceId: stack.namespaceId, id: password.id },
+        delivery: { type: "env" },
+      },
+    },
+  });
+}
+
+async function gatewayEnvironment(
+  stack: SmokeStack,
+  gateway: GatewayPod,
+): Promise<Record<string, string>> {
+  const { stdout } = await kubectl(stack, [
+    "-n",
+    gateway.namespace,
+    "exec",
+    gateway.pod,
+    "-c",
+    "gateway",
+    "--",
+    "node",
+    "-p",
+    "JSON.stringify(Object.fromEntries(['APP_SERVER_URL','NODE_USE_ENV_PROXY','NO_PROXY','OPENCLAW_PROXY_ACTIVE'].map((n)=>[n,process.env[n]??''])))",
+  ]);
+  return JSON.parse(stdout.trim()) as Record<string, string>;
+}
+
 async function rawConnect(
   stack: SmokeStack,
   gateway: GatewayPod,
@@ -781,11 +878,20 @@ export async function proveControlledChannelProxy(
   const http = await proxyServer(address);
   const https = await proxyServer(address, material);
   const bad = await proxyServer(address, wrong);
+  const callback = await signedLeaf(
+    modelDirectory,
+    { caPath: join(modelDirectory, "ca.pem"), caKeyPath: join(modelDirectory, "ca-key.pem") },
+    {
+      name: "teams-callback",
+      commonName: TEAMS_CALLBACK_HOSTNAME,
+      subjectAltName: `DNS:${TEAMS_CALLBACK_HOSTNAME}`,
+    },
+  );
   const proxies = [http, https, bad];
   let scenarioError: unknown;
   let scenarioFailed = false;
   try {
-    await configureInstallation(stack, proxies, ca, smokeStep);
+    await configureInstallation(stack, proxies, ca, callback, smokeStep);
     const [a, b] = admissions;
     const [aSetup, bSetup] = await Promise.all([
       enableSlack(stack, a, "a", http),
@@ -874,6 +980,7 @@ export async function proveControlledChannelProxy(
       "POST",
       `/namespaces/${stack.namespaceId}/channel-directory/lookup`,
       {
+        provider: "slack",
         secretId: aSetup.botSecretId,
         kind: "channels",
         query: "smoke",
@@ -908,6 +1015,44 @@ export async function proveControlledChannelProxy(
     );
     https.recover();
     await waitSocket("B", bSockets);
+
+    // Agent B adds Teams behind the same HTTPS proxy. The Teams SDK needs Node's
+    // process-wide proxy, which must still leave the Harness route and Slack working.
+    await enableTeams(stack, b);
+    const bSocketsBeforeTeams = await socketCount("B");
+    const teamsRevision = await deployAgent(stack, b.agent);
+    await waitSocket("B", bSocketsBeforeTeams);
+    const teamsGateway = await readyGateway(stack, b.agent.id, teamsRevision);
+    const teamsEnvironment = await gatewayEnvironment(stack, teamsGateway);
+    assert.equal(teamsEnvironment.NODE_USE_ENV_PROXY, "1");
+    assert.equal(teamsEnvironment.OPENCLAW_PROXY_ACTIVE, "1");
+    assert.ok(
+      teamsEnvironment
+        .NO_PROXY!.split(",")
+        .includes(new URL(teamsEnvironment.APP_SERVER_URL!).hostname),
+      "the Teams Gateway would send its Harness connection to the channel proxy",
+    );
+    // A declared Teams destination reaches the selected proxy, which refuses it here
+    // because the controlled proxy serves only the Slack stand-in.
+    const teamsProxyBefore = https.observations.length;
+    assert.equal(await rawConnect(stack, teamsGateway, "graph.microsoft.com:443"), 502);
+    assert.ok(
+      https.observations
+        .slice(teamsProxyBefore)
+        .some((item) => item.authority === "graph.microsoft.com:443" && item.authenticated),
+      "the Teams destination did not reach the selected upstream proxy",
+    );
+    // Without Teams fileHosts, Envoy refuses storage before any proxy sees it.
+    const storageProxyBefore = proxyCounts(proxies);
+    assert.equal(await rawConnect(stack, teamsGateway, "tenant.sharepoint.com:443"), 403);
+    assert.deepEqual(proxyCounts(proxies), storageProxyBefore, "Envoy forwarded unlisted storage");
+    const teamsModelBefore = proxyCounts(proxies);
+    await chatTurn(stack, b.agent, teamsRevision);
+    assert.deepEqual(
+      proxyCounts(proxies),
+      teamsModelBefore,
+      "a Teams Agent's Harness model turn used a channel proxy",
+    );
 
     const base = `/namespaces/${stack.namespaceId}/agents/${a.agent.id}`;
     const moved = await grantSecret(stack, a, https.authorization, "a-moved-proxy");
@@ -994,7 +1139,7 @@ export async function proveControlledChannelProxy(
       "credential-bearing CONNECT reached an untrusted proxy",
     );
     log(
-      "controlled channel proxy: two dedicated Agents, HTTP/HTTPS private CA, policy denials, OCC isolation, 407 recovery, revision edit/clear, wrong-host/untrusted TLS and credential containment passed",
+      "controlled channel proxy: two dedicated Agents, HTTP/HTTPS private CA, policy denials, OCC isolation, 407 recovery, combined Slack and Teams behind a proxy, revision edit/clear, wrong-host/untrusted TLS and credential containment passed",
     );
   } catch (error) {
     scenarioError = error;

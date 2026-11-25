@@ -104,7 +104,8 @@ test(
     const { createQaBrowser } = await import("../helpers/qa-browser.mjs");
     const { prepareQaRepository, verifyQaRepository, stopQaAgent } =
       await import("../helpers/qa-repository.ts");
-    const { verifyQaSlack } = await import("../helpers/qa-slack.mjs");
+    const { prepareQaChannelEgress, verifyQaSlack } = await import("../helpers/qa-slack.mjs");
+    const { verifyQaTeamsRejection } = await import("../helpers/qa-teams.ts");
     const { assertGatewayModelTurn } = await import("../helpers/kubernetes-real.ts");
     const artifacts = process.env.OCC_TEST_QA_ARTIFACTS
       ? resolve(process.env.OCC_TEST_QA_ARTIFACTS)
@@ -739,6 +740,14 @@ test(
                   cellContext.diagnostic(
                     "Slack and Codex-native approval policy: not applicable to Standard OpenClaw. Linear READ uses its separate OpenShell scenario.",
                   );
+                }
+                if (selectedCell.scenarios.includes("teams")) {
+                  await runScenario(cellContext, "teams", async (agent, step) => {
+                    await step("Teams credential refusal preserves the serving Agent", async () => {
+                      await prepareQaChannelEgress(f);
+                      await verifyQaTeamsRejection(f, agent);
+                    });
+                  });
                 }
               },
             );
