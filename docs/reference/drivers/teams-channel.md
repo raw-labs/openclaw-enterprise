@@ -17,13 +17,17 @@ OCC directory requests never use these hosts.
 
 ## Interface
 
-Lookup uses the [ChannelDriver contract](channel.md), with `context` containing
-exactly the `appId`, `tenantId` and `teamId` UUIDs. Other keys, missing keys, or
-a cursor from another app, tenant, Team, kind or query return
-`400 INVALID_REQUEST` before any Microsoft request. `teamId` is the Entra group ID used by
+Lookup uses the [ChannelDriver contract](channel.md). The Driver's
+`directoryContextSchema()` requires exactly the `appId`, `tenantId` and `teamId`
+UUIDs in `context`; OCC refuses other or missing keys with `400 INVALID_REQUEST`
+before the Secret read. The Driver refuses a cursor from another app, tenant,
+Team, kind or query the same way, before any Microsoft request. `teamId` is the Entra group ID used by
 Graph; returned `workspaceId` is the native Team ID used for bot routing.
 `kind` selects `channels` or `users`. Searches match names, IDs and available
-member email addresses. Hydration resolves up to twenty selected IDs.
+member email addresses. Hydration resolves up to twenty selected IDs from the
+same bounded pages; an ID that those pages do not contain, such as a person
+outside the Team, stays an exact ID without a name. Lookups and the deploy check
+trim the app password, as the native Teams plugin does.
 
 ## Authentication and authorization
 

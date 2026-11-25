@@ -17,20 +17,28 @@ import { createControlledChannelProxy } from "./channel-upstream-proxy.ts";
 import { parseGatewayObservation } from "./normal-agent-observation-receipts.ts";
 import { sessionEvidenceScript } from "./normal-agent-gateway-evidence.ts";
 
-export async function prepareQaChannelEgress(f, proxy = undefined) {
+/** Install managed channel egress once; a given proxy must be one of its upstream endpoints. */
+export async function prepareQaChannelEgress(f, proxy) {
   assert.equal(
     f.controlPlane,
     "kubernetes",
     "live channel egress proof requires the Helm-installed Kubernetes control plane",
   );
   const configuration = f.configuration.drivers.compute.configuration;
-  if (configuration.runtime.channelEgress !== undefined) {
+  const installed = configuration.runtime.channelEgress;
+  if (
+    installed !== undefined &&
+    (proxy === undefined ||
+      (installed.upstreamProxies ?? []).some((endpoint) => endpoint.url === proxy.url))
+  ) {
     return;
   }
   const path = join(f.stateDirectory, "helm-values.json");
   const values = JSON.parse(await readFile(path, "utf8"));
   const { channelEgress } = await installManagedChannelEgressFixture({
-    ...(proxy && { upstreamProxies: [{ url: proxy.url, addresses: [`${proxy.address}/32`] }] }),
+    ...(proxy === undefined
+      ? {}
+      : { upstreamProxies: [{ url: proxy.url, addresses: [`${proxy.address}/32`] }] }),
     namespace: f.state.platformNamespace,
     controllerImage: values.images.controller,
     workspaceGateway: {

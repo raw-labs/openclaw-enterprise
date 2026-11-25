@@ -1,9 +1,10 @@
 import type { Driver } from "../index.ts";
+import type { JSONSchema } from "../../index.ts";
 import type { NetworkDestinationRule } from "../../network-destination.ts";
 
 export interface ChannelDirectoryLookupInput {
   readonly token: string;
-  /** Nonsecret provider inputs, such as a tenant ID. The Driver validates its own keys. */
+  /** Nonsecret provider lookup fields, such as a tenant ID; see `directoryContextSchema`. */
   readonly context?: Readonly<Record<string, string>>;
   readonly kind: "users" | "channels";
   readonly query?: string;
@@ -34,6 +35,12 @@ export interface ChannelDriver extends Driver {
   readonly capability: "channel";
   /** Deterministic provider requirements; never reads credentials or changes infrastructure. */
   enableRouting(): readonly NetworkDestinationRule[];
+  /**
+   * Closed JSON Schema object for this provider's lookup fields in `context`. OCC
+   * validates every lookup's `context`, an absent one as `{}`, before it reads the
+   * credential. A provider without lookup fields returns a closed empty schema.
+   */
+  directoryContextSchema(): JSONSchema;
   /** Checks only this Driver's provider section; an absent or disabled section passes. */
   validateCredentials?(
     values: Readonly<Record<string, unknown>>,

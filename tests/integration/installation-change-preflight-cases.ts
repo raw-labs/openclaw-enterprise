@@ -206,7 +206,7 @@ type MutableRouting = {
 type Mismatch =
   | ["gatewayName" | "gatewayNamespace" | "envoyNamespace", string]
   | ["hostname", string | undefined]
-  | ["channels", KubernetesGatewayRoutingOptions["channels"]];
+  | ["channels", { readonly hostname: string } | undefined];
 
 export async function gatewayRoutingCase(
   t: TestContext,
@@ -294,18 +294,25 @@ export async function gatewayRoutingCase(
       ["gatewayNamespace", "other-namespace"],
       ["envoyNamespace", "other-namespace"],
       ["hostname", "other.example"],
+      ...(hostname === undefined ? [] : [["hostname", undefined] satisfies Mismatch]),
+      // Teams callback routes attach to the chart's channel listener by name. A Compute
+      // hostname the chart does not serve, or a listener it does not render, drops callbacks.
       ["channels", { hostname: "other.example" }],
       ...(callbacks === undefined ? [] : [["channels", undefined] satisfies Mismatch]),
-      ...(hostname === undefined ? [] : [["hostname", undefined] satisfies Mismatch]),
     ];
     for (const [field, value] of mismatches) {
       const different = structuredClone(configuration);
-      if (field === "channels") {
-        different.drivers.compute.configuration.gatewayRouting.channels = value;
-      } else if (field === "hostname") {
-        different.drivers.compute.configuration.gatewayRouting.hostname = value;
+      const differentRouting = different.drivers.compute.configuration.gatewayRouting;
+      if (field === "hostname") {
+        differentRouting.hostname = value;
+      } else if (field === "channels") {
+        if (value === undefined) {
+          delete differentRouting.channels;
+        } else {
+          differentRouting.channels = value;
+        }
       } else {
-        different.drivers.compute.configuration.gatewayRouting[field] = value;
+        differentRouting[field] = value;
       }
       const refused = await runCheck(t, different, {}, () => environment);
       assert.equal(refused.status, 1, `${field}: ${refused.stderr}`);

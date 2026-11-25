@@ -1654,6 +1654,44 @@ assert.equal(sibling.cleanup, null);
     }
   });
 
+  test("CI installs WebKit for the lanes that run WebKit browser cases", async () => {
+    const manifest = loadSuites(join(repositoryRoot, "scripts/ci/test-suites.json"));
+    const actionSteps = parseActionSteps(
+      await readFile(join(repositoryRoot, ".github/actions/run-ci-lane/action.yml"), "utf8"),
+    );
+    const browserSetup = actionSteps.find(
+      (step) => step.run === "bash scripts/ci/setup-tools.sh browser",
+    );
+    const webkitSetup = (browserSetup?.env as Record<string, unknown> | undefined)
+      ?.CI_PLAYWRIGHT_WEBKIT;
+    assert.equal(typeof webkitSetup, "string");
+    // Every browser test that launches WebKit; Chromium alone cannot run them.
+    const webkitFiles = (await readdir(join(repositoryRoot, "tests/browser")))
+      .map((name) => `tests/browser/${name}`)
+      .filter((path) => /\.test\.(?:ts|mts|mjs)$/.test(path));
+    const launchesWebkit = await Promise.all(
+      webkitFiles.map(async (path) =>
+        /\bimport \{[^}]*\bwebkit\b[^}]*\} from "playwright"/.test(
+          await readFile(join(repositoryRoot, path), "utf8"),
+        ),
+      ),
+    );
+    const paths = webkitFiles.filter((_, index) => launchesWebkit[index]);
+    assert.ok(paths.length > 0);
+    // Moving a WebKit suite between lanes must carry its WebKit prerequisite.
+    for (const path of paths) {
+      const owners = Object.entries(manifest.lanes).filter(([, lane]) =>
+        lane.files.some((file) => file.path === path),
+      );
+      assert.equal(owners.length, 1, path);
+      const [lane] = owners[0]!;
+      assert.ok(
+        String(webkitSetup).includes(`inputs.lane == '${lane}'`),
+        `${lane} must install WebKit for ${path}`,
+      );
+    }
+  });
+
   registerAdvisoryCases(repositoryRoot);
 
   registerSeccompCases();
@@ -2332,6 +2370,9 @@ if (args[0] === "pull") {
                     OCC_TEST_SLACK_SENDER_BOT_TOKEN: "xoxb-sender",
                     SLACK_APP_TOKEN: "xapp-test",
                     SLACK_BOT_TOKEN: "xoxb-test",
+                    OCC_TEST_TEAMS_APP_ID: "11111111-1111-4111-8111-111111111111",
+                    OCC_TEST_TEAMS_TENANT_ID: "22222222-2222-4222-8222-222222222222",
+                    OCC_TEST_TEAMS_APP_PASSWORD_FILE: "synthetic-teams-password-file",
                   }
                 : {}),
               OCC_DOCKER_BIN: join(root, "docker-must-not-run"),
@@ -2536,6 +2577,9 @@ if (args[0] === "pull") {
           OCC_TEST_SLACK_SENDER_BOT_TOKEN: "xoxb-sender",
           SLACK_APP_TOKEN: "xapp-test",
           SLACK_BOT_TOKEN: "xoxb-test",
+          OCC_TEST_TEAMS_APP_ID: "11111111-1111-4111-8111-111111111111",
+          OCC_TEST_TEAMS_TENANT_ID: "22222222-2222-4222-8222-222222222222",
+          OCC_TEST_TEAMS_APP_PASSWORD_FILE: "synthetic-teams-password-file",
         },
       },
       {

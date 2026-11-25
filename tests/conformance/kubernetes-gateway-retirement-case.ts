@@ -406,40 +406,6 @@ export async function checkGatewayRetirement() {
     deletions.length = 0;
   }
 
-  // A dedicated candidate may be prepared while embedded Teams still serves.
-  // Its public callback must select only the current embedded revision.
-  fixture.observe({
-    ...gateway,
-    metadata: {
-      ...gateway.metadata,
-      annotations: {
-        ...gateway.metadata.annotations,
-        "openclaw.dev/agent-revision": String(active.revision),
-        "openclaw.dev/msteams-webhook": "true",
-        "openclaw.dev/embedded-msteams-webhook": "true",
-      },
-    },
-  });
-  await driver["reconcileGatewayRoute"](candidate, ownership, target);
-  const callbackName = gatewayName + "-msteams";
-  const embeddedResources = fixture.nodeResources(callbackName);
-  const backend = resourceRecord(embeddedResources.get("Service"), "embedded callback Service");
-  const selector = resourceRecord(
-    resourceRecord(backend.spec, "Service spec").selector,
-    "selector",
-  );
-  assert.equal(selector["openclaw.dev/revision"], active.id);
-  const embeddedRoute = resourceRecord(embeddedResources.get("HTTPRoute"), "embedded callback");
-  const embeddedRule = resourceRecords(
-    resourceRecord(embeddedRoute.spec, "route spec").rules,
-    "rules",
-  )[0];
-  assert.equal(
-    resourceRecords(embeddedRule?.backendRefs, "callback backend")[0]?.name,
-    callbackName,
-  );
-  fixture.reset(...survivingResources);
-
   // Preparation can run while the previous Gateway still serves requests. A
   // failed candidate must not acquire and then delete that Gateway's node route.
   observeGateway(active);
@@ -508,6 +474,31 @@ export async function checkGatewayRetirement() {
   }
   await driver["removeRetiredGateway"](active, target);
   expectChatRetirement(active);
+  // An Installation that later drops channel routing cannot serve the callback. Reconciling the
+  // serving Teams Gateway removes the stale route instead of refusing every redeploy.
+  const withoutChannelRouting = createKubernetesComputeDriver(
+    routedOptions({
+      gatewayRouting,
+      runtime: { transportSecretPrefix: "transport", gatewayStorageClassName: "local-path" },
+    }),
+  );
+  Object.assign(withoutChannelRouting, { apiClients: driver["apiClients"] });
+  await withoutChannelRouting["reconcileGatewayRoute"](candidate, ownership, target);
+  assert.equal(fixture.nodeResources(gatewayName + "-msteams").size, 0);
+  assert.deepEqual(
+    deletions.map(([kind, request]) => {
+      assert.ok("spec" in request);
+      return [kind, request.spec.metadata?.name];
+    }),
+    [
+      ["HTTPRoute", gatewayName + "-msteams"],
+      ["SecurityPolicy", gatewayName + "-msteams"],
+    ],
+  );
+  deletions.length = 0;
+  // Restoring channel routing recreates the callback for the serving revision.
+  await driver["reconcileGatewayRoute"](candidate, ownership, target);
+  assert.equal(fixture.nodeResources(gatewayName + "-msteams").size, 2);
   // Disabling Teams on the serving revision removes the callback before its auth override.
   fixture.observe({
     ...gateway,

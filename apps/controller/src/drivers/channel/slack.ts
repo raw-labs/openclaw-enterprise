@@ -27,6 +27,12 @@ const INFO_BATCH_SIZE = 5;
 
 type SlackRecord = Record<string, unknown>;
 
+const SLACK_DIRECTORY_CONTEXT_SCHEMA: JSONSchema = deepFreeze({
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+});
+
 /** Provider calls require the separate managed OCC channel-egress listener. */
 export class SlackRouteNotConfiguredError extends ResourceStateConflictError {
   constructor() {
@@ -122,6 +128,11 @@ export class SlackChannelDriver implements ChannelDriver {
 
   static validateConfiguration(): readonly ErrorDetail[] {
     return [];
+  }
+
+  /** Slack lookups need only the bot token, so `context` accepts no fields. */
+  directoryContextSchema(): JSONSchema {
+    return SLACK_DIRECTORY_CONTEXT_SCHEMA;
   }
 
   private readonly request: typeof fetch;
@@ -329,10 +340,6 @@ export class SlackChannelDriver implements ChannelDriver {
     input: ChannelDirectoryLookupInput,
     signal?: AbortSignal,
   ): Promise<ChannelDirectoryResult> {
-    if (input.context !== undefined) {
-      // Slack needs no provider context; refuse it rather than ignore caller input.
-      throw new ChannelDirectoryError("invalid_request");
-    }
     const auth = await this.call("auth.test", input.token, new URLSearchParams(), signal);
     if (!/^B[A-Z0-9]+$/.test(boundedString(auth.bot_id, 32) ?? "")) {
       throw new ChannelDirectoryError("credentials_rejected");

@@ -15502,18 +15502,25 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           "forwarded",
           "x-forwarded-for",
           ...(access === "browser" ? [] : [BROWSER_DELEGATION_HEADER]),
-          ...(access === "node" || access === "node-transfer" || access === "channel"
-            ? [TRUSTED_PROXY_SCOPES_HEADER, TRUSTED_PROXY_HEADER]
-            : []),
-          ...(access === "operator"
-            ? []
-            : [
+          // Chat and channel callbacks, like node routes, forward no client credential or
+          // Tailscale identity claim to the tenant Gateway.
+          ...(access === "node" ||
+          access === "node-transfer" ||
+          access === "chat" ||
+          access === "channel"
+            ? [
                 "x-api-key",
                 "tailscale-user-login",
                 "tailscale-user-name",
                 "tailscale-user-profile-pic",
                 "tailscale-funnel-request",
-              ]),
+              ]
+            : []),
+          // Chat sets its own trusted identity and scope cap above; removing them would make
+          // that grant depend on proxy evaluation order.
+          ...(access === "node" || access === "node-transfer" || access === "channel"
+            ? [TRUSTED_PROXY_SCOPES_HEADER, TRUSTED_PROXY_HEADER]
+            : []),
         ],
       },
     };
@@ -15969,6 +15976,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       gateway.metadata.annotations?.["openclaw.dev/embedded-msteams-webhook"] === "true";
     if (
       gateway.metadata.annotations?.["openclaw.dev/msteams-webhook"] !== "true" ||
+      routing.channels === undefined ||
       (embedded &&
         asRecord(service.spec?.selector)?.["app.kubernetes.io/name"] !== service.metadata.name)
     ) {
@@ -15987,9 +15995,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
       }
       return;
     }
-    if (routing.channels === undefined) {
-      throw new ConfigurationFailure("Microsoft Teams requires channel callback routing.");
-    }
+    const channels = routing.channels;
     const route = this.manifest(GATEWAY_API_VERSION, "HTTPRoute", name, ownership, namespace);
     const metadata = {
       ...route.metadata,
@@ -16044,7 +16050,7 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         ...route,
         metadata,
         spec: {
-          hostnames: [routing.channels.hostname],
+          hostnames: [channels.hostname],
           parentRefs: [
             {
               group: "gateway.networking.k8s.io",
@@ -17268,6 +17274,36 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         : { destinations: requirements.destinations };
     requireSupportedChannelDestinations(policy.destinations);
     return { ...requirements, ...policy };
+  }
+
+  private requireTeamsCallback(
+    configuration: Readonly<OpenClawConfigurationDocument>,
+    providers: readonly string[],
+    createError: typeof callerSettingError | typeof preparationSettingError,
+  ): void {
+    if (!providers.includes("msteams")) {
+      return;
+    }
+    const teams = asRecord(asRecord(configuration.channels)?.msteams);
+    const webhook = asRecord(teams?.webhook);
+    if (
+      teams?.webhook !== undefined &&
+      (webhook === undefined || (webhook.path !== undefined && webhook.path !== "/api/messages"))
+    ) {
+      throw createError("channels.msteams.webhook.path", "must be /api/messages");
+    }
+    if (teams?.legacyWebhook !== undefined && teams.legacyWebhook !== false) {
+      throw createError("channels.msteams.legacyWebhook", "must be false");
+    }
+    if (teams?.cloud !== undefined && teams.cloud !== "Public") {
+      throw createError("channels.msteams.cloud", "must be Public");
+    }
+    if (this.options.gatewayRouting?.channels === undefined) {
+      throw createError(
+        "channels.msteams",
+        "requires a dedicated public channel callback listener",
+      );
+    }
   }
 
   private requireTeamsCallback(
@@ -19141,8 +19177,10 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           }
           variables.push({ name: "HTTPS_PROXY", value: enabledChannels.proxyUrl });
           if (enabledChannels.providers.includes("msteams")) {
-            // The Teams SDK honors only Node's process-wide proxy. Envoy then checks every
-            // CONNECT target, including redirects; the Harness and peer routes bypass it.
+            // The Teams SDK honors only Node's process-wide proxy. Envoy then admits only declared
+            // CONNECT targets, including redirects, and checks their final address unless the
+            // Agent selects an upstream proxy, which owns that check. Harness and peer routes
+            // bypass it.
             variables.push(
               { name: "NODE_USE_ENV_PROXY", value: "1" },
               { name: "NO_PROXY", value: [...internalHosts].join(",") },

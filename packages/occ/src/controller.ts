@@ -110,10 +110,10 @@ import type {
   Preset,
   PresetSummary,
   PluginCatalogEntry,
-  ChannelProviderDriver,
   PluginCatalogPage,
   PluginDriver,
   ChannelDirectoryResult,
+  ChannelProviderDriver,
   RepositoryOptions,
   ResourceRef,
   Role,
@@ -199,6 +199,7 @@ export class OpenClawController {
     this.composition.drivers.installPluginDrivers(drivers);
   }
 
+  /** Install the provider-to-Driver set that trusted composition also gives Compute. */
   installChannelDrivers(providers: readonly ChannelProviderDriver[]): void {
     this.composition.drivers.installChannelDrivers(providers);
   }

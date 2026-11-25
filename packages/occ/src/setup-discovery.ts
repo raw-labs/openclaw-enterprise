@@ -9,6 +9,7 @@ import type {
   Secret,
   SecretDriver,
 } from "@openclaw-enterprise/contracts";
+import { validateConfiguration } from "@openclaw-enterprise/contracts";
 import {
   asRecord,
   hasControlCharacter,
@@ -33,6 +34,7 @@ import { sameSecretBackend, secretOperation } from "./secret-operations.ts";
 
 export interface LookupChannelDirectoryInput {
   readonly secretId: string;
+  /** The channel provider whose installed Channel Driver serves this lookup. */
   readonly provider: string;
   readonly context?: ChannelDirectoryLookupInput["context"];
   readonly kind: ChannelDirectoryLookupInput["kind"];
@@ -56,7 +58,7 @@ interface SetupDiscoveryDependencies {
     facet: SandboxFacet,
   ) => Promise<{ readonly configuration: DriverConfigurationDescriptor | undefined }>;
   readonly selectCompute: () => ComputeDriver;
-  readonly selectChannel: (provider: string) => ChannelDriver;
+  readonly channelDriver: (provider: string) => ChannelDriver | undefined;
   readonly secretDriver: (driverId: string) => SecretDriver;
 }
 
@@ -223,7 +225,21 @@ export class SetupDiscovery {
   ): Promise<ChannelDirectoryResult> {
     const ids = validateChannelDirectoryInput(input);
     const first = await this.channelDirectorySecret(principalId, namespaceId, input);
-    const driver = this.dependencies.selectChannel(input.provider);
+    const driver = this.dependencies.channelDriver(input.provider);
+    if (driver === undefined) {
+      throw new NotImplementedError(
+        "channel_directory.lookup",
+        "Channel directory lookup is unavailable for this provider.",
+      );
+    }
+    // The provider's Driver declares its lookup fields; refuse others before reading the Secret.
+    const context = validateConfiguration(driver.directoryContextSchema(), input.context ?? {});
+    if (!context.success) {
+      throw new ChannelDirectoryError(
+        "invalid_request",
+        context.error.details.map(({ path, code }) => ({ path: `/context${path}`, code })),
+      );
+    }
     if (!first.driver.withValue) {
       throw new DependencyUnavailableError(
         "The selected Secret Driver cannot use credentials for directory lookup.",
@@ -261,11 +277,12 @@ export class SetupDiscovery {
           );
           return safeChannelDirectoryResult(result, ids, token);
         } catch (error) {
-          return {
-            error: new ChannelDirectoryError(
-              error instanceof ChannelDirectoryError ? error.reason : "unavailable",
-            ),
-          };
+          if (!(error instanceof ChannelDirectoryError)) {
+            return { error: new ChannelDirectoryError("unavailable") };
+          }
+          // Keep only the field path and code a Driver names; never its messages.
+          const details = error.details?.slice(0, 32).map(({ path, code }) => ({ path, code }));
+          return { error: new ChannelDirectoryError(error.reason, details) };
         }
       }),
     );

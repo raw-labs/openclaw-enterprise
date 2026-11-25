@@ -96,3 +96,11 @@ Agent whose browser access came from fork PR #12, check the saved Configuration
 for its exact Agent origin. Follow [Configure each Agent](../guides/deploy/native-admin.md#configure-each-agent)
 and redeploy the Agent. The newer controller requires a delegation credential
 that is created when the new revision is prepared.
+
+## Review native Git access before redeploying
+
+For OpenShell Agents using native Git, the Teams branch's upstream baseline derives
+GitHub issue and pull request access from the Namespace registration and the Agent's
+saved repository grant. An existing draft can gain API access on its next deployment.
+Review those permissions before redeploying. To keep Git access alone, set
+`apiLimits: { default: "none" }`. See the [registration upgrade procedure](../reference/repository-credentials/access-levels.md#cut-over-existing-registrations).

@@ -81,6 +81,7 @@ and peer status URLs. The selected embedded Gateway also bypasses the proxy for
 its authorized repository broker and uses it for public model and plugin HTTPS.
 `OPENCLAW_PROXY_ACTIVE=1` delegates guarded-fetch address selection to Envoy
 while native media and credential checks stay in place.
+Dedicated Agents can select an [upstream proxy](../reference/agents/network-proxy.md) to perform the final-address check.
 
 ### 2. Reconcile the serving revision's callback
 
@@ -109,7 +110,8 @@ The [pinned native attachment downloader](https://github.com/openclaw/openclaw/b
 redirect and authentication-header policy. Its guarded fetch uses the Gateway's
 managed Envoy listener. `apps/controller/src/drivers/channel/teams.ts:TeamsChannelDriver.enableRouting`
 declares the exact messaging hosts and the Installation's optional storage hosts.
-Envoy checks every CONNECT target and rejects nonpublic or excluded addresses.
+Envoy admits only declared CONNECT targets. Without an upstream proxy, it
+rejects nonpublic or excluded final addresses; with one, the proxy owns that check.
 Provider TLS stays inside the tunnel. Each redirect needs its own permitted
 destination. The native plugin independently controls bearer-token forwarding.
 

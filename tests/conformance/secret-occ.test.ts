@@ -1000,6 +1000,7 @@ function createTestChannelDriver(binding?: string) {
     enableRouting: () => [],
     implementation: "test-channel",
     binding,
+    directoryContextSchema: () => ({ type: "object", additionalProperties: false, properties: {} }),
     async validateCredentials(
       _values: Readonly<Record<string, unknown>>,
       withSecret: ChannelCredentialReader,

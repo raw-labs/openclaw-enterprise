@@ -463,7 +463,9 @@ test("active Agent can deploy the current saved draft as a new version", async (
 
   const secretBindings: Record<string, SecretBinding> = {};
   for (const key of ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]) {
-    const secret = await createSecret(fixture, namespace.id, key, `test-${key}`);
+    // Deployment checks each token's Slack role, as production does.
+    const value = key === "SLACK_APP_TOKEN" ? "xapp-test-redeploy" : "xoxb-test-redeploy";
+    const secret = await createSecret(fixture, namespace.id, key, value);
     secretBindings[key] = envBinding(secret);
     await fixture.grantAgentSecretOperate(agent, secret.ref);
   }
@@ -811,7 +813,9 @@ async function agentWithoutGrant(
   const secrets = new Map<string, SecretMetadata>();
   const secretBindings: Record<string, SecretBinding> = {};
   for (const key of bindings) {
-    const secret = await createSecret(fixture, namespace.id, `Bound ${key}`, `value-${key}`);
+    // Shaped like the Slack token each standard key holds; deployment checks the role.
+    const value = key === "SLACK_APP_TOKEN" ? `xapp-${key}` : `xoxb-${key}`;
+    const secret = await createSecret(fixture, namespace.id, `Bound ${key}`, value);
     secrets.set(key, secret);
     secretBindings[key] = envBinding(secret);
   }
@@ -919,6 +923,16 @@ async function ungrantedBoundSecret(
     await list.locator(".badge").allTextContents(),
     badges.map((badge) => badge.replace(" · Agent access not confirmed", "")),
   );
+  if (slackValues?.enabled === false) {
+    // With every channel off the keys are listed only: once the grant is made, no Save remains.
+    assert.equal(
+      await page
+        .locator("section.channel-secrets")
+        .getByRole("button", { name: "Save channel Secrets" })
+        .count(),
+      0,
+    );
+  }
   assert.deepEqual(await secretGrants(fixture, requests, namespace.id, agent), [
     boundSecret(secrets, ungranted).id,
   ]);

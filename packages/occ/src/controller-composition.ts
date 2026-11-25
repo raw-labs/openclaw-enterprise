@@ -974,7 +974,7 @@ export function createControllerComposition(
     getAgentSandboxPolicy: (principalId, namespaceId, agentId, facet) =>
       publicController.getAgentSandboxPolicy(principalId, namespaceId, agentId, facet),
     selectCompute: selectedCompute,
-    selectChannel: (provider) => drivers.channelDriver(provider),
+    channelDriver: (provider) => drivers.channelDriver(provider),
     secretDriver: secretOperations.secretDriver,
   });
   const runtimeCredentials: AgentRuntimeCredentials = new AgentRuntimeCredentials({

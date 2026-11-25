@@ -149,6 +149,7 @@ These process environment variables are optional. First Agent Smoke has its own
 | `OPENCLAW_CI_IMAGE_CACHE_EXPORT_TIMEOUT_MS` | `1200000`                                | Maximum time for a hosted BuildKit cache export.                                   |
 | `OPENCLAW_CI_BROWSER_FAILURE_DIR`           | Unset                                    | Retain browser failure evidence locally.                                           |
 | `OPENCLAW_CI_BROWSER_FAILURE_TRACE`         | Unset                                    | Set `1` to include Playwright traces.                                              |
+| `CI_PLAYWRIGHT_WEBKIT`                      | Set by the lane action                   | `1` installs Playwright WebKit for lanes with WebKit cases (`checks-browser-2`).   |
 
 Cleanup timeout/grace overrides that are not positive numbers use defaults.
 Deadlines include pipe drain; a wait timeout does not prove deletion. Preparation

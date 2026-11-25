@@ -348,6 +348,10 @@ install_browser_dependencies() {
     if [[ -z "${OCC_TEST_BROWSER_EXECUTABLE:-}" ]]; then
       pnpm exec playwright install --with-deps --only-shell chromium
     fi
+    # Lanes that own WebKit browser cases request Playwright's WebKit and its system libraries.
+    if [[ "${CI_PLAYWRIGHT_WEBKIT:-}" == "1" ]]; then
+      pnpm exec playwright install --with-deps webkit
+    fi
     if [[ -n "${OPENCLAW_CI_NATIVE_BROWSER_EVIDENCE_DIR:-}" ]]; then
       # Host Chrome does not install Playwright's pinned video encoder.
       pnpm exec playwright install ffmpeg

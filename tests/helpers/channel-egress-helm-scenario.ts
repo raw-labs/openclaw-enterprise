@@ -24,12 +24,12 @@ import { createNativeTopologyConfiguration } from "./topology-launch-configurati
 import { slackApi } from "./slack-web-api.ts";
 import { verifySlackChannelAccess, verifySingleSlackDelivery } from "./slack-delivery.ts";
 import { gatewaySlackEvidence } from "./slack-native-evidence.ts";
-import { protectedText } from "./qa-secrets.ts";
 import { probeChannelConnect } from "./channel-egress-probe.ts";
 import { productionTuiProxyCommand, productionTuiProxyData } from "./production-tui-proxy.ts";
 import { createProductionTuiRequest, ProductionTuiRequestError } from "./production-tui-request.ts";
 import { createUpgradeResponseProxy } from "./channel-upgrade-response-proxy.ts";
 import { availablePort } from "./available-port.ts";
+import { protectedText } from "./qa-secrets.ts";
 
 function object(value: unknown): Record<string, unknown> {
   const result = asRecord(value);
@@ -82,6 +82,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
   for (const value of Object.values(slack)) {
     assert.ok(value);
   }
+  // The fresh install deploys Teams; OCC validates its bot credentials before deployment.
   const teams = upgrade
     ? undefined
     : {
@@ -92,10 +93,8 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
           "Teams test bot password",
         ),
       };
-  if (teams) {
-    for (const id of [teams.appId, teams.tenantId]) {
-      assert.match(id ?? "", /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
-    }
+  for (const id of teams === undefined ? [] : [teams.appId, teams.tenantId]) {
+    assert.match(id ?? "", /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
   }
   const targetIdentity = await slackApi("auth.test", slack.botToken);
   const senderIdentity = await slackApi("auth.test", slack.senderBotToken);
@@ -119,7 +118,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     slack.appToken,
     slack.botToken,
     slack.senderBotToken,
-    ...(teams ? [teams.password] : []),
+    ...(teams === undefined ? [] : [teams.password]),
   ];
   const secret = () => {
     const value = randomBytes(32).toString("hex");
@@ -232,19 +231,24 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     .update(`${namespace}/${gatewayName}`)
     .digest("hex")
     .slice(0, 12);
-  const channels = {
-    enabled: true,
-    hostname: "teams.oce.localhost",
-    tlsSecretName: "teams-callback-tls",
-    ingressPeers: [
-      { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": namespace } } },
-    ],
-  };
+  // The upgrade lane starts from a controller that predates Teams; only the fresh install
+  // exercises the Teams callback listener and Driver selection.
+  const channels = upgrade
+    ? undefined
+    : {
+        enabled: true,
+        hostname: "teams.oce.localhost",
+        tlsSecretName: "teams-callback-tls",
+        ingressPeers: [
+          { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": namespace } } },
+        ],
+      };
   const routing = {
     gatewayName,
     gatewayNamespace: namespace,
     envoyNamespace,
     hostname: `occ-gateway-${routeHash}.${envoyNamespace}.svc`,
+    ...(channels === undefined ? {} : { channels: { hostname: channels.hostname } }),
   };
   const egress = {
     gatewayName: `channel-egress-${suffix}`,
@@ -270,7 +274,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
   const sourceCidrs = process.env.OCC_TEST_KUBERNETES_PLUGIN_STATUS_PROXY_CIDRS;
   assert.ok(sourceCidrs, "the real API-to-Pod proxy source must be explicitly prepared");
   Object.assign(configuration.drivers.compute.configuration, {
-    gatewayRouting: { ...routing, ...(teams ? { channels: { hostname: channels.hostname } } : {}) },
+    gatewayRouting: routing,
     network: {
       ...network,
       gatewayTrustedProxyCidrs: podCidrs,
@@ -278,6 +282,17 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     },
   });
   configuration.drivers.compute.configuration.resources.gateway.limits.memory = "4Gi";
+  // Use a public storage endpoint so the allowed probe can complete verified TLS.
+  const teamsFileHost = "api.onedrive.com";
+  if (channels !== undefined) {
+    // The Teams Driver owns its storage hosts; only Teams Gateway listeners receive them.
+    Object.assign(configuration.drivers, {
+      channel: [
+        { id: "slack-channel", configuration: {} },
+        { id: "teams-channel", configuration: { fileHosts: [teamsFileHost] } },
+      ],
+    });
+  }
   if (upgrade) {
     Object.assign(configuration.drivers.compute.configuration.runtime, {
       channels: {
@@ -302,14 +317,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     metadata: { name: "private-gateway-key", namespace },
     stringData: { occ: apiKey },
   });
-  const teamsFileHost = "api.onedrive.com";
-  if (teams) {
-    Object.assign(configuration.drivers, {
-      channel: [
-        { id: "slack-channel", configuration: {} },
-        { id: "teams-channel", configuration: { fileHosts: [teamsFileHost] } },
-      ],
-    });
+  if (channels !== undefined) {
     const callbackKey = join(directory, "teams.key");
     const callbackCert = join(directory, "teams.crt");
     await run("openssl", [
@@ -371,7 +379,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       gatewayClassName: gatewayClass,
       envoyNamespace,
       apiKeySecretName: "private-gateway-key",
-      ...(teams ? { channels } : {}),
+      ...(channels === undefined ? {} : { channels }),
     },
     run,
     kubernetes: kube,
@@ -694,14 +702,13 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
   }
   const workspaceMarker = `One-off workspace continuity ${suffix}\n`;
   const agentId = string(agent.id);
-  let providerDirectory = !upgrade;
   const agentPath = `/namespaces/${namespaceId}/agents/${agentId}`;
   await api("POST", `${agentPath}/runtime-credentials`, {});
   const verifyDirectory = async () => {
     await waitFor("OCC provider directory access", async () => {
       const result = await request("POST", `/namespaces/${namespaceId}/channel-directory/lookup`, {
+        provider: "slack",
         agentId,
-        ...(providerDirectory ? { provider: "slack" } : {}),
         secretId: bot.id,
         kind: "channels",
         ids: [slack.channelId],
@@ -715,8 +722,8 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       return array(found.candidates).some((candidate) => candidate.id === slack.channelId);
     });
     const users = await api("POST", `/namespaces/${namespaceId}/channel-directory/lookup`, {
+      provider: "slack",
       agentId,
-      ...(providerDirectory ? { provider: "slack" } : {}),
       secretId: bot.id,
       kind: "users",
       ids: [senderIdentity.user_id],
@@ -1045,7 +1052,6 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
         2,
         "only the original running set is deployed, once each",
       );
-      providerDirectory = true;
       await verifyDirectory();
       const completedJournal = JSON.parse(await readFile(journalPath, "utf8"));
       upgradeReceipt = {
@@ -1116,16 +1122,15 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     );
     const proxy = string(gatewayEnv.find((entry) => entry.name === "HTTPS_PROXY")?.value);
     const gatewayName = string(object(gatewayPod.metadata).name);
-    if (teams) {
-      assert.equal(
-        (await probeChannelConnect(tenant, gatewayName, proxy, teamsFileHost)).status,
-        403,
-      );
-    }
     assert.deepEqual(await probeChannelConnect(tenant, gatewayName, proxy, "slack.com"), {
       status: 200,
       tlsVerified: true,
     });
+    // Teams Driver settings never widen a Slack-only Agent's listener.
+    assert.equal(
+      (await probeChannelConnect(tenant, gatewayName, proxy, teamsFileHost)).status,
+      403,
+    );
     assert.notEqual(
       (
         await probeChannelConnect(
@@ -1228,8 +1233,17 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       202,
     );
   }
+  const deleteSlackAgent = async () => {
+    assert.equal((await request("DELETE", agentPath)).status, 202);
+    await waitFor(
+      "normal Slack Agent deletion",
+      async () => (await request("GET", agentPath)).status === 404,
+    );
+  };
   let teamsAgentId: string | undefined;
-  if (teams) {
+  if (teams === undefined) {
+    await deleteSlackAgent();
+  } else {
     // Keep both Gateways serving so the test can attempt to borrow each listener.
     const teamsPassword = await saveSecret("teams-app-password", teams.password);
     const teamsChannel = {
@@ -1248,10 +1262,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       `/namespaces/${namespaceId}/configurations`,
       {
         kind: "agent",
-        values: {
-          ...values,
-          channels: { msteams: teamsChannel },
-        },
+        values: { ...values, channels: { msteams: teamsChannel } },
         secretBindings: teamsBindings,
       },
       201,
@@ -1268,7 +1279,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       201,
     );
     teamsAgentId = string(teamsAgent.id);
-    const teamsPath = `/namespaces/${namespaceId}/agents/${string(teamsAgent.id)}`;
+    const teamsPath = `/namespaces/${namespaceId}/agents/${teamsAgentId}`;
     await api("POST", `${teamsPath}/runtime-credentials`, {});
     const teamsRevision = await api("POST", `${teamsPath}/deploy`, undefined, 202);
     await waitFor(
@@ -1321,6 +1332,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     for (const host of ["slack.com", "neighbor.onedrive.com"]) {
       assert.equal((await probeChannelConnect(tenant, teamsPod, teamsProxy, host)).status, 403);
     }
+    assert.ok(gatewayPod);
     const slackPod = string(object(gatewayPod.metadata).name);
     const slackProxy = string(
       array(array(object(gatewayPod.spec).containers)[0]!.env).find(
@@ -1353,12 +1365,8 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       200,
       "the dedicated Harness cannot use the Teams Gateway's listener",
     );
-    assert.equal((await request("DELETE", agentPath)).status, 202);
-    await waitFor(
-      "normal Slack Agent deletion",
-      async () => (await request("GET", agentPath)).status === 404,
-    );
     // Stop the first Socket Mode consumer before deploying the combined provider configuration.
+    await deleteSlackAgent();
     await api(
       "PATCH",
       `/namespaces/${namespaceId}/configurations/${string(teamsConfiguration.id)}`,
@@ -1385,7 +1393,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
       "pods",
       tenant,
       "-l",
-      `openclaw.dev/agent=${string(teamsAgent.id)},openclaw.dev/revision=${string(combined.id)}`,
+      `openclaw.dev/agent=${teamsAgentId},openclaw.dev/revision=${string(combined.id)}`,
     );
     const combinedGateway = combinedPods
       ?.map(object)
@@ -1402,10 +1410,7 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     for (const host of ["slack.com", "graph.microsoft.com", teamsFileHost]) {
       assert.deepEqual(
         await probeChannelConnect(tenant, combinedPod, combinedProxy, host),
-        {
-          status: 200,
-          tlsVerified: true,
-        },
+        { status: 200, tlsVerified: true },
         host,
       );
     }
@@ -1418,12 +1423,6 @@ export async function runHelmChannelScenario(t: TestContext, { upgrade }: { upgr
     await waitFor(
       "normal Teams Agent deletion",
       async () => (await request("GET", teamsPath)).status === 404,
-    );
-  } else {
-    assert.equal((await request("DELETE", agentPath)).status, 202);
-    await waitFor(
-      "normal Agent deletion",
-      async () => (await request("GET", agentPath)).status === 404,
     );
   }
   const slots = array(

@@ -358,7 +358,7 @@ async function firstDeploymentFixture({ ready = true, slackFetch } = {}) {
     listRevisionMetadata,
     work,
     secretDriver,
-    channelDriver,
+    channelDrivers: [{ provider: "slack", driver: channelDriver }],
     providerCalls,
   };
 }

@@ -2017,7 +2017,8 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     if (operation.operationId === "lookupChannelDirectory") {
       const directory = await controller.lookupChannelDirectory(context.actorId, namespaceId, {
         secretId: body?.secretId as string,
-        provider: body?.provider as string,
+        // Clients written before provider selection omit it; their lookups are Slack lookups.
+        provider: (body?.provider as string | undefined) ?? "slack",
         ...(body?.context === undefined ? {} : { context: body.context as Record<string, string> }),
         kind: body?.kind as "users" | "channels",
         ...(body?.query === undefined ? {} : { query: body.query as string }),

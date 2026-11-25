@@ -12,7 +12,7 @@ OpenClaw Control Plane (OCC) owns caller authorization, Secret access, and the
 saved Agent or Configuration. The Driver owns the provider request and returns
 bounded display candidates with stable provider IDs. It does not send messages
 or grant channel access. Each implementation serves one channel provider; see
-[Driver selection](selection.md) for the bundled Slack and Teams Drivers.
+[Installation selection](#installation-selection).
 
 ## Interface
 
@@ -33,19 +33,28 @@ still apply. See [Kubernetes enforcement limits](kubernetes-compute/channel-egre
 
 The [shared interface](../../../packages/contracts/src/drivers/channel/index.ts) requires a
 Driver identity and `lookupDirectory({ token, context?, kind, query?, cursor?, ids? })`.
-`kind` selects users or channels. Optional `context` contains at most eight
-nonsecret strings of at most 200 characters. Each Driver validates its own
-context, authentication and pagination. A Driver rejects missing, unknown or
-malformed context, and a cursor from another lookup, with the `invalid_request`
-reason before it sends a request; OCC returns `400 INVALID_REQUEST`. A Driver
-that uses no context rejects any context. `ids` resolves saved IDs directly and
+`kind` selects users or channels. Optional `context` contains the provider's own
+lookup fields: at most eight nonsecret strings of at most 200 characters. Each
+Driver declares those fields with `directoryContextSchema()`, a closed JSON
+Schema object; OCC refuses to install a Driver whose schema is open or that the
+Driver configuration schema rules refuse. OCC validates `context`, an absent one as `{}`, against it before it
+reads the Secret, and returns `400 INVALID_REQUEST` with details. A missing or
+malformed field is named, for example `/context/team`; an unknown key is
+reported as `/context`. A provider without lookup fields declares a closed empty
+schema: an empty `context` passes and any key is refused. The Driver owns
+authentication and pagination, and can refuse input that a schema cannot
+express, such as a cursor from another lookup, with the `invalid_request` reason
+and field details. That refusal comes after OCC reads the Secret and calls the
+Driver. `ids` resolves saved IDs directly and
 cannot be combined with a search query or cursor. The method returns workspace
 identity, candidates, an optional next cursor, and `complete`. A returned name
 is a display hint; callers save IDs.
 
 The lookup request names its `provider`. OCC sends the request only to the
-Driver that composition installed for that provider. A provider without an
-installed Driver returns `501 NOT_IMPLEMENTED`.
+Driver that composition installed for that provider and does not interpret
+`context`. A request without `provider` is a Slack lookup, so clients written
+before provider selection keep working. A provider without an installed Driver
+returns `501 NOT_IMPLEMENTED`.
 
 The optional `validateCredentials(values, withSecret)` method checks configured
 channel credentials before API provisioning or deployment. OCC runs it for every
@@ -78,9 +87,12 @@ drivers:
 | `slack-channel` | `slack`   | None.                                                                                                  |
 | `teams-channel` | `msteams` | Optional [`fileHosts`](../../guides/integrations/teams.md#prepare-attachment-downloads); default `[]`. |
 
-If you omit `drivers.channel`, startup installs both Drivers with default
-configuration. If you supply the list, startup installs only the listed
-Drivers, and Agent admission refuses a channel whose Driver is not installed.
+If you omit `drivers.channel`, startup installs every bundled Driver with
+default configuration. If you supply the list, startup installs only the listed
+Drivers. The API refuses to deploy or provision an Agent that enables a channel
+whose Driver is not installed, on every Compute; the provisioning worker, which
+has no Channel Drivers, deploys only Agents the API admitted. Kubernetes Compute
+also refuses that Agent Configuration at save.
 Startup refuses an unknown ID, a repeated ID and unknown or invalid
 configuration. OCC directory lookup and Compute admission use the same
 installed set.

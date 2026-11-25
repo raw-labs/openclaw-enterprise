@@ -30,6 +30,8 @@ type ChannelScenario = {
   teams?: boolean;
   teamsBindings?: boolean;
   teamsConfiguration?: Configuration["values"];
+  /** Omit `groupAllowFrom`, so native Teams applies `allowFrom` to channel senders. */
+  teamsInheritedChannelAccess?: boolean;
   slack?: boolean;
   slackPolicy?: SlackConfig["dmPolicy"];
   slackChannels?: SlackConfig["channels"];
@@ -86,6 +88,20 @@ export function channelsScenarios({
       actions: [click("Edit Microsoft Teams")],
       description:
         "App and tenant IDs, app password Secret, channel access, optional outgoing-file storage with sharing information, and personal-message policies.",
+    },
+    teamsInheritedChannelAccess: {
+      group: "Components/Channels",
+      name: "Teams inherited channel access",
+      path: `${draft}&tab=channels`,
+      teams: true,
+      teamsInheritedChannelAccess: true,
+      teamsConfiguration: {
+        dmPolicy: "allowlist",
+        allowFrom: ["44444444-4444-4444-8444-444444444444"],
+      },
+      actions: [click("Edit Microsoft Teams")],
+      description:
+        "Without a separate channel list, native Teams applies the personal-message allowlist to channel senders. The editor shows that list and keeps it inherited on unrelated saves.",
     },
     teamsDirectoryChannels: {
       group: "Components/Channels",

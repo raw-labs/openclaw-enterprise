@@ -3500,6 +3500,22 @@ test("gateway browser routes preserve delegated authority while machine and node
     { name: "x-occ-identity", value: "occ-workspace-files" },
     { name: "x-openclaw-scopes", value: "operator.sessions.write" },
   ]);
+  // Chat sets the trusted identity and scope cap; removing the same headers would make that
+  // grant depend on proxy evaluation order.
+  assert.deepEqual(
+    chatHeaders.set.filter(({ name }) => chatHeaders.remove.includes(name)),
+    [],
+  );
+  // Client credential and identity claims never reach the tenant Gateway through chat.
+  for (const name of [
+    "x-api-key",
+    "tailscale-user-login",
+    "tailscale-user-name",
+    "tailscale-user-profile-pic",
+    "tailscale-funnel-request",
+  ]) {
+    assert.ok(chatHeaders.remove.includes(name), name);
+  }
   const rendered = driver.kubernetesGatewayConfigurationDocument(revision.configuration);
   assert.deepEqual(rendered.gateway.auth.trustedProxy.delegation, {
     credentialFile: "/var/run/openclaw/browser-delegation/browser-key",

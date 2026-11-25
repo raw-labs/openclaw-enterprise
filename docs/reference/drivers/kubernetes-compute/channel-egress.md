@@ -8,9 +8,7 @@ supplied Installation files must include the matching runtime settings.
 OCC starts without the fleet; affected channel operations fail
 instead of using a direct internet connection.
 
-Dedicated Gateways use this route for their enabled channels. The
-[embedded Teams evaluation](#embedded-teams-evaluation) shares the listener
-with each participating Agent's native model and plugins.
+Dedicated Gateways use this route for their enabled channels. The [embedded Teams evaluation](#embedded-teams-evaluation) also routes participating Agents’ model and plugin HTTPS through their assigned listeners.
 
 ## Configuration
 
@@ -221,6 +219,6 @@ Provider credentials stay with their authorized consumers.
 Use the [Kubernetes tests](../../../testing/kubernetes.md) and
 [Slack proof](../../../testing/slack.md) for real enforcement and model execution.
 Per-Agent ports are temporary until verified Gateway workload identity supports
-authenticated shared listeners.
+authenticated shared listeners. Microsoft Teams uses the same per-Agent listeners.
 
 See the [source-backed flow](../../../flows/channel-egress.md) for reconciliation.

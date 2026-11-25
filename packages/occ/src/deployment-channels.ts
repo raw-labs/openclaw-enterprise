@@ -4,8 +4,8 @@ import type { PlatformUnitOfWork } from "./ports/platform-unit-of-work.ts";
 import { driverOperation } from "./driver-operation.ts";
 import { deploymentSandboxPolicy } from "./sandbox-policy.ts";
 import type {
-  ChannelDriver,
   ChannelCredentialReader,
+  ChannelDriver,
   Configuration,
   ConfigurationDriver,
   OpenClawConfigurationDocument,
@@ -18,9 +18,12 @@ import type { ControllerAuthority } from "./controller-authority.ts";
 import type { ControllerTransactions } from "./controller-transactions.ts";
 import { exactConfiguration, storedSecretBindings } from "./configuration-operations.ts";
 import { secretOperation, sameSecretBackend } from "./secret-operations.ts";
+import { enabledChannelEntries } from "./channel-secret-bindings.ts";
+import { configurationSettingMessage, keyedSettingPath } from "./environment-references.ts";
 import {
   AuthorizationDeniedError,
   ChannelCredentialError,
+  ConfigurationHarnessError,
   DependencyUnavailableError,
   RepositoryPolicyDeploymentConflict,
   ResourceConflictError,
@@ -40,10 +43,9 @@ type DeploymentConfigurationMetadata = Readonly<
 export interface PreparedDeploymentChannels {
   readonly configuration: Readonly<Configuration>;
   readonly configurationDriver: ConfigurationDriver;
-  readonly channels: readonly {
-    driver: ChannelDriver;
-    validate: ChannelDriver["validateCredentials"];
-  }[];
+  /** Every installed Channel Driver, in composition order, and the validator each exposed. */
+  readonly channels: readonly ChannelDriver[];
+  readonly channelValidators: readonly ChannelDriver["validateCredentials"][];
 }
 
 type CheckChannelPolicy = () => Promise<() => void>;
@@ -72,7 +74,12 @@ interface DeploymentChannelDependencies {
   readonly authority: Pick<ControllerAuthority, "authorize" | "holdAuthority">;
   readonly drivers: Pick<
     DriverRegistry,
-    "hasInstalledChannelDrivers" | "installedChannelDrivers" | "selection"
+    | "selection"
+    | "hasChannelDrivers"
+    | "installedChannelDrivers"
+    | "installedChannelProviders"
+    | "ownsChannelDriverSet"
+    | "channelDriver"
   >;
   readonly configurationDriver: () => ConfigurationDriver;
   readonly requireBundledChannelBindings: (
@@ -174,8 +181,15 @@ export function createDeploymentChannelChecks(dependencies: DeploymentChannelDep
     driverFailure: () => SecretDriverOwnershipError,
     use: DeploymentChannelUse | (() => Promise<void>),
   ): Promise<void> {
-    const channels = typeof use === "function" ? captureChannelValidators() : use.prepared.channels;
-    if (channels.every(({ validate }) => validate === undefined)) {
+    const drivers =
+      typeof use === "function"
+        ? dependencies.drivers.installedChannelDrivers()
+        : use.prepared.channels;
+    const validators =
+      typeof use === "function"
+        ? drivers.map((driver) => driver.validateCredentials)
+        : use.prepared.channelValidators;
+    if (validators.every((validator) => validator === undefined)) {
       return;
     }
     if (dependencies.transactions.hasContext()) {
@@ -280,24 +294,20 @@ export function createDeploymentChannelChecks(dependencies: DeploymentChannelDep
         throw outcome.error;
       }
     };
-    for (const { driver, validate } of channels) {
-      if (validate) {
-        await Reflect.apply(validate, driver, [configuration.values, withSecret]);
+    // Each Driver checks only its own provider section, so every installed validator runs.
+    for (const [index, driver] of drivers.entries()) {
+      const validator = validators[index];
+      if (validator !== undefined) {
+        await Reflect.apply(validator, driver, [configuration.values, withSecret]);
       }
     }
-  }
-
-  function captureChannelValidators() {
-    return dependencies.drivers
-      .installedChannelDrivers()
-      .map((driver) => ({ driver, validate: driver.validateCredentials }));
   }
 
   async function prepareOrdinaryDeploymentChannels(
     principalId: string,
     input: DeployAgentInput,
   ): Promise<PreparedDeploymentChannels | undefined> {
-    if (!dependencies.drivers.hasInstalledChannelDrivers()) {
+    if (!dependencies.drivers.hasChannelDrivers()) {
       return undefined;
     }
     await dependencies.authority.authorize(principalId, "deploy", {
@@ -349,7 +359,13 @@ export function createDeploymentChannelChecks(dependencies: DeploymentChannelDep
       configuration.secretBindings ?? {},
     );
     await configurationDriver.validate(configuration);
-    return { configuration, configurationDriver, channels: captureChannelValidators() };
+    const channels = dependencies.drivers.installedChannelDrivers();
+    return {
+      configuration,
+      configurationDriver,
+      channels,
+      channelValidators: channels.map((driver) => driver.validateCredentials),
+    };
   }
   async function validatePreparedChannels(
     principalId: string,
@@ -378,9 +394,9 @@ export function createDeploymentChannelChecks(dependencies: DeploymentChannelDep
       !unchangedDriver(configuration) ||
       channels.length !== prepared.channels.length ||
       channels.some(
-        (driver, i) =>
-          driver !== prepared.channels[i]?.driver ||
-          driver.validateCredentials !== prepared.channels[i]?.validate,
+        (driver, index) =>
+          driver !== prepared.channels[index] ||
+          driver.validateCredentials !== prepared.channelValidators[index],
       )
     ) {
       throw new ResourceStateConflictError(
@@ -389,7 +405,33 @@ export function createDeploymentChannelChecks(dependencies: DeploymentChannelDep
     }
   }
 
+  // Every Compute: an enabled channel needs an installed Channel Driver, or OCC can neither check
+  // its credentials nor own its egress. Kubernetes Compute also refuses it at Configuration save.
+  // Only a controller that owns the Installation's Channel Driver set applies this: the API, for
+  // deployment and provisioning requests. The provisioning worker has no Channel Drivers, since
+  // it cannot reach provider egress, and admits only work the API already checked.
+  function assertEnabledChannelsInstalled(values: OpenClawConfigurationDocument): void {
+    if (!dependencies.drivers.ownsChannelDriverSet()) {
+      return;
+    }
+    const installed = dependencies.drivers.installedChannelProviders();
+    for (const provider of enabledChannelEntries(values)) {
+      if (dependencies.drivers.channelDriver(provider) === undefined) {
+        // The same message as Kubernetes Compute's save-time rule.
+        throw new ConfigurationHarnessError(
+          configurationSettingMessage(
+            keyedSettingPath("channels", provider),
+            installed.length === 0
+              ? "is not a supported channel: install its Channel Driver, or set its enabled to false"
+              : `is not a supported channel: use ${installed.join(" or ")}, or set its enabled to false`,
+          ),
+        );
+      }
+    }
+  }
+
   return {
+    assertEnabledChannelsInstalled,
     validateChannelCredentials,
     prepareOrdinaryDeploymentChannels,
     validatePreparedChannels,

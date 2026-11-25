@@ -84,7 +84,7 @@ alter existing dependencies. Continue installation only after the check passes.
 
 For an existing installation, prepare the matching settings through the
 [installation change procedure](production-installation-changes.md). Saving an
-Agent's Slack settings cannot enable installation-level egress.
+Agent's channel settings cannot enable installation-level egress.
 
 ## Configure upstream proxy endpoints
 
@@ -117,7 +117,7 @@ do not widen global egress to make deployment pass.
    cannot change an existing binding's credential version.
 
 Proxy outage, certificate failure, or authentication refusal has no direct
-fallback. OCC Slack credential validation and directory lookup use their
+fallback. OCC channel credential validation and directory lookup use their
 existing separate route; a failure there does not prove the Agent proxy failed.
 An Agent without enabled channels creates no proxy binding or egress grant.
 

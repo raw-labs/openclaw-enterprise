@@ -208,10 +208,16 @@ function slackFormBindings(values: unknown) {
     : null;
 }
 
+// Null when no enabled channel has a picker, so the tab only lists bound keys: every channel
+// is off, or Slack reads keys the form cannot name and Teams is off.
 function channelFormBindings(values: unknown) {
-  const slack = channelEnabled(values, "slack") ? slackFormBindings(values) : [];
-  const teams = channelEnabled(values, "msteams") ? TEAMS_SECRET_BINDINGS : [];
-  return slack === null && !teams.length ? null : [...(slack ?? []), ...teams];
+  const slackOn = channelEnabled(values, "slack");
+  const teamsOn = channelEnabled(values, "msteams");
+  const slack = slackOn ? slackFormBindings(values) : [];
+  if ((!slackOn && !teamsOn) || (slack === null && !teamsOn)) {
+    return null;
+  }
+  return [...(slack ?? []), ...(teamsOn ? TEAMS_SECRET_BINDINGS : [])];
 }
 
 function servicePrincipalId(agent: Pick<Agent, "servicePrincipalId">) {
@@ -1066,8 +1072,10 @@ export function createChannelSecretsPanel({
       return null;
     }
     // Keys the form has no pickers for are listed only; the form then keeps just Retry Secret
-    // access for their outstanding grants. With Slack off, every bound key is listed only.
+    // access for their outstanding grants. With every channel off, every bound key is listed only.
     const listOnly = channelFormBindings(state.values) === null;
+    // Slack keys the form cannot name are listed even when Teams keeps its picker.
+    const slackListed = slackOn && slackFormBindings(state.values) === null;
     const formBindings = channelFormBindings(state.values) ?? [];
     const extraKeys =
       slackOn &&
@@ -1078,7 +1086,7 @@ export function createChannelSecretsPanel({
     if (!slackOn) {
       // The section's introduction says why these Secrets are listed.
       hintText = null;
-    } else if (listOnly) {
+    } else if (slackListed) {
       hintText = usesNamedSlackAccounts(state.values)
         ? "Named Slack accounts use their own token keys. Bind them through the Configuration API."
         : SLACK_OTHER_KEYS_HINT;

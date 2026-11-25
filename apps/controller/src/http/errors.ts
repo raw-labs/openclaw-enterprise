@@ -773,6 +773,7 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
         400,
         "INVALID_REQUEST",
         "The directory request does not match this channel provider. Check its settings and retry.",
+        error.details,
       );
     }
     const mapped = discoveryFailure("CHANNEL_DIRECTORY", error.reason, CHANNEL_DIRECTORY_MESSAGES);

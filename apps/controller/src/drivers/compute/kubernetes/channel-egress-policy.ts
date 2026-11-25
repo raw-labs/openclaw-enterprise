@@ -10,9 +10,9 @@ import {
   proxyAddressForbidden,
 } from "./channel-proxy-address.ts";
 
-export { CHANNEL_EGRESS_EXCLUDED_IPV4_CIDRS } from "./channel-proxy-address.ts";
-
 import { isEmbeddedHttpsHost } from "./embedded-https-host.ts";
+
+export { CHANNEL_EGRESS_EXCLUDED_IPV4_CIDRS } from "./channel-proxy-address.ts";
 
 /** Effective policy for one listener. Only Compute may attach the public HTTPS grant. */
 export interface ChannelEgressPolicy {

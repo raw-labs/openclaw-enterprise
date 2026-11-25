@@ -344,7 +344,7 @@ test("directory preview rejects malformed requests without losing search or ID l
     { ...base, query: "😀".repeat(201) },
     { ...base, agentId, configurationId },
     { ...base, unexpected: true },
-    { kind: "users", secretId },
+    { ...base, provider: "discord" },
   ]) {
     await rejected(body, "Malformed channel directory preview request.");
   }

@@ -9,7 +9,8 @@ import type {
   PluginDriver,
   SandboxDriver,
 } from "@openclaw-enterprise/contracts";
-import { isNonEmptyString } from "@openclaw-enterprise/utils";
+import { assertConfigurationSchema } from "@openclaw-enterprise/contracts";
+import { asRecord, isNonEmptyString } from "@openclaw-enterprise/utils";
 import type { DriverConfigurationRegistry } from "./configuration-registry.ts";
 import {
   capability,
@@ -29,8 +30,9 @@ import {
 } from "./namespace-lifecycle.ts";
 
 export interface RegisteredDriver {
-  readonly provider?: string;
   readonly harnessId?: string;
+  /** The channel provider that trusted composition bound to this Channel Driver. */
+  readonly provider?: string;
   readonly owner?: InstalledDriver;
   readonly driver: Driver;
   readonly capability: DriverCapability;
@@ -44,6 +46,23 @@ interface DriverRegistryDependencies {
   readonly configurations: Pick<DriverConfigurationRegistry, "resolve">;
   readonly namespaceLifecycleBindings: readonly NamespaceLifecycleBinding[];
   readonly hasBuiltInRepositoryPolicy: () => boolean;
+}
+
+/** A Channel Driver's lookup schema must be a supported, closed object schema. */
+function closedLookupSchema(driver: ChannelDriver): boolean {
+  if (typeof driver.directoryContextSchema !== "function") {
+    return false;
+  }
+  try {
+    const schema = driver.directoryContextSchema();
+    // The same check as Driver configuration schemas: valid JSON Schema, known formats, and a
+    // schema that compiles, so a malformed one fails at install instead of per request.
+    assertConfigurationSchema(schema);
+    const root = asRecord(schema);
+    return root?.type === "object" && root.additionalProperties === false;
+  } catch {
+    return false;
+  }
 }
 
 function driverKey(capability: DriverCapability, id: string): string {
@@ -66,8 +85,10 @@ export function unchangedDriver(selected: RegisteredDriver): boolean {
 export class DriverRegistry {
   private readonly registrations = new Map<string, RegisteredDriver>();
   private readonly selections = new Map<DriverCapability, RegisteredDriver>();
-  private channelRegistrations: readonly RegisteredDriver[] = [];
   private pluginRegistrations: readonly RegisteredDriver[] = [];
+  private channelRegistrations: readonly RegisteredDriver[] = [];
+  // Whether composition gave this controller its Channel Driver set, even an empty one.
+  private channelSetInstalled = false;
   private readonly dependencies: DriverRegistryDependencies;
 
   constructor(dependencies: DriverRegistryDependencies) {
@@ -123,6 +144,11 @@ export class DriverRegistry {
     }
   }
 
+  private selectPluginRegistrations(entries: readonly RegisteredDriver[]): void {
+    this.applyLifecycleDrivers(this.selections, [...entries, ...this.channelRegistrations]);
+    this.pluginRegistrations = entries;
+  }
+
   /** Install the provider-to-Driver set that trusted composition also gives Compute. */
   installChannelDrivers(providers: readonly ChannelProviderDriver[]): void {
     if (
@@ -130,7 +156,8 @@ export class DriverRegistry {
         ({ provider, driver }) =>
           !isNonEmptyString(provider) ||
           !/^[a-z][a-z0-9_-]{0,63}$/.test(provider) ||
-          driver?.capability !== "channel",
+          driver?.capability !== "channel" ||
+          !closedLookupSchema(driver),
       ) ||
       new Set(providers.map(({ provider }) => provider)).size !== providers.length ||
       new Set(providers.map(({ driver }) => driver.id)).size !== providers.length
@@ -139,22 +166,52 @@ export class DriverRegistry {
         "Each channel provider must bind one distinct Channel Driver identity.",
       );
     }
-    const registrations = providers.map(({ provider, driver }) => {
-      const [key, entry] = this.driverRegistrationEntry(driver);
-      return [key, Object.freeze({ ...entry, provider })] as const;
-    });
-    const entries = registrations.map(([, entry]) => entry);
-    this.applyLifecycleDrivers(this.selections, [...this.pluginRegistrations, ...entries]);
+    // The new set replaces the previous one, which may share Drivers with it. Release the
+    // previous registrations first and restore them if the new set is refused.
+    const previous = this.channelRegistrations
+      .map((entry) => [driverKey("channel", entry.id), entry] as const)
+      .filter(([key, entry]) => this.registrations.get(key) === entry);
+    for (const [key] of previous) {
+      this.registrations.delete(key);
+    }
+    let registrations: (readonly [string, RegisteredDriver])[];
+    try {
+      registrations = providers.map(({ provider, driver }) => {
+        const [key, entry] = this.driverRegistrationEntry(driver);
+        return [key, Object.freeze({ ...entry, provider })] as const;
+      });
+      this.applyLifecycleDrivers(this.selections, [
+        ...this.pluginRegistrations,
+        ...registrations.map(([, entry]) => entry),
+      ]);
+    } catch (error) {
+      for (const [key, entry] of previous) {
+        this.registrations.set(key, entry);
+      }
+      throw error;
+    }
     for (const [key, entry] of registrations) {
       this.registrations.set(key, entry);
     }
-    this.channelRegistrations = entries;
+    this.channelRegistrations = registrations.map(([, entry]) => entry);
+    this.channelSetInstalled = true;
   }
 
-  hasInstalledChannelDrivers(): boolean {
+  /**
+   * Whether composition gave this controller the Installation's Channel Driver set, even an
+   * empty one. The API owns that set; a controller without one, such as the provisioning
+   * worker's, carries out work the API already checked.
+   */
+  ownsChannelDriverSet(): boolean {
+    return this.channelSetInstalled;
+  }
+
+  /** Whether composition installed any Channel Driver; reads no Driver member. */
+  hasChannelDrivers(): boolean {
     return this.channelRegistrations.length > 0;
   }
 
+  /** Every installed Channel Driver, in composition order. */
   installedChannelDrivers(): readonly ChannelDriver[] {
     return this.channelRegistrations.map((entry) => {
       if (!unchangedDriver(entry)) {
@@ -164,20 +221,19 @@ export class DriverRegistry {
     });
   }
 
-  channelDriver(provider: string): ChannelDriver {
-    const entry = this.channelRegistrations.find((candidate) => candidate.provider === provider);
-    if (entry === undefined || !unchangedDriver(entry)) {
-      throw new NotImplementedError(
-        "channel_directory.lookup",
-        "Channel directory lookup is unavailable for this provider.",
-      );
-    }
-    return entry.driver as ChannelDriver;
+  /** The providers that have an installed Channel Driver, in composition order. */
+  installedChannelProviders(): readonly string[] {
+    return this.channelRegistrations.flatMap((entry) =>
+      entry.provider === undefined ? [] : [entry.provider],
+    );
   }
 
-  private selectPluginRegistrations(entries: readonly RegisteredDriver[]): void {
-    this.applyLifecycleDrivers(this.selections, [...entries, ...this.channelRegistrations]);
-    this.pluginRegistrations = entries;
+  /** The Channel Driver installed for one provider, or undefined. */
+  channelDriver(provider: string): ChannelDriver | undefined {
+    const entry = this.channelRegistrations.find((candidate) => candidate.provider === provider);
+    return entry === undefined || !unchangedDriver(entry)
+      ? undefined
+      : (entry.driver as ChannelDriver);
   }
 
   private driverRegistrationEntry(
@@ -342,12 +398,11 @@ export class DriverRegistry {
   }
 
   configurationDriverSelected(capability: DriverCapability, id: string): boolean {
-    if (capability === "channel") {
-      return this.channelRegistrations.some((entry) => entry.id === id);
+    if (capability === "plugin" || capability === "channel") {
+      const listed = capability === "plugin" ? this.pluginRegistrations : this.channelRegistrations;
+      return listed.some((entry) => entry.id === id);
     }
-    return capability === "plugin"
-      ? this.pluginRegistrations.some((entry) => entry.id === id)
-      : this.selections.get(capability)?.id === id;
+    return this.selections.get(capability)?.id === id;
   }
 
   enabledPluginDrivers(): readonly PluginDriver[] {
@@ -392,13 +447,13 @@ export class DriverRegistry {
 
   private applyLifecycleDrivers(
     proposed: ReadonlyMap<DriverCapability, RegisteredDriver>,
-    plugins: readonly RegisteredDriver[],
+    listed: readonly RegisteredDriver[],
   ): void {
     const namespaceParticipants = selectedNamespaceLifecycle(
-      [...proposed.values(), ...plugins].map((entry) => entry.owner ?? entry.driver),
+      [...proposed.values(), ...listed].map((entry) => entry.owner ?? entry.driver),
       this.dependencies.namespaceLifecycleBindings,
     );
-    const lifecycleDrivers = this.lifecycleDrivers(proposed, plugins);
+    const lifecycleDrivers = this.lifecycleDrivers(proposed, listed);
     const compute = proposed.get("compute");
     if (compute !== undefined) {
       if (!unchangedDriver(compute)) {
@@ -425,10 +480,10 @@ export class DriverRegistry {
 
   private lifecycleDrivers(
     selections: ReadonlyMap<DriverCapability, RegisteredDriver>,
-    plugins: readonly RegisteredDriver[],
+    listed: readonly RegisteredDriver[],
   ): readonly Driver[] {
     const drivers = new Set<Driver>();
-    for (const selected of [...selections.values(), ...plugins]) {
+    for (const selected of [...selections.values(), ...listed]) {
       if (selected.capability === "compute") {
         continue;
       }

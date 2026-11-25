@@ -809,7 +809,9 @@ function channelSelections(value: unknown): readonly SelectedDriverConfiguration
       const selection = object(entry, path);
       closed(selection, ["id", "configuration"], path);
       if (!isBundledChannelDriverId(selection.id)) {
-        throw new Error(`${path}.id must select slack-channel or teams-channel.`);
+        throw new Error(
+          `${path}.id must select a bundled Channel Driver: ${Object.keys(BUNDLED_CHANNEL_DRIVERS).join(", ")}.`,
+        );
       }
       if (ids.has(selection.id)) {
         throw new Error(`${path}.id duplicates another Channel Driver selection.`);

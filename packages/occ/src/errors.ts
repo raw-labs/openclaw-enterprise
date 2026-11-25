@@ -412,7 +412,7 @@ export class PluginDiscoveryError extends Error {
 
 /** Safe channel-directory outcomes contain no upstream response or token. */
 export class ChannelDirectoryError extends Error {
-  /** `invalid_request`: the Driver refused caller input, such as provider context or a cursor. */
+  /** `invalid_request`: caller input that the provider refuses, such as context or a cursor. */
   readonly reason:
     | "invalid_request"
     | "credentials_rejected"
@@ -421,10 +421,19 @@ export class ChannelDirectoryError extends Error {
     | "invalid_response"
     | "unavailable";
 
-  constructor(reason: ChannelDirectoryError["reason"]) {
+  /** For `invalid_request`: the refused request fields. */
+  readonly details?: readonly import("@openclaw-enterprise/contracts").ErrorDetail[];
+
+  constructor(
+    reason: ChannelDirectoryError["reason"],
+    details?: readonly import("@openclaw-enterprise/contracts").ErrorDetail[],
+  ) {
     super("Channel directory lookup failed.");
     this.name = "ChannelDirectoryError";
     this.reason = reason;
+    if (details !== undefined) {
+      this.details = details;
+    }
   }
 }
 
