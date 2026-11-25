@@ -1,3 +1,4 @@
+import { verifyEmbeddedHttpsPolicy } from "./runtime-image-embedded-https-case.ts";
 import { execute, runDocker } from "../helpers/runtime-image-docker.ts";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -230,4 +231,10 @@ test(
     assert.match(result.stdout, /# pass 1/);
     assert.match(result.stdout, /# fail 0/);
   },
+);
+
+test(
+  "embedded Teams HTTPS wildcards preserve resolved IP checks and listener isolation",
+  imageTestOptions,
+  (t) => verifyEmbeddedHttpsPolicy(t, requiredImage()),
 );

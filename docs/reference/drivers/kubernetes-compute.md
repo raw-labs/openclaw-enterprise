@@ -90,8 +90,9 @@ the worker stops predecessors before starting the new Harness. This permits RWO
 workspace storage with deployment downtime; restore previous
 configuration through a new version instead of restarting its old snapshot.
 
-External channels require dedicated execution; Teams also requires
-`gatewayRouting.channels.hostname` and the operator's **channels** listener
+Channels require dedicated execution unless the Installation enables
+[embedded Teams](kubernetes-compute/channel-egress.md#embedded-teams-evaluation). Teams requires
+`gatewayRouting.channels.hostname` and the **channels** listener
 ([setup](../../guides/integrations/teams.md)). Unsupported Harness/mode combinations
 fail deployment. Embedded OpenClaw cannot use OpenShell.
 

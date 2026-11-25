@@ -114,7 +114,7 @@ jobs:
             qa.push(
               { installation: 'compose', preset: 'Codex', scenarios: 'console-secrets,agent-audit,http-chat', focused: false },
               { installation: 'kubernetes', preset: 'Codex', scenarios: 'console-secrets,http-chat,teams', focused: false },
-              { installation: 'kubernetes', preset: 'OpenClaw', scenarios: 'http-chat', focused: true },
+              { installation: 'kubernetes', preset: 'OpenClaw', scenarios: 'http-chat,teams', focused: true },
               { installation: 'compose', preset: 'OpenClaw', scenarios: 'http-chat', focused: true },
             );
           } else {

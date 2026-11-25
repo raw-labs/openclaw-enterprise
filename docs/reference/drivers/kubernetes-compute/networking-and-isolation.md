@@ -127,6 +127,8 @@ select its Agent revision and binding. These policies grant the dedicated
 Gateway no direct access to public channel providers. OCC uses a separate
 provider listener.
 
+Embedded Teams revisions use their assigned listener for public HTTPS. See [channel egress](channel-egress.md#embedded-teams-evaluation).
+
 Teams Gateways use their Envoy listener for [guarded attachment downloads](../../../guides/integrations/teams.md#prepare-attachment-downloads).
 
 ## Explicit network profiles

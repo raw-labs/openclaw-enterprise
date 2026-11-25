@@ -8,12 +8,10 @@ last_updated_session: authoring-run/327102e0-6dec-42cc-b735-3c5cfe2874d3
 
 ## Overview
 
-An operator passes a profile, JSON inputs, and output directory to
-`scripts/render-installation-profile.ts`. The renderer validates inputs, resolves omitted
-hosted Codex destinations, and writes paired Helm values, Installation YAML, and
-preflight. This flow ends at those files. Operators still prepare the cluster
-and Secrets, apply Helm, and configure hosted/runtime tokens, optional ChatGPT
-service accounts, the repository registry, and Slack consumers.
+The renderer validates the operator's profile and JSON inputs, resolves omitted hosted
+Codex destinations, and writes Helm values, Installation YAML and preflight results.
+The operator prepares the cluster and Secrets, applies Helm and configures credentials
+and consumers.
 
 ## Entry Points
 
@@ -180,6 +178,8 @@ preflight also refuses a zone ID, which the API accepts.
 
 When `channels.managedEgress` is true, the renderer writes matching
 `channelEgress` Helm values and `runtime.channelEgress` Compute configuration.
+The renderer writes the optional embedded-channel boolean to `runtime.proxy` and
+supplemental HTTPS hosts to `runtime.channelEgress` in Compute only.
 The operator supplies installation address exclusions. OCC derives its reserved
 listener from that configuration; Compute assigns each enabled Agent its own
 listener. See [channel egress](channel-egress.md).
@@ -301,6 +301,8 @@ activation, and repository registry creation need separate evidence.
 ## Changelog
 
 - 2026-11-24 10:41: Render unrestricted API and refresh Worker egress without provider CIDRs. (authoring-run/327102e0-6dec-42cc-b735-3c5cfe2874d3 - 219356409a900924f407bb247b6bc064710a218a)
+
+- 2026-11-23 13:53: Render embedded Teams admission and supplemental HTTPS hosts into Compute. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - aee16e14c7)
 
 - 2026-11-23 12:51: Match Helm preview name. (authoring-run/07352eb0-f0e9-4aa3-bbe2-6be9c96a1476 - 7ef4d08319f4ad8dfd1dd52473db764ccad53235)
 

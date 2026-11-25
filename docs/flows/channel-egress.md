@@ -1,7 +1,7 @@
 ---
 created: 2026-11-19
-updated: 2026-11-21
-last_updated_session: authoring-run/b9e0b8fc-0057-44bd-b184-c3de7be3267b
+updated: "2026-11-23"
+last_updated_session: "authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57"
 ---
 
 # Channel egress flow
@@ -57,7 +57,10 @@ graph TD
   Y -->|unknown response| X
   Y -->|accepted| A
   A["Worker reads saved Agent revision"] --> B["Resolve current Channel Drivers"]
-  B --> C{"Rules supported and fleet available?"}
+  B --> M{"Embedded Teams enabled under the Installation opt-in?"}
+  M -->|yes| H["Add operator-approved HTTPS hosts"]
+  M -->|no| C{"Rules supported and fleet available?"}
+  H --> C
   C -->|no| X["Fail activation without direct fallback"]
   C -->|yes| D["Reserve a port using resourceVersion"]
   D --> E["Install the binding's Envoy policy"]
@@ -183,6 +186,14 @@ Compute rejects unqualified IPv6 rules. Each attempt retains the resulting
 requirements; a retry derives them again. Destination policies are not a
 separate PostgreSQL snapshot.
 
+`KubernetesComputeDriver.enabledChannels` also checks embedded placement against
+the trusted Installation boolean. Each revision enabling embedded Teams adds the
+operator's supplemental HTTPS hosts to that revision's routing requirements.
+Compute translates a leading `*.` into the existing subdomain rule. A standalone
+`*` adds a CONNECT authority matcher for port 443 to this listener. Both matchers
+pass through the same selected-upstream IP check. The policy hash covers the
+complete filter chain, including the explicit public HTTPS grant.
+
 `packages/occ/src/agent-deployment-admission.ts:createAgentDeploymentAdmission`
 
 Core saves the Agent's proxy selection and private Compute admission in the
@@ -233,7 +244,11 @@ fleet egress grant before Gateway startup.
 `apps/controller/src/drivers/compute/kubernetes/index.ts:KubernetesComputeDriver.deployment`
 
 Only the Gateway receives the assigned proxy URL and binding label. Harness
-transport remains direct and its model credential placement is unchanged.
+transport stays direct in dedicated mode. The embedded model policy excludes
+every Pod with the channel binding label, including while a replacement revision
+starts. The selected Gateway and its model probe children use the assigned
+listener. Embedded callback reconciliation selects the observed revision through
+a separate Service. Compute opens the callback only after the Gateway Service selects a serving workload.
 
 ### 4. Revoke before reuse
 
@@ -296,6 +311,12 @@ and remaining acceptance evidence.
 ## Manual Notes
 
 ## Changelog
+
+- 2026-11-23 14:36: Trace embedded wildcard policy compilation and the upstream address check. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - 1701a86a6a)
+
+- 2026-11-23 13:53: Trace independent embedded Teams admission and destination approval. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - aee16e14c7)
+
+- 2026-11-23 13:00: Trace the embedded Teams selection and model path. (authoring-run/01a2083c-f35b-7263-8be2-9428a9825a57 - acf695ee1d)
 
 - 2026-11-23 16:55: Check the original revision again before recording each one-off Deploy as sending.
 

@@ -10,9 +10,18 @@ import {
   proxyAddressForbidden,
 } from "./channel-proxy-address.ts";
 
+import { isEmbeddedHttpsHost } from "./embedded-https-host.ts";
+
 export { CHANNEL_EGRESS_EXCLUDED_IPV4_CIDRS } from "./channel-proxy-address.ts";
 
+/** Effective policy for one listener. Only Compute may attach the public HTTPS grant. */
+export interface ChannelEgressPolicy {
+  readonly destinations: readonly NetworkDestinationRule[];
+  readonly allowPublicHttps?: boolean;
+}
+
 export interface ChannelEgressOptions {
+  readonly embeddedHttpsHosts?: readonly string[];
   readonly gatewayName: string;
   readonly gatewayNamespace: string;
   readonly envoyNamespace: string;
@@ -73,6 +82,12 @@ export const channelEgressConfigurationSchema: JSONSchema = {
     "excludedCidrs",
   ],
   properties: {
+    embeddedHttpsHosts: {
+      type: "array",
+      maxItems: 16,
+      uniqueItems: true,
+      items: { type: "string", minLength: 1, maxLength: 253 },
+    },
     gatewayName: { type: "string", minLength: 1 },
     gatewayNamespace: { type: "string", minLength: 1 },
     envoyNamespace: { type: "string", minLength: 1 },
@@ -107,6 +122,26 @@ export const channelEgressConfigurationSchema: JSONSchema = {
   },
 };
 
+/** Supplemental HTTPS endpoints apply only to embedded Gateways with Teams enabled. */
+export function embeddedTeamsPolicy(
+  providerDestinations: readonly NetworkDestinationRule[],
+  hosts: readonly string[],
+): ChannelEgressPolicy {
+  const extra = [...hosts]
+    .sort()
+    .filter((host) => host !== "*")
+    .map((host) => ({
+      destination: host.startsWith("*.")
+        ? { kind: "dns", name: host.slice(2), match: "subdomains" }
+        : { kind: "dns", name: host, match: "exact" },
+      ports: [443],
+    }));
+  return {
+    destinations: [...providerDestinations, ...normalizeNetworkDestinationRules(extra)],
+    ...(hosts.includes("*") ? { allowPublicHttps: true } : {}),
+  };
+}
+
 export function validateChannelEgressOptions(options: ChannelEgressOptions): void {
   for (const name of [
     options.gatewayName,
@@ -116,6 +151,19 @@ export function validateChannelEgressOptions(options: ChannelEgressOptions): voi
   ]) {
     if (name.length > 63 || !/^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(name)) {
       throw new Error("Channel egress requires exact Kubernetes resource names.");
+    }
+  }
+  if (options.embeddedHttpsHosts !== undefined) {
+    const hosts = options.embeddedHttpsHosts;
+    if (
+      !Array.isArray(hosts) ||
+      hosts.length > 16 ||
+      new Set(hosts).size !== hosts.length ||
+      hosts.some((host) => !isEmbeddedHttpsHost(host))
+    ) {
+      throw new Error(
+        "Embedded HTTPS hosts must be a list of up to sixteen distinct lowercase hostnames, *.domain patterns or *.",
+      );
     }
   }
   const ports = [
@@ -204,6 +252,7 @@ export function requireSupportedChannelDestinations(
 }
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const dnsLabel = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
 const octet = "(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])";
 const canonicalIpv4 = `${octet}(?:\\.${octet}){3}`;
 // WHATWG IPv4 parsing accepts a bare 0x component as zero and an optional trailing dot.
@@ -304,41 +353,50 @@ function destinationPermission(
     .with(
       { kind: "dns" },
       ({ name, match: mode }) =>
-        `${mode === "subdomains" ? "(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+" : ""}${escapeRegex(name)}`,
+        `${mode === "subdomains" ? `(?:${dnsLabel}\\.)+` : ""}${escapeRegex(name)}`,
     )
     .with({ kind: "ip" }, ({ address }) => escapeRegex(address))
     .with({ kind: "cidr" }, ({ cidr }) => ipv4CidrAuthority(cidr))
     .exhaustive();
-  const rules: Record<string, unknown>[] = [
-    { header: { name: ":method", string_match: { exact: "CONNECT" } } },
-    {
-      header: {
-        name: ":authority",
-        string_match: { safe_regex: { regex: `(?i:${host}):(?:${rule.ports.join("|")})` } },
-      },
-    },
-  ];
+  const permission = connectAuthority(host, rule.ports);
   if (upstream && rule.destination.kind !== "dns") {
-    rules.push(
+    permission.and_rules.rules.push(
       upstreamCidr(
         rule.destination.kind === "ip" ? `${rule.destination.address}/32` : rule.destination.cidr,
       ),
     );
   }
+  return permission;
+}
+
+function connectAuthority(host: string, ports: readonly number[]) {
+  const rules: Record<string, unknown>[] = [
+    { header: { name: ":method", string_match: { exact: "CONNECT" } } },
+    {
+      header: {
+        name: ":authority",
+        string_match: { safe_regex: { regex: `(?i:${host}):(?:${ports.join("|")})` } },
+      },
+    },
+  ];
   return { and_rules: { rules } };
 }
 
 export function channelEgressFilterChain(
   generation: string,
-  destinations: readonly NetworkDestinationRule[],
+  policy: ChannelEgressPolicy,
   options: ChannelEgressOptions,
   proxy?: ChannelProxyPolicy,
 ): Record<string, unknown> {
+  const { destinations, allowPublicHttps } = policy;
   requireSupportedChannelDestinations(destinations);
+  const publicHttps = allowPublicHttps
+    ? [connectAuthority(`${dnsLabel}(?:\\.${dnsLabel})*\\.?`, [443])]
+    : [];
   const permissions = (upstream: boolean): Record<string, unknown> => ({
     action: "ALLOW",
     policies:
-      destinations.length === 0
+      destinations.length === 0 && !allowPublicHttps
         ? {}
         : {
             destinations: {
@@ -349,7 +407,10 @@ export function channelEgressFilterChain(
                     rules: [
                       {
                         or_rules: {
-                          rules: destinations.map((rule) => destinationPermission(rule, upstream)),
+                          rules: [
+                            ...destinations.map((rule) => destinationPermission(rule, upstream)),
+                            ...publicHttps,
+                          ],
                         },
                       },
                       ...(upstream

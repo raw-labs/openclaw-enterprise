@@ -48,7 +48,7 @@ function qaRow(
 const fullQa = [
   qaRow("compose", "Codex", "console-secrets,agent-audit,http-chat", false),
   qaRow("kubernetes", "Codex", "console-secrets,http-chat,teams", false),
-  qaRow("kubernetes", "OpenClaw", "http-chat", true),
+  qaRow("kubernetes", "OpenClaw", "http-chat,teams", true),
   qaRow("compose", "OpenClaw", "http-chat", true),
 ];
 

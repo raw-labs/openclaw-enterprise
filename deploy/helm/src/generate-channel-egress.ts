@@ -29,7 +29,7 @@ const options = {
 const document = {
   image: CHANNEL_EGRESS_IMAGE,
   excludedIpv4Cidrs: CHANNEL_EGRESS_EXCLUDED_IPV4_CIDRS,
-  occFilterChain: channelEgressFilterChain(`occ-${generation}`, destinations, options),
+  occFilterChain: channelEgressFilterChain(`occ-${generation}`, { destinations }, options),
   forwardCluster: CHANNEL_EGRESS_FORWARD_CLUSTER,
   inspectionCluster: {
     name: "channel-egress-inspection",

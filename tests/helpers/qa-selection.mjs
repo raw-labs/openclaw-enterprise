@@ -24,7 +24,7 @@ const scenarioPresets = {
   "git-write": ["Codex"],
   "git-push-denied": ["Codex"],
   slack: ["Codex"],
-  teams: ["Codex"],
+  teams: ["OpenClaw", "Codex"],
 };
 
 // One selection contract serves local execution and hosted credential setup.

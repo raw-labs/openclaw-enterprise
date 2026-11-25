@@ -655,8 +655,10 @@ test("manual dev-up workflow prepares the complete lane and aggregates its exact
     [
       { cell: "compose/OpenClaw", scenarios: ["http-chat", "model-ui", "console-secrets"] },
       { cell: "compose/Codex", scenarios: ["http-chat", "console-secrets", "agent-audit"] },
-      { cell: "kubernetes/OpenClaw", scenarios: ["http-chat", "model-ui", "console-secrets"] },
-      // Teams credential refusal needs no Microsoft secret and runs only on Kubernetes.
+      {
+        cell: "kubernetes/OpenClaw",
+        scenarios: ["http-chat", "model-ui", "console-secrets", "teams"],
+      },
       { cell: "kubernetes/Codex", scenarios: ["http-chat", "console-secrets", "teams"] },
     ],
   );

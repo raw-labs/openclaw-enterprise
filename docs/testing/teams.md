@@ -62,10 +62,34 @@ Microsoft network access, file permission or model turn.
 The [managed egress suite](kubernetes.md) covers denied addresses and listener
 isolation through actual Envoy.
 
+Run the credential-free wildcard test with the built runtime image:
+
+```bash
+OCC_TEST_RUNTIME_IMAGE=oce-runtime:teams node --test \
+  --test-name-pattern='embedded Teams HTTPS wildcards' tests/integration/runtime-image-startup.test.ts
+```
+
+It runs the pinned Envoy with restrictive and wildcard listeners in a network
+namespace with no external route. A local TLS origin exercises exact names,
+subdomains, public HTTPS, certificate validation and denials for excluded addresses.
+The test assigns fixture addresses to its own loopback interface.
+
 The Teams directory browser case in `tests/browser/console-agent-channels.test.ts`
 runs in Chromium and WebKit. It checks mouse selection, selected chips and exact
 IDs, pagination, keyboard activation, dismissal, and saving/reopening through the
 Configuration API with a local Microsoft protocol fixture.
+
+For the embedded trial, run the signed-message check with an authorized test
+bot and one embedded Agent in a disposable Installation with the opt-in enabled. Record the Gateway Pod
+UID, revision and listener port. Send a nonce in the bot's personal chat, verify
+the exact model reply, and repeat with a fresh nonce after redeploy. From the
+Gateway, verify that direct public HTTPS, an unlisted CONNECT and the other
+Agent's listener fail. Keep bot credentials and message contents out of artifacts.
+
+For the Connections follow-up, enable the packaged plugin on the same Agent
+and approve its exact Composio endpoint. Run an authorized read-only operation,
+verify a Teams reply, and repeat the read after redeploy without reauthorizing.
+Record the operation outcome and whether the existing grant survived.
 
 Before accepting production support, use a disposable real Teams bot and tenant
 with the [operator setup](../guides/integrations/teams.md). Verify a permitted

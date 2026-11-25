@@ -85,6 +85,7 @@ function computeDriver({
   repositoryCredentials = false,
   modelProvider,
   channelRuntime = false,
+  experimentalEmbeddedChannels,
   channelDrivers,
   routed = true,
   discoverHarnessModels = async () => [],
@@ -110,6 +111,7 @@ function computeDriver({
     sandboxDriver,
     credentialGatewayDriver,
     channelRuntime,
+    experimentalEmbeddedChannels,
     channelDrivers,
     routed,
   });
@@ -493,6 +495,7 @@ export async function createConsoleAppFixture(t, options = {}) {
       computeDriver({
         repositoryCredentials: options.repositoryCredentials === true,
         channelRuntime: options.channelRuntime === true,
+        experimentalEmbeddedChannels: options.experimentalEmbeddedChannels,
         channelDrivers,
         routed: options.routed !== false,
         discoverHarnessModels: options.discoverHarnessModels,

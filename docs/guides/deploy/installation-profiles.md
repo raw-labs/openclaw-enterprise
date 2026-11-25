@@ -367,7 +367,10 @@ the install as ready:
 - For Slack, [managed channel egress](../../reference/drivers/kubernetes-compute/channel-egress.md)
   with EnvoyPatchPolicy support. `channels.managedEgress` defaults to true;
   explicit false disables the fleet. `channels.excludedCidrs` produces matching
-  Helm and Compute settings. Supply
+  Helm and Compute settings. For the
+  [embedded Teams trial](../../reference/drivers/kubernetes-compute/channel-egress.md#embedded-teams-evaluation),
+  set `channels.experimentalEmbeddedChannels` and approve model or plugin hosts
+  separately in `channels.embeddedHttpsHosts`. Supply
   actual Pod, Service and node ranges, including public node addresses. Rendering
   the fleet does not enable channel consumers. Slack Agents require dedicated
   Codex execution; customer upstream proxies are not supported.
