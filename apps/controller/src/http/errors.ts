@@ -665,7 +665,9 @@ const RUNTIME_LOG_FAILURES: Readonly<
 });
 
 type DiscoveryFailureReason =
-  ChannelDirectoryError["reason"] | ModelDiscoveryError["reason"] | PluginDiscoveryError["reason"];
+  | Exclude<ChannelDirectoryError["reason"], "invalid_request">
+  | ModelDiscoveryError["reason"]
+  | PluginDiscoveryError["reason"];
 
 const DISCOVERY_FAILURE_STATUS: Record<DiscoveryFailureReason, number> = {
   credentials_rejected: 400,
@@ -675,7 +677,10 @@ const DISCOVERY_FAILURE_STATUS: Record<DiscoveryFailureReason, number> = {
   unavailable: 503,
 };
 
-const CHANNEL_DIRECTORY_MESSAGES: Record<ChannelDirectoryError["reason"], string> = {
+const CHANNEL_DIRECTORY_MESSAGES: Record<
+  Exclude<ChannelDirectoryError["reason"], "invalid_request">,
+  string
+> = {
   credentials_rejected:
     "The channel provider rejected the selected credential. Check the Secret and retry.",
   missing_scope:
@@ -763,6 +768,14 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
     );
   }
   if (error instanceof ChannelDirectoryError) {
+    if (error.reason === "invalid_request") {
+      return failure(
+        400,
+        "INVALID_REQUEST",
+        "The directory request does not match this channel provider. Check its settings and retry.",
+        error.details,
+      );
+    }
     const mapped = discoveryFailure("CHANNEL_DIRECTORY", error.reason, CHANNEL_DIRECTORY_MESSAGES);
     if (mapped !== undefined) {
       return mapped;
@@ -781,7 +794,7 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
       503,
       "DEPENDENCY_UNAVAILABLE",
       error.reason === "unreachable"
-        ? "OCC could not reach the sign-in service at auth.openai.com. An operator must allow HTTPS egress from the API Pods to it (Helm api.modelDiscoveryCidrs), then try again."
+        ? "OCC could not reach the sign-in service at auth.openai.com. Ask an operator to check API Pod DNS, routing, and HTTPS connectivity, then try again."
         : "Device login could not start. Try again.",
     );
   }
@@ -849,7 +862,6 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
     return failure(400, "INVALID_REQUEST", error.message);
   }
   if (error instanceof RepositoryBindingSelectionError) {
-    // Either repositoryBindings or repositoryAccess can carry the selections, so no detail.
     return failure(400, "INVALID_REQUEST", error.message);
   }
   if (error instanceof SecretBindingValidationError) {
@@ -992,7 +1004,7 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
     return failure(
       400,
       "INVALID_REQUEST",
-      "Static sources accept only the optional provider_preset=openai configuration. Supply one nonempty UTF-8 credential without NUL; its encoded value must fit the Secret storage limit.",
+      "Static sources accept an approved provider_preset configuration. Supply one nonempty UTF-8 credential without NUL; its encoded value must fit the Secret storage limit.",
     );
   }
   if (

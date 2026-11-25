@@ -10,6 +10,7 @@ import type { GatewayNodeEnrollment } from "../../apps/controller/src/gateway/no
 type DriverSelection = NonNullable<ConstructorParameters<typeof KubernetesComputeDriver>[1]>;
 
 interface TestKubernetesComputeDriverOptions {
+  channelDrivers?: DriverSelection["channelDrivers"];
   repositoryCredentials?: boolean | undefined;
   gatewayRuntime?: boolean | undefined;
   channelRuntime?: boolean | undefined;
@@ -22,7 +23,6 @@ interface TestKubernetesComputeDriverOptions {
     KubernetesComputeDriverOptions["servicePrincipalCredentials"] | undefined;
   readonly sandboxDriver?: DriverSelection["sandboxDriver"];
   scratchVolumes?: NonNullable<KubernetesComputeDriverOptions["runtime"]>["scratchVolumes"];
-  readonly credentialGatewayDriver?: DriverSelection["credentialGatewayDriver"];
   readonly protectedDriver?: DriverSelection["protectedDriver"];
 }
 
@@ -47,6 +47,7 @@ export function createTestKubernetesComputeDriver(
     gatewayRuntime = false,
     // An Installation with runtime.channelEgress: isolated channel credentials and a reviewed proxy.
     channelRuntime = false,
+    channelDrivers = slackChannelDrivers,
     // false: runtime storage without gateway routing or node enrollment, which dedicated Agents
     // cannot use (provisioning and deployment admission refuse them).
     routed = true,
@@ -60,7 +61,6 @@ export function createTestKubernetesComputeDriver(
     servicePrincipalCredentials = { mode: "disabled" },
     sandboxDriver,
     scratchVolumes,
-    credentialGatewayDriver,
     protectedDriver,
   }: TestKubernetesComputeDriverOptions = {},
 ): KubernetesComputeDriver {
@@ -127,9 +127,8 @@ export function createTestKubernetesComputeDriver(
     },
     {
       id,
-      channelDrivers: slackChannelDrivers,
+      channelDrivers,
       ...(sandboxDriver === undefined ? {} : { sandboxDriver }),
-      ...(credentialGatewayDriver === undefined ? {} : { credentialGatewayDriver }),
       ...(protectedDriver === undefined ? {} : { protectedDriver }),
       ...(placed ? { nodeEnrollment: unexpectedNodeEnrollment() } : {}),
     },

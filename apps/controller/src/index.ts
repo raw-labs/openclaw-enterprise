@@ -18,6 +18,7 @@ import {
   ModelProviderModelSchema,
   CredentialSourceResponse,
   RegisterTokenServiceSourceBody,
+  RegisterGitHubAppTokenServiceSourceBody,
   UpdateTokenServiceSourceBody,
   PushAgentCredentialsBody,
   PushAgentCredentialsResponse,
@@ -38,7 +39,7 @@ import {
   type AuditEventKind,
   type AuthorizationEvidence,
   type BackendSummary,
-  type ChannelDriver,
+  type ChannelProviderDriver,
   type ComputeDriver,
   type ConfigurationDriver,
   type IAMDriver,
@@ -49,7 +50,6 @@ import {
   type ResourceRef,
   type SandboxDriver,
   type SecretDriver,
-  type SecretReference,
   type CredentialSourceReference,
 } from "@openclaw-enterprise/contracts";
 import {
@@ -208,7 +208,7 @@ export interface ControllerAppOptions {
   readonly iamDriver: IAMDriver;
   readonly computeDriver?: ComputeDriver;
   readonly configurationDriver?: ConfigurationDriver;
-  readonly channelDriver?: ChannelDriver;
+  readonly channelDrivers?: readonly ChannelProviderDriver[];
   readonly secretDriver?: SecretDriver;
   readonly sandboxDriver?: SandboxDriver;
   readonly resolveHarness: HarnessResolver;
@@ -224,7 +224,10 @@ export interface ControllerAppOptions {
   readonly workspaceFilesAccess?: ControllerWorkspaceFilesAccess;
   readonly workspaceFileRequestTimeoutMs?: number;
   readonly discoverMcpAuthorization?: typeof discoverMcpAuthorization;
-  readonly readManagedMcpToolNames?: typeof listManagedMcpToolNames;
+  readonly managedMcpDiscoveryTransport?: Pick<
+    NonNullable<Parameters<typeof listManagedMcpToolNames>[3]>,
+    "resolveHost" | "fetch"
+  >;
   readonly nativeAdmin?: NativeAdminAccessConfig;
   /** Private Agent gateway transport credential, shared by native browser and HTTP chat relays. */
   readonly nativeAdminGatewayApiKey?: () => Promise<string>;
@@ -487,6 +490,7 @@ function operationTarget(
     (operation.operationId === "createCredentialSource" ||
       operation.operationId === "listCredentialSources" ||
       operation.operationId === "listUsableConnectionTemplates" ||
+      operation.operationId === "listEligibleOAuthClients" ||
       operation.operationId === "startNamespaceConnection") &&
     namespaceId
   ) {
@@ -553,6 +557,16 @@ function clientInstallation(
 }
 
 export function createFastifyApp(options: ControllerAppOptions): FastifyInstance {
+  const readManagedMcpToolNames = (
+    endpoint: string,
+    accessToken: string,
+    signal?: AbortSignal,
+    guard?: Parameters<typeof listManagedMcpToolNames>[3],
+  ) =>
+    listManagedMcpToolNames(endpoint, accessToken, signal, {
+      ...options.managedMcpDiscoveryTransport,
+      ...guard,
+    });
   const development = Object.freeze({ ...options.development });
   const browserOrigin = developmentBrowserOrigin(development);
   if (
@@ -734,6 +748,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
   app.addSchema(ModelProviderModelSchema);
   app.addSchema(ModelProviderSchema);
   app.addSchema(RegisterTokenServiceSourceBody);
+  app.addSchema(RegisterGitHubAppTokenServiceSourceBody);
   app.addSchema(UpdateTokenServiceSourceBody);
   app.addSchema(PushAgentCredentialsBody);
   app.addSchema(PushAgentCredentialsResponse);
@@ -746,6 +761,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
           schema.title ??= schema.$id;
           switch (schema.$id) {
             case "RegisterTokenServiceSourceBody":
+            case "RegisterGitHubAppTokenServiceSourceBody":
             case "UpdateTokenServiceSourceBody":
             case "PushAgentCredentialsBody":
             case "PushAgentCredentialsResponse":
@@ -1231,7 +1247,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     ...createDeviceAuthorizationHandlers({
       auditSink: options.auditSink,
       // Start phases belong in the factory input, before audit details are sanitized and frozen.
-      startEvent: ({ context, request }, resource, details) =>
+      transitionEvent: ({ context, request }, resource, details) =>
         event(context.operation, request, resource, "mutation", context, undefined, {
           outcome: "success",
           details,
@@ -1345,6 +1361,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
       operation.operationId !== "stopAgent" &&
       operation.operationId !== "listAgentRevisions" &&
       operation.operationId !== "listAgentAuditEvents" &&
+      operation.operationId !== "listEligibleOAuthClients" &&
       operation.operationId !== "listAgentAutomations" &&
       operation.operationId !== "listAgentAutomationRuns" &&
       operation.operationId !== "deleteAgentAutomation" &&
@@ -1694,9 +1711,8 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
           created.registerDriver(options.secretDriver);
           created.selectDriver("secret", options.secretDriver.id);
         }
-        if (options.channelDriver) {
-          created.registerDriver(options.channelDriver);
-          created.selectDriver("channel", options.channelDriver.id);
+        if (options.channelDrivers) {
+          created.installChannelDrivers(options.channelDrivers);
         }
         if (options.sandboxDriver) {
           created.registerDriver(options.sandboxDriver);
@@ -1758,7 +1774,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
           actorId: context.actorId,
           request,
           reply,
-          mutationEvent: (resourceId) =>
+          mutationEvent: (details) =>
             event(
               operation,
               request,
@@ -1768,9 +1784,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
               undefined,
               {
                 outcome: "success",
-                details: resourceId.startsWith("ccr_")
-                  ? { oauthClientId: resourceId }
-                  : { connectionTemplateId: resourceId },
+                details,
               },
             ),
         });
@@ -1944,9 +1958,6 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
         ...(body?.credentialSource === undefined
           ? {}
           : { credentialSource: body.credentialSource as CredentialSourceReference }),
-        ...(body?.secretRef === undefined
-          ? { accessToken: body?.accessToken as string }
-          : { secretRef: body.secretRef as SecretReference }),
       };
       const result =
         operation.operationId === "discoverAgentPlugins"
@@ -1963,8 +1974,20 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
           : await controller.discoverAgentPluginDetails(
               context.actorId,
               namespaceId,
-              { ...input, pluginId: body?.pluginId as string },
+              {
+                ...input,
+                pluginId: body?.pluginId as string,
+                ...(body?.managedConnection === undefined
+                  ? {}
+                  : {
+                      managedConnection: body.managedConnection as {
+                        slot: string;
+                        sourceId: string;
+                      },
+                    }),
+              },
               pluginDiscoveryRequestSignal(reply),
+              readManagedMcpToolNames,
             );
       reply.header("cache-control", "no-store");
       reply.send({ data: result, meta: { requestId: request.id } });
@@ -2008,7 +2031,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
         params.agentId as string,
         body as DiscoverSavedAgentPluginDetailsBody,
         pluginDiscoveryRequestSignal(reply),
-        options.readManagedMcpToolNames ?? listManagedMcpToolNames,
+        readManagedMcpToolNames,
       );
       reply.header("cache-control", "no-store");
       reply.send({ data: plugin, meta: { requestId: request.id } });
@@ -2018,6 +2041,9 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     if (operation.operationId === "lookupChannelDirectory") {
       const directory = await controller.lookupChannelDirectory(context.actorId, namespaceId, {
         secretId: body?.secretId as string,
+        // Clients written before provider selection omit it; their lookups are Slack lookups.
+        provider: (body?.provider as string | undefined) ?? "slack",
+        ...(body?.context === undefined ? {} : { context: body.context as Record<string, string> }),
         kind: body?.kind as "users" | "channels",
         ...(body?.query === undefined ? {} : { query: body.query as string }),
         ...(body?.cursor === undefined ? {} : { cursor: body.cursor as string }),
@@ -3817,7 +3843,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
         event: "device_authorization.start_failed",
         requestId: request.id,
         route: request.routeOptions.url ?? "unmatched",
-        boundary: "credential_refresh",
+        boundary: "token_service",
         reason: error.reason,
         failure: error.failure,
       });

@@ -67,8 +67,8 @@ interface InjectedFixtureOptions extends Partial<
     | "auditSink"
     | "configurationDriver"
     | "secretDriver"
-    | "channelDriver"
-    | "readManagedMcpToolNames"
+    | "channelDrivers"
+    | "managedMcpDiscoveryTransport"
     | "logger"
   >
 > {
@@ -216,9 +216,8 @@ export async function createInjectedControllerFixture(
                 recordOperations: options.recordOperations ?? false,
                 ...(options.backends === undefined ? {} : { backends: options.backends }),
               });
-              if (options.channelDriver) {
-                controller.registerDriver(options.channelDriver);
-                controller.selectDriver("channel", options.channelDriver.id);
+              if (options.channelDrivers) {
+                controller.installChannelDrivers(options.channelDrivers);
               }
               if (options.backends?.length) {
                 // Association alone must never provision an upstream account or credential.
@@ -254,9 +253,9 @@ export async function createInjectedControllerFixture(
         installationId,
       },
       auth: authFixture.auth,
-      ...(options.readManagedMcpToolNames === undefined
+      ...(options.managedMcpDiscoveryTransport === undefined
         ? {}
-        : { readManagedMcpToolNames: options.readManagedMcpToolNames }),
+        : { managedMcpDiscoveryTransport: options.managedMcpDiscoveryTransport }),
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(options.provisionAuthAccount === undefined
         ? {}

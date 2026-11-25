@@ -13,9 +13,8 @@ import type {
   SecretBindings,
   SecretMetadata,
 } from "../../packages/contracts/src/index.ts";
-import type { PlatformUnitOfWork } from "../../packages/occ/src/ports/platform-unit-of-work.ts";
 
-import { apiErrorResponse } from "../helpers/api-error.mjs";
+import { apiErrorResponse } from "../helpers/api-error-response.ts";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
 import { createTestConfigurationDriver } from "../helpers/configuration-driver.ts";
 import { createHarnessConfiguration } from "../helpers/harness-configuration.mjs";
@@ -463,7 +462,9 @@ test("active Agent can deploy the current saved draft as a new version", async (
 
   const secretBindings: Record<string, SecretBinding> = {};
   for (const key of ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]) {
-    const secret = await createSecret(fixture, namespace.id, key, `test-${key}`);
+    // Deployment checks each token's Slack role, as production does.
+    const value = key === "SLACK_APP_TOKEN" ? "xapp-test-redeploy" : "xoxb-test-redeploy";
+    const secret = await createSecret(fixture, namespace.id, key, value);
     secretBindings[key] = envBinding(secret);
     await fixture.grantAgentSecretOperate(agent, secret.ref);
   }
@@ -811,7 +812,9 @@ async function agentWithoutGrant(
   const secrets = new Map<string, SecretMetadata>();
   const secretBindings: Record<string, SecretBinding> = {};
   for (const key of bindings) {
-    const secret = await createSecret(fixture, namespace.id, `Bound ${key}`, `value-${key}`);
+    // Shaped like the Slack token each standard key holds; deployment checks the role.
+    const value = key === "SLACK_APP_TOKEN" ? `xapp-${key}` : `xoxb-${key}`;
+    const secret = await createSecret(fixture, namespace.id, `Bound ${key}`, value);
     secrets.set(key, secret);
     secretBindings[key] = envBinding(secret);
   }
@@ -1825,31 +1828,13 @@ test("missing Slack credential fields require both Secret references before savi
   await waitForEnabled(page.getByRole("button", { name: "Deploy new version" }));
 });
 
-// A codex Agent bound to an issued account, on a Credentials tab whose Service Account list is
+// A Codex Agent on a Credentials tab whose ServiceAccount list is
 // denied after Console admission. With `heldList`, the list waits for `list.release()`, so a test
 // can change the method while it is in flight. `denied()` checks the refusal and lifts the denial.
 async function deniedIssuedAccountList(t: TestContext, { heldList = false } = {}) {
   const fixture = await createConsoleAppFixture(t);
   await fixture.bootstrap();
   const namespace = await createNamespace(fixture, "Issued-account feedback");
-  // Seed an issued account's stored result; listing and source selection still use the real app.
-  assert.ok(fixture.controller, "Fixture Controller must be bootstrapped");
-  const storedAccount: unknown = await fixture.controller.transact(
-    async (state: PlatformUnitOfWork) => {
-      const created = await state.serviceAccounts.createServiceAccount({
-        id: `sa_${randomUUID()}`,
-        namespaceId: namespace.id,
-        name: "Saved issued account",
-      });
-      return state.serviceAccounts.updateCredential(namespace.id, created.id, {
-        kind: "access_token",
-        secretRef: { name: "issued-account-feedback-fixture", key: "token" },
-      });
-    },
-  );
-  const account = {
-    id: stringField(record(storedAccount, "Issued account").id, "Issued account ID"),
-  };
   const agent = await createAgent(
     fixture,
     namespace.id,
@@ -1857,10 +1842,7 @@ async function deniedIssuedAccountList(t: TestContext, { heldList = false } = {}
     nativeValues("issued-account-feedback", { harnessId: "codex" }),
     {
       executionMode: "dedicated",
-      harnessAuth: {
-        method: "codex_pat",
-        source: { kind: "service_account", namespaceId: namespace.id, id: account.id },
-      },
+      harnessAuth: null,
     },
   );
   const { page } = await newPage(t, fixture);
@@ -1891,10 +1873,10 @@ async function deniedIssuedAccountList(t: TestContext, { heldList = false } = {}
     (response) => new URL(response.url()).pathname === accountsPath,
   );
   await login(page, fixture, detailUrl(fixture, namespace.id, agent.id, "draft", "credentials"));
+  await page.getByLabel("Authentication source", { exact: true }).selectOption("service_account");
   return {
     page,
     requests,
-    account,
     // The held list reaches the server, and is denied, only once released.
     list: held && {
       requested: () => held.requested,
@@ -1918,23 +1900,23 @@ async function deniedIssuedAccountList(t: TestContext, { heldList = false } = {}
 }
 
 test("Credentials shows issued-account denial only while that source is selected", async (t) => {
-  const { page, requests, account, denied, method, issuedAccount, feedback } =
+  const { page, requests, denied, method, issuedAccount, feedback } =
     await deniedIssuedAccountList(t);
   await denied();
   await feedback.waitFor();
-  assert.equal(await issuedAccount.inputValue(), account.id);
+  assert.equal(await issuedAccount.inputValue(), "");
   assert.equal(await issuedAccount.isDisabled(), true);
   // The select cannot be used, but a keyboard reader still reaches it and hears why (finding 2925).
   await expectReachableReason(page, issuedAccount, await feedback.textContent());
 
   // Other methods remain usable without presenting the issued-account permission error.
-  for (const source of ["api_key", "codex_pat", "runtime"]) {
+  for (const source of ["api_key", "runtime"]) {
     await method.selectOption(source);
     assert.equal(await feedback.isVisible(), false);
   }
   await method.selectOption("service_account");
   assert.equal(await feedback.isVisible(), true);
-  assert.equal(await issuedAccount.inputValue(), account.id);
+  assert.equal(await issuedAccount.inputValue(), "");
   assert.equal(await issuedAccount.isDisabled(), true);
   assert.deepEqual(nonAuthWriteRequests(requests), []);
 });
@@ -1946,7 +1928,7 @@ test("an issued-account denial read under ChatGPT OAuth is reachable after switc
   // has no reason to read and is natively disabled.
   assert.ok(list, "The issued-account request must be held");
   await list.requested();
-  await method.selectOption("credential_source");
+  await method.selectOption("device_login");
   list.release();
   await denied();
   await feedback.waitFor({ state: "attached" });
