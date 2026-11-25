@@ -141,6 +141,18 @@ function catalogAtMigrationCount(count, completedCount) {
   if (count === 94 && completedCount > 94) {
     return "preNativeGitDelivery";
   }
+  if (count === 95 && completedCount > 95) {
+    return "preAgentNetworkProxy";
+  }
+  if (count === 96 && completedCount > 96) {
+    return "preAgentNetworkProxyAdmission";
+  }
+  if (count === 97 && completedCount > 97) {
+    return "preAgentRepositoryApiLimits";
+  }
+  if (count === 98 && completedCount > 98) {
+    return "preTokenServiceSourceBackendRef";
+  }
   if (count === completedCount) {
     return "completed";
   }

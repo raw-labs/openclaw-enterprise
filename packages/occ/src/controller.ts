@@ -7,6 +7,11 @@ import {
   type ReconciliationOperation,
 } from "./controller-composition.ts";
 import { type NamespaceLifecycleEvidence } from "./namespace-lifecycle.ts";
+import type {
+  AgentCredentialPushAudit,
+  AgentCredentialPushResult,
+  PushAgentCredentialsInput,
+} from "./agent-credential-retry.ts";
 import { type CreateNamespaceInput } from "./namespace-operations.ts";
 import {
   type CreateConnectionTemplateInput,
@@ -1791,6 +1796,14 @@ export class OpenClawController {
       resolveHarness,
       auditEvent,
     );
+  }
+
+  async pushAgentCredentials(
+    principalId: string,
+    input: PushAgentCredentialsInput,
+    audit: AgentCredentialPushAudit,
+  ): Promise<readonly AgentCredentialPushResult[]> {
+    return this.composition.agentCredentialRetry.pushAgentCredentials(principalId, input, audit);
   }
 
   async withdrawAgentCredentialSource(

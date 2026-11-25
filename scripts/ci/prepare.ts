@@ -1183,12 +1183,15 @@ async function prepareK3dRuntimeImages(
   }
   // Replace the build tag with its imported digest before publishing the next step's inputs.
   env.OCC_TEST_KUBERNETES_RUNTIME_IMAGE = env.OCC_TEST_KUBERNETES_GATEWAY_IMAGE!;
-  // This focused journey deploys only embedded OpenClaw Agents. The full lane
+  // These focused journeys deploy only embedded OpenClaw Agents. The full lane
   // still prepares Codex because its other files exercise dedicated execution.
-  const embeddedOidcOnly =
+  const embeddedOnly =
     state.lane === "gateway-routing" &&
-    state.selectedFile === "tests/integration/oidc-agent-chat-k3d-real.test.ts";
-  if (lanePrepare(state.lane).codexSeccomp && !embeddedOidcOnly) {
+    [
+      "tests/integration/oidc-agent-chat-k3d-real.test.ts",
+      "tests/integration/agent-network-proxy-kubernetes-real.test.ts",
+    ].includes(state.selectedFile ?? "");
+  if (lanePrepare(state.lane).codexSeccomp && !embeddedOnly) {
     progress(state.lane, "Deriving and installing the dedicated Codex seccomp profile.");
     const seccomp = await prepareCodexSeccompProfile({
       cluster,
@@ -1527,6 +1530,7 @@ async function prepareLane({
     case "postgres":
     case "postgres-application":
     case "postgres-auth":
+    case "openshell-token-service":
     case "postgres-platform":
       // Verify the same workspace that the file's migrator will use.
       await execFile(process.env.OPENCLAW_CI_COREPACK_BIN ?? "corepack", [
@@ -2403,7 +2407,10 @@ async function prepareFileWithState({
       env.OCC_TEST_NATIVE_IAM_BARRIER_DATABASE = database.name;
       env.OCC_TEST_NATIVE_IAM_BARRIER_MIGRATION_DATABASE_URL = database.migrationUrl;
     }
-    if (relativeFile === "tests/integration/occ-metrics.test.ts") {
+    if (
+      relativeFile === "tests/integration/occ-metrics.test.ts" ||
+      relativeFile === "tests/integration/postgres-metrics-listener-capacity.test.ts"
+    ) {
       env.OCC_METRICS_TEST_MIGRATION_DATABASE_URL = database.migrationUrl;
     }
     if (relativeFile === "tests/integration/postgres-api-request-audit.test.ts") {

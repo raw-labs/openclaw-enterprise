@@ -666,6 +666,34 @@
       "when": 1787000000095,
       "tag": "0095_native_git_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1787000000096,
+      "tag": "0096_agent_network_proxy",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1787000000097,
+      "tag": "0097_agent_network_proxy_admission",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1787000000098,
+      "tag": "0098_agent_repository_api_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1787000000099,
+      "tag": "0099_token_service_source_backend_ref",
+      "breakpoints": true
     }
   ]
 }
