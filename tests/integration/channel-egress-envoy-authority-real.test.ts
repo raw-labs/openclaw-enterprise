@@ -86,15 +86,20 @@ test(
     // The upstream is a controlled loopback fixture. No asserted final destination is contacted.
     const chain = channelEgressFilterChain(
       "authority-proof",
-      { destinations: [
-        { destination: { kind: "cidr", cidr: "8.8.8.128/25" }, ports: [443] },
-        { destination: { kind: "cidr", cidr: "10.0.0.0/8" }, ports: [443] },
-        { destination: { kind: "cidr", cidr: "11.0.0.0/8" }, ports: [443] },
-        { destination: { kind: "ip", address: "169.254.169.254" }, ports: [80] },
-        { destination: { kind: "dns", name: "0xa9fea9fe", match: "exact" }, ports: [80] },
-        { destination: { kind: "dns", name: "0xa9.0xfe.0xa9.0376", match: "exact" }, ports: [80] },
-        { destination: { kind: "dns", name: "0xa.0x.0x.1", match: "exact" }, ports: [443] },
-      ] },
+      {
+        destinations: [
+          { destination: { kind: "cidr", cidr: "8.8.8.128/25" }, ports: [443] },
+          { destination: { kind: "cidr", cidr: "10.0.0.0/8" }, ports: [443] },
+          { destination: { kind: "cidr", cidr: "11.0.0.0/8" }, ports: [443] },
+          { destination: { kind: "ip", address: "169.254.169.254" }, ports: [80] },
+          { destination: { kind: "dns", name: "0xa9fea9fe", match: "exact" }, ports: [80] },
+          {
+            destination: { kind: "dns", name: "0xa9.0xfe.0xa9.0376", match: "exact" },
+            ports: [80],
+          },
+          { destination: { kind: "dns", name: "0xa.0x.0x.1", match: "exact" }, ports: [443] },
+        ],
+      },
       options,
       { clusterName: "selected-proxy", addresses: ["127.0.0.1"], port: address.port },
     );

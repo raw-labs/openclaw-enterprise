@@ -186,8 +186,8 @@ Separate proposals extend POST policy `/validate` beyond ordinary additions to p
 
 | Entity                                                                                     | Change                                       | Persistence semantics                                                                                 |
 | ------------------------------------------------------------------------------------------ | -------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| [`occ.sandbox_policies.document`](../../migrations/0087_repository_network_policy.sql)     | Extend the JSON validator and version guard. | Preserve absence, `[]` and nonempty lists across unrelated edits.                                     |
-| [`occ.agent_revisions.admitted_spec`](../../migrations/0087_repository_network_policy.sql) | Snapshot the list in `sandbox_policy`.       | Immutable per revision. Require a [compatible Worker](../../migrations/0090_native_git_delivery.sql). |
+| [`occ.sandbox_policies.document`](../../migrations/0092_repository_network_policy.sql)     | Extend the JSON validator and version guard. | Preserve absence, `[]` and nonempty lists across unrelated edits.                                     |
+| [`occ.agent_revisions.admitted_spec`](../../migrations/0092_repository_network_policy.sql) | Snapshot the list in `sandbox_policy`.       | Immutable per revision. Require a [compatible Worker](../../migrations/0095_native_git_delivery.sql). |
 
 ### Driver contracts
 

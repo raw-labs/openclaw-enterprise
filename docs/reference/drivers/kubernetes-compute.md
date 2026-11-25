@@ -90,7 +90,7 @@ the worker stops predecessors before starting the new Harness. This permits RWO
 workspace storage with deployment downtime; restore previous
 configuration through a new version instead of restarting its old snapshot.
 
-Channels use dedicated execution by default. An operator can enable the Installation-wide
+Channels use dedicated execution by default. Enable the
 [embedded Teams trial](kubernetes-compute/channel-egress.md#embedded-teams-evaluation). Teams requires
 `gatewayRouting.channels.hostname` and the operator's **channels** listener
 ([setup](../../guides/integrations/teams.md)). Unsupported Harness/mode combinations

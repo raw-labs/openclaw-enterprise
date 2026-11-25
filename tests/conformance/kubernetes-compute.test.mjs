@@ -3473,7 +3473,7 @@ test("gateway browser routes preserve delegated authority while machine and node
       headers.set.filter(({ name }) => headers.remove.includes(name)),
       [],
     );
-    // Client credential and identity claims never reach the tenant Gateway through chat.
+    // Client credential and identity claims never reach the tenant Gateway through the delegated browser route.
     for (const name of [
       "x-api-key",
       "tailscale-user-login",

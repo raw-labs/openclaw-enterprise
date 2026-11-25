@@ -1450,7 +1450,14 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
   closed(
     channels,
     "channels",
-    ["managedEgress", "excludedCidrs", "experimentalEmbeddedChannels", "embeddedHttpsHosts", "upstreamProxies", "proxyTrust"],
+    [
+      "managedEgress",
+      "excludedCidrs",
+      "experimentalEmbeddedChannels",
+      "embeddedHttpsHosts",
+      "upstreamProxies",
+      "proxyTrust",
+    ],
     diagnostics,
   );
   closed(codex, "codex", ["managedServiceAccounts", "modelDiscoveryCidrs"], diagnostics);

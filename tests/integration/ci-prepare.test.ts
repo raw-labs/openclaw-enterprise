@@ -2363,9 +2363,6 @@ if (args[0] === "pull") {
               NODE_BASE_IMAGE: nodeBaseImage,
               ...(lane === "slack"
                 ? {
-                    OCC_TEST_TEAMS_APP_ID: "synthetic-app-id",
-                    OCC_TEST_TEAMS_TENANT_ID: "synthetic-tenant-id",
-                    OCC_TEST_TEAMS_APP_PASSWORD_FILE: "/synthetic/teams-password",
                     OCC_TEST_SLACK_CHANNEL_ID: "C0123456789",
                     OCC_TEST_SLACK_SENDER_BOT_TOKEN: "xoxb-sender",
                     SLACK_APP_TOKEN: "xapp-test",
@@ -2570,9 +2567,6 @@ if (args[0] === "pull") {
           NODE_BASE_IMAGE: nodeBaseImage,
           ...k3dImages,
           OCC_TEST_KUBERNETES_GATEWAY_IMAGE: mutableImage,
-          OCC_TEST_TEAMS_APP_ID: "synthetic-app-id",
-          OCC_TEST_TEAMS_TENANT_ID: "synthetic-tenant-id",
-          OCC_TEST_TEAMS_APP_PASSWORD_FILE: "/synthetic/teams-password",
           OCC_TEST_SLACK_CHANNEL_ID: "C0123456789",
           OCC_TEST_SLACK_SENDER_BOT_TOKEN: "xoxb-sender",
           SLACK_APP_TOKEN: "xapp-test",

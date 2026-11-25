@@ -15,15 +15,7 @@ less-privileged application role. Missing URLs skip tests. Check results.
 
 ## Version-worker tests
 
-The application lane prepares isolated databases and removes its resources on
-exit. Its PostgreSQL server is disposable, so preparation turns off `fsync`,
-`synchronous_commit` and `full_page_writes` there; keep no data in it. Each run
-needs its own state file. Preparation stages a container-readable copy of the public
-bootstrap SQL, so restrictive checkout permissions do not need changing. Cleanup
-removes this copy with the disposable server; unexpected files in its directory
-are preserved and reported as a cleanup failure. If directory or SQL creation was
-not durably confirmed, cleanup preserves any unconfirmed contents and state.
-Inspect their ownership before manual removal; a competing process may own the directory.
+Each run uses its own state file and disposable PostgreSQL server with `fsync`, `synchronous_commit` and `full_page_writes` disabled. Preparation stages container-readable public bootstrap SQL. Cleanup removes confirmed resources and reports unexpected files. If creation was uncertain, cleanup preserves the contents and state. Check ownership before removing anything manually.
 
 Install dependencies in the same checkout and with the same pnpm settings used
 to run preparation. This includes the `CI` environment setting. Before creating
@@ -172,26 +164,9 @@ version-worker tests and therefore require prepared ownership.
 
 ## Preset preservation across controller upgrades
 
-Run `tests/integration/postgres-preset-upgrade.test.ts` with an empty, migrated
-application-role `OCC_TEST_DATABASE_URL` or `postgres-platform` CI.
-Authenticated HTTP saves edited/custom Presets and Configuration. Restarts with
-stock inputs and disabled seeding must preserve IDs, values and generations;
-new Namespaces receive no stock Presets when seeding is disabled.
+Run `node --test tests/integration/postgres-preset-upgrade.test.ts` against a disposable migrated `OCC_TEST_DATABASE_URL`. The test checks saved Presets and Configuration through authenticated controller restarts with seeding enabled and disabled.
 
-CI proves current-version restarts. Cross-revision proof requires a prepared
-before checkout and a disposable database migrated by that revision. Set `OCC_TEST_PRESET_BEFORE_ROOT` to its absolute path and
-`OCC_TEST_PRESET_MIGRATION_DATABASE_URL` to that database's separate migrator-role
-URL. Run from the candidate:
-
-```sh
-node --test tests/integration/postgres-preset-upgrade.test.ts
-```
-
-The test stops the before controller, migrates, and starts the candidate twice.
-Scope credentials to this invocation; remove its owned database/server. Missing application
-configuration skips; missing cross-revision migrator fails.
-Compute/Secret Drivers are fixtures: this proves saved-state preservation,
-not images, Kubernetes or model execution.
+For a cross-revision upgrade, set `OCC_TEST_PRESET_BEFORE_ROOT` to the prepared prior checkout and `OCC_TEST_PRESET_MIGRATION_DATABASE_URL` to the separate migrator URL for its database. The default CI case uses the current controller throughout.
 
 ## OIDC human sign-in
 

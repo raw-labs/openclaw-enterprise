@@ -125,9 +125,6 @@ async function assertReadOnlyBuildKitCache(t: TestContext, lane: string, env: No
 export function registerBuildKitCases() {
   test("slack prepares checkout images with read-only BuildKit caches", (t) =>
     assertReadOnlyBuildKitCache(t, "slack", {
-      OCC_TEST_TEAMS_APP_ID: "synthetic-app-id",
-      OCC_TEST_TEAMS_TENANT_ID: "synthetic-tenant-id",
-      OCC_TEST_TEAMS_APP_PASSWORD_FILE: "/synthetic/teams-password",
       OCC_TEST_SLACK_CHANNEL_ID: "synthetic-channel",
       OCC_TEST_SLACK_SENDER_BOT_TOKEN: "synthetic-sender",
       SLACK_APP_TOKEN: "synthetic-app",

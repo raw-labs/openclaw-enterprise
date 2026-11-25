@@ -15502,12 +15502,8 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
           "forwarded",
           "x-forwarded-for",
           ...(access === "browser" ? [] : [BROWSER_DELEGATION_HEADER]),
-          // Chat and channel callbacks, like node routes, forward no client credential or
-          // Tailscale identity claim to the tenant Gateway.
-          ...(access === "node" ||
-          access === "node-transfer" ||
-          access === "chat" ||
-          access === "channel"
+          // Only the operator route accepts caller API-key and Tailscale identity headers.
+          ...(access !== "operator"
             ? [
                 "x-api-key",
                 "tailscale-user-login",
@@ -17274,36 +17270,6 @@ chmodSync(${JSON.stringify(nodeStatePath)}, 0o700);`;
         : { destinations: requirements.destinations };
     requireSupportedChannelDestinations(policy.destinations);
     return { ...requirements, ...policy };
-  }
-
-  private requireTeamsCallback(
-    configuration: Readonly<OpenClawConfigurationDocument>,
-    providers: readonly string[],
-    createError: typeof callerSettingError | typeof preparationSettingError,
-  ): void {
-    if (!providers.includes("msteams")) {
-      return;
-    }
-    const teams = asRecord(asRecord(configuration.channels)?.msteams);
-    const webhook = asRecord(teams?.webhook);
-    if (
-      teams?.webhook !== undefined &&
-      (webhook === undefined || (webhook.path !== undefined && webhook.path !== "/api/messages"))
-    ) {
-      throw createError("channels.msteams.webhook.path", "must be /api/messages");
-    }
-    if (teams?.legacyWebhook !== undefined && teams.legacyWebhook !== false) {
-      throw createError("channels.msteams.legacyWebhook", "must be false");
-    }
-    if (teams?.cloud !== undefined && teams.cloud !== "Public") {
-      throw createError("channels.msteams.cloud", "must be Public");
-    }
-    if (this.options.gatewayRouting?.channels === undefined) {
-      throw createError(
-        "channels.msteams",
-        "requires a dedicated public channel callback listener",
-      );
-    }
   }
 
   private requireTeamsCallback(
