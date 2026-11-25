@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
-updated: "2026-11-20"
-last_updated_session: "authoring-run/54a714d8-60c2-4824-b3a2-2fbd2b090ead"
+updated: 2026-11-24
+last_updated_session: authoring-run/81560d43-8d6a-40f6-8c1a-fa669ed36e0d
 ---
 
 # Agent Channel Directory Lookup Flow
@@ -23,7 +23,8 @@ actionable error.
 - Assumptions: the caller can create an Agent or update the exact Agent or
   Configuration, and can operate the selected same-Namespace Secret.
 - Source: `apps/controller/src/console/agents/slack-directory.mts:createSlackDirectoryField`,
-  `packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`,
+  `packages/occ/src/setup-discovery.ts:SetupDiscovery.lookupChannelDirectory`,
+  `packages/occ/src/driver-registry.ts:DriverRegistry.channelDriver`,
   and `apps/controller/src/drivers/channel/index.ts:createChannelProviders`.
 
 ## Flow
@@ -32,15 +33,18 @@ actionable error.
 graph TD
   A["Operator selects bot Secret and searches"] --> B["OCC checks edit target and exact Secret operate"]
   B -->|denied or missing| X["Return safe lookup error"]
-  B -->|authorized| P{"Driver installed for the named provider?"}
+  B -->|authorized| P{"Driver installed for the provider?"}
   P -->|no| U["Return 501; Console offers exact-ID entry"]
-  P -->|yes| C["SecretDriver reads current value"]
+  P -->|yes| K{"Context matches the Driver's schema?"}
+  K -->|no| I["Return 400 before the Secret read"]
+  K -->|yes| C["SecretDriver reads current value"]
   C --> D["OCC rechecks target, Secret grant, and backend identity"]
   D -->|changed| X
-  D -->|current| R{"Provider"}
-  R -->|slack| E["Slack Driver reads workspace and bounded directory pages"]
-  R -->|msteams| T["Teams Driver checks context, exchanges password for Graph token"]
-  T -->|invalid context or cursor| I["Return 400 before provider I/O"]
+  D -->|current| M{"Managed OCC listener configured?"}
+  M -->|no| X
+  M -->|yes| H["Tunnel through the reserved Envoy listener"]
+  H -->|slack| E["Slack Driver reads workspace and directory pages"]
+  H -->|msteams| T["Teams Driver exchanges password for Graph token"]
   T --> V["Resolve native Team ID; read selected Team channels or members"]
   V -->|provider error| X
   V --> F
@@ -53,38 +57,48 @@ graph TD
 
 ### 1. Authorize the selected Secret
 
-`packages/occ/src/index.ts:OpenClawController.channelDirectorySecret`
+`packages/occ/src/setup-discovery.ts:SetupDiscovery.channelDirectorySecret`
 
-The request names a same-Namespace Secret and optionally an Agent or
-Configuration being edited. OCC checks the matching create or exact update
+The request names a same-Namespace Secret, the channel `provider`, optional
+provider-owned `context`, and optionally an Agent or Configuration being
+edited. The API treats a request without `provider` as a Slack lookup, so
+clients written before provider selection keep working. OCC checks the matching create or exact update
 permission and Secret `operate`, then reads the resource and Secret from
 platform state. A missing or foreign target is rejected before provider I/O.
 
 ### 2. Read and use the current value
 
-`packages/occ/src/index.ts:OpenClawController.lookupChannelDirectory`
+`packages/occ/src/setup-discovery.ts:SetupDiscovery.lookupChannelDirectory`
 
 `apps/controller/src/composition/installation-config.ts` builds one Driver for
-each `drivers.channel` selection with `createChannelProviders`, configures each
-with the managed fleet's OCC listener, and gives the same provider set to OCC
-(`installChannelDrivers`) and Kubernetes Compute. Production requests fail if that
-listener is absent or unavailable. The Helm policy permits directory OAuth and
-Graph targets on port 443 alongside the Slack targets. The OCC port is
-separate from the Gateway port and does not include Teams storage or bot hosts.
+each `drivers.channel` selection with `createChannelProviders`, binds it to the
+reserved OCC channel-egress listener from the validated Installation
+configuration, and gives the same provider set to OCC (`installChannelDrivers`)
+and Kubernetes Compute. `DriverRegistry.channelDriver` selects the Driver for
+the request's provider; a provider without one returns 501. Missing routing prevents provider
+I/O; it never enables direct fallback. Directory failures are returned as
+unavailable. Credential validation reports a configuration conflict when the
+managed route is absent. Helm admits only the authorized API Pods to this
+listener and permits Teams directory OAuth and Graph targets on port 443
+alongside the Slack targets; it does not include Teams storage or bot hosts.
+Agent and Harness grants remain separate. See
+[channel egress](channel-egress.md) for policy enforcement and address checks.
 
 The selected SecretDriver invokes `withValue` and verifies backend ownership.
 OCC rechecks grants and Secret backend identity after the read. It passes the
-token only in process to the ChannelDriver. The bundled Slack implementation
+token and the validated `context` only in process to the ChannelDriver. Before
+the Secret read, OCC validates `context` against the Driver's
+`directoryContextSchema()` and returns `400 INVALID_REQUEST` with field paths on
+a mismatch. The bundled Slack implementation declares an empty schema, so any
+context is refused before a provider call. It
 requires a bot identity from `auth.test` and pages through `users.list` or
 `conversations.list`. Exact-ID searches and saved IDs use `users.info` or `conversations.info`.
 The response contains at most 100 candidates and pagination state, never the token.
 An incomplete page cannot establish that a name is absent or unique.
 
-`packages/occ/src/index.ts:OpenClawController.channelDriver` selects the Driver
-installed for the request's `provider`; OCC does not interpret `context`.
 `apps/controller/src/drivers/channel/teams.ts:TeamsChannelDriver.lookupDirectory`
-requires context with exactly the nonsecret app, tenant and Entra group UUIDs,
-and the Slack Driver refuses any context, both before provider I/O. The Teams adapter exchanges the app
+declares the nonsecret app, tenant and Entra group UUIDs as its required lookup
+context, which OCC validates before the Secret read. The Teams adapter exchanges the app
 password for a Graph token, resolves the native Team ID with `primaryChannel`,
 and reads only that Team's standard channels or member roster. Application RSC
 consent is checked by Microsoft, independently of OCC authorization. The Driver
@@ -164,7 +178,15 @@ adds its exact ID to the editable ID list; names and search text are not saved.
 Result buttons and Load more retain search focus on pointer-down, so Safari does
 not hide them on blur before their click handlers run. Keyboard activation,
 Escape and focus leaving the field retain their existing behavior.
-The existing channel transaction persists separate channel and personal rules.
+The existing channel transaction persists channel and personal rules. Native
+Teams applies `allowFrom` to channel senders while `groupAllowFrom` is absent,
+so the editor shows that inherited list and follows personal-list edits. Channel
+access stays inherited until the user changes channel people or the access
+choice, and while it equals the personal list; save then leaves
+`groupAllowFrom` unset. A draft restore replays field values without bubbling
+events, so it is not a user change. Choosing the Open personal-message policy
+does not open inherited channels: channel access keeps its people and becomes a
+separate setting, which the editor states.
 It also saves the optional SharePoint site ID in native
 `channels.msteams.sharePointSiteId`; clearing the field removes that key. The
 editor describes outgoing storage and native organization-scoped channel links.
@@ -206,6 +228,10 @@ Manual IDs remain available after missing-consent or provider errors.
 [keep this for the user to add notes. do not change between edits]
 
 ## Changelog
+
+- 2026-11-24 10:00: Send each lookup to its provider's installed Channel Driver; an omitted provider is Slack. (RFC-20261120-channel-provider-drivers - b9517748410b346b10a97fea7e20d81916ae9c1c)
+
+- 2026-11-20 16:36: Point discovery to the setup catalog module. (authoring-run/81560d43-8d6a-40f6-8c1a-fa669ed36e0d - d7da2d9c7716128fb51147656fec44d22b896cc2)
 
 - 2026-11-20 00:40: Document directory provider selection and the managed OCC egress listener. (authoring-run/54a714d8-60c2-4824-b3a2-2fbd2b090ead - e88dc5883143e5fe39cffb0199ae5c0bac147cb7)
 

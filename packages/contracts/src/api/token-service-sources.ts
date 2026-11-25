@@ -3,82 +3,69 @@ import { Type } from "typebox";
 import {
   ConnectionTemplateId,
   CredentialSourceConfig,
-  CredentialSourceId,
-  CredentialSourceReference,
-  CredentialSourceType,
   Name,
-  NamespaceId,
+  RepositoryBindingRequestSchema,
   SecretValue,
 } from "./common.ts";
-import { CredentialSourceSchema } from "./resources.ts";
+import { CredentialClientId } from "./connection-templates.ts";
 
-const material = Type.Record(Type.String(), SecretValue, {
-  minProperties: 1,
-  maxProperties: 16,
-  writeOnly: true,
-  description: "Credential values keyed by the secret fields declared by the source type.",
-});
+const material = { ...SecretValue, writeOnly: true, description: "Opaque credential value." };
+
+const managedConfig = {
+  ...CredentialSourceConfig,
+  description:
+    "Non-secret configuration. provider_preset selects an approved model operation: openai or codex-pat.",
+};
 
 export const RegisterTokenServiceSourceBody = Type.Object(
   {
     name: Name,
-    type: CredentialSourceType,
+    type: Type.Literal("static"),
+    config: Type.Optional(managedConfig),
     connectionTemplateId: Type.Optional(ConnectionTemplateId),
-    config: Type.Optional(CredentialSourceConfig),
-    secret: Type.Optional(material),
+    secret: material,
   },
   {
     $id: "RegisterTokenServiceSourceBody",
     additionalProperties: false,
     description:
-      "Proposed registration body for a Namespace credential source. OCC allocates the identity and selects the TokenService Driver. An attached Connection Template supplies its current settings. Supply the secret fields required by the source type.",
+      "Register a managed static Source. Optionally supply connectionTemplateId. OCC validates the approved static Template before TokenService takes custody.",
   },
 );
 
-export const UpdateTokenServiceSourceBody = Type.Union(
-  [
-    Type.Object(
-      { config: CredentialSourceConfig, secret: Type.Optional(material) },
-      { additionalProperties: false },
-    ),
-    Type.Object(
-      { config: Type.Optional(CredentialSourceConfig), secret: material },
-      { additionalProperties: false },
-    ),
-  ],
+export const RegisterGitHubAppTokenServiceSourceBody = Type.Object(
   {
-    $id: "UpdateTokenServiceSourceBody",
-    description:
-      "Proposed update to credential material, mutable lifecycle settings, or both. Omitted fields retain their values.",
-  },
-);
-
-export const TokenServiceSourceMetadata = Type.Object(
-  {
-    id: CredentialSourceId,
-    namespaceId: NamespaceId,
-    ref: CredentialSourceReference,
     name: Name,
-    type: CredentialSourceType,
-    config: CredentialSourceConfig,
-    connectionTemplateId: Type.Optional(ConnectionTemplateId),
-    state: CredentialSourceSchema.properties.state,
-    version: Type.Optional(
-      Type.String({
-        minLength: 1,
-        description: "Opaque usable credential version when recorded by the owner.",
-      }),
-    ),
-    status: CredentialSourceSchema.properties.status,
+    type: Type.Literal("github-app-installation"),
+    clientId: {
+      ...CredentialClientId,
+      description: "OCC registration ID of the GitHub App client.",
+    },
+    repositoryRefs: Type.Array(RepositoryBindingRequestSchema.properties.repositoryRef, {
+      minItems: 1,
+      maxItems: 16,
+      uniqueItems: true,
+      description: "Repository references approved for this Namespace in the GitHub registry.",
+    }),
   },
   {
-    $id: "TokenServiceSourceMetadata",
+    $id: "RegisterGitHubAppTokenServiceSourceBody",
     additionalProperties: false,
     description:
-      "Proposed public metadata for a Namespace source. OCC keeps the TokenService instance and private registration reference internally. Metadata reads do not resolve a usable credential.",
+      "Register a GitHub App installation Source. Select a registered App client. The Installation's GitHub registry verifies the App and supplies the installation and permissions for the selected repositories. Agent access requires a separate grant.",
+  },
+);
+
+export const UpdateTokenServiceSourceBody = Type.Object(
+  { config: Type.Optional(managedConfig), secret: Type.Optional(material) },
+  {
+    $id: "UpdateTokenServiceSourceBody",
+    minProperties: 1,
+    additionalProperties: false,
+    description:
+      "Update a managed static Source through its persisted owner. Supply at least one of config or secret. Omitted fields retain their values. An effective provider_preset change or removal combined with replacement credential material returns 409 RESOURCE_CONFLICT. Repeating the current preset with replacement material is allowed.",
   },
 );
 
 export type RegisterTokenServiceSourceBody = Type.Static<typeof RegisterTokenServiceSourceBody>;
 export type UpdateTokenServiceSourceBody = Type.Static<typeof UpdateTokenServiceSourceBody>;
-export type TokenServiceSourceMetadata = Type.Static<typeof TokenServiceSourceMetadata>;

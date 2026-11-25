@@ -5,8 +5,8 @@
   "fileConcurrency": 8,
   "parallelFiles": [
     "tests/conformance/strands-box-transport.test.ts",
-    "tests/integration/prepared-refresh-enrollment.test.ts",
     "tests/integration/staging-upgrade-return.test.ts",
+    "tests/integration/controller-endpoint-observation.test.ts",
     "tests/integration/controlled-tls-origin.test.ts",
     "tests/integration/ci-prepare-k3d.test.ts",
     "tests/integration/ci-prepare-image-cache.test.ts",
@@ -23,13 +23,14 @@
     "tests/conformance/module-policy.test.ts",
     "tests/integration/native-admin-access.test.mjs",
     "tests/integration/repository-credentials-transport-bounds.test.ts",
+    "tests/integration/release-oce.test.ts",
     "tests/integration/cli-release.test.ts",
     "tests/integration/container-resume.test.ts",
     "tests/integration/metrics-monitoring-readiness.test.mjs",
     "tests/integration/repository-credentials-control.test.ts",
     "tests/integration/repository-credential-operator-recovery.test.ts",
     "tests/integration/repository-receipt-observation.test.ts",
-    "tests/integration/codex-plugin-startup-reads.test.mjs",
+    "tests/integration/codex-plugin-startup-reads.test.ts",
     "tests/integration/codex-plugin-preparation.test.ts",
     "tests/integration/container-release.test.ts",
     "tests/integration/password-sign-in-audit.test.ts",
@@ -197,14 +198,6 @@
       ]
     },
     {
-      "path": "tests/integration/prepared-refresh-enrollment.test.ts",
-      "expectedTests": [
-        "prepared refresh enrollment refuses before effects (legacy Refresh installed)",
-        "prepared refresh enrollment refuses before effects (legacy Refresh missing)",
-        "non-refresh prepared enrollment uses only its issuer with legacy Refresh installed"
-      ]
-    },
-    {
       "path": "tests/integration/staging-upgrade-return.test.ts",
       "expectedTests": [
         "return rehearsal rejects different manifest references that contain the same controller",
@@ -221,6 +214,9 @@
         "interrupted commands close local pipes without killing a separate-session holder",
         "fixture command reports independently signalled child as unsettled"
       ]
+    },
+    {
+      "path": "tests/integration/controller-endpoint-observation.test.ts"
     },
     {
       "path": "tests/integration/controlled-tls-origin.test.ts"
@@ -512,6 +508,9 @@
       "path": "tests/integration/container-release.test.ts"
     },
     {
+      "path": "tests/integration/release-oce.test.ts"
+    },
+    {
       "path": "tests/integration/cli-release.test.ts",
       "expectedTests": [
         "CLI release builds four installable platform binaries and rejects changed assets"
@@ -619,7 +618,6 @@
         "Agent save refuses initial workspace files in a Sandbox with a 409 that names the Sandbox",
         "Agent create admits private workspace files through the OpenShell initializer contract",
         "Agent admission refuses projected identity only for OpenShell-owned Harnesses",
-        "Credential-source deployment refuses OpenShell projected identity before creating a revision",
         "Agent create refuses dedicated OpenClaw on OpenShell settings its workspace preparation refuses",
         "Agent save refuses a dedicated Harness the Kubernetes Compute settings cannot place",
         "Create Agent's preflight refuses a planned Harness authentication that Agent save refuses"
@@ -775,7 +773,7 @@
       "path": "tests/integration/repository-runtime-materialization.test.ts"
     },
     {
-      "path": "tests/integration/codex-plugin-startup-reads.test.mjs"
+      "path": "tests/integration/codex-plugin-startup-reads.test.ts"
     },
     {
       "path": "tests/integration/codex-plugin-preparation.test.ts",
@@ -902,6 +900,13 @@
       "path": "tests/integration/openshell-full-integration.test.ts"
     },
     {
+      "path": "tests/integration/openshell-stock-destination-ca.test.ts",
+      "expectedTests": [
+        "OpenShell destination CA fixture accepts a single CA and refuses a substituted ConfigMap",
+        "OpenShell stock Supervisor fixture refuses a substituted imported image"
+      ]
+    },
+    {
       "path": "tests/integration/oidc-provider.test.ts"
     },
     {
@@ -950,6 +955,7 @@
       "path": "tests/integration/workspace-gateway-host-route.test.ts",
       "expectedTests": [
         "Linux Gateway routes reuse distinct bound ports and preserve the HTTPS Service target",
+        "Gateway TLS readiness fails when its forwarder exits after loopback readiness",
         "Gateway Service mapping failure retains forwarder cleanup and reports shutdown failure",
         "Gateway relay rejects a malformed HTTPS Service target before starting a forwarder"
       ]

@@ -21,8 +21,9 @@ import {
   teamsMemberId,
 } from "../helpers/teams-directory.ts";
 
-import { apiErrorResponse, proxyErrorResponse } from "../helpers/api-error.mjs";
+import { apiErrorResponse, proxyErrorResponse } from "../helpers/api-error-response.ts";
 import { createConsoleAppFixture } from "../helpers/console-app.mjs";
+import { responseTo } from "./console-action-helpers.ts";
 import {
   accessBindingPostRequests,
   accessibleDescription,
@@ -33,6 +34,7 @@ import {
   expectNoText,
   fileBrowser,
   grantInstallationAdministration,
+  hasFocus,
   holdRequests,
   login,
   MEMBER_WRITE,
@@ -42,6 +44,7 @@ import {
   nonAuthWriteRequests,
   pathRequests,
   revealNativeConfiguration,
+  revokeAdministratorGrant,
   secretOptionLabel,
   selectSecret,
   setSlackSelection,
@@ -905,6 +908,261 @@ describe("Agent channels", { concurrency: 3 }, () => {
     assert.equal(pageText.includes(slackBotSecretValue), false);
   });
 
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    test(`A closed Channels draft distinguishes unavailable and denied access checks (${viewport.width} px)`, async (t) => {
+      const { fixture, namespace } = await readyNamespace(t, "Channel access check");
+      const { agent } = await createSlackAgent(fixture, namespace, {
+        name: "Channel access Agent",
+        slug: "channel-access",
+        secretBindings: await slackTokenBindings(fixture, namespace, "Channel access"),
+      });
+      const { page } = await newPage(t, fixture, { browser, context: { viewport } });
+      await trackSettledFetches(page);
+      await openDraft(page, fixture, agent, "Channels");
+      const edit = page.getByRole("button", { name: "Edit Slack", exact: true });
+      const tab = page.getByRole("tab", { name: "Channels", exact: true });
+      const panel = page.getByRole("tabpanel", { name: "Channels", exact: true });
+      const draftEntry = page.locator("#revision-selector option[value=draft]");
+      await edit.waitFor();
+      await waitForIdleFetches(page);
+      const agentPath = `/namespaces/${namespace.id}/agents/${agent.id}`;
+      const agentUrl = fixture.origin + agentPath;
+      const permissionsPath = `${agentPath}/permissions`;
+      const permissionsUrl = fixture.origin + permissionsPath;
+      const requests = apiRequests(page, fixture.origin);
+      const unavailableResponse = apiErrorResponse(
+        503,
+        "INTERNAL_ERROR",
+        "Permission read unavailable.",
+      );
+      let unavailable = false;
+      await page.route(permissionsUrl, async (route) => {
+        if (!unavailable || route.request().method() !== "GET") {
+          await route.continue();
+          return;
+        }
+        unavailable = false;
+        await route.fulfill(unavailableResponse);
+      });
+      const checkPermissions = async (
+        trigger: () => Promise<unknown>,
+        status: number,
+        configurationUpdate?: boolean,
+      ) => {
+        const checked = responseTo(page, "GET", permissionsUrl);
+        await trigger();
+        const response = await checked;
+        assert.equal(response.status(), status, "permission check HTTP response");
+        if (configurationUpdate !== undefined) {
+          const body: unknown = await response.json();
+          assertRecord(body);
+          assertRecord(body.data);
+          assert.equal(body.data.configurationUpdate, configurationUpdate);
+        }
+        await waitForIdleFetches(page);
+        await nextFrames(page);
+      };
+      const recheck = (status: number, configurationUpdate?: boolean) =>
+        checkPermissions(
+          () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))),
+          status,
+          configurationUpdate,
+        );
+
+      // Start away from the scroll limits so the tab can stay in the same part of the viewport
+      // even when the permission-gated checklist and harness controls above it disappear.
+      await tab.evaluate((control) => {
+        window.scrollBy({
+          top: control.getBoundingClientRect().top - window.innerHeight / 2,
+          behavior: "instant",
+        });
+      });
+      await edit.evaluate((control: HTMLButtonElement) => control.focus({ preventScroll: true }));
+      assert.equal(await hasFocus(edit), true);
+      const tabTop = () => tab.evaluate((control) => control.getBoundingClientRect().top);
+      const initialTop = await tabTop();
+      assert.ok(initialTop > 0 && initialTop < viewport.height, "Channels tab starts in view");
+      const expectAnchor = async () => {
+        const top = await tabTop();
+        assert.ok(
+          Math.abs(top - initialTop) <= 1,
+          `Channels tab moved from ${initialTop} to ${top}`,
+        );
+      };
+      const unconfirmed = /Could not check your edit access\. Select Refresh to try again\./;
+      const unconfirmedDraft = "Draft · Edit access unconfirmed";
+      const denial = /Your access does not include editing this Configuration/;
+      const expectUnconfirmed = async () => {
+        const copy = await panel.innerText();
+        assert.match(copy, unconfirmed);
+        assert.doesNotMatch(
+          copy,
+          /Your access does not include|read-only with your access|ask an Installation administrator/i,
+        );
+        assert.equal(await edit.count(), 0);
+        assert.equal(await draftEntry.textContent(), unconfirmedDraft);
+      };
+
+      unavailable = true;
+      await recheck(503);
+      await expectUnconfirmed();
+      await expectAnchor();
+      assert.equal(
+        await hasFocus(tab),
+        true,
+        "focus returns to the selected tab after Edit is removed",
+      );
+
+      await recheck(200, true);
+      await edit.waitFor();
+      assert.doesNotMatch(await panel.innerText(), unconfirmed);
+      assert.equal(await draftEntry.textContent(), "Draft · Editable Configuration");
+      await expectAnchor();
+      assert.equal(await hasFocus(tab), true);
+
+      // A genuine denial has the same disabled action as a failed check, but different copy.
+      await edit.evaluate((control: HTMLButtonElement) => control.focus({ preventScroll: true }));
+      assert.equal(await hasFocus(edit), true);
+      const restore = revokeAdministratorGrant(fixture, ["update", "configuration"]);
+      t.after(restore);
+      await recheck(200, false);
+      assert.match(await panel.innerText(), denial);
+      assert.equal(await edit.count(), 0);
+      assert.equal(await hasFocus(tab), true, "focus returns to the selected tab after denial");
+      unavailable = true;
+      await recheck(503);
+      await expectUnconfirmed();
+      await page.getByRole("tab", { name: "Configuration", exact: true }).click();
+      await page.getByRole("tabpanel", { name: "Configuration", exact: true }).waitFor();
+      assert.equal(await draftEntry.textContent(), unconfirmedDraft);
+      await tab.click();
+      await panel.getByText(unconfirmed).waitFor();
+      await expectUnconfirmed();
+      await recheck(200, false);
+      assert.match(await panel.innerText(), denial);
+      assert.doesNotMatch(await panel.innerText(), unconfirmed);
+      assert.equal(await draftEntry.textContent(), "Draft · Read-only Configuration");
+      assert.equal(await edit.count(), 0);
+      assert.equal(pathRequests(requests, "GET", permissionsPath).length, 5);
+
+      restore();
+      const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+      // An Agent read can fail before Refresh reaches permissions. Retry still needs confirmation.
+      await page.route(
+        agentUrl,
+        (route) =>
+          route.fulfill(apiErrorResponse(503, "INTERNAL_ERROR", "Agent read unavailable.")),
+        { times: 1 },
+      );
+      const failedAgentRead = responseTo(page, "GET", agentUrl);
+      await refresh.click();
+      assert.equal((await failedAgentRead).status(), 503);
+      const retry = page.getByRole("button", { name: "Retry", exact: true });
+      await retry.waitFor();
+      assert.equal(pathRequests(requests, "GET", permissionsPath).length, 5);
+      const recoveredAgentRead = responseTo(page, "GET", agentUrl);
+      unavailable = true;
+      await checkPermissions(() => retry.click(), 503);
+      assert.equal((await recoveredAgentRead).status(), 200);
+      await expectUnconfirmed();
+      assert.equal(pathRequests(requests, "GET", permissionsPath).length, 6);
+
+      // Refresh must wait for a current answer, even when the account really has edit access.
+      const failedRefresh = await holdRequests(t, page, permissionsUrl, {
+        once: true,
+        method: "GET",
+        fulfill: unavailableResponse,
+      });
+      await checkPermissions(async () => {
+        await refresh.click();
+        await failedRefresh.requested;
+        assert.equal(await edit.count(), 0, "Edit Slack stays unavailable during Refresh");
+        failedRefresh.release();
+      }, 503);
+      await waitForEnabled(refresh);
+      await expectUnconfirmed();
+      assert.equal(pathRequests(requests, "GET", permissionsPath).length, 7);
+
+      await checkPermissions(() => refresh.click(), 200, true);
+      await waitForEnabled(refresh);
+      await waitForEnabled(edit);
+      assert.doesNotMatch(await panel.innerText(), unconfirmed);
+      assert.doesNotMatch(await panel.innerText(), denial);
+      assert.equal(await draftEntry.textContent(), "Draft · Editable Configuration");
+      assert.equal(pathRequests(requests, "GET", permissionsPath).length, 8);
+
+      const readAnchor = () =>
+        tab.evaluate((control) => ({
+          top: control.getBoundingClientRect().top,
+          scroll: window.scrollY,
+          maxScroll: document.documentElement.scrollHeight - window.innerHeight,
+        }));
+      const expectSettledAnchor = async (previousTop: number, phase: string) => {
+        const { top, scroll, maxScroll } = await readAnchor();
+        const target = Math.max(0, Math.min(maxScroll, scroll + top - previousTop));
+        assert.ok(
+          Math.abs(scroll - target) <= 1,
+          `${phase}: Channels tab moved from ${previousTop} to ${top} at scroll ${scroll}, expected ${target} of ${maxScroll}`,
+        );
+        return top;
+      };
+      await edit.click();
+      const dialog = page.getByRole("dialog", { name: "Edit Slack" });
+      const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+      await cancel.press("Enter");
+      await dialog.waitFor({ state: "detached" });
+      assert.equal(await hasFocus(edit), true, "Cancel restores Edit Slack focus");
+      await page.evaluate(() => {
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+      });
+      const bottom = await readAnchor();
+      assert.ok(bottom.maxScroll > 0);
+      assert.equal(bottom.scroll, bottom.maxScroll, "the reader starts at the bottom");
+      assert.ok(bottom.top > 0 && bottom.top < viewport.height, "Channels tab starts in view");
+
+      // Use the settled scroll range. A shorter page can make the old screen position unreachable.
+      unavailable = true;
+      await recheck(503);
+      await expectUnconfirmed();
+      const unconfirmedTop = await expectSettledAnchor(bottom.top, "unavailable access");
+      assert.equal(await hasFocus(tab), true);
+      await recheck(200, true);
+      await waitForEnabled(edit);
+      await expectSettledAnchor(unconfirmedTop, "confirmed access");
+      assert.equal(await hasFocus(tab), true);
+      assert.equal(pathRequests(requests, "GET", permissionsPath).length, 10);
+
+      // Returning to the browser tab must preserve arrow-key focus without activating it.
+      const strip = page.getByRole("tablist").filter({ has: tab });
+      const repositories = strip.getByRole("tab", { name: "Repositories", exact: true });
+      await page.keyboard.press("ArrowRight");
+      assert.equal(await hasFocus(repositories), true);
+      assert.equal(await tab.getAttribute("aria-selected"), "true");
+      await recheck(200, true);
+      assert.equal(await hasFocus(repositories), true);
+      assert.equal(await tab.getAttribute("aria-selected"), "true");
+      const stops = await strip
+        .getByRole("tab")
+        .evaluateAll((tabs) =>
+          tabs.filter((item) => item.tabIndex >= 0).map((item) => item.textContent?.trim()),
+        );
+      await page.keyboard.press("Shift+Tab");
+      assert.equal(
+        await strip.evaluate((list) => list.matches(":focus-within")),
+        false,
+        "Shift+Tab leaves the Agent tabs in one step",
+      );
+      await page.keyboard.press("Tab");
+      assert.equal(await hasFocus(tab), true, "Tab returns to the selected Channels tab");
+      assert.deepEqual(stops, ["Repositories"]);
+      assert.equal(pathRequests(requests, "GET", permissionsPath).length, 11);
+      assert.deepEqual(nonAuthWriteRequests(requests), []);
+    });
+  }
+
   // A version snapshot cannot be edited, so its Slack card offers no setup step: a reader of a
   // v1 without Slack was told to provide the tokens (finding 2455). The Dedicated draft still
   // asks; an Embedded one cannot have channels, so it does not (finding D708).
@@ -1686,6 +1944,12 @@ describe("Agent channels", { concurrency: 3 }, () => {
       account.credentials,
     );
     await page.getByRole("heading", { name: "Unconfirmed Grant Agent" }).waitFor();
+    // The policy read has finished when the draft names the remaining Slack binding.
+    await page
+      .getByText("Complete these in Credentials before deploying: Slack Secret bindings.", {
+        exact: true,
+      })
+      .waitFor();
     await selectSecret(page, "Slack app token", appSecret);
     await page.getByRole("button", { name: "Save channel Secrets" }).click();
     // While she administers the Installation, the warning keeps offering the Retry she has.
@@ -2409,6 +2673,124 @@ for (const [name, access] of [
     assert.deepEqual(saved.data.values.channels.msteams, teams);
   });
 }
+
+test("Teams editor shows channel access inherited from personal access and keeps it inherited on unrelated edits", async (t) => {
+  const { fixture, namespace } = await readyNamespace(
+    t,
+    "Teams inherited channel access",
+    createChannelProviders(),
+  );
+  const team = "19:team@thread.tacv2";
+  const channelId = "19:general@thread.tacv2";
+  const user = (digit: string) =>
+    `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`;
+  // No groupAllowFrom: native Teams admits the allowFrom senders in these channels too.
+  const teams = {
+    enabled: true,
+    appId: teamsDirectoryContext.appId,
+    tenantId: teamsDirectoryContext.tenantId,
+    appPassword: { source: "env", provider: "default", id: "MSTEAMS_APP_PASSWORD" },
+    dmPolicy: "allowlist",
+    allowFrom: [user("1")],
+    groupPolicy: "allowlist",
+    requireMention: true,
+    teams: { [team]: { channels: { [channelId]: { requireMention: true } } } },
+  };
+  const agent = await fixture.createAgent(
+    namespace.id,
+    "Inherited Teams Agent",
+    nativeValues("teams-inherited", { harnessId: "codex", channels: { msteams: teams } }),
+    { executionMode: "dedicated" },
+  );
+  const path = `/namespaces/${namespace.id}/configurations/${agent.configurationId}`;
+  const { page } = await newPage(t, fixture);
+  await openDraft(page, fixture, agent, "Inherited Teams Agent");
+  // A same-document history entry, so Back and Forward can retain and restore the drawer draft.
+  await page.getByRole("tab", { name: "Configuration", exact: true }).click();
+  await page.getByRole("tab", { name: "Channels", exact: true }).click();
+  const openEditor = async () => {
+    await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Edit Microsoft Teams", exact: true });
+    await dialog.waitFor();
+    return dialog;
+  };
+  const save = async (dialog: Awaited<ReturnType<typeof openEditor>>) => {
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        response.url().endsWith(`/configurations/${agent.configurationId}`),
+    );
+    await dialog.getByRole("button", { name: "Save configuration", exact: true }).click();
+    assert.equal((await saved).status(), 200);
+    return (await fixture.request("GET", path)).data.values.channels.msteams;
+  };
+
+  // The editor shows who can actually post in the channels, not an empty list.
+  let dialog = await openEditor();
+  assert.equal(await dialog.locator("#msteams-group-users").inputValue(), user("1"));
+  assert.equal(await dialog.locator("#msteams-channel-access").inputValue(), "selected");
+  await dialog.locator("#msteams-channel-access-inherited").waitFor();
+  // Editing the personal list changes the inherited channel list with it.
+  await dialog.locator("#msteams-dm-users").fill([user("1"), user("2")].join(", "));
+  assert.equal(
+    await dialog.locator("#msteams-group-users").inputValue(),
+    [user("1"), user("2")].join(", "),
+  );
+  // An unrelated edit saves without writing a separate channel list.
+  const siteId =
+    "example.sharepoint.com,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666";
+  await dialog.getByLabel("SharePoint site ID", { exact: true }).fill(siteId);
+  // Leaving and returning restores the draft by replaying each field; that replay is not a
+  // channel access change.
+  await page.goBack();
+  await page.getByRole("button", { name: "Edit Configuration" }).waitFor();
+  await page.goForward();
+  await dialog.waitFor();
+  assert.equal(await dialog.getByLabel("SharePoint site ID", { exact: true }).inputValue(), siteId);
+  await dialog.locator("#msteams-channel-access-inherited").waitFor();
+  let saved = await save(dialog);
+  assert.equal(saved.sharePointSiteId, siteId);
+  assert.deepEqual(saved.allowFrom, [user("1"), user("2")]);
+  assert.equal(Object.hasOwn(saved, "groupAllowFrom"), false);
+
+  // Opening personal messages to everyone does not open the inherited channels too: channel
+  // access keeps its people and becomes a separate setting.
+  dialog = await openEditor();
+  await dialog.locator("#msteams-dm-policy").selectOption("open");
+  await dialog.locator("#msteams-channel-access-kept").waitFor();
+  assert.equal(await dialog.locator("#msteams-channel-access").inputValue(), "selected");
+  assert.equal(
+    await dialog.locator("#msteams-group-users").inputValue(),
+    [user("1"), user("2")].join(", "),
+  );
+  saved = await save(dialog);
+  assert.deepEqual(saved.allowFrom, ["*"]);
+  assert.deepEqual(saved.groupAllowFrom, [user("1"), user("2")]);
+  // Back to the previous native state for the explicit-change case below.
+  const reset = await fixture.request("PATCH", path, {
+    body: {
+      values: {
+        ...(await fixture.request("GET", path)).data.values,
+        channels: {
+          msteams: { ...teams, allowFrom: [user("1"), user("2")], sharePointSiteId: siteId },
+        },
+      },
+    },
+  });
+  assert.equal(reset.status, 200, JSON.stringify(reset.body));
+  assert.equal(Object.hasOwn(reset.data.values.channels.msteams, "groupAllowFrom"), false);
+  await page.reload();
+  await page.getByRole("button", { name: "Edit Microsoft Teams", exact: true }).waitFor();
+
+  // Changing the channel people sets channel access separately from then on.
+  dialog = await openEditor();
+  await dialog.locator("#msteams-group-users").fill(user("2"));
+  assert.equal(await dialog.locator("#msteams-channel-access-inherited").isHidden(), true);
+  await dialog.locator("#msteams-dm-users").fill(user("1"));
+  saved = await save(dialog);
+  assert.deepEqual(saved.groupAllowFrom, [user("2")]);
+  assert.deepEqual(saved.allowFrom, [user("1")]);
+});
 
 test("Teams editor persists separate personal and channel access with an authorized password Secret binding", async (t) => {
   const { fixture, namespace } = await readyNamespace(

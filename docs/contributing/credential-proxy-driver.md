@@ -1,11 +1,8 @@
-# Implement a Credential Proxy Driver
+# Implement a legacy egress Proxy Driver
 
-Start with the [Credential Proxy contract](../reference/drivers/credential-proxy.md)
-and choose a delivery profile that your backend can enforce. This guide connects
-one package's Sandbox and Credential Proxy capabilities to the normal Agent
-workflow. You will register the pair, implement installation and request
-handling for the chosen profile, and then qualify those guarantees through a
-real Agent and backend. An implementation does not need to use OpenShell.
+This guide covers `LegacyEgressProxyDriver`, which serves existing protected-egress deployments through the `credential_proxy` capability. Start with the [legacy contract](../reference/drivers/credential-proxy.md#legacy-protected-egress) and choose a delivery profile that your Backend can enforce. Register the Driver with its paired Sandbox, implement installation and request handling, and qualify the result through a real Agent and Backend. An implementation does not need to use OpenShell.
+
+For the canonical `CredentialProxyDriver`, see the [credential delivery contract](../reference/drivers/credential-proxy.md#interface) and [implementation status](../reference/credential-sources.md#implementation-status).
 
 ## 1. Choose the enforcement boundary
 
@@ -115,7 +112,7 @@ does not prove this workflow.
 ## 6. Qualify the backend
 
 Use the existing [exchange checks](../testing/static-egress.md#check-a-credential-proxy-change)
-and [repository workflow checks](../testing/protected-repository-custody.md#check-useful-git-work-and-conversation-continuity)
+and [repository workflow checks](../testing/protected-repository-custody.md#check-useful-git-work)
 as starting points. Their owning testing pages specify prerequisites and explain
 what the fixtures prove. Extend relevant conformance and integration coverage
 through the real Agent caller for a new implementation.

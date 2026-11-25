@@ -252,7 +252,7 @@ PYTHON
   # The downloader verifies a private copy of the PATH candidate before reuse.
   download_file \
     "https://dl.k8s.io/release/v${version}/bin/${operating_system}/${arch}/kubectl" \
-    "${binary}" "${checksum}" "" "${existing}" 0755
+    "${binary}" "${checksum}" "${CI_PINNED_TOOL_CACHE:-}" "${existing}" 0755
   run_system_tool "${binary}" version --client=true
 }
 
@@ -348,6 +348,14 @@ install_browser_dependencies() {
     if [[ -z "${OCC_TEST_BROWSER_EXECUTABLE:-}" ]]; then
       pnpm exec playwright install --with-deps --only-shell chromium
     fi
+    # Lanes that own WebKit browser cases request Playwright's WebKit and its system libraries.
+    if [[ "${CI_PLAYWRIGHT_WEBKIT:-}" == "1" ]]; then
+      pnpm exec playwright install --with-deps webkit
+    fi
+    if [[ -n "${OPENCLAW_CI_NATIVE_BROWSER_EVIDENCE_DIR:-}" ]]; then
+      # Host Chrome does not install Playwright's pinned video encoder.
+      pnpm exec playwright install ffmpeg
+    fi
     if [[ -n "${OCC_TEST_BROWSER_EXECUTABLE:-}" ]]; then
       if [[ ! -x "${OCC_TEST_BROWSER_EXECUTABLE}" ]]; then
         echo "Selected CI browser executable is unavailable." >&2
@@ -402,6 +410,9 @@ case "${profile}" in
     require_docker
     install_yq
     need_command jq
+    ;;
+  docker-only)
+    require_docker
     ;;
   images)
     require_docker

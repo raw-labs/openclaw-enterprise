@@ -6,6 +6,7 @@ interface ModelProbeCertificateOptions {
   caName: string;
   dnsNames?: string[];
   run?: OpenSslRunner | undefined;
+  slackStandIn?: boolean;
 }
 
 // Callers own subprocess policy and cleanup. The CA and leaf each reuse their
@@ -15,6 +16,7 @@ export async function createModelProbeCertificates({
   caName,
   run,
   dnsNames = ["api.openai.com"],
+  slackStandIn = false,
 }: ModelProbeCertificateOptions): Promise<void> {
   const caKeyPem: unknown = sharedRsaPrivateKeyPem("model-probe-ca");
   const leafKeyPem: unknown = sharedRsaPrivateKeyPem("model-probe-leaf");
@@ -24,7 +26,12 @@ export async function createModelProbeCertificates({
   await caAndLeaf(directory, {
     caName,
     commonName: dnsNames[0],
-    subjectAltName: dnsNames.map((name) => `DNS:${name}`).join(","),
+    subjectAltName: [
+      ...dnsNames,
+      ...(slackStandIn ? ["slack.com", "wss-primary.slack.com", "login.microsoftonline.com"] : []),
+    ]
+      .map((name) => `DNS:${name}`)
+      .join(","),
     caKeyPem,
     leafKeyPem,
     run,

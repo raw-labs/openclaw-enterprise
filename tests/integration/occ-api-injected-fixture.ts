@@ -39,7 +39,7 @@ import {
   authenticatedHeaders,
   createTestAuthPrincipal,
   signInToControllerApp,
-} from "../helpers/auth-session.mjs";
+} from "../helpers/auth-session.ts";
 import { createTestConfigurationDriver } from "../helpers/configuration-driver.ts";
 import { createReadyComputeDriver } from "../helpers/development.ts";
 import { createTestSecretDriver } from "../helpers/secret-driver.mjs";
@@ -68,7 +68,7 @@ interface InjectedFixtureOptions extends Partial<
     | "configurationDriver"
     | "secretDriver"
     | "channelDrivers"
-    | "readManagedMcpToolNames"
+    | "managedMcpDiscoveryTransport"
     | "logger"
   >
 > {
@@ -253,9 +253,9 @@ export async function createInjectedControllerFixture(
         installationId,
       },
       auth: authFixture.auth,
-      ...(options.readManagedMcpToolNames === undefined
+      ...(options.managedMcpDiscoveryTransport === undefined
         ? {}
-        : { readManagedMcpToolNames: options.readManagedMcpToolNames }),
+        : { managedMcpDiscoveryTransport: options.managedMcpDiscoveryTransport }),
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(options.provisionAuthAccount === undefined
         ? {}

@@ -8,7 +8,7 @@ rfc: ../rfcs/20261120-channel-provider-drivers.md
 - **Delivery status:** In progress
 - **Owner:** Kubernetes Compute Driver, native OpenClaw runtime packaging, and console channel editors
 - **Authority:** [Platform design](../../docs/design.md), existing Compute-owned gateway routing and Agent-owned Secret delivery
-- **RFCs:** [Teams channels](https://github.com/raw-labs/openclaw-enterprise/pull/29), [per-Agent channel egress](../rfcs/20261118-channel-egress.md), [per-provider Channel Drivers](../rfcs/20261120-channel-provider-drivers.md)
+- **RFCs:** [per-Agent channel egress](../rfcs/20261118-channel-egress.md), [per-provider Channel Drivers](../rfcs/20261120-channel-provider-drivers.md)
 - **Source baseline:** `447c387b63c1b781fec03655f06c318caeb91e36`
 
 ## Outcome and scope
@@ -41,7 +41,7 @@ and the OpenClaw source pin stay in scope for regression verification.
   for [managed channel egress](../rfcs/20261118-channel-egress.md). Teams
   Gateways get their own Envoy listener; OCC directory requests use the
   reserved OCC listener. Verify rejected destinations and retained Slack
-  tunnels. Earlier drafts extended the Slack proxy that upstream later removed.
+  tunnels. Earlier drafts extended a Slack proxy that the platform later removed.
 - Add the Teams editor through the shared channel save transaction and Secret
   authorization workflow. Exercise persistence through the real development
   API and inspect rebuilt Storybook states with screenshots and a short video.
@@ -56,10 +56,8 @@ Synthetic SDK rejection and fixture Kubernetes tests cannot replace that proof.
 
 ## Current refresh and admission repair (2026-11-05)
 
-The source refresh merges upstream `b891554203643c769f19d71860d03382bb9717bc`
-without rewriting published history. It retains the typed Console owners,
-serving-revision routing and current runtime source pin. Refresh commit
-`24ce51f702664d3f3fc450bb9b1b7c563664e267` records the initial delivery.
+The refresh onto `b891554203643c769f19d71860d03382bb9717bc` retains the typed
+Console owners, serving-revision routing and current runtime source pin.
 
 The follow-up checks Teams callback routing at deployment admission, before a
 worker can stop a predecessor. Draft save remains allowed. The existing native
@@ -94,10 +92,34 @@ visually inspected. Later changes record this result only. Exact-final-head nati
 qualification on both architectures, approved live Teams messages/attachments,
 production public Envoy ingress and required CI remain before-merge holds.
 
+## Contract split (2026-11-24)
+
+Review asked to land the Channel Driver contract change on its own. The
+per-provider Drivers, lookup `context`, `invalid_request` and `drivers.channel`
+selection now come from
+[RFC-20261120-channel-provider-drivers](../rfcs/20261120-channel-provider-drivers.md)
+and its [primary plan](20261120-channel-provider-drivers.md). That change makes the lookup `provider` optional: an omitted provider is Slack, so
+existing Slack clients keep working. Each Channel Driver declares its lookup
+fields with `directoryContextSchema()`, and OCC validates them. This plan
+adds only the Teams Driver, its `teams-channel` selection and its
+declared lookup schema (app, tenant and Team UUIDs).
+
+## Refresh and channel proxies (2026-11-23)
+
+The refresh onto `b951774841` follows the split of the OCC controller into
+modules: per-provider Channel Driver installation is in `driver-registry.ts`,
+directory dispatch in `setup-discovery.ts` and multi-provider validation in
+`deployment-channels.ts`. The chat-route header fix keeps the `browser` route
+unchanged.
+
+[Agent Gateway channel proxies](../../docs/reference/drivers/kubernetes-compute/channel-egress.md#upstream-proxy-configuration)
+also apply to Teams Agents. Envoy still admits only the Teams Driver's
+destinations; a selected proxy owns final DNS resolution and address checks,
+including attachment downloads. The Teams guide states this boundary.
+
 ## Envoy egress port and Channel Driver selection (2026-11-20)
 
-[raw-labs/openclaw-enterprise#39](https://github.com/raw-labs/openclaw-enterprise/pull/39)
-moves the Teams implementation onto upstream `e88dc58831`, which includes managed
+The Teams implementation moved onto `e88dc58831`, which includes managed
 per-Agent channel egress. Review of that port changed the following:
 
 - OCC installs the Slack and Teams Drivers per provider instead of one composite
@@ -134,4 +156,4 @@ live Microsoft and public ingress holds above.
 
 ## Change record
 
-- 2026-10-06: Created from the verified upstream baseline for the raw-labs fork.
+- 2026-10-06: Created from the verified source baseline.

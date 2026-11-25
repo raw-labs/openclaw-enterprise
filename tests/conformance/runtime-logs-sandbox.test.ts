@@ -48,7 +48,7 @@ import type {
   RuntimeLogCursorBinding,
   RuntimeLogPage,
 } from "../../packages/occ/src/runtime-logs/index.ts";
-import { assertApiError } from "../helpers/api-error.mjs";
+import { assertApiError } from "../helpers/api-error.ts";
 import {
   assertLogSecurityCondition,
   assertSensitiveValuesAbsent,
@@ -182,7 +182,8 @@ function openShellSandboxDriver(gatewayClient: OpenShellGatewayClient) {
   });
   return new OpenShellSandboxDriver(
     {
-      gateway: { workspaceMode: "operator" },
+      integrationMode: "legacy",
+      gateway: {},
       kubernetes: {
         serviceAccount: { mode: "gatewayConfigured" },
         sandboxDataMount: {

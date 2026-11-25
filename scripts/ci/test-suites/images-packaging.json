@@ -30,7 +30,7 @@
     "tests/integration/production-kubernetes-packaging.test.mjs",
     "tests/integration/production-kubernetes-network-policy.test.ts",
     "tests/integration/production-image-startup.test.mjs",
-    "tests/integration/production-image-bootstrap-mounts.test.mjs",
+    "tests/integration/production-image-bootstrap-mounts.test.ts",
     "tests/integration/container-registry-real.test.ts",
     "tests/integration/logging-packaging.test.ts",
     "tests/integration/repository-runtime-volume.test.ts",
@@ -78,7 +78,7 @@
       ]
     },
     {
-      "path": "tests/integration/production-image-bootstrap-mounts.test.mjs",
+      "path": "tests/integration/production-image-bootstrap-mounts.test.ts",
       "expectedTests": ["development bootstrap mount copies support a different reader UID"]
     },
     {
@@ -114,7 +114,8 @@
         "the staged sign-in chart preserves the historical worker probes for both Helm operations",
         "the production image executes the chart worker probes as the worker user",
         "the plugin request guard installs beside OpenShell without control-plane access",
-        "the optional ChatGPT Backend isolates admin credentials, tenant Secrets, and provider egress to the API",
+        "the optional ChatGPT Backend isolates admin credentials and tenant Secrets to the API",
+        "Helm leaves API and Worker egress unrestricted without widening other workloads",
         "the real Helm renderer rejects mutable images, broad dependencies, and shared credentials",
         "default routing refuses missing operator configuration",
         "private Envoy Gateway routing defaults on with automatic CA and deterministic hostnames",
@@ -164,7 +165,7 @@
     {
       "path": "tests/integration/container-registry-real.test.ts",
       "expectedTests": [
-        "publication updates aliases using real Skopeo and a multi-platform registry"
+        "registry publication recovers interrupted image, chart and alias transfers from the original bytes"
       ]
     },
     {

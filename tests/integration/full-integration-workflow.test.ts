@@ -136,8 +136,11 @@ test("split dispatcher leaves skipped ticks outside the execution queue", async 
   assert.equal(present(dispatcher.jobs["manual-approval"]).concurrency, undefined);
   assert.equal(execute.needs, "preflight");
   assert.equal(execute.uses, "./.github/workflows/full-integration-execution.yml");
-  assert.deepEqual(execution.on, {
-    workflow_call: { inputs: { lane: { type: "string", default: "" } } },
+  const trigger = record(execution.on);
+  assert.deepEqual(Object.keys(trigger), ["workflow_call"]);
+  assert.deepEqual(record(record(trigger.workflow_call).inputs).lane, {
+    type: "string",
+    default: "",
   });
   assert.equal(record(execute.with).lane, "${{ inputs.lane || '' }}");
   assert.equal(execute.secrets, "inherit");
@@ -652,8 +655,11 @@ test("manual dev-up workflow prepares the complete lane and aggregates its exact
     [
       { cell: "compose/OpenClaw", scenarios: ["http-chat", "model-ui", "console-secrets"] },
       { cell: "compose/Codex", scenarios: ["http-chat", "console-secrets", "agent-audit"] },
-      { cell: "kubernetes/OpenClaw", scenarios: ["http-chat", "model-ui", "console-secrets"] },
-      { cell: "kubernetes/Codex", scenarios: ["http-chat", "console-secrets"] },
+      {
+        cell: "kubernetes/OpenClaw",
+        scenarios: ["http-chat", "model-ui", "console-secrets", "teams"],
+      },
+      { cell: "kubernetes/Codex", scenarios: ["http-chat", "console-secrets", "teams"] },
     ],
   );
   assert.equal(qaSelection.exclusions.length, 2);

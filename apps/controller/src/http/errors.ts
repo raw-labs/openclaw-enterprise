@@ -15,6 +15,8 @@ import {
   ChannelCredentialError,
   ConfigurationGenerationConflictError,
   ConfigurationHarnessError,
+  NetworkProxyValidationError,
+  NetworkProxyEnforcementUnavailableError,
   ConfigurationSizeError,
   CredentialGatewayNotConfiguredError,
   CredentialSourceConfigError,
@@ -24,6 +26,7 @@ import {
   CredentialWithdrawalInProgressError,
   CredentialWithdrawalNotFoundError,
   DependencyUnavailableError,
+  CredentialDeliveryFailedError,
   DeviceAuthorizationStartError,
   BrowserAuthorizationError,
   IAMAccessBindingRoleError,
@@ -55,6 +58,7 @@ import {
   SecretDriverOwnershipError,
   SecretValueError,
   ServiceAccountDriverNotConfiguredError,
+  TokenServiceSourceInputError,
   type RuntimeLogsErrorCode,
 } from "@openclaw-enterprise/occ";
 import {
@@ -769,6 +773,7 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
         400,
         "INVALID_REQUEST",
         "The directory request does not match this channel provider. Check its settings and retry.",
+        error.details,
       );
     }
     const mapped = discoveryFailure("CHANNEL_DIRECTORY", error.reason, CHANNEL_DIRECTORY_MESSAGES);
@@ -789,7 +794,7 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
       503,
       "DEPENDENCY_UNAVAILABLE",
       error.reason === "unreachable"
-        ? "OCC could not reach the sign-in service at auth.openai.com. An operator must allow HTTPS egress from the API Pods to it (Helm api.modelDiscoveryCidrs), then try again."
+        ? "OCC could not reach the sign-in service at auth.openai.com. Ask an operator to check API Pod DNS, routing, and HTTPS connectivity, then try again."
         : "Device login could not start. Try again.",
     );
   }
@@ -857,7 +862,6 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
     return failure(400, "INVALID_REQUEST", error.message);
   }
   if (error instanceof RepositoryBindingSelectionError) {
-    // Either repositoryBindings or repositoryAccess can carry the selections, so no detail.
     return failure(400, "INVALID_REQUEST", error.message);
   }
   if (error instanceof SecretBindingValidationError) {
@@ -873,6 +877,9 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
           ? [{ path: destination.bindingsPath, code: destination.code }]
           : pointerDetail(destination.bindingsPath, destination.key, destination.code),
     );
+  }
+  if (error instanceof NetworkProxyValidationError) {
+    return failure(400, "INVALID_REQUEST", error.message);
   }
   if (error instanceof NativeWorkerSupportError) {
     return failure(400, "INVALID_REQUEST", error.message);
@@ -933,6 +940,9 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
   if (error instanceof NotImplementedError) {
     return failure(501, "NOT_IMPLEMENTED", error.message);
   }
+  if (error instanceof NetworkProxyEnforcementUnavailableError) {
+    return failure(503, "DEPENDENCY_UNAVAILABLE", error.message);
+  }
   if (error instanceof PostgresCommitOutcomeUnknownError) {
     return failure(
       503,
@@ -956,6 +966,9 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
       result.registrationRetryAfterSeconds = error.retryAfterSeconds;
     }
     return result;
+  }
+  if (error instanceof CredentialDeliveryFailedError) {
+    return failure(503, "DEPENDENCY_UNAVAILABLE", error.message);
   }
   if (isDependencyUnavailable(error)) {
     return dependencyUnavailable();
@@ -987,6 +1000,13 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
   if (error instanceof ResourceConflictError) {
     return failure(409, "RESOURCE_CONFLICT", "The requested platform resource already exists.");
   }
+  if (error instanceof TokenServiceSourceInputError) {
+    return failure(
+      400,
+      "INVALID_REQUEST",
+      "Static sources accept an approved provider_preset configuration. Supply one nonempty UTF-8 credential without NUL; its encoded value must fit the Secret storage limit.",
+    );
+  }
   if (
     error instanceof ScopeViolationError ||
     error instanceof HiddenResourceAuthorizationDeniedError
@@ -1004,7 +1024,11 @@ export function requestFailure(error: unknown, denied?: DeniedRequest): RequestF
   if (error instanceof AgentPrincipalAuthorizationError) {
     // The Agent's own principal lacks the grant; the caller's denial is below. The text names a
     // stored resource only when the caller sent or may read it (finding 2592).
-    return failure(403, "FORBIDDEN", capped(agentPrincipalDenialMessage(error, denied?.requested)));
+    return failure(
+      403,
+      "FORBIDDEN",
+      capped(agentPrincipalDenialMessage(error, denied?.requested, denied?.agentPrincipalRecovery)),
+    );
   }
   if (error instanceof CallerStateDeniedError) {
     // Fixed text about the caller's own account, session or job, not about a grant.

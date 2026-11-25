@@ -4,6 +4,12 @@ Use **Components / Channels / Teams Editor** to inspect app and tenant IDs,
 the app-password Secret picker, channel mentions, and personal-message policy.
 Change the personal policy to Allowlist, enter an exact user ID, save, reopen,
 and inspect native Configuration. Channel access must retain its separate rules.
+Open **Teams Inherited Channel Access**: the channel people show the
+personal-message list with an inheritance hint. Editing personal people updates
+them. Save a SharePoint change and confirm native Configuration has no
+`groupAllowFrom`; change the channel people and the hint disappears. Set the
+personal-message policy to Open: channel access keeps its people and a status
+says it is now set separately.
 The optional **SharePoint site ID** starts with a simulated destination. Change
 it, save and reopen to verify persistence; clear it and save to remove the native
 `sharePointSiteId` setting. Read the storage and organization-link explanation.

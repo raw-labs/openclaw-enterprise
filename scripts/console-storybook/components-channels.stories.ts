@@ -99,6 +99,7 @@ export const RevisionSecretsAbsent = story("revisionSecretsAbsent");
 
 export const Teams = story("teams");
 export const TeamsEditor = story("teamsEditor");
+export const TeamsInheritedChannelAccess = story("teamsInheritedChannelAccess");
 export const TeamsMissingSecret = story("teamsMissingSecret");
 export const TeamsUnsupported = story("teamsUnsupported");
 export const TeamsReadOnly = story("teamsReadOnly");

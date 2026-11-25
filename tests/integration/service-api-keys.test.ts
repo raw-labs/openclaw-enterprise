@@ -16,11 +16,11 @@ import { createFastifyApp } from "../../apps/controller/src/index.ts";
 import { InMemoryAuditSink } from "../../packages/audit/src/index.ts";
 import { NativeIAMDriver, type NativeIAMState } from "../../packages/iam/src/index.ts";
 import { InMemoryPlatformState, OpenClawController } from "../../packages/occ/src/index.ts";
-import { signInWithEmailPassword } from "../helpers/auth-session.mjs";
+import { signInWithEmailPassword } from "../helpers/auth-session.ts";
 import { jsonRequestInit } from "../helpers/inject-json.ts";
 import { createTestConfigurationDriver } from "../helpers/configuration-driver.ts";
 import { createTestSecretDriver } from "../helpers/secret-driver.mjs";
-import { createDevelopmentComputeDriver } from "../helpers/development.mjs";
+import { createDevelopmentComputeDriver } from "../helpers/development.ts";
 import { bindRole, grantRole, restrict } from "../helpers/iam-grants.ts";
 import {
   AUTHORIZATION_HEADER_REFUSED,

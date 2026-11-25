@@ -64,6 +64,10 @@
                       {
                         "page": "guides/integrations/codex-plugins",
                         "label": "Plugins"
+                      },
+                      {
+                        "page": "guides/integrations/channels",
+                        "label": "Channels"
                       }
                     ]
                   },
@@ -142,6 +146,10 @@
                     "label": "Gateway managed mode"
                   },
                   {
+                    "page": "reference/agents/network-proxy",
+                    "label": "Network Proxy"
+                  },
+                  {
                     "page": "guides/topics/agent-presets",
                     "label": "Presets"
                   },
@@ -216,6 +224,10 @@
                   {
                     "page": "reference/agent-native-admin",
                     "label": "Native Admin UI"
+                  },
+                  {
+                    "page": "reference/agent-automations",
+                    "label": "Automation API"
                   },
                   {
                     "page": "guides/topics/agent-troubleshoot",
@@ -298,6 +310,14 @@
                   {
                     "page": "reference/credential-sources",
                     "label": "Credential Sources"
+                  },
+                  {
+                    "page": "reference/credential-sources/managed-static",
+                    "label": "Managed Static Sources"
+                  },
+                  {
+                    "page": "reference/credential-sources/other-delivery-modes",
+                    "label": "Other Delivery Modes"
                   },
                   {
                     "page": "guides/credential-proxy",
@@ -455,6 +475,10 @@
                         ]
                       },
                       {
+                        "page": "reference/drivers/kubernetes-openshell-compute",
+                        "label": "Kubernetes + OpenShell"
+                      },
+                      {
                         "page": "reference/drivers/ssh-compute",
                         "label": "SSH"
                       },
@@ -525,7 +549,15 @@
                       },
                       {
                         "page": "reference/drivers/plugin-bundled",
-                        "label": "Bundled"
+                        "label": "Overview"
+                      },
+                      {
+                        "page": "reference/drivers/openclaw-plugin",
+                        "label": "OpenClaw"
+                      },
+                      {
+                        "page": "reference/drivers/codex-plugin",
+                        "label": "Codex"
                       }
                     ]
                   },
@@ -801,6 +833,14 @@
                     "label": "Image Upgrades"
                   },
                   {
+                    "page": "guides/deploy/one-off-upgrades",
+                    "label": "One Off Upgrades"
+                  },
+                  {
+                    "page": "guides/deploy/channel-egress",
+                    "label": "Channel Egress Setup"
+                  },
+                  {
                     "page": "guides/deploy/production-upgrade-command",
                     "label": "Upgrade Commands"
                   },
@@ -1031,6 +1071,8 @@
               "testing/teams",
               "testing/plugins",
               "testing/openshell",
+              "testing/openshell-git-replacement",
+              "testing/openshell-managed",
               "testing/openshell-oauth",
               "testing/openshell-coverage",
               "testing/openshell-permission-diagnostics",
@@ -1102,7 +1144,7 @@
                   },
                   {
                     "page": "contributing/credential-proxy-driver",
-                    "label": "Implement a Credential Proxy Driver"
+                    "label": "Legacy Egress Driver"
                   },
                   {
                     "group": "Driver Contracts",
@@ -1337,7 +1379,9 @@
               "flows/compute-driver-lifecycle-hooks",
               "flows/openshell-sandbox-provisioning",
               "flows/connection-templates",
+              "flows/openshell-managed-workload",
               "flows/credential-source-lifecycle",
+              "flows/token-service-static-custody",
               "flows/credential-source-refresh",
               "flows/driver-plugin-loading",
               "flows/agent-plugins",
@@ -1347,6 +1391,7 @@
               "flows/agent-plugin-approvals",
               "flows/agent-provisioning",
               "flows/agent-native-admin",
+              "flows/agent-automations",
               "flows/agent-http-chat",
               "flows/kubernetes-existing-namespace-placement",
               "flows/production-tui",
@@ -1356,6 +1401,7 @@
               "flows/github-actions-testing",
               "flows/clawsweeper-dispatch",
               "flows/container-package-bootstrap",
+              "flows/release-oce",
               "flows/container-publication",
               "flows/cli-publication",
               "flows/cli-agent-browsing",

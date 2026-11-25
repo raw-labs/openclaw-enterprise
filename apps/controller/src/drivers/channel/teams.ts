@@ -25,7 +25,20 @@ const DIRECTORY_HOSTS = ["login.microsoftonline.com", "graph.microsoft.com"];
 const BOT_HOSTS = ["login.botframework.com", "api.botframework.com", "smba.trafficmanager.net"];
 const STORAGE_HOST =
   /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:sharepoint(?:-df)?\.com|1drv\.com|onedrive\.com|blob\.core\.windows\.net)$/;
-const CONTEXT_KEYS = ["appId", "tenantId", "teamId"] as const;
+const UUID_PATTERN =
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+
+/** Teams lookups need the bot's app and tenant and the Entra group UUID of one Team. */
+const TEAMS_DIRECTORY_CONTEXT_SCHEMA: JSONSchema = deepFreeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["appId", "tenantId", "teamId"],
+  properties: {
+    appId: { type: "string", pattern: UUID_PATTERN },
+    tenantId: { type: "string", pattern: UUID_PATTERN },
+    teamId: { type: "string", pattern: UUID_PATTERN },
+  },
+});
 
 function httpsDestinations(hosts: readonly string[]): NetworkDestinationRule[] {
   return hosts.map((name) => ({
@@ -80,6 +93,10 @@ export class TeamsChannelDriver implements ChannelDriver {
       },
     },
   });
+
+  directoryContextSchema(): JSONSchema {
+    return TEAMS_DIRECTORY_CONTEXT_SCHEMA;
+  }
 
   static validateConfiguration(
     configuration: Readonly<TeamsChannelConfiguration>,
@@ -248,15 +265,8 @@ export class TeamsChannelDriver implements ChannelDriver {
         "Managed channel egress is not configured for OCC provider requests. Ask an Installation administrator to enable the channel egress fleet.",
       );
     }
-    const context = input.context ?? {};
-    const { appId, tenantId, teamId } = context;
-    // Context is caller input: refuse it before any provider request.
-    if (
-      ![appId, tenantId, teamId].every((id) => typeof id === "string" && GUID.test(id)) ||
-      Object.keys(context).some((key) => !(CONTEXT_KEYS as readonly string[]).includes(key))
-    ) {
-      throw new ChannelDirectoryError("invalid_request");
-    }
+    // OCC validated context against `directoryContextSchema()` before this call.
+    const { appId = "", tenantId = "", teamId = "" } = input.context ?? {};
     const path = `/v1.0/teams/${teamId}/${input.kind === "users" ? "members" : "channels"}`;
     const query = (input.query ?? "").trim().toLocaleLowerCase();
     const scope = JSON.stringify([appId, tenantId, teamId, input.kind, query]);
@@ -288,7 +298,14 @@ export class TeamsChannelDriver implements ChannelDriver {
     const boundedSignal = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
       : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-    const token = await this.accessToken(tenantId!, appId!, input.token, GRAPH, boundedSignal);
+    // The native Teams plugin trims the password, as the deploy check does.
+    const token = await this.accessToken(
+      tenantId!,
+      appId!,
+      input.token.trim(),
+      GRAPH,
+      boundedSignal,
+    );
     const options = {
       signal: boundedSignal,
       headers: { authorization: `Bearer ${token}` },
@@ -388,7 +405,9 @@ export class TeamsChannelDriver implements ChannelDriver {
       }
     }
     if (ids !== undefined) {
-      throw new ChannelDirectoryError("unavailable");
+      // Saved-ID names are best effort: an ID outside the Team, or beyond the pages read,
+      // stays an exact ID without a name.
+      return { workspaceId, candidates: [...candidates.values()], complete: true };
     }
     if (candidates.size > 100) {
       // A provider batch cannot be partially consumed without losing matches on continuation.

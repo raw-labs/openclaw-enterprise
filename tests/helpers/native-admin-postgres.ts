@@ -33,7 +33,7 @@ import {
 import { createFixtureResponse } from "./console-fixture-response.ts";
 import { createTestConfigurationDriver } from "./configuration-driver.ts";
 import { createTestSecretDriver } from "./secret-driver.mjs";
-import { cookieHeaderFromSetCookie } from "./auth-session.mjs";
+import { cookieHeaderFromSetCookie } from "./auth-session.ts";
 import { injectJson as inject } from "./inject-json.ts";
 import {
   ensureDevelopmentBootstrap,
@@ -111,10 +111,16 @@ function nativeComputeDriver(upstreamPort: number): ComputeDriver {
     {
       implementation: "native-admin-postgres-test-upstream",
       validateHarnessAuth() {},
-      getGatewayChatEndpoint(
-        revision: Parameters<NonNullable<ComputeDriver["getGatewayChatEndpoint"]>>[0],
-      ) {
-        return `wss://localhost:${upstreamPort}/native-chat/namespaces/${revision.namespaceId}/agents/${revision.agentId}/`;
+      async getGatewayBrowserRequest(revision, { principalId, mode }) {
+        return {
+          endpoint: `wss://localhost:${upstreamPort}/native-browser/namespaces/${revision.namespaceId}/agents/${revision.agentId}/`,
+          subject: `test:${principalId}`,
+          headers: {
+            "x-occ-identity": `test:${principalId}`,
+            "x-occ-browser-key": "server-browser-credential",
+            "x-openclaw-scopes": mode === "admin" ? "operator.admin" : "operator.sessions.write",
+          },
+        };
       },
       getGatewayEndpoint(
         revision: Parameters<NonNullable<ComputeDriver["getGatewayEndpoint"]>>[0],

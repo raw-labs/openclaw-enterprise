@@ -49,6 +49,10 @@ In the Installation's selected Compute Driver configuration, set
 in Helm and the Installation. The Teams Driver admits the exact Public cloud
 messaging and authentication hosts over TCP 443.
 
+If you later remove this routing from Helm and the Installation, deploys of new
+Teams versions are refused. The next redeploy of an Agent that still serves
+Teams deletes its callback route, so Microsoft can no longer reach it.
+
 ## Configure and deploy the Agent
 
 1. Open the Dedicated Agent's **Channels** tab and select **Configure Microsoft
@@ -140,8 +144,19 @@ subdomains of `sharepoint.com`, `sharepoint-df.com`, `1drv.com`, `onedrive.com`
 or `blob.core.windows.net`. Enter each required redirect hostname separately.
 Restart OCC to load the change, then deploy a revision to apply the updated
 destination policy. The Teams Driver adds these hosts only to Gateways with
-Teams enabled. Envoy checks the address
-it connects to on each tunnel. Native media and credential checks still apply.
+Teams enabled. Envoy admits only these exact names and, without an upstream
+proxy, checks the address it connects to on each tunnel. Native media and
+credential checks still apply.
+
+## Use an upstream proxy
+
+A Teams Agent can send its Microsoft traffic through an
+[Agent Gateway channel proxy](../../reference/agents/network-proxy.md). Envoy
+still admits only the Teams destinations and your `fileHosts`, then connects
+through the selected proxy. The proxy resolves those names and owns the
+final-address check, including for attachment downloads: select only a proxy
+that you trust to refuse private and internal addresses. Messaging, OCC
+directory lookup and the Harness connection do not change.
 
 Native `channels.msteams.mediaAllowHosts` may also need an exact destination
 that its defaults do not admit. This is separate from proxy admission and

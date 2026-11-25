@@ -1,9 +1,13 @@
 /// <reference lib="es2024.string" />
 import { isEmbeddedHttpsHost } from "../apps/controller/src/drivers/compute/kubernetes/embedded-https-host.ts";
-import type { ChannelEgressOptions } from "../apps/controller/src/drivers/compute/kubernetes/channel-egress-policy.ts";
+import type {
+  ChannelEgressOptions,
+  ChannelUpstreamProxyEndpoint,
+} from "../apps/controller/src/drivers/compute/kubernetes/channel-egress-policy.ts";
+import { proxyAddressForbidden } from "../apps/controller/src/drivers/compute/kubernetes/channel-proxy-address.ts";
+import { normalizeAgentNetworkProxy } from "../packages/contracts/src/agent-network-proxy.ts";
 import { oidcEnrollmentPolicy } from "../apps/controller/src/auth/oidc-enrollment.ts";
 import { createHash } from "node:crypto";
-import dns from "node:dns/promises";
 import { statSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -34,7 +38,6 @@ interface SignInValues {
   clientIdKey?: string;
   clientSecretKey?: string;
   allowedDomains?: unknown[];
-  egressCidrs?: unknown[];
   issuer?: string;
   authorizationUrl?: string;
   tokenUrl?: string;
@@ -71,13 +74,11 @@ interface RepositoryValues {
   tlsSecretName?: string;
   publicCaSecretName?: string;
   serviceName?: string | undefined;
-  upstreamCidrs?: unknown[];
 }
 interface ChatGptValues {
   enabled: boolean;
   secretName: string;
   key: string;
-  providerCidr: string;
 }
 interface SecretValues {
   bootstrap: { adminEmail: string; credentials: { secretName: string } };
@@ -110,7 +111,6 @@ interface ProfileValues extends SecretValues {
   database: { cidrs: unknown[]; caSecretName?: string; caKey?: string; caMountPath?: string };
   api: {
     clients: { namespace: string; podLabels: InputRecord }[];
-    modelDiscoveryCidrs: unknown[];
     trustedProxy?: { preset: string; cidrs: unknown[]; clientAddressHeader?: string };
   };
   cluster: { cidrs: unknown[] };
@@ -128,7 +128,8 @@ interface ProfileValues extends SecretValues {
     scraperPodLabels?: InputRecord;
   };
   logging: { collector: { enabled: boolean; exporter?: CollectorExporter } };
-  channelEgress?: ChannelEgressOptions & { enabled: boolean; gatewayClassName: string };
+  channelEgress?:
+    (ChannelEgressOptions & { enabled: true; gatewayClassName: string }) | { enabled: false };
   publicGithubRead?: { enabled: boolean; clusterIP: string; upstreamCidrs: unknown[] };
 }
 interface KubernetesDriver {
@@ -1099,13 +1100,7 @@ function signInProvider(source: InputRecord, name: string, diagnostics: Errors) 
       nonempty: false,
     });
   }
-  if (source.egressCidrs !== undefined) {
-    rendered.egressCidrs = stringArray(source, [...path, "egressCidrs"], diagnostics, {
-      validate: isIpv4Cidr,
-      description: "an IPv4 CIDR with a prefix from 1 through 32",
-      nonempty: false,
-    });
-  }
+
   return rendered;
 }
 
@@ -1398,10 +1393,17 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
   closed(
     channels,
     "channels",
-    ["managedEgress", "excludedCidrs", "experimentalEmbeddedChannels", "embeddedHttpsHosts"],
+    [
+      "managedEgress",
+      "excludedCidrs",
+      "upstreamProxies",
+      "proxyTrust",
+      "experimentalEmbeddedChannels",
+      "embeddedHttpsHosts",
+    ],
     diagnostics,
   );
-  closed(codex, "codex", ["managedServiceAccounts", "modelDiscoveryCidrs"], diagnostics);
+  closed(codex, "codex", ["managedServiceAccounts"], diagnostics);
   closed(
     repository,
     "repository",
@@ -1417,7 +1419,6 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
       "tlsSecretName",
       "publicCaSecretName",
       "serviceName",
-      "upstreamCidrs",
     ],
     diagnostics,
   );
@@ -1444,7 +1445,7 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
   closed(
     google,
     "controlPlane.google",
-    ["secretName", "clientIdKey", "clientSecretKey", "allowedDomains", "egressCidrs"],
+    ["secretName", "clientIdKey", "clientSecretKey", "allowedDomains"],
     diagnostics,
   );
   const oidc = section(controlPlane, "oidc", diagnostics, false);
@@ -1462,7 +1463,6 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
       "clientSecretKey",
       "tokenAuth",
       "displayName",
-      "egressCidrs",
     ],
     diagnostics,
   );
@@ -1477,7 +1477,7 @@ function buildInput(rawInput: unknown, diagnostics: Errors) {
   closed(
     managedServiceAccounts,
     "codex.managedServiceAccounts",
-    ["workspaceId", "adminSecretName", "adminSecretKey", "providerCidr", "credentialTtlSeconds"],
+    ["workspaceId", "adminSecretName", "adminSecretKey", "credentialTtlSeconds"],
     diagnostics,
   );
 
@@ -1782,8 +1782,80 @@ function buildRendered(
     channels,
     ["channels", "managedEgress"],
     diagnostics,
-    false,
+    true,
   );
+  const exclusions = managedEgressEnabled
+    ? (stringArray(channels, ["channels", "excludedCidrs"], diagnostics, {
+        validate: isCidr,
+        description: "a canonical installation network CIDR",
+      }) as string[])
+    : [];
+  const upstreamProxies: ChannelUpstreamProxyEndpoint[] = [];
+  if (channels.upstreamProxies !== undefined) {
+    if (!Array.isArray(channels.upstreamProxies) || channels.upstreamProxies.length > 32) {
+      diagnostics.errors.push("channels.upstreamProxies must contain at most 32 endpoints.");
+    } else {
+      for (const [index, raw] of channels.upstreamProxies.entries()) {
+        const path = `channels.upstreamProxies[${index}]`;
+        const endpoint = record(raw, path, diagnostics);
+        closed(endpoint, path, ["url", "addresses"], diagnostics);
+        let url = "";
+        try {
+          url = normalizeAgentNetworkProxy({ url: endpoint.url }).url;
+        } catch {
+          diagnostics.errors.push(
+            `${path}.url must be an HTTP or HTTPS endpoint without credentials.`,
+          );
+        }
+        const addresses = stringArray(
+          endpoint,
+          ["channels", `upstreamProxies[${index}]`, "addresses"],
+          diagnostics,
+          {
+            validate: (value) => {
+              const address = value.endsWith("/32") ? value.slice(0, -3) : "";
+              return isIP(address) === 4 && !proxyAddressForbidden(address, exclusions);
+            },
+            description: "an approved IPv4 /32 outside metadata and cluster infrastructure ranges",
+          },
+        ) as string[];
+        if (addresses.length > 16 || new Set(addresses).size !== addresses.length) {
+          diagnostics.errors.push(
+            `${path}.addresses must contain 1 to 16 unique IPv4 /32 addresses.`,
+          );
+        }
+        if (upstreamProxies.some((entry) => entry.url === url)) {
+          diagnostics.errors.push(`${path}.url must be unique.`);
+        }
+        upstreamProxies.push({ url, addresses });
+      }
+    }
+  }
+  let proxyTrust: ChannelEgressOptions["proxyTrust"];
+  if (channels.proxyTrust !== undefined) {
+    const trust = record(channels.proxyTrust, "channels.proxyTrust", diagnostics);
+    closed(trust, "channels.proxyTrust", ["caSecretName", "caKey"], diagnostics);
+    proxyTrust = {
+      caSecretName: asString(
+        trust,
+        ["channels", "proxyTrust", "caSecretName"],
+        diagnostics,
+        namespaceRule,
+      ),
+      caKey: asString(trust, ["channels", "proxyTrust", "caKey"], diagnostics, {
+        pattern: /^[-._A-Za-z0-9]+$/,
+        description: "a Kubernetes Secret key",
+      }),
+    };
+  }
+  if (
+    (!managedEgressEnabled || upstreamProxies.length === 0) &&
+    (upstreamProxies.length > 0 || proxyTrust !== undefined)
+  ) {
+    diagnostics.errors.push(
+      "Channel proxy inputs require managed egress and at least one upstream endpoint.",
+    );
+  }
   const experimentalEmbeddedChannels = asBoolean(
     channels,
     ["channels", "experimentalEmbeddedChannels"],
@@ -1824,10 +1896,9 @@ function buildRendered(
         listenerPortEnd: 10062,
         occListenerPort: 10000,
         inspectionPort: 19004,
-        excludedCidrs: stringArray(channels, ["channels", "excludedCidrs"], diagnostics, {
-          validate: isCidr,
-          description: "a canonical installation network CIDR",
-        }) as string[],
+        excludedCidrs: exclusions,
+        ...(upstreamProxies.length === 0 ? {} : { upstreamProxies }),
+        ...(proxyTrust === undefined ? {} : { proxyTrust }),
       }
     : undefined;
   if (profile.name === "openclaw" && Object.keys(codex).length > 0) {
@@ -1980,14 +2051,6 @@ function buildRendered(
     },
     api: {
       clients: clientSelectors(controlPlane, diagnostics),
-      modelDiscoveryCidrs:
-        profile.name === "codex" && codex.modelDiscoveryCidrs !== undefined
-          ? stringArray(codex, ["codex", "modelDiscoveryCidrs"], diagnostics, {
-              validate: (value) => isIpv4Cidr(value, 32),
-              description: "an IPv4 /32 CIDR",
-              nonempty: false,
-            })
-          : [],
       ...(controlPlane.trustedProxy === undefined
         ? {}
         : { trustedProxy: renderTrustedProxy(trustedProxy, diagnostics) }),
@@ -2057,7 +2120,7 @@ function buildRendered(
       enabled: repositoryEnabled,
     },
     ...(channelEgress === undefined
-      ? {}
+      ? { channelEgress: { enabled: false } }
       : {
           channelEgress: {
             ...channelEgress,
@@ -2129,7 +2192,7 @@ function buildRendered(
               limits: { cpu: "4", memory: "6Gi" },
             },
             namespace: {
-              quota: { pods: "10" },
+              quota: { pods: "20" },
               containerDefaults: {
                 requests: { cpu: "100m", memory: "128Mi" },
                 limits: { cpu: "4", memory: "2Gi" },
@@ -2247,12 +2310,6 @@ function buildRendered(
               diagnostics,
               secretKeyRule,
             ) ?? "admin-key",
-          providerCidr: asString(
-            managedServiceAccounts,
-            ["codex", "managedServiceAccounts", "providerCidr"],
-            diagnostics,
-            { validate: (value) => isIpv4Cidr(value, 32), description: "an IPv4 /32 CIDR" },
-          ),
         },
       };
       installation.backend.push({
@@ -2349,10 +2406,6 @@ function buildRendered(
       serviceName: optionalString(repository, ["repository", "serviceName"], diagnostics, {
         validate: (value) => value.length <= 63 && dns1035Label.test(value),
         description: "a Kubernetes Service DNS-1035 label of at most 63 characters",
-      }),
-      upstreamCidrs: stringArray(repository, ["repository", "upstreamCidrs"], diagnostics, {
-        validate: isIpv4Cidr,
-        description: "an IPv4 CIDR",
       }),
     } satisfies RepositoryValues;
     values.repositoryCredentials = credentials;
@@ -2499,56 +2552,6 @@ function buildRendered(
   };
 }
 
-async function resolveHostedDiscoveryCidrs(
-  profile: Profile,
-  parsed: ReturnType<typeof buildInput>,
-  values: ReturnType<typeof buildRendered>["values"],
-  diagnostics: Diagnostics,
-) {
-  const hostedDiscovery = profile.installation.drivers.plugin.some(
-    (entry) =>
-      entry.id === "codex-plugin" && (entry.configuration?.catalogSource ?? "hosted") === "hosted",
-  );
-  if (!hostedDiscovery) {
-    return;
-  }
-  const hosts = ["auth.openai.com", "chatgpt.com"];
-  diagnostics.prerequisites.push(
-    "Verify API Pods can reach auth.openai.com and chatgpt.com on HTTPS using their actual DNS and translated destinations before testing hosted discovery in the Console.",
-  );
-  if (parsed.codex.modelDiscoveryCidrs !== undefined) {
-    if (values.api.modelDiscoveryCidrs.length === 0) {
-      diagnostics.warnings.push(
-        "codex.modelDiscoveryCidrs is explicitly empty: supply external API HTTPS policy for auth.openai.com and chatgpt.com; Helm grants no discovery egress.",
-      );
-    }
-    return;
-  }
-  // Independent resolvers ignore process-level DNS settings unless copied. Keep
-  // those settings while bounding queries; explicit operator CIDRs stay offline.
-  const resolver = new dns.Resolver({ timeout: 1500, tries: 1 });
-  resolver.setServers(dns.getServers());
-  const answers = await Promise.allSettled(hosts.map((host) => resolver.resolve4(host)));
-  const addresses: string[] = [];
-  answers.forEach((answer, index) => {
-    if (answer.status === "rejected") {
-      diagnostics.errors.push(
-        `Hosted Codex discovery could not resolve IPv4 addresses for ${hosts[index]}. Rerender with DNS access or supply codex.modelDiscoveryCidrs with reviewed IPv4 /32 destinations.`,
-      );
-    } else {
-      addresses.push(...answer.value);
-    }
-  });
-  if (diagnostics.errors.length === 0) {
-    values.api.modelDiscoveryCidrs = [...new Set(addresses)]
-      .sort()
-      .map((address) => `${address}/32`);
-    diagnostics.warnings.push(
-      "Hosted discovery egress is a DNS snapshot from the renderer host. Verify it matches API Pod destinations, and rerender then upgrade Helm when addresses change.",
-    );
-  }
-}
-
 async function writePreflight(
   outDir: string,
   profile: string,
@@ -2614,10 +2617,6 @@ export async function renderInstallationProfile(args: RenderArguments) {
   ]);
   const parsed = buildInput(rawInput, diagnostics);
   const { values, installation } = buildRendered(profile, parsed, diagnostics);
-
-  if (diagnostics.errors.length === 0) {
-    await resolveHostedDiscoveryCidrs(profile, parsed, values, diagnostics);
-  }
 
   if (diagnostics.errors.length === 0) {
     const installationYaml = renderYaml(installation);

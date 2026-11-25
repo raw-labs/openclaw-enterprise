@@ -24,7 +24,6 @@ interface TestKubernetesComputeDriverOptions {
     KubernetesComputeDriverOptions["servicePrincipalCredentials"] | undefined;
   readonly sandboxDriver?: DriverSelection["sandboxDriver"];
   scratchVolumes?: NonNullable<KubernetesComputeDriverOptions["runtime"]>["scratchVolumes"];
-  readonly credentialGatewayDriver?: DriverSelection["credentialGatewayDriver"];
   readonly protectedDriver?: DriverSelection["protectedDriver"];
 }
 
@@ -64,7 +63,6 @@ export function createTestKubernetesComputeDriver(
     servicePrincipalCredentials = { mode: "disabled" },
     sandboxDriver,
     scratchVolumes,
-    credentialGatewayDriver,
     protectedDriver,
   }: TestKubernetesComputeDriverOptions = {},
 ): KubernetesComputeDriver {
@@ -136,7 +134,6 @@ export function createTestKubernetesComputeDriver(
       id,
       channelDrivers,
       ...(sandboxDriver === undefined ? {} : { sandboxDriver }),
-      ...(credentialGatewayDriver === undefined ? {} : { credentialGatewayDriver }),
       ...(protectedDriver === undefined ? {} : { protectedDriver }),
       ...(placed ? { nodeEnrollment: unexpectedNodeEnrollment() } : {}),
     },
