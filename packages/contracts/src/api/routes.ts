@@ -90,6 +90,8 @@ import {
   UpdateServiceAccountCredentialBody,
   UpdateWorkspaceFileBody,
   WorkspaceFileParams,
+  WorkspaceSkillArchiveBody,
+  WorkspaceSkillReceipt,
 } from "./common.ts";
 import {
   AgentListResponse,
@@ -2206,6 +2208,31 @@ export const occApiRoutes = [
       querystring: EmptyQuery,
       params: AgentParams,
       response: { 202: AgentResponse, ...mutationErrors },
+    },
+  },
+  {
+    operationId: "installAgentWorkspaceSkill",
+    method: "POST",
+    path: "/namespaces/:namespaceId/agents/:agentId/workspace/skills/install",
+    action: "openclaw.agents.workspace.skills.install",
+    iamAction: "administer",
+    resourceKind: "agent",
+    authorizationTarget: "agent",
+    summary: "Install a digest-pinned skill archive in one active embedded OpenClaw workspace",
+    tags: ["Agents"],
+    schema: {
+      querystring: EmptyQuery,
+      params: AgentParams,
+      body: WorkspaceSkillArchiveBody,
+      response: {
+        200: WorkspaceSkillReceipt,
+        ...createErrors,
+        429: ErrorResponseRef,
+        503: Type.Ref("ErrorResponse", {
+          description:
+            "UNKNOWN_OUTCOME means the skill may already be installed. Inspect its provenance before retrying.",
+        }),
+      },
     },
   },
   {

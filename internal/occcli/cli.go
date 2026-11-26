@@ -1097,6 +1097,7 @@ func (app *application) agentCommand() *cobra.Command {
 		app.agentRuntimeCommand(),
 		app.agentLogsCommand(),
 		app.agentPolicyCommand(),
+		app.installSkillCommand(),
 	)
 	return command
 }

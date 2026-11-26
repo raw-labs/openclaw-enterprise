@@ -376,6 +376,13 @@ export const requestExamples = {
   createIAMServicePrincipal: {},
   createPreset: { name: preset.name, template: preset.template },
   updatePreset: { name: "Updated documentation assistant", template: preset.template },
+  installAgentWorkspaceSkill: {
+    revisionId,
+    slug: "example-guide",
+    sha256: "94012dc622ebf7553f6aada6e3b03a182586333c6b5831a7472f2c175c2830b5",
+    archiveBase64:
+      "UEsDBBQAAAAAAAAAIQCx0nwJWgAAAFoAAAAIAAAAU0tJTEwubWQtLS0KbmFtZTogZXhhbXBsZS1ndWlkZQpkZXNjcmlwdGlvbjogRXhwbGFpbiB0aGUgc2FtcGxlIGd1aWRlLgotLS0KClVzZSB0aGUgc2FtcGxlIGd1aWRlLgpQSwECFAMUAAAAAAAAACEAsdJ8CVoAAABaAAAACAAAAAAAAAAAAAAAgAEAAAAAU0tJTEwubWRQSwUGAAAAAAEAAQA2AAAAgAAAAAAA",
+  },
   putAgentWorkspaceFile: { content: "Explain your changes and verify the affected behavior.\n" },
   discoverAgentModels: {
     provider: "openai",
@@ -678,6 +685,12 @@ export const responseExamples = {
   getAgentWorkspaceFile: {
     name: "AGENTS.md",
     content: "Explain your changes and verify the affected behavior.\n",
+  },
+  installAgentWorkspaceSkill: {
+    agentId,
+    revisionId,
+    slug: "example-guide",
+    sha256: "94012dc622ebf7553f6aada6e3b03a182586333c6b5831a7472f2c175c2830b5",
   },
   putAgentWorkspaceFile: { name: "AGENTS.md", size: 54 },
   lookupChannelDirectory: {

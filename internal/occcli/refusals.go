@@ -71,6 +71,7 @@ var commandPermissions = map[string]commandPermission{
 	"agent list":                          {[]string{"listAgents"}, []string{"namespace.read"}, ""},
 	"agent get":                           {[]string{"getAgent"}, []string{"agent.read"}, ""},
 	"agent update":                        {[]string{"updateAgent"}, []string{"agent.update", "configuration.read"}, "access to the ServiceAccount, Secrets and credential sources it binds, and SandboxPolicy read when the Agent has saved network policy additions and repository bindings"},
+	"agent install-skill":                 {[]string{"installAgentWorkspaceSkill"}, []string{"agent.administer"}, ""},
 	"agent deploy":                        {[]string{"deployAgent"}, []string{"agent.deploy", "configuration.read"}, "access to the ServiceAccount, Secrets and credential sources it binds, Agent read and operate for a first deploy, and SandboxPolicy read when the Agent has saved network policy additions"},
 	"agent deploy-first":                  {[]string{"deployAgentFirst"}, []string{"agent.deploy", "configuration.read"}, "for a new admission, access to the ServiceAccount, Secrets and credential sources it binds, Agent read and operate, and SandboxPolicy read when the Agent has saved network policy additions"},
 	"agent recover-first-deployment":      {[]string{"recoverAgentFirstDeployment"}, []string{"agent.deploy", "configuration.read"}, ""},

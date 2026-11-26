@@ -90,6 +90,12 @@ import Fastify, {
   type RouteGenericInterface,
 } from "fastify";
 import { randomUUID } from "node:crypto";
+import {
+  WORKSPACE_SKILL_MAX_BYTES,
+  type WorkspaceSkillArchiveBody,
+} from "@openclaw-enterprise/contracts";
+import { checkSkillTarget, verifiedSkillBytes } from "./http/workspace-skill.ts";
+import { skillInstallUnknown } from "./gateway/workspace-skill.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AdmittedCaller } from "./admission/admission-verifier.ts";
 import {
@@ -480,6 +486,7 @@ function validateConfiguration(value: unknown, depth = 0, path = ""): void {
 /** Operations whose grant check runs before their body is read (see authorizeBeforeBody). */
 function authorizesBeforeBody(operation: OccApiRoute): boolean {
   return (
+    operation.operationId === "installAgentWorkspaceSkill" ||
     operation.operationId === "createPreset" ||
     operation.operationId === "updatePreset" ||
     operation.operationId === "createConfiguration" ||
@@ -1230,6 +1237,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     );
   }
   const bodyLimit = options.maxBodyBytes ?? DEFAULT_BODY_LIMIT;
+  let skillUploadInProgress = false;
   const precompiledRouteCompilers = defaultPrecompiledRouteCompilers();
   if (!Number.isSafeInteger(bodyLimit) || bodyLimit < 1) {
     throw new Error("The controller request-body limit must be a positive integer.");
@@ -1984,9 +1992,13 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
     }),
   };
 
-  const chatBodyDeadlines = new WeakMap<FastifyRequest, ReturnType<typeof setTimeout>>();
+  const bodyReadDeadlines = new WeakMap<FastifyRequest, ReturnType<typeof setTimeout>>();
   app.addHook("onRequest", async (request, reply) => {
-    if (request.routeOptions.url === "/agents/:agentId/chat") {
+    if (
+      request.routeOptions.url === "/agents/:agentId/chat" ||
+      request.routeOptions.url ===
+        "/namespaces/:namespaceId/agents/:agentId/workspace/skills/install"
+    ) {
       const timer = setTimeout(() => {
         if (!reply.sent) {
           reply.header("connection", "close");
@@ -1997,7 +2009,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
           });
         }
       }, 60_000);
-      chatBodyDeadlines.set(request, timer);
+      bodyReadDeadlines.set(request, timer);
       request.raw.once("end", () => clearTimeout(timer));
       request.raw.once("aborted", () => clearTimeout(timer));
     }
@@ -2019,7 +2031,7 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
   });
 
   app.addHook("onResponse", async (request, reply) => {
-    clearTimeout(chatBodyDeadlines.get(request));
+    clearTimeout(bodyReadDeadlines.get(request));
     const startedAt = requestStartedAt.get(request);
     const durationMs =
       startedAt === undefined ? undefined : Number(process.hrtime.bigint() - startedAt) / 1_000_000;
@@ -2283,6 +2295,17 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
       throw failure(404, "NOT_FOUND", "The requested platform resource was not found.");
     }
     const params = request.params as Record<string, string>;
+    if (operation.operationId === "installAgentWorkspaceSkill") {
+      requireWorkspaceFileCsrf(request, true);
+      checkSkillTarget(
+        await controller.getAdministerableActiveAgentRevision(
+          context.actorId,
+          params.namespaceId!,
+          params.agentId!,
+        ),
+      );
+      return;
+    }
     if (
       operation.operationId === "createConfiguration" ||
       operation.operationId === "updateConfiguration"
@@ -3112,6 +3135,80 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
         data: { operateDenied, unreadableOperateDenied },
         meta: { requestId: request.id },
       });
+      return;
+    }
+
+    if (operation.operationId === "installAgentWorkspaceSkill") {
+      const archiveBody = body as unknown as WorkspaceSkillArchiveBody;
+      const activeController = controller;
+      const select = async () =>
+        checkSkillTarget(
+          await activeController.getAdministerableActiveAgentRevision(
+            context.actorId,
+            namespaceId,
+            agentId,
+          ),
+          archiveBody.revisionId,
+        );
+      const revision = await select();
+      const install = options.workspaceFilesAccess?.installSkill;
+      if (!install) {
+        throw dependencyUnavailable();
+      }
+      const archive = verifiedSkillBytes(archiveBody);
+      const details = {
+        agentId,
+        revisionId: revision.id,
+        slug: archiveBody.slug,
+        sha256: archiveBody.sha256,
+      };
+      const target = { kind: "agent" as const, namespaceId, id: agentId };
+      const evidence = (phase: string, outcome: "success" | "failure", reasonCode?: string) =>
+        event(operation, request, target, "mutation", context, undefined, {
+          outcome,
+          ...(reasonCode ? { reasonCode } : {}),
+          details: { ...details, phase, replace: archiveBody.replace === true },
+        });
+      const timeoutMs = 120_000;
+      const timeout = workspaceFileRequestSignal(request, reply, timeoutMs);
+      try {
+        await options.auditSink.append(evidence("accepted", "success"));
+        await install({
+          revision,
+          archive,
+          slug: archiveBody.slug,
+          sha256: archiveBody.sha256,
+          replace: archiveBody.replace === true,
+          deadline: new Date(Date.now() + timeoutMs),
+          signal: timeout.signal,
+          beforeInstall: async () => {
+            await admit(request, operation);
+            await resolveIdentity(request, operation);
+            if (contexts.get(request)?.actorId !== context.actorId) {
+              throw failure(403, "FORBIDDEN", GENERIC_DENIAL);
+            }
+            await select();
+          },
+        });
+      } catch (error) {
+        const normalized = requestFailure(error);
+        try {
+          await options.auditSink.append(evidence("finished", "failure", normalized.code));
+        } catch {
+          if (normalized.code !== "UNKNOWN_OUTCOME") {
+            throw dependencyUnavailable();
+          }
+        }
+        throw normalized;
+      } finally {
+        timeout.dispose();
+      }
+      try {
+        await options.auditSink.append(evidence("finished", "success"));
+      } catch {
+        throw skillInstallUnknown();
+      }
+      reply.send({ data: details, meta: { requestId: request.id } });
       return;
     }
 
@@ -4918,6 +5015,14 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
         url: operation.path,
         ...(routeAuditSink === undefined ? {} : { config: { auditManagementRequest: true } }),
         ...(operation.operationId === "chatWithAgent" ? { bodyLimit: AGENT_CHAT_BODY_LIMIT } : {}),
+        ...(operation.operationId === "installAgentWorkspaceSkill"
+          ? {
+              bodyLimit: Math.min(
+                options.maxBodyBytes ?? Infinity,
+                Math.ceil(WORKSPACE_SKILL_MAX_BYTES / 3) * 4 + 1024,
+              ),
+            }
+          : {}),
         ...(operation.operationId === "putAgentWorkspaceFile"
           ? { bodyLimit: WORKSPACE_FILE_BODY_LIMIT }
           : operation.operationId === "createAgent" ||
@@ -4931,11 +5036,31 @@ export function createFastifyApp(options: ControllerAppOptions): FastifyInstance
                 ? { bodyLimit: options.maxBodyBytes ?? CONFIGURATION_BODY_LIMIT }
                 : {}),
         schema,
-        onRequest: async (request) => {
+        onRequest: async (request, reply) => {
           await admit(request, operation);
           if (authorizesBeforeBody(operation)) {
             await resolveIdentity(request, operation);
             await authorizeBeforeBody(request, operation);
+          }
+          if (operation.operationId === "installAgentWorkspaceSkill") {
+            if (reply.raw.destroyed || reply.raw.writableEnded || request.raw.aborted) {
+              throw dependencyUnavailable();
+            }
+            if (skillUploadInProgress) {
+              throw failure(
+                429,
+                "RATE_LIMITED",
+                "This controller is already receiving a skill archive.",
+              );
+            }
+            skillUploadInProgress = true;
+            const release = () => {
+              reply.raw.off("finish", release);
+              reply.raw.off("close", release);
+              skillUploadInProgress = false;
+            };
+            reply.raw.once("finish", release);
+            reply.raw.once("close", release);
           }
         },
         preValidation: async (request) => {

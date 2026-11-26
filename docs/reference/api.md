@@ -90,7 +90,7 @@ the paths.
 | [Connections](#connections) | 15 operations |
 | [Installation](#installation) | 5 operations |
 | [Namespaces](#namespaces) | 7 operations |
-| [Agents](#agents) | 54 operations |
+| [Agents](#agents) | 55 operations |
 | [Agent deployments](#agent-deployments) | 4 operations |
 | [Agent revisions](#agent-revisions) | 2 operations |
 | [Configurations](#configurations) | 4 operations |
@@ -3843,6 +3843,7 @@ Example response
 | [`POST /namespaces/{namespaceId}/agents/{agentId}/stop`](#post-namespacesnamespaceidagentsagentidstop) | Stop one Agent and keep its saved Agent revision and persistent state |
 | [`GET /namespaces/{namespaceId}/agents/{agentId}/workspace/files/{name}`](#get-namespacesnamespaceidagentsagentidworkspacefilesname) | Read an allowed workspace file from one active Agent |
 | [`PUT /namespaces/{namespaceId}/agents/{agentId}/workspace/files/{name}`](#put-namespacesnamespaceidagentsagentidworkspacefilesname) | Create or replace an allowed workspace file for one active Agent |
+| [`POST /namespaces/{namespaceId}/agents/{agentId}/workspace/skills/install`](#post-namespacesnamespaceidagentsagentidworkspaceskillsinstall) | Install a digest-pinned skill archive in one active embedded OpenClaw workspace |
 | [`POST /namespaces/{namespaceId}/channel-directory/lookup`](#post-namespacesnamespaceidchanneldirectorylookup) | Search a channel directory using an authorized Namespace Secret |
 | [`GET /native-admin/return/{agentKey}`](#get-nativeadminreturnagentkey) | Resolve an authorized Agent from a copied native chat link |
 
@@ -8599,6 +8600,94 @@ Example response
   "data": {
     "name": "AGENTS.md",
     "size": 54
+  },
+  "meta": {
+    "requestId": "req_123e4567-e89b-42d3-a456-426614174000"
+  }
+}
+```
+
+#### `POST /namespaces/{namespaceId}/agents/{agentId}/workspace/skills/install`
+
+<span id="post-namespacesnamespaceidagentsagentidworkspaceskillsinstall"></span>
+
+Install a digest-pinned skill archive in one active embedded OpenClaw workspace
+
+**Operation ID:** `installAgentWorkspaceSkill`
+
+**Permissions:** Requires administer permission on the requested Agent.
+
+| Action | Resource | Scope |
+| --- | --- | --- |
+| `administer` | `agent` | `requested` |
+
+##### Parameters
+
+| Name | In | Type | Required | Constraints | Example |
+| --- | --- | --- | --- | --- | --- |
+| `namespaceId` | path | `string` | Yes | pattern: `^ns_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` | "ns_123e4567-e89b-42d3-a456-426614174000" |
+| `agentId` | path | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` | "agt_123e4567-e89b-42d3-a456-426614174000" |
+
+##### Request body
+
+**Required:** Yes
+
+**Content type:** `application/json`
+
+| Field | Type | Required | Constraints |
+| --- | --- | --- | --- |
+| `archiveBase64` | `string` | Yes | min length: 4; max length: 55924056 |
+| `replace` | `boolean` | No | — |
+| `revisionId` | `string` | Yes | pattern: `^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `sha256` | `string` | Yes | min length: 64; max length: 64; pattern: `^[0-9a-f]{64}$` |
+| `slug` | `string` | Yes | min length: 1; max length: 64; pattern: `^[a-z0-9]+(-[a-z0-9]+)*$` |
+
+Example request
+```json
+{
+  "archiveBase64": "UEsDBBQAAAAAAAAAIQCx0nwJWgAAAFoAAAAIAAAAU0tJTEwubWQtLS0KbmFtZTogZXhhbXBsZS1ndWlkZQpkZXNjcmlwdGlvbjogRXhwbGFpbiB0aGUgc2FtcGxlIGd1aWRlLgotLS0KClVzZSB0aGUgc2FtcGxlIGd1aWRlLgpQSwECFAMUAAAAAAAAACEAsdJ8CVoAAABaAAAACAAAAAAAAAAAAAAAgAEAAAAAU0tJTEwubWRQSwUGAAAAAAEAAQA2AAAAgAAAAAAA",
+  "revisionId": "rev_123e4567-e89b-42d3-a456-426614174000",
+  "sha256": "94012dc622ebf7553f6aada6e3b03a182586333c6b5831a7472f2c175c2830b5",
+  "slug": "example-guide"
+}
+```
+
+##### Responses
+
+| Status | Meaning |
+| --- | --- |
+| `200` | OK |
+| `400` | The request does not match the operation contract. |
+| `401` | The caller did not provide valid credentials. |
+| `403` | The caller is not allowed to perform this operation. |
+| `404` | The requested platform resource was not found. |
+| `409` | The requested operation conflicts with the current resource state. |
+| `413` | The request body exceeds the permitted size. |
+| `415` | The request content type is not supported. |
+| `429` | Too many requests. Wait for Retry-After and try again. |
+| `500` | The platform request could not be completed. |
+| `503` | UNKNOWN_OUTCOME means the skill may already be installed. Inspect its provenance before retrying. |
+
+**`200` response body:** `application/json`
+
+| Field | Type | Required | Constraints |
+| --- | --- | --- | --- |
+| `data` | `object` | Yes | — |
+| `data.agentId` | `string` | Yes | pattern: `^agt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `data.revisionId` | `string` | Yes | pattern: `^rev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+| `data.sha256` | `string` | Yes | min length: 64; max length: 64; pattern: `^[0-9a-f]{64}$` |
+| `data.slug` | `string` | Yes | min length: 1; max length: 64; pattern: `^[a-z0-9]+(-[a-z0-9]+)*$` |
+| `meta` | `object` | Yes | — |
+| `meta.requestId` | `string` | Yes | pattern: `^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` |
+
+Example response
+```json
+{
+  "data": {
+    "agentId": "agt_123e4567-e89b-42d3-a456-426614174000",
+    "revisionId": "rev_123e4567-e89b-42d3-a456-426614174000",
+    "sha256": "94012dc622ebf7553f6aada6e3b03a182586333c6b5831a7472f2c175c2830b5",
+    "slug": "example-guide"
   },
   "meta": {
     "requestId": "req_123e4567-e89b-42d3-a456-426614174000"

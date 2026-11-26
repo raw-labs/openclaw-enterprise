@@ -36,6 +36,8 @@ Workspace instructions, plugin code and operational stores follow their own acti
 
 Filesystem protection can remain follow-up hardening only if the initial managed-mode controls close administrator-reachable paths to the protected configuration. If the required guarantee is that the Gateway process and code running under its identity cannot change OCE-owned configuration, filesystem protection or equivalent separation of write authority is required. Protect the effective config, its parent and replacement paths, and included files; keep operational state writable and preserve trusted OCE configuration generation and recovery. Disabling reload would not protect the stored configuration.
 
+See the [proposal for workspace skill archive installation](workspace-skill-archives.md) for a release job using the OCC API.
+
 ## Qualification
 
 Qualify the integrated behavior with the actual OCE image, OC binary, permissions and mounts. Verify that only authorized OCE admins can change the mode. With managed mode on, test local config writes, local terminals and Gateway-hosted commands, including preexisting jobs and watchers. With it off, have a Gateway admin explicitly add an excluded tool and verify a subsequent model turn can call it after a native restart. Redeploy with managed mode on and verify the same call is denied while a permitted call succeeds. Also check that launch, trusted live updates and recovery preserve the selected mode, and that permitted node terminals, timed Agent turns, Harness work, sessions and credential refresh continue to work.

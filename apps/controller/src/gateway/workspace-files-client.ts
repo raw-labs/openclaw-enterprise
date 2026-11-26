@@ -68,7 +68,7 @@ export function createNativeWorkspaceFilesAccess(
 }
 
 type WorkspaceFileOperation = "read" | "write";
-type GatewayHello = Parameters<NonNullable<GatewayClientOptions["onHelloOk"]>>[0];
+export type GatewayHello = Parameters<NonNullable<GatewayClientOptions["onHelloOk"]>>[0];
 
 type NativeRequestResult =
   | { readonly status: "ok"; readonly payload: unknown }
@@ -160,9 +160,9 @@ async function requestNativeWorkspaceFile(
   }
 }
 
-function waitForHello(
+export function waitForHello(
   connected: Promise<GatewayHello>,
-  request: ControllerWorkspaceFileReadRequest | ControllerWorkspaceFileWriteRequest,
+  request: { readonly signal: AbortSignal },
   timeoutMs: number,
 ): Promise<GatewayHello> {
   return new Promise((resolve, reject) => {
@@ -290,7 +290,7 @@ function writeOutcomeUnknown(error: unknown, requestSent: boolean): boolean {
   return requestSent;
 }
 
-function remainingDeadlineMs(deadline: Date): number | undefined {
+export function remainingDeadlineMs(deadline: Date): number | undefined {
   const remaining = deadline.getTime() - Date.now();
   return Number.isFinite(remaining) && remaining > 0
     ? Math.max(1, Math.floor(remaining))

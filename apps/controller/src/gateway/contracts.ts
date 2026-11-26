@@ -49,7 +49,19 @@ export type ControllerWorkspaceFileWriteResult =
       readonly status: "unavailable";
     };
 
+export interface WorkspaceSkillInstallRequest {
+  readonly revision: Readonly<AgentRevision>;
+  readonly slug: string;
+  readonly sha256: string;
+  readonly archive: Buffer;
+  readonly replace: boolean;
+  readonly deadline: Date;
+  readonly signal: AbortSignal;
+  readonly beforeInstall: () => Promise<void>;
+}
+
 export interface ControllerWorkspaceFilesAccess {
+  installSkill?(request: WorkspaceSkillInstallRequest): Promise<void>;
   read(request: ControllerWorkspaceFileReadRequest): Promise<ControllerWorkspaceFileReadResult>;
   write(request: ControllerWorkspaceFileWriteRequest): Promise<ControllerWorkspaceFileWriteResult>;
 }

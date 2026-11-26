@@ -991,6 +991,49 @@ export const ChannelDirectoryLookupBody = Type.Union([
   ),
 ]);
 
+// This route alone accepts a base64 archive. Other OCC body limits stay independent.
+export const WORKSPACE_SKILL_MAX_BYTES = 40 * 1024 * 1024;
+export const WorkspaceSkillSlug = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: "^[a-z0-9]+(-[a-z0-9]+)*$",
+});
+export const WorkspaceSkillDigest = Type.String({
+  minLength: 64,
+  maxLength: 64,
+  pattern: "^[0-9a-f]{64}$",
+});
+export const WorkspaceSkillArchiveBody = Type.Object(
+  {
+    revisionId: RevisionId,
+    slug: WorkspaceSkillSlug,
+    sha256: WorkspaceSkillDigest,
+    archiveBase64: Type.String({
+      minLength: 4,
+      maxLength: 4 * Math.ceil(WORKSPACE_SKILL_MAX_BYTES / 3),
+    }),
+    replace: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type WorkspaceSkillArchiveBody = Type.Static<typeof WorkspaceSkillArchiveBody>;
+
+export const WorkspaceSkillReceipt = Type.Object(
+  {
+    data: Type.Object(
+      {
+        agentId: AgentId,
+        revisionId: RevisionId,
+        slug: WorkspaceSkillSlug,
+        sha256: WorkspaceSkillDigest,
+      },
+      { additionalProperties: false },
+    ),
+    meta: Meta,
+  },
+  { additionalProperties: false },
+);
+
 export const UpdateWorkspaceFileBody = Type.Object(
   {
     content: Type.String({

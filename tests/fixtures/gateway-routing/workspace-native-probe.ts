@@ -119,6 +119,7 @@ const fixture = await createTenantReaderFixture({
     { action: "operate", resourceKind: "secret" },
     { action: "deploy", resourceKind: "agent" },
     { action: "operate", resourceKind: "agent" },
+    { action: "administer", resourceKind: "agent" },
   ],
   computeDriver: compute,
   secretDriver: createTestSecretDriver(),
@@ -147,10 +148,14 @@ const admitRevision = async (
   agents: OpenClawConfigurationDocument,
   executionMode: HarnessExecutionMode,
   harnessId: string,
+  allowUploadedArchives = false,
 ) => {
   sequence += 1;
   const configuration = await call(`/namespaces/${namespaceId}/configurations`, {
-    body: { kind: "agent", values: { agents } },
+    body: {
+      kind: "agent",
+      values: { agents, skills: { install: { allowUploadedArchives } } },
+    },
   });
   assert.equal(configuration.response.status, 201);
   const secret = await controller.createSecret(fixture.administrator.id, {
@@ -207,7 +212,7 @@ const admitRevision = async (
   return { agent, revisionId };
 };
 
-const { agent, revisionId } = await admitRevision(scenario.agents, "embedded", "openclaw");
+const { agent, revisionId } = await admitRevision(scenario.agents, "embedded", "openclaw", true);
 const path = `/namespaces/${namespaceId}/agents/${agent.id}/workspace/files/USER.md`;
 const put = (content: string) =>
   call(path, {
@@ -221,7 +226,70 @@ const read = await call(path);
 assert.equal(read.response.status, 200, JSON.stringify(read.payload));
 assert.equal(responseRecord(read.payload.data).content, scenario.content);
 
+// The first probe uses a non-default sole workspace. Verify the server's native
+// receipt and prove that a second install without replacement is refused.
 const { explicitAgentId } = scenario;
+if (explicitAgentId && scenario.deniedWrite.identity === "proof-read") {
+  const skillPath = `/namespaces/${namespaceId}/agents/${agent.id}/workspace/skills/install`;
+  const body = {
+    revisionId,
+    slug: "example-guide",
+    sha256: "94012dc622ebf7553f6aada6e3b03a182586333c6b5831a7472f2c175c2830b5",
+    archiveBase64:
+      "UEsDBBQAAAAAAAAAIQCx0nwJWgAAAFoAAAAIAAAAU0tJTEwubWQtLS0KbmFtZTogZXhhbXBsZS1ndWlkZQpkZXNjcmlwdGlvbjogRXhwbGFpbiB0aGUgc2FtcGxlIGd1aWRlLgotLS0KClVzZSB0aGUgc2FtcGxlIGd1aWRlLgpQSwECFAMUAAAAAAAAACEAsdJ8CVoAAABaAAAACAAAAAAAAAAAAAAAgAEAAAAAU0tJTEwubWRQSwUGAAAAAAEAAQA2AAAAgAAAAAAA",
+  };
+  const principal = { kind: "service_principal" as const, id: "skill-release-job", namespaceId };
+  fixture.state.identities.push(principal);
+  const role = {
+    id: "workspace-skill-release",
+    permissions: [{ action: "administer", resourceKind: "agent" }],
+  } satisfies { id: string; permissions: Permission[] };
+  fixture.state.roles.push(role);
+  const issued = await fixture.auth.createServiceKey({ principal, name: "skill-release-test" });
+  const send = (input: unknown) =>
+    call(skillPath, {
+      method: "POST",
+      body: input,
+      identity: false,
+      headers: { "x-api-key": issued.key },
+    });
+  // The same key and archive are refused until the release job has the exact Agent grant.
+  const denied = await send(body);
+  assert.ok([403, 404].includes(denied.response.status), JSON.stringify(denied.payload));
+  bindRole(fixture.state, principal.id, {
+    id: role.id,
+    roleId: role.id,
+    namespaceId,
+    resource: { kind: "agent", id: agent.id },
+  });
+  assert.equal(
+    (await send({ ...body, revisionId: "rev_12345678-1234-4123-8123-123456789abc" })).response
+      .status,
+    409,
+  );
+  assert.equal((await send({ ...body, sha256: "0".repeat(64) })).response.status, 400);
+  const installed = await send(body);
+  assert.equal(installed.response.status, 200, JSON.stringify(installed.payload));
+  assert.deepEqual(installed.payload.data, {
+    agentId: agent.id,
+    revisionId,
+    slug: body.slug,
+    sha256: body.sha256,
+  });
+  assert.equal((await send(body)).response.status, 409);
+  assert.equal((await send({ ...body, replace: true })).response.status, 200);
+  const disabled = await admitRevision(scenario.agents, "embedded", "openclaw");
+  const otherPath = `/namespaces/${namespaceId}/agents/${disabled.agent.id}/workspace/skills/install`;
+  const otherBody = { ...body, revisionId: disabled.revisionId };
+  const crossAgent = await call(otherPath, {
+    body: otherBody,
+    identity: false,
+    headers: { "x-api-key": issued.key },
+  });
+  assert.ok([403, 404].includes(crossAgent.response.status), JSON.stringify(crossAgent.payload));
+  const policyRefusal = await call(otherPath, { body: otherBody });
+  assert.equal(policyRefusal.response.status, 409);
+}
 if (explicitAgentId !== undefined) {
   const revision = await controller.getRevision(
     fixture.administrator.id,

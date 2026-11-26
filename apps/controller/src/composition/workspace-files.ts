@@ -2,7 +2,9 @@ import { refuseRewrittenIpv4Host } from "../auth/configuration.ts";
 import { constants } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import type { ComputeDriver } from "@openclaw-enterprise/contracts";
+import { dependencyUnavailable } from "../http/errors.ts";
+import { installWorkspaceSkill } from "../gateway/workspace-skill.ts";
+import type { AgentRevision, ComputeDriver } from "@openclaw-enterprise/contracts";
 import type { ControllerWorkspaceFilesAccess } from "../gateway/contracts.ts";
 import { createNativeWorkspaceFilesAccess } from "../gateway/workspace-files-client.ts";
 import { DEVELOPMENT_HARNESS_DESCRIPTOR } from "./production-harness.ts";
@@ -38,7 +40,7 @@ export function createWorkspaceFilesAccess(
   apiKeyPath: string,
 ): ControllerWorkspaceFilesAccess {
   validateGatewayApiKeyPath(apiKeyPath);
-  return createNativeWorkspaceFilesAccess(async (request) => {
+  const resolveTarget = async (request: { readonly revision: Readonly<AgentRevision> }) => {
     const endpoint = computeDriver.getGatewayEndpoint?.(request.revision);
     if (endpoint === undefined) {
       return undefined;
@@ -52,7 +54,24 @@ export function createWorkspaceFilesAccess(
         : {}),
       apiKey: await readWorkspaceFilesApiKey(apiKeyPath),
     };
-  });
+  };
+  return {
+    ...createNativeWorkspaceFilesAccess(resolveTarget),
+    installSkill: async (request) => {
+      const { compute } = request.revision;
+      if (
+        compute.id !== computeDriver.id ||
+        compute.implementation !== computeDriver.implementation
+      ) {
+        throw dependencyUnavailable();
+      }
+      const target = await resolveTarget(request);
+      if (!target?.preferSoleNativeAgent) {
+        throw dependencyUnavailable();
+      }
+      await installWorkspaceSkill(request, target);
+    },
+  };
 }
 
 export function validateGatewayApiKeyPath(path: string): void {

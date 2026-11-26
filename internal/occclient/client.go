@@ -339,6 +339,13 @@ func (client *Client) GetAgent(namespaceID, agentID string) (any, error) {
 	return client.get("namespaces", namespaceID, "agents", agentID)
 }
 
+// InstallWorkspaceSkill submits one pinned archive for the specified active revision.
+func (client *Client) InstallWorkspaceSkill(namespace, agent, revision, slug, digest string, archive []byte, replace bool) (any, error) {
+	return client.send("POST", []string{"namespaces", namespace, "agents", agent, "workspace", "skills", "install"}, map[string]any{
+		"revisionId": revision, "slug": slug, "sha256": digest, "archiveBase64": archive, "replace": replace,
+	})
+}
+
 // GetAgentCallerPermissions reads the caller's advisory permission summary for
 // one Agent (update, deploy, operate, delete). It does not authorize a later
 // request; the CLI uses it only to choose advice.

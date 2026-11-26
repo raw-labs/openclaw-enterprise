@@ -12,7 +12,7 @@ OCC privately stages authenticated creation inputs: `AGENTS.md`, `SOUL.md`,
 `IDENTITY.md`, and `USER.md`. Compute prepares storage; the execution provider
 initializes it before activation.
 
-File operations authorize the exact active Agent through its Compute-resolved
+File operations and [skill installs](../reference/agents/workspace-files.md#install-a-workspace-skill-from-a-private-zip) authorize the Agent through its Compute-resolved
 private Envoy endpoint.
 
 Dedicated execution initializes the Harness workspace for Codex and native

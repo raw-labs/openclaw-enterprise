@@ -247,6 +247,7 @@ test(
       };
       // Background memory indexing is separate from the file API's no-turn guarantee.
       configuration.memory = { search: { enabled: false } };
+      configuration.skills = { install: { allowUploadedArchives: true } };
       const { explicitAgentId, ...agents } = roster;
       const agentsConfiguration = { ...configurationRecord(configuration.agents), ...agents };
       configuration.agents = agentsConfiguration;
@@ -374,6 +375,15 @@ test(
           };
           child.child.stdin.end(JSON.stringify(input));
           const result = await child;
+          if (explicitAgentId && deniedWrite.identity === "proof-read") {
+            const skill = await runDocker([
+              "exec",
+              native,
+              "cat",
+              "/home/node/workspace/skills/example-guide/SKILL.md",
+            ]);
+            assert.match(skill.stdout, /Use the sample guide/);
+          }
           assert.deepEqual(JSON.parse(result.stdout), {
             apiWrite: 200,
             apiRead: 200,

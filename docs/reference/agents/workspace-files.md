@@ -4,6 +4,17 @@ Use this reference to seed the workspace files of an [Agent](../agents.md) at
 creation and to read or replace them in its live workspace. For procedures, see the
 [workspace guide](../../guides/topics/workspace-files.md).
 
+## Install a workspace skill from a private ZIP
+
+For an embedded OpenClaw Agent, pin the skill slug and the archive SHA-256 in the release repository. Deploy a revision with `skills.install.allowUploadedArchives` enabled. Use the deployed revision ID and a service key with `administer` on that Agent.
+
+```sh
+occ --namespace "$NAMESPACE_ID" --timeout-seconds 180 agent install-skill "$AGENT_ID" "$REVISION_ID" \
+  --archive ./example-guide.zip --slug example-guide --sha256 "$PINNED_SHA256"
+```
+
+The command uploads up to 40 MiB and prints the Agent, revision, slug and SHA-256 returned by OCC. Keep the receipt with the release. Use `--replace` to replace an existing workspace skill. If the connection drops or OCC reports `UNKNOWN_OUTCOME`, check the installed skill's provenance before another attempt. Enable archive uploads only for revisions where installation is intended.
+
 ## Initial contents at creation
 
 `POST /namespaces/:namespaceId/agents` accepts `initialWorkspaceFiles`, an optional
