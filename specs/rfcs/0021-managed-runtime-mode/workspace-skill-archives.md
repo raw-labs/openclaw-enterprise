@@ -4,7 +4,7 @@ rfc: index.md
 
 # Proposed workspace skill archive installation
 
-A release job that already deploys an Agent can carry a private skill ZIP alongside the Agent configuration. Give the job a way to install a reviewed archive into the active embedded OpenClaw workspace after deployment. The release repository owns the version and SHA-256. OCC owns authorization and routing. OpenClaw owns extraction, skill policy, and installation.
+This companion extends [RFC-0021](index.md). A release job that already deploys an Agent can carry a private skill ZIP alongside the Agent configuration. Give the job a way to install a reviewed archive into the active embedded OpenClaw workspace after deployment. The release repository owns the version and SHA-256. OCC owns authorization and routing. OpenClaw owns extraction, skill policy, and installation.
 
 ## Request and authority
 

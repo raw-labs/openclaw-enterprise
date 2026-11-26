@@ -25,7 +25,9 @@ OCE has swappable Drivers and a choice of first-party Harness: native OpenClaw o
 
 To preserve OCE's ownership of deployment configuration and lifecycle, Gateway calls made by model-directed work must not override OCE-owned configuration or permissions. The same requirement applies to model-origin CLI commands, file changes and plugin operations. A separate default-on OCE deployment setting governs [direct human Gateway administration](gateway-administration.md).
 
-### Dedicated topology: OC or Codex
+#A [workspace skill archive proposal](workspace-skill-archives.md) covers release jobs that install a private skill into one embedded Agent.
+
+## Dedicated topology: OC or Codex
 
 ![Dedicated OC and Codex workloads across the control-plane and data-plane boundary](dedicated-managed-topology.png)
 
